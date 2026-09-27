@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="Bromelia.App.Views.DrivePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Padding="24,16,24,12" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <FontIcon x:Name="HeaderIcon" Glyph="&#xE958;" FontSize="40" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Top" />
+            <StackPanel Grid.Column="1" Spacing="2">
+                <TextBlock x:Name="TitleText" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <TextBlock x:Name="SubtitleText" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
+                <TextBlock x:Name="StatusText" Style="{StaticResource CaptionTextBlockStyle}" />
+                <StackPanel x:Name="Chips" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="8" HorizontalAlignment="Right">
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <ComboBox x:Name="ConfigPicker" MinWidth="200" PlaceholderText="Configuration" Visibility="Collapsed" SelectionChanged="ConfigPicker_SelectionChanged" />
+                    <Button x:Name="OpenDiscButton" Click="OpenDisc_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6"><SymbolIcon Symbol="List" /><TextBlock Text="Open disc" /></StackPanel>
+                    </Button>
+                    <SplitButton x:Name="RipButton" Click="Rip_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE7C8;" /><TextBlock Text="Rip" /></StackPanel>
+                        <SplitButton.Flyout>
+                            <MenuFlyout x:Name="RipMenu" Placement="BottomEdgeAlignedRight" />
+                        </SplitButton.Flyout>
+                    </SplitButton>
+                    <Button x:Name="EjectButton" Click="Eject_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xF847;" /><TextBlock Text="Eject" /></StackPanel>
+                    </Button>
+                    <Button x:Name="CloseSourceButton" Click="CloseSource_Click" Content="Close" Visibility="Collapsed" />
+                </StackPanel>
+                <Button x:Name="ConfigureButton" HorizontalAlignment="Right" Click="Configure_Click" Content="Configure…" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Active job -->
+        <ContentControl x:Name="JobHost" Grid.Row="1" HorizontalContentAlignment="Stretch" />
+
+        <!-- Disc area -->
+        <Grid Grid.Row="2">
+            <StackPanel x:Name="EmptyPanel" Spacing="12" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="460">
+                <FontIcon Glyph="&#xE958;" FontSize="48" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <TextBlock x:Name="EmptyTitle" Text="No disc opened" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
+                <TextBlock x:Name="EmptyText" Text="Open the disc to browse titles and tracks, or use Rip to apply this drive's rules directly." TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button x:Name="EmptyOpenButton" Content="Open disc" HorizontalAlignment="Center" Click="OpenDisc_Click" />
+            </StackPanel>
+
+            <Grid x:Name="LoadingPanel" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="LoadingText" Text="Reading disc…" />
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
+                    <ProgressBar x:Name="LoadingProgress" Width="420" Maximum="1" VerticalAlignment="Center" />
+                    <Button Content="Cancel" Click="CancelLoad_Click" />
+                </StackPanel>
+                <ContentControl x:Name="LoadingLogHost" Grid.Row="2" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+            </Grid>
+
+            <StackPanel x:Name="ErrorPanel" Spacing="8" Visibility="Collapsed">
+                <InfoBar x:Name="LoadErrorBar" Title="Could not open the disc" Severity="Error" IsOpen="True" IsClosable="False" />
+                <Button Content="Try again" Click="OpenDisc_Click" />
+                <ContentControl x:Name="ErrorLogHost" Height="260" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+            </StackPanel>
+
+            <Grid x:Name="BrowserPanel" ColumnSpacing="12" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="340" />
+                </Grid.ColumnDefinitions>
+                <ListView x:Name="TitleList" SelectionMode="Single" SelectionChanged="TitleList_SelectionChanged" />
+                <Border Grid.Column="1" Style="{StaticResource CardStyle}">
+                    <ScrollViewer>
+                        <StackPanel x:Name="InfoPanel" Spacing="6" />
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- Action bar -->
+        <Grid x:Name="ActionBar" Grid.Row="3" ColumnSpacing="10" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <DropDownButton Content="Select">
+                <DropDownButton.Flyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Text="All titles" Click="SelectAll_Click" />
+                        <MenuFlyoutItem Text="None" Click="SelectNone_Click" />
+                        <MenuFlyoutItem x:Name="SelectRuleItem" Text="Apply title rules" Click="SelectRule_Click" />
+                    </MenuFlyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="SelectionSummary" />
+                <TextBlock x:Name="OutputPreview" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <Button Grid.Column="2" x:Name="OutputFolderButton" Click="OutputFolder_Click" ToolTipService.ToolTip="Choose a different output folder for this disc">
+                <SymbolIcon Symbol="Folder" />
+            </Button>
+            <DropDownButton Grid.Column="3" x:Name="BackupButton" Content="Backup">
+                <DropDownButton.Flyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Text="Backup (encrypted, 1:1)" Click="BackupEncrypted_Click" />
+                        <MenuFlyoutItem Text="Backup (decrypted)" Click="BackupDecrypted_Click" />
+                        <MenuFlyoutItem Text="Decrypted backup, then MKV of selected titles" Click="BackupThenMkv_Click" />
+                    </MenuFlyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <Button Grid.Column="4" x:Name="MakeMkvButton" Style="{StaticResource AccentButtonStyle}" Click="MakeMkv_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6"><SymbolIcon Symbol="Video" /><TextBlock Text="Make MKV" /></StackPanel>
+            </Button>
+        </Grid>
+    </Grid>
+</Page>

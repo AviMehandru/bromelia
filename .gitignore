@@ -1,0 +1,11 @@
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+bin/
+obj/
+*.user
+.vs/
+builddir*/
+_build/

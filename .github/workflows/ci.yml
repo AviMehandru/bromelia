@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  macos:
+    name: macOS (SwiftUI)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        working-directory: macos
+        run: |
+          xcodebuild -project Bromelia.xcodeproj -scheme Bromelia -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData test
+
+  windows:
+    name: Windows (WinUI 3)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test core
+        working-directory: windows
+        run: dotnet test tests/Bromelia.Core.Tests/Bromelia.Core.Tests.csproj
+      - name: Build app (x64)
+        working-directory: windows
+        run: dotnet build src/Bromelia.App/Bromelia.App.csproj -c Release -p:Platform=x64
+      - name: Publish app (x64, self-contained)
+        working-directory: windows
+        run: dotnet publish src/Bromelia.App/Bromelia.App.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained -o publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bromelia-windows-x64
+          path: windows/publish
+
+  linux:
+    name: Linux (GTK 4 / libadwaita)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build libgtk-4-dev libadwaita-1-dev libjson-glib-dev
+      - name: Build
+        working-directory: linux
+        run: |
+          meson setup builddir
+          ninja -C builddir
+      - name: Test
+        working-directory: linux
+        run: meson test -C builddir --print-errorlogs

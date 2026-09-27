@@ -1,0 +1,87 @@
+import Foundation
+import Observation
+
+/// The disc currently opened in the UI for one source (a drive, an ISO file or a folder):
+/// its title listing and the user's title / track choices.
+@MainActor
+@Observable
+final class DiscSession: Identifiable {
+    let id: String
+    var source: DiscSource
+    /// Configuration used to open the disc (drive configuration or, for files, the chosen one).
+    var configId: UUID
+    var info: DiscInfo?
+    var isLoading = false
+    var loadError: String?
+    var log: [LogEntry] = []
+    var progress = 0.0
+    var operation = ""
+    var selectedTitles: Set<Int> = []
+    /// Only titles whose tracks were changed by the user appear here.
+    var trackSelections: [Int: Set<Int>] = [:]
+    /// Output file names typed by the user (MakeMKV's expert-mode rename), keyed by title index.
+    var titleNameOverrides: [Int: String] = [:]
+    /// One-off output folder for the next rip from this disc. Empty = the configuration's folder.
+    var outputFolderOverride = ""
+    @ObservationIgnored var runner: ProcessRunner?
+    @ObservationIgnored private var nextLog = 0
+
+    init(id: String, source: DiscSource, configId: UUID) {
+        self.id = id
+        self.source = source
+        self.configId = configId
+    }
+
+    func appendLog(_ text: String, severity: RobotMessage.Severity) {
+        log.append(LogEntry(id: nextLog, time: Date(), severity: severity, text: text))
+        nextLog += 1
+        if log.count > 5_000 { log.removeFirst(1_000) }
+    }
+
+    func reset() {
+        runner?.cancel()
+        runner = nil
+        info = nil
+        isLoading = false
+        loadError = nil
+        selectedTitles = []
+        trackSelections = [:]
+        titleNameOverrides = [:]
+        progress = 0
+        operation = ""
+    }
+
+    /// Applies the configuration's title rules to preselect titles (like MakeMKV's default selection).
+    func applyRule(_ rule: TitleSelection) {
+        guard let info else { return }
+        var r = rule
+        if r.strategy == .manual { r.strategy = .all }
+        selectedTitles = Set(TitleSelector.evaluate(info.titles, rule: r).selectedIndices)
+        trackSelections = [:]
+    }
+
+    /// Tracks of a title are chosen by the profile's selection rule unless the user customises them.
+    func hasCustomTracks(_ title: Int) -> Bool { trackSelections[title] != nil }
+
+    func customizeTracks(_ title: Int) {
+        guard let t = info?.title(at: title) else { return }
+        trackSelections[title] = Set(t.tracks.map(\.index))
+    }
+
+    func resetTracks(_ title: Int) { trackSelections[title] = nil }
+
+    func isTrackSelected(title: Int, track: Int) -> Bool {
+        trackSelections[title]?.contains(track) ?? false
+    }
+
+    func setTrack(title: Int, track: Int, selected: Bool) {
+        guard var set = trackSelections[title] else { return }
+        if selected { set.insert(track) } else { set.remove(track) }
+        trackSelections[title] = set
+    }
+
+    var selectedSizeBytes: Int64 {
+        guard let info else { return 0 }
+        return info.titles.filter { selectedTitles.contains($0.index) }.reduce(0) { $0 + $1.sizeBytes }
+    }
+}

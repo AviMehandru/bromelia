@@ -1,0 +1,1 @@
+option('ui', type: 'boolean', value: true, description: 'Build the GTK application (disable to build only the core library and tests)')

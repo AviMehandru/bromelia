@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Bromelia
+GenericName=Disc Ripper
+Comment=Rip DVDs and Blu-rays from several drives at once with MakeMKV
+Exec=bromelia %f
+Icon=@APP_ID@
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;GTK;GNOME;
+Keywords=makemkv;rip;dvd;blu-ray;bluray;mkv;backup;
+MimeType=application/x-cd-image;inode/directory;
+StartupNotify=true

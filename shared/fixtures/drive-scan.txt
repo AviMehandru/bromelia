@@ -1,0 +1,15 @@
+MSG:1005,0,1,"MakeMKV v2.0.0 darwin(arm64-release) started","%1 started","MakeMKV v2.0.0 darwin(arm64-release)"
+PRGT:5018,0,"Scanning CD-ROM devices"
+PRGC:5018,0,"Scanning CD-ROM devices"
+PRGV:0,0,65536
+DRV:0,2,999,12,"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325","MOVIE_DISC","/dev/rdisk4"
+DRV:1,0,999,0,"BD-RE ASUS BW-16D1HT 3.10 KL3H4AB1234","","/dev/rdisk5"
+DRV:2,1,999,0,"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00","","/dev/rdisk6"
+DRV:3,3,999,1,"DVD-RW PIONEER DVR-S21 1.00","","/dev/rdisk7"
+DRV:4,2,999,1,"DVD+RW Some \"Quoted\" Drive","Disc, With Comma","/dev/rdisk8"
+DRV:5,256,999,0,"","",""
+DRV:6,256,999,0,"","",""
+DRV:7,256,999,0,"","",""
+PRGV:65536,65536,65536
+MSG:5010,0,0,"Failed to open disc","Failed to open disc"
+TCOUNT:0

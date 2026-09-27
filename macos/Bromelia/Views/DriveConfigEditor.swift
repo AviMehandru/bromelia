@@ -1,0 +1,340 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// Sheet wrapper: edits a draft copy, saved on “Save”.
+struct DriveConfigSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let original: DriveConfig
+    let session: DiscSession?
+    @State private var draft: DriveConfig
+    @State private var presetName = ""
+    @State private var askPresetName = false
+    @State private var confirmDelete = false
+
+    init(original: DriveConfig, session: DiscSession?) {
+        self.original = original
+        self.session = session
+        _draft = State(initialValue: original)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            DriveConfigEditor(config: $draft, isDefaultTemplate: original.id == model.config.defaultDrive.id, previewInfo: session?.info)
+            Divider()
+            HStack {
+                Menu("Presets") {
+                    Button("Save as Preset…") { presetName = draft.name; askPresetName = true }
+                    if !model.config.presets.isEmpty {
+                        Divider()
+                        ForEach(model.config.presets) { p in
+                            Button("Apply “\(p.name)”") { draft = model.applyPreset(p, to: draft) }
+                        }
+                    }
+                    Divider()
+                    Button("Copy Settings from Default Configuration") { draft = model.applyPreset(DrivePreset(name: "", config: model.config.defaultDrive), to: draft) }
+                }
+                .fixedSize()
+                if original.id != model.config.defaultDrive.id {
+                    Button("Delete Configuration…", role: .destructive) { confirmDelete = true }
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    model.updateDrive(draft)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
+        .frame(minWidth: 820, idealWidth: 880, minHeight: 620, idealHeight: 700)
+        .alert("Save preset", isPresented: $askPresetName) {
+            TextField("Name", text: $presetName)
+            Button("Save") { model.savePreset(name: presetName.isEmpty ? draft.name : presetName, from: draft) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Presets store everything except the drive's name and identification, so they can be applied to other drives.")
+        }
+        .confirmationDialog("Delete the configuration “\(original.name)”?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) {
+                model.removeDriveConfig(original.id)
+                dismiss()
+            }
+        }
+    }
+}
+
+struct DriveConfigEditor: View {
+    @Binding var config: DriveConfig
+    var isDefaultTemplate = false
+    var previewInfo: DiscInfo?
+
+    var body: some View {
+        TabView {
+            GeneralTab(config: $config, isDefaultTemplate: isDefaultTemplate)
+                .tabItem { Label("General", systemImage: "opticaldiscdrive") }
+            RipTab(config: $config, previewInfo: previewInfo)
+                .tabItem { Label("Ripping", systemImage: "film.stack") }
+            OutputTab(config: $config)
+                .tabItem { Label("Output", systemImage: "folder") }
+            MakeMKVSettingsTab(settings: $config.settings, mode: .drive)
+                .tabItem { Label("MakeMKV Settings", systemImage: "slider.horizontal.3") }
+            ProfileTab(profile: $config.profile)
+                .tabItem { Label("Profile", systemImage: "doc.badge.gearshape") }
+            PostProcessTab(steps: $config.postProcess, driveName: config.name)
+                .tabItem { Label("Post-processing", systemImage: "terminal") }
+        }
+        .padding(12)
+    }
+}
+
+// MARK: - General
+
+private struct GeneralTab: View {
+    @Environment(AppModel.self) private var model
+    @Binding var config: DriveConfig
+    let isDefaultTemplate: Bool
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Name", text: $config.name)
+                if !isDefaultTemplate {
+                    Toggle("Enabled", isOn: $config.enabled)
+                }
+            } footer: {
+                if isDefaultTemplate {
+                    Text("The default configuration is used for drives that have not been set up and for disc images and folders. New drive configurations start as a copy of it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if !isDefaultTemplate {
+                Section("Drive identification") {
+                    TextField("Drive name", text: $config.match.driveName, prompt: Text("e.g. BD-RE HL-DT-ST BD-RE WH16NS60 1.02 KL…"))
+                    TextField("Device path", text: $config.match.devicePath, prompt: Text("/dev/rdisk4 (used when the drive name is empty)"))
+                    let candidates = model.scannedDrives.filter(\.isPresent)
+                    if !candidates.isEmpty {
+                        Menu("Use a Connected Drive") {
+                            ForEach(candidates, id: \.self) { e in
+                                Button("\(e.driveName) — \(e.devicePath)") {
+                                    config.match = DriveMatch(driveName: e.driveName, devicePath: e.devicePath)
+                                }
+                            }
+                        }
+                        .fixedSize()
+                    }
+                    Text("The drive name reported by MakeMKV usually includes the serial number, so a configuration follows the drive even when device numbers change.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section("Automation") {
+                Toggle("Rip automatically when a disc is inserted", isOn: $config.automation.autoRipOnInsert)
+                if config.automation.autoRipOnInsert {
+                    LabeledContent("Start after") {
+                        IntField(title: "Delay", value: $config.automation.autoRipDelaySeconds, suffix: "seconds")
+                    }
+                }
+                Toggle("Eject the disc when the job succeeds", isOn: $config.automation.ejectWhenDone)
+                Toggle("Eject the disc when the job fails", isOn: $config.automation.ejectOnFailure)
+                Toggle("Show a notification when the job finishes", isOn: $config.automation.notify)
+                Toggle("Play a sound", isOn: $config.automation.playSound)
+                    .disabled(!config.automation.notify)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Ripping
+
+private struct RipTab: View {
+    @Binding var config: DriveConfig
+    let previewInfo: DiscInfo?
+
+    var body: some View {
+        Form {
+            Section("What to do with a disc") {
+                Picker("Mode", selection: $config.rip.mode) {
+                    ForEach(RipMode.allCases) { Text($0.label).tag($0) }
+                }
+                if config.rip.mode.makesBackup {
+                    Picker("Backup format", selection: $config.rip.backupFormat) {
+                        ForEach(BackupFormat.allCases) { Text($0.label).tag($0) }
+                    }
+                }
+                if config.rip.mode == .backupThenMkv {
+                    Toggle("Keep the backup after the MKV files are made", isOn: $config.rip.keepBackupAfterMKV)
+                }
+                Text(modeHelp).font(.caption).foregroundStyle(.secondary)
+            }
+            TitleRuleEditor(rule: $config.rip.titleSelection, previewInfo: previewInfo)
+            Section("makemkvcon options") {
+                LabeledContent("Minimum title length") {
+                    OptionalIntField(title: "Seconds", value: $config.rip.minLengthSeconds, placeholder: "Setting", suffix: "seconds (--minlength)")
+                }
+                LabeledContent("Read cache") {
+                    OptionalIntField(title: "MB", value: $config.rip.cacheMB, placeholder: "Default", suffix: "MB (--cache)")
+                }
+                TriStatePicker(title: "Direct disc access (--directio)", value: $config.rip.directIO)
+                TextField("Extra switches", text: $config.rip.extraArguments, prompt: Text("Advanced: additional makemkvcon switches"))
+                Toggle("Save disc information (disc-info.json) next to the files", isOn: $config.rip.writeDiscInfoJSON)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var modeHelp: String {
+        switch config.rip.mode {
+        case .mkv: return "Titles chosen by the rules below are saved as MKV files. Track selection follows the profile."
+        case .backup: return "The whole disc is copied as is, still encrypted. Needs MakeMKV (or another decrypter) to play."
+        case .backupDecrypted: return "The whole disc is copied and video files are decrypted, keeping menus and extras."
+        case .backupThenMkv: return "A decrypted backup is made first (fast sequential read), then MKV files are made from the backup. Safest for scratched discs."
+        case .infoOnly: return "Only reads the disc and stores disc-info.json. Useful for cataloguing or for scripts."
+        }
+    }
+}
+
+struct TitleRuleEditor: View {
+    @Binding var rule: TitleSelection
+    let previewInfo: DiscInfo?
+
+    var body: some View {
+        Section("Titles to rip") {
+            Picker("Choose", selection: $rule.strategy) {
+                ForEach(TitleSelection.Strategy.allCases) { Text($0.label).tag($0) }
+            }
+            switch rule.strategy {
+            case .longest:
+                LabeledContent("Number of titles") {
+                    Stepper(value: $rule.longestCount, in: 1...99) { Text("\(rule.longestCount)").monospacedDigit() }
+                }
+            case .indices:
+                TextField("Pattern", text: $rule.indexPattern, prompt: Text("0,2-4,7-  ·  last  ·  all"))
+                Picker("Numbers refer to", selection: $rule.indexBase) {
+                    ForEach(TitleSelection.IndexBase.allCases) { Text($0.label).tag($0) }
+                }
+                if let err = patternError { Text(err).font(.caption).foregroundStyle(.red) }
+            case .manual:
+                Text("Automatic rips are not possible with this setting; open the disc and pick titles.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .all:
+                EmptyView()
+            }
+        }
+        Section {
+            HStack {
+                LabeledContent("Duration") {
+                    DurationField(seconds: $rule.minDurationSeconds, placeholder: "min")
+                    Text("to")
+                    DurationField(seconds: $rule.maxDurationSeconds, placeholder: "max")
+                }
+            }
+            LabeledContent("Chapters") {
+                IntField(title: "Min", value: $rule.minChapters, width: 60)
+                Text("to")
+                IntField(title: "Max", value: $rule.maxChapters, width: 60)
+            }
+            LabeledContent("Size") {
+                IntField(title: "Min", value: $rule.minSizeMB, width: 80)
+                Text("to")
+                IntField(title: "Max", value: $rule.maxSizeMB, suffix: "MB", width: 80)
+            }
+            TextField("Include if matching", text: $rule.includePattern, prompt: Text("Regular expression, e.g. ^(00800|00801)\\.mpls"))
+            TextField("Exclude if matching", text: $rule.excludePattern, prompt: Text("Regular expression"))
+            Toggle("Skip duplicate titles (same segments and length)", isOn: $rule.skipDuplicates)
+            Toggle("Skip alternate angles", isOn: $rule.skipAlternateAngles)
+            LabeledContent("At most") {
+                IntField(title: "Max titles", value: $rule.maxTitles, suffix: "titles (0 = no limit)", width: 60)
+            }
+        } header: {
+            Text("Filters")
+        } footer: {
+            Text("0 means no limit. Patterns are matched against the title name, comment, source file (e.g. 00800.mpls), output file name, segment map and “#<source id>”.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        if let info = previewInfo {
+            Section("Preview on “\(info.name)”") {
+                let result = TitleSelector.evaluate(info.titles, rule: rule)
+                ForEach(result.decisions) { d in
+                    let t = info.title(at: d.titleIndex)
+                    HStack {
+                        Image(systemName: d.selected ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(d.selected ? .green : .secondary)
+                        Text("Title \(d.titleIndex)").frame(width: 60, alignment: .leading)
+                        Text(t?.durationText ?? "").monospacedDigit().frame(width: 70, alignment: .leading)
+                        Text("\(t?.chapterCount ?? 0) ch").frame(width: 50, alignment: .leading)
+                        Text(t?.sourceFileName ?? "").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(d.reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private var patternError: String? {
+        do { _ = try IndexPattern(parsing: rule.indexPattern); return nil } catch { return error.localizedDescription }
+    }
+}
+
+/// h:mm:ss text field bound to seconds (0 = empty).
+struct DurationField: View {
+    @Binding var seconds: Int
+    var placeholder: String
+
+    var body: some View {
+        TextField(placeholder, text: Binding(
+            get: { seconds == 0 ? "" : TitleInfo.formatDuration(seconds) },
+            set: { seconds = TitleInfo.parseDuration($0.trimmingCharacters(in: .whitespaces)) }
+        ), prompt: Text(placeholder))
+        .labelsHidden()
+        .frame(width: 80)
+        .multilineTextAlignment(.trailing)
+        .help("h:mm:ss, m:ss or seconds")
+    }
+}
+
+// MARK: - Output
+
+private struct OutputTab: View {
+    @Environment(AppModel.self) private var model
+    @Binding var config: DriveConfig
+
+    var body: some View {
+        Form {
+            Section("Location") {
+                PathField(title: "Output folder", path: $config.output.rootOverride, kind: .directory,
+                          placeholder: "Global default: \(model.config.outputRoot)")
+                TextField("Folder name", text: $config.output.folderTemplate, prompt: Text("{disc}"))
+                Text("Preview: \(preview(config.output.folderTemplate, file: false))")
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Picker("If the folder already exists", selection: $config.output.conflictPolicy) {
+                    ForEach(ConflictPolicy.allCases) { Text($0.label).tag($0) }
+                }
+            }
+            Section("File names") {
+                TextField("Rename MKV files to", text: $config.output.fileNameTemplate, prompt: Text("Empty keeps MakeMKV's names, e.g. {disc} - {n:2}"))
+                if !config.output.fileNameTemplate.isEmpty {
+                    Text("Preview: \(preview(config.output.fileNameTemplate, file: true)).mkv")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                TextField("Backup subfolder (backup + MKV mode)", text: $config.output.backupSubfolder)
+                TokenReference(tokens: TemplateRenderer.fileTokens)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func preview(_ template: String, file: Bool) -> String {
+        var v = TemplateRenderer.dateValues()
+        v["disc"] = "MOVIE_TITLE"; v["volume"] = "MOVIE_TITLE"; v["type"] = "bd"; v["drive"] = config.name; v["job"] = "1a2b3c4d"
+        v["title"] = "Movie Title"; v["index"] = "3"; v["n"] = "1"; v["source"] = "800"; v["duration"] = "1-58-02"
+        v["chapters"] = "24"; v["original"] = "MOVIE_TITLE_t03"; v["comment"] = ""
+        let rel = TemplateRenderer.renderPath(template, values: v)
+        if file { return rel }
+        let root = config.output.rootOverride.isEmpty ? model.config.outputRoot : config.output.rootOverride
+        return (Paths.expandTilde(root) as NSString).appendingPathComponent(rel)
+    }
+}

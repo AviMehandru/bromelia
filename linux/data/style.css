@@ -1,0 +1,15 @@
+.tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: smaller;
+  background-color: alpha(@accent_bg_color, 0.15);
+  color: @accent_color;
+}
+.tag.warning { background-color: alpha(@warning_bg_color, 0.18); color: @warning_color; }
+.tag.purple { background-color: alpha(#9141ac, 0.15); color: #9141ac; }
+.tag.teal { background-color: alpha(#2190a4, 0.15); color: #2190a4; }
+.tag.pink { background-color: alpha(#c64600, 0.12); color: #c64600; }
+.log-view { font-family: monospace; font-size: smaller; }
+.job-card { padding: 12px; }
+.drive-icon { color: @accent_color; }
+.sidebar-subtitle { font-size: smaller; opacity: 0.7; }

@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Target framework for the platform-neutral projects. Override with
+         -p:BromeliaTargetFramework=net7.0 to build and test with an older SDK. -->
+    <BromeliaTargetFramework Condition="'$(BromeliaTargetFramework)' == ''">net8.0</BromeliaTargetFramework>
+  </PropertyGroup>
+</Project>

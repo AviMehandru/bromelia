@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "comment": "Catalog of MakeMKV settings.conf keys that Bromelia exposes. Shared by the macOS, Windows and Linux front-ends. Values are always written as strings, exactly as MakeMKV stores them.",
+  "sections": [
+    {
+      "id": "general",
+      "title": "General",
+      "settings": [
+        { "key": "app_DataDir", "label": "Data directory", "type": "directory", "default": "", "help": "Folder where MakeMKV keeps its downloaded data (SDF, hashed keys, KEYDB.cfg). Leave empty to use MakeMKV's default. Bromelia shares your normal MakeMKV data folder with every drive unless you override it here." },
+        { "key": "app_ExpertMode", "label": "Expert mode", "type": "bool", "default": "0", "help": "Enables advanced MakeMKV behaviour and additional information in logs." },
+        { "key": "app_ShowDebug", "label": "Log debug messages", "type": "bool", "default": "0", "help": "Makes makemkvcon emit DEBUG messages and write MakeMKV_log.txt." },
+        { "key": "app_ShowAVSyncMessages", "label": "Show AV synchronization messages", "type": "bool", "default": "0", "help": "Report every audio/video synchronization fix-up while ripping." },
+        { "key": "app_UpdateEnable", "label": "Check for MakeMKV updates", "type": "bool", "default": "1", "help": "Allow makemkvcon to contact makemkv.com to check for updates." },
+        { "key": "app_Proxy", "label": "Proxy server", "type": "string", "default": "", "help": "HTTP proxy used by MakeMKV for internet access, for example http://proxy:3128." }
+      ]
+    },
+    {
+      "id": "language",
+      "title": "Language",
+      "settings": [
+        { "key": "app_InterfaceLanguage", "label": "Message language", "type": "language", "default": "", "help": "Language makemkvcon uses for log and progress messages (ISO 639-2 code, e.g. eng). Empty = automatic." },
+        { "key": "app_PreferredLanguage", "label": "Preferred audio/subtitle language", "type": "language", "default": "", "help": "Used by the 'favlang' token in selection rules (ISO 639-2 code, e.g. eng, fra, jpn)." }
+      ]
+    },
+    {
+      "id": "io",
+      "title": "Input / Output",
+      "settings": [
+        { "key": "io_ErrorRetryCount", "label": "Read retry count", "type": "int", "min": 0, "max": 1000, "default": "", "help": "How many times a failed read is retried before MakeMKV gives up on a sector. Empty = MakeMKV default." },
+        { "key": "io_RBufSizeMB", "label": "Read buffer size (MB)", "type": "choice", "default": "", "choices": [
+          { "value": "", "label": "Automatic" },
+          { "value": "64", "label": "64 MB" },
+          { "value": "128", "label": "128 MB" },
+          { "value": "256", "label": "256 MB" },
+          { "value": "512", "label": "512 MB" },
+          { "value": "768", "label": "768 MB" },
+          { "value": "1024", "label": "1024 MB" }
+        ], "help": "Size of the read cache. Larger values help slow or error-prone drives." },
+        { "key": "io_IgnoreReadErrors", "label": "Ignore read errors", "type": "bool", "default": "", "advanced": true, "help": "Continue past unreadable sectors instead of failing the title." },
+        { "key": "io_SingleDrive", "label": "Single drive mode", "type": "bool", "default": "", "advanced": true, "help": "Advanced MakeMKV IO option." },
+        { "key": "io_DarwinK2Workaround", "label": "macOS kernel workaround", "type": "int", "min": 0, "max": 2, "default": "", "advanced": true, "platforms": ["macos"], "help": "Advanced MakeMKV IO option for macOS drive access." }
+      ]
+    },
+    {
+      "id": "dvd",
+      "title": "DVD",
+      "settings": [
+        { "key": "dvd_MinimumTitleLength", "label": "Minimum title length (seconds)", "type": "int", "min": 0, "max": 36000, "default": "120", "help": "Titles shorter than this are hidden from the disc listing." },
+        { "key": "dvd_SPRemoveMethod", "label": "Structure protection removal", "type": "choice", "default": "", "choices": [
+          { "value": "", "label": "Automatic" },
+          { "value": "1", "label": "CellWalk" },
+          { "value": "2", "label": "CellTrim" }
+        ], "help": "Algorithm MakeMKV uses to remove fake cells on protected DVDs." }
+      ]
+    },
+    {
+      "id": "protection",
+      "title": "Protection",
+      "settings": [
+        { "key": "app_Java", "label": "Java executable", "type": "file", "default": "", "help": "Path to a Java runtime used for BD-J based protections. Empty = autodetect." },
+        { "key": "bdplus_DumpAlways", "label": "Always dump BD+ information", "type": "bool", "default": "0", "advanced": true, "help": "Write BD+ diagnostic dumps for every disc." }
+      ]
+    },
+    {
+      "id": "integration",
+      "title": "Integration",
+      "settings": [
+        { "key": "app_ccextractor", "label": "CCExtractor executable", "type": "file", "default": "", "help": "Path to ccextractor, used to extract closed captions (EIA-608) into subtitle tracks." }
+      ]
+    },
+    {
+      "id": "advanced",
+      "title": "Advanced",
+      "settings": [
+        { "key": "app_DefaultProfileName", "label": "Default profile name", "type": "string", "default": "", "help": "Name of the MakeMKV profile used when no profile file is passed. Bromelia normally passes an explicit per-drive profile." },
+        { "key": "app_DefaultSelectionString", "label": "Default selection rule", "type": "selection", "default": "", "help": "Rule deciding which tracks are included in every MKV. Empty = the profile's rule." },
+        { "key": "app_DefaultOutputFileName", "label": "Output file name template", "type": "string", "default": "", "help": "MakeMKV's own file naming template, e.g. {NAME1}{_t:INDEX}. Bromelia can additionally rename files after ripping." },
+        { "key": "app_BackupDecrypted", "label": "Decrypt video files in backups by default", "type": "bool", "default": "0", "help": "Default for the 'decrypt' option of backups." }
+      ]
+    }
+  ],
+  "selectionTokens": [
+    { "token": "all", "help": "Matches every track" },
+    { "token": "video", "help": "Video tracks" },
+    { "token": "audio", "help": "Audio tracks" },
+    { "token": "subtitle", "help": "Subtitle tracks" },
+    { "token": "favlang", "help": "Track language is one of the preferred languages" },
+    { "token": "nolang", "help": "Track has no language or 'und'" },
+    { "token": "single", "help": "Only track of its type" },
+    { "token": "special", "help": "Commentary, visually impaired and similar special tracks" },
+    { "token": "forced", "help": "Forced subtitles" },
+    { "token": "mono", "help": "Mono audio" },
+    { "token": "stereo", "help": "Stereo audio" },
+    { "token": "multi", "help": "Multi-channel audio" },
+    { "token": "lossy", "help": "Lossy audio" },
+    { "token": "lossless", "help": "Lossless audio" },
+    { "token": "havemulti", "help": "A multi-channel track exists in the same language" },
+    { "token": "havelossless", "help": "A lossless track exists in the same language" },
+    { "token": "core", "help": "Core audio contained in an HD audio track" },
+    { "token": "havecore", "help": "HD audio track that contains a core" },
+    { "token": "mvcvideo", "help": "3D MVC video" },
+    { "token": "eng", "help": "Any ISO 639-2 language code (eng, fra, deu, jpn, ...)" }
+  ],
+  "selectionPresets": [
+    { "name": "MakeMKV default", "rule": "-sel:all,+sel:(favlang|nolang|single),-sel:(havemulti|havecore),-sel:mvcvideo,=100:all,-10:favlang" },
+    { "name": "Everything", "rule": "+sel:all" },
+    { "name": "Preferred language only", "rule": "-sel:all,+sel:video,+sel:(favlang|nolang),-sel:mvcvideo" },
+    { "name": "Preferred language, best audio only", "rule": "-sel:all,+sel:video,+sel:(favlang|nolang),-sel:(havemulti|havelossless|havecore),-sel:(core),-sel:mvcvideo" },
+    { "name": "All audio, preferred subtitles", "rule": "-sel:all,+sel:(video|audio),+sel:subtitle&(favlang|forced),-sel:mvcvideo" },
+    { "name": "No commentary", "rule": "-sel:all,+sel:(favlang|nolang|single),-sel:special,-sel:(havemulti|havecore),-sel:mvcvideo" }
+  ]
+}
