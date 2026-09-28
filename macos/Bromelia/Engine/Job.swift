@@ -2,9 +2,11 @@ import Foundation
 import Observation
 
 enum JobState: String, Codable, Sendable {
-    case queued, waiting, running, succeeded, failed, cancelled
+    /// `completedWithErrors`: every title was saved, but MakeMKV reported read errors while ripping,
+    /// so the files may contain damaged or skipped data. They are kept apart from finished archives.
+    case queued, waiting, running, succeeded, completedWithErrors, failed, cancelled
 
-    var isFinished: Bool { self == .succeeded || self == .failed || self == .cancelled }
+    var isFinished: Bool { self == .succeeded || self == .completedWithErrors || self == .failed || self == .cancelled }
     var isActive: Bool { self == .running }
 
     var label: String {
@@ -13,6 +15,7 @@ enum JobState: String, Codable, Sendable {
         case .waiting: return "Starting soon"
         case .running: return "Running"
         case .succeeded: return "Completed"
+        case .completedWithErrors: return "Completed with read errors"
         case .failed: return "Failed"
         case .cancelled: return "Cancelled"
         }
@@ -21,6 +24,7 @@ enum JobState: String, Codable, Sendable {
     var statusWord: String {
         switch self {
         case .succeeded: return "success"
+        case .completedWithErrors: return "errors"
         case .cancelled: return "cancelled"
         default: return "failed"
         }
@@ -92,6 +96,8 @@ final class RipJob: Identifiable {
     var checksumFile: URL?
     var makemkvVersion = ""
     var errorMessages: [String] = []
+    /// Errors MakeMKV reported while ripping or backing up (read errors, hash check failures, ...).
+    var dataErrors: [String] = []
 
     @ObservationIgnored private var nextLogId = 0
     @ObservationIgnored var logHandle: FileHandle?

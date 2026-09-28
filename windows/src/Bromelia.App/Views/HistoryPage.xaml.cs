@@ -66,7 +66,8 @@ public sealed partial class HistoryPage : Page
             for (int i = 0; i < cols.Length; i++)
             {
                 var tb = new TextBlock { Text = cols[i], TextTrimming = TextTrimming.CharacterEllipsis };
-                if (i == 4 && r.State != JobState.Succeeded) tb.Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+                if (i == 4 && r.State != JobState.Succeeded)
+                    tb.Foreground = new SolidColorBrush(r.State == JobState.CompletedWithErrors ? Microsoft.UI.Colors.DarkOrange : Microsoft.UI.Colors.IndianRed);
                 Grid.SetColumn(tb, i);
                 g.Children.Add(tb);
             }

@@ -146,3 +146,43 @@ struct DiscInfoBuilder {
         return b.info
     }
 }
+
+/// Matches titles of one listing to another: the listing a disc was opened with and the listing read
+/// when the job starts, or a disc and its backup. MakeMKV numbers titles by position, which changes with
+/// the minimum length setting, so titles are matched by source title, duration and segment map.
+enum ListingMatcher {
+    static func key(_ t: TitleInfo) -> String { "\(t.sourceTitleId ?? -1)|\(t.durationSeconds)|\(t.segmentMap)" }
+
+    /// Why `new` looks like a different disc than `old`, or nil when it may be the same disc.
+    static func differentDisc(old: DiscInfo, new: DiscInfo) -> String? {
+        if !old.volumeName.isEmpty, !new.volumeName.isEmpty, old.volumeName != new.volumeName {
+            return "the disc is now “\(new.volumeName)”, it was “\(old.volumeName)” when it was opened"
+        }
+        let oldKeys = Set(old.titles.map(key)), newKeys = Set(new.titles.map(key))
+        if !oldKeys.isEmpty, !newKeys.isEmpty, oldKeys.isDisjoint(with: newKeys) {
+            return "none of its titles match the titles listed when it was opened"
+        }
+        return nil
+    }
+
+    /// Maps each of `indices` (titles of `old`) to a title of `new`. Throws when a title is missing, or when
+    /// `sameTracks` contains it and its track list changed (hand-picked tracks would then pick the wrong streams).
+    static func map(_ indices: Set<Int>, from old: DiscInfo, to new: DiscInfo, sameTracks: Set<Int>) throws -> [Int: Int] {
+        var result: [Int: Int] = [:]
+        var used = Set<Int>()
+        for i in indices.sorted() {
+            guard let t = old.title(at: i) else { throw JobError.message("Title \(i) is not in the disc listing") }
+            let candidates = new.titles.filter { key($0) == key(t) && !used.contains($0.index) }
+            guard let match = candidates.first(where: { $0.index == i }) ?? candidates.first else {
+                throw JobError.message("Title \(i) (\(t.durationText), \(t.sourceFileName.isEmpty ? "source \(t.sourceTitleId.map(String.init) ?? "?")" : t.sourceFileName)) is not in the new disc listing. The disc may have been changed, or the minimum title length differs. Open the disc again and choose the titles.")
+            }
+            if sameTracks.contains(i) {
+                let a = t.tracks.map(\.kind), b = match.tracks.map(\.kind)
+                if a != b { throw JobError.message("The tracks of title \(i) differ from the listing the tracks were chosen on. Open the disc again and choose the tracks.") }
+            }
+            result[i] = match.index
+            used.insert(match.index)
+        }
+        return result
+    }
+}

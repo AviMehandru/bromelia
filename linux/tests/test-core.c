@@ -1080,6 +1080,508 @@ test_split_integration (void)
   }
 }
 
+/* ---- safeguards: read errors, staging and marked folders, checks against the listing, disc changes ---- */
+
+#define READ_ERROR "MSG:2003,0,3,\"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading " \
+  "'/BDMV/STREAM/00001.m2ts' at offset '1048576'\",\"Error '%1' occurred while reading '%2' at offset '%3'\"," \
+  "\"Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR\",\"/BDMV/STREAM/00001.m2ts\",\"1048576\""
+#define SAVED "MSG:5036,260,1,\"Copy complete. 1 titles saved.\",\"Copy complete. %1 titles saved.\",\"1\""
+#define FAILED_SAVE "MSG:5003,0,2,\"Failed to save title 1 to file title_t01.mkv\",\"Failed to save title %1 to file %2\",\"1\",\"title_t01.mkv\"\n" \
+  "MSG:5037,516,2,\"Copy complete. 0 titles saved, 1 failed.\",\"Copy complete. %1 titles saved, %2 failed.\",\"0\",\"1\""
+
+/* A disc listing in robot format; titles is "duration,source;duration,source;…". */
+static char *
+listing (const char *volume, const char *titles)
+{
+  g_auto (GStrv) parts = g_strsplit (titles, ";", -1);
+  GString *s = g_string_new (NULL);
+  g_string_append_printf (s, "MSG:1005,0,1,\"MakeMKV v1.18.1 started\",\"%%1 started\",\"MakeMKV v1.18.1\"\nTCOUNT:%u\n"
+                             "CINFO:1,6209,\"Blu-ray disc\"\nCINFO:2,0,\"%s\"\nCINFO:32,0,\"%s\"\n", g_strv_length (parts), volume, volume);
+  for (guint i = 0; parts[i]; i++)
+    {
+      g_auto (GStrv) f = g_strsplit (parts[i], ",", 2);
+      g_string_append_printf (s, "TINFO:%u,8,0,\"2\"\nTINFO:%u,9,0,\"%s\"\nTINFO:%u,16,0,\"0000%s.mpls\"\nTINFO:%u,24,0,\"%s\"\n"
+                                 "TINFO:%u,26,0,\"%s\"\nTINFO:%u,27,0,\"title_t0%u.mkv\"\nSINFO:%u,0,1,6201,\"Video\"\nSINFO:%u,1,1,6202,\"Audio\"\n",
+                              i, i, f[0], i, f[1], i, f[1], i, f[1], i, i, i, i);
+    }
+  g_string_append (s, "MSG:5011,0,0,\"Operation successfully completed\",\"Operation successfully completed\"\n");
+  return g_string_free (s, FALSE);
+}
+
+/* Shell code that writes a small file as MakeMKV's output for the title (for "all": titles 0-4 in the listing),
+ * then prints messages. __LISTING__ is replaced by the listing file. */
+static char *
+writes_file (const char *messages)
+{
+  return g_strdup_printf ("if [ \"$title\" = \"all\" ]; then\n"
+                          "  for t in 0 1 2 3 4; do grep -q \"title_t0$t.mkv\" '__LISTING__' && printf 'mkv data' > \"$dest/title_t0$t.mkv\"; done\n"
+                          "else\n  printf 'mkv data %%s' \"$title\" > \"$dest/title_t0$title.mkv\"\nfi\n"
+                          "cat <<'EOF'\n%s\nEOF", messages);
+}
+
+typedef struct {
+  char *dir, *exe, *root;
+} Fake;
+
+/* A stand-in for makemkvcon: info prints the listing, mkv runs the shell code with $title and $dest set. */
+static Fake *
+fake_new (const char *listing_text, const char *mkv)
+{
+  Fake *f = g_new0 (Fake, 1);
+  g_autofree char *list = NULL, *script = NULL, *body = NULL;
+  g_auto (GStrv) pieces = NULL;
+  f->dir = g_dir_make_tmp ("bromelia-fake-XXXXXX", NULL);
+  f->root = g_dir_make_tmp ("bromelia-safety-XXXXXX", NULL);
+  f->exe = g_build_filename (f->dir, "makemkvcon", NULL);
+  list = g_build_filename (f->dir, "listing.txt", NULL);
+  g_assert_true (g_file_set_contents (list, listing_text, -1, NULL));
+  pieces = g_strsplit (mkv, "__LISTING__", -1);
+  body = g_strjoinv (list, pieces);
+  script = g_strdup_printf ("#!/bin/sh\necho \"$@\" >> '%s/calls.txt'\n"
+                            "while [ $# -gt 0 ]; do\n  case \"$1\" in info|mkv|backup) cmd=\"$1\"; shift; break;; esac\n  shift\ndone\n"
+                            "case \"$cmd\" in\n  info) cat '%s' ;;\n  mkv) title=\"$2\"; dest=\"$3\"\n%s\n  ;;\nesac\nexit 0\n",
+                            f->dir, list, body);
+  g_assert_true (g_file_set_contents (f->exe, script, -1, NULL));
+  g_chmod (f->exe, 0755);
+  return f;
+}
+
+static char *
+fake_calls (Fake *f)
+{
+  g_autofree char *p = g_build_filename (f->dir, "calls.txt", NULL);
+  char *text = NULL;
+  return g_file_get_contents (p, &text, NULL, NULL) ? text : g_strdup ("");
+}
+
+static void
+fake_free (Fake *f)
+{
+  g_free (f->dir);
+  g_free (f->exe);
+  g_free (f->root);
+  g_free (f);
+}
+
+/* Runs a job against the fake. titles is "0,1" (manual titles) or NULL. */
+static BroRunResult *
+run_fake (Fake *f, const char *titles, BroDiscInfo *opened, const char *mkvmerge, gboolean shared)
+{
+  BroRunRequest *req = bro_run_request_new ();
+  BroRunResult *res;
+  req->job_id = g_uuid_string_random ();
+  req->job_dir = g_build_filename (f->dir, "job", NULL);
+  req->config = bro_app_config_new ();
+  g_free (req->config->output_root);
+  req->config->output_root = g_strdup (f->root);
+  req->drive = bro_drive_config_new ();
+  req->drive->automation.notify = FALSE;
+  req->drive->rip.titles.skip_duplicates = FALSE;
+  if (shared)
+    {
+      g_free (req->drive->output.folder_template);
+      req->drive->output.folder_template = g_strdup ("");
+      req->drive->output.conflict_policy = BRO_CONFLICT_OVERWRITE;
+    }
+  req->source = bro_source_new_path (BRO_SOURCE_ISO, "/nonexistent/test.iso");
+  req->mode = BRO_MODE_MKV;
+  if (titles)
+    {
+      g_auto (GStrv) t = g_strsplit (titles, ",", -1);
+      req->manual_titles = g_array_new (FALSE, FALSE, sizeof (int));
+      for (guint i = 0; t[i]; i++)
+        {
+          int v = atoi (t[i]);
+          g_array_append_val (req->manual_titles, v);
+        }
+    }
+  if (opened)
+    req->preloaded = bro_disc_info_ref (opened);
+  req->makemkvcon = g_strdup (f->exe);
+  req->mkvmerge = g_strdup (mkvmerge);
+  req->skip_eject = TRUE;
+  res = bro_run_job (req);
+  bro_run_request_free (req);
+  return res;
+}
+
+static GPtrArray *
+names_in (const char *dir, gboolean hidden)
+{
+  GPtrArray *a = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  const char *n;
+  while (d && (n = g_dir_read_name (d)))
+    if (hidden || n[0] != '.')
+      g_ptr_array_add (a, g_strdup (n));
+  g_ptr_array_sort (a, (GCompareFunc) g_strcmp0);
+  return a;
+}
+
+static gboolean
+has_name (GPtrArray *a, const char *name)
+{
+  for (guint i = 0; i < a->len; i++)
+    if (g_str_equal (a->pdata[i], name))
+      return TRUE;
+  return FALSE;
+}
+
+static gboolean
+has_prefix (GPtrArray *a, const char *prefix)
+{
+  for (guint i = 0; i < a->len; i++)
+    if (g_str_has_prefix (a->pdata[i], prefix))
+      return TRUE;
+  return FALSE;
+}
+
+static char *
+record_status (const char *dir, guint *read_errors)
+{
+  g_autofree char *path = g_build_filename (dir, "bromelia.json", NULL);
+  g_autoptr (JsonParser) p = json_parser_new ();
+  JsonObject *o;
+  g_assert_true (json_parser_load_from_file (p, path, NULL));
+  o = json_node_get_object (json_parser_get_root (p));
+  if (read_errors)
+    *read_errors = json_array_get_length (json_object_get_array_member (o, "readErrors"));
+  return g_strdup (json_object_get_string_member (o, "status"));
+}
+
+static void
+test_safety_success (void)
+{
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2"), *m = writes_file (SAVED);
+  Fake *f = fake_new (l, m);
+  g_autoptr (BroRunResult) res = run_fake (f, "0,1", NULL, NULL, FALSE);
+  g_autoptr (GPtrArray) root = names_in (f->root, FALSE);
+  g_autoptr (GPtrArray) items = NULL;
+  g_autoptr (GPtrArray) bad = NULL;
+  g_autofree char *status = NULL;
+  g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+  g_assert_cmpuint (root->len, ==, 1);
+  g_assert_cmpstr (root->pdata[0], ==, "Sample Movie");
+  items = names_in (res->output_dir, TRUE);
+  g_assert_false (has_prefix (items, ".bromelia"));
+  g_assert_true (has_name (items, "SHA256SUMS"));
+  g_assert_cmpuint (res->files->len, ==, 2);
+  for (guint i = 0; i < res->files->len; i++)
+    {
+      g_autofree char *parent = g_path_get_dirname (res->files->pdata[i]);
+      g_assert_cmpstr (parent, ==, res->output_dir);
+      g_assert_true (g_file_test (res->files->pdata[i], G_FILE_TEST_EXISTS));
+    }
+  bad = bro_checksums_verify (res->output_dir, NULL);
+  g_assert_nonnull (bad);
+  g_assert_cmpuint (bad->len, ==, 0);
+  status = record_status (res->output_dir, NULL);
+  g_assert_cmpstr (status, ==, "success");
+  fake_free (f);
+}
+
+static void
+test_safety_read_errors (void)
+{
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:00:10,1"), *m = writes_file (READ_ERROR "\n" SAVED);
+  Fake *f = fake_new (l, m);
+  g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
+  g_autoptr (GPtrArray) root = names_in (f->root, FALSE);
+  g_autoptr (GPtrArray) items = NULL;
+  g_autofree char *status = NULL, *note = NULL, *note_path = NULL;
+  guint read_errors = 0;
+  g_assert_cmpint (res->status, ==, BRO_JOB_COMPLETED_WITH_ERRORS);
+  g_assert_cmpuint (root->len, ==, 1);
+  g_assert_cmpstr (root->pdata[0], ==, "Sample Movie [READ ERRORS]");
+  items = names_in (res->output_dir, FALSE);
+  g_assert_true (has_name (items, "READ ERRORS.txt"));
+  g_assert_true (has_name (items, "SHA256SUMS"));
+  note_path = g_build_filename (res->output_dir, "READ ERRORS.txt", NULL);
+  g_assert_true (g_file_get_contents (note_path, &note, NULL, NULL));
+  g_assert_nonnull (strstr (note, "MEDIUM ERROR"));
+  status = record_status (res->output_dir, &read_errors);
+  g_assert_cmpstr (status, ==, "errors");
+  g_assert_cmpuint (read_errors, ==, 1);
+  g_assert_cmpstr (bro_job_state_word (res->status), ==, "errors");
+  fake_free (f);
+}
+
+static void
+test_safety_listing_errors (void)
+{
+  g_autofree char *l0 = listing ("SAMPLE_MOVIE", "0:00:10,1"), *l = g_strconcat (READ_ERROR "\n", l0, NULL), *m = writes_file (SAVED);
+  Fake *f = fake_new (l, m);
+  g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
+  g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+  fake_free (f);
+}
+
+static void
+test_safety_failed_title (void)
+{
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2;0:00:30,3");
+  const char *m = "printf 'partial' > \"$dest/title_t0$title.mkv\"\n"
+                  "if [ \"$title\" = \"1\" ]; then cat <<'EOF'\n" FAILED_SAVE "\nEOF\nelse cat <<'EOF'\n" SAVED "\nEOF\nfi";
+  Fake *f = fake_new (l, m);
+  g_autoptr (BroRunResult) res = run_fake (f, "0,1", NULL, NULL, FALSE);
+  g_autoptr (GPtrArray) root = names_in (f->root, FALSE);
+  g_autoptr (GPtrArray) items = NULL;
+  g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+  g_assert_cmpuint (root->len, ==, 1);
+  g_assert_cmpstr (root->pdata[0], ==, "Sample Movie [INCOMPLETE]");
+  items = names_in (res->output_dir, TRUE);
+  g_assert_true (has_name (items, "INCOMPLETE.txt"));
+  g_assert_true (has_name (items, "title_t01.mkv"));
+  g_assert_false (has_name (items, "SHA256SUMS"));
+  g_assert_false (has_prefix (items, ".bromelia"));
+  fake_free (f);
+}
+
+static void
+test_safety_failure_without_files (void)
+{
+  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), "cat <<'EOF'\n" FAILED_SAVE "\nEOF");
+  g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
+  g_autoptr (GPtrArray) root = names_in (f->root, TRUE);
+  g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+  g_assert_cmpuint (root->len, ==, 0);
+  g_assert_null (res->output_dir);
+  fake_free (f);
+}
+
+static void
+test_safety_shared_folder (void)
+{
+  g_autofree char *m = writes_file (FAILED_SAVE);
+  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), m);
+  g_autofree char *other = g_build_filename (f->root, "other.mkv", NULL);
+  g_autoptr (BroRunResult) res = NULL;
+  g_autoptr (GPtrArray) root = NULL;
+  g_assert_true (g_file_set_contents (other, "keep", -1, NULL));
+  res = run_fake (f, "0", NULL, NULL, TRUE);
+  root = names_in (f->root, FALSE);
+  g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+  g_assert_cmpuint (root->len, ==, 2);
+  g_assert_true (has_name (root, "other.mkv"));
+  g_assert_true (has_prefix (root, "INCOMPLETE - "));
+  {
+    g_autoptr (GPtrArray) sub = names_in (res->output_dir, FALSE);
+    g_assert_true (has_name (sub, "title_t00.mkv"));
+  }
+  fake_free (f);
+}
+
+static void
+test_safety_different_disc (void)
+{
+  g_autofree char *m = writes_file (SAVED), *other = listing ("OTHER_DISC", "0:00:10,1");
+  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), m);
+  g_autoptr (BroDiscInfo) opened = bro_disc_info_from_output (other);
+  g_autoptr (BroRunResult) res = run_fake (f, "0", opened, NULL, FALSE);
+  g_autofree char *calls = fake_calls (f);
+  g_autoptr (GPtrArray) root = names_in (f->root, TRUE);
+  g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+  g_assert_nonnull (strstr (res->error, "not the disc that was opened"));
+  g_assert_null (strstr (calls, " mkv "));
+  g_assert_cmpuint (root->len, ==, 0);
+  fake_free (f);
+}
+
+static void
+test_safety_title_numbers (void)
+{
+  g_autofree char *m = writes_file (SAVED), *old = listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2");
+  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:05,9;0:00:10,1;0:00:20,2"), m);
+  g_autoptr (BroDiscInfo) opened = bro_disc_info_from_output (old);
+  g_autoptr (BroRunResult) res = run_fake (f, "1", opened, NULL, FALSE);
+  g_autofree char *calls = fake_calls (f);
+  if (res->status != BRO_JOB_SUCCEEDED)
+    g_printerr ("job failed: %s\n", res->error);
+  g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+  g_assert_nonnull (strstr (calls, "mkv iso:/nonexistent/test.iso 2 "));
+  g_assert_null (strstr (calls, "mkv iso:/nonexistent/test.iso 1 "));
+
+  {
+    g_autofree char *m2 = writes_file (SAVED);
+    Fake *f2 = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), m2);
+    g_autoptr (BroRunResult) res2 = run_fake (f2, "1", opened, NULL, FALSE);
+    g_autofree char *calls2 = fake_calls (f2);
+    g_assert_cmpint (res2->status, ==, BRO_JOB_FAILED);
+    g_assert_nonnull (strstr (res2->error, "not in the new disc listing"));
+    g_assert_null (strstr (calls2, " mkv "));
+    fake_free (f2);
+  }
+  fake_free (f);
+}
+
+static char *
+make_sample (const char *ffmpeg, int seconds)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-sample-XXXXXX", NULL);
+  char *path = g_strdup_printf ("%s/sample-%d.mkv", dir, seconds);
+  g_autofree char *src = g_strdup_printf ("testsrc=size=64x48:rate=5:duration=%d", seconds);
+  g_autofree char *snd = g_strdup_printf ("sine=duration=%d", seconds);
+  const char *argv[] = { ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", src, "-f", "lavfi", "-i", snd, "-c:v", "mpeg4", "-c:a", "aac", path, NULL };
+  int status = -1;
+  g_assert_true (bro_process_run (argv, NULL, NULL, 120, NULL, NULL, NULL, &status, NULL, NULL, NULL));
+  g_assert_cmpint (status, ==, 0);
+  return path;
+}
+
+static void
+test_safety_checks_rips (void)
+{
+  g_autofree char *ffmpeg = bro_find_tool ("", "ffmpeg");
+  g_autofree char *mkvmerge = bro_find_tool ("", "mkvmerge");
+  g_autofree char *good = NULL, *short_file = NULL, *m = NULL;
+  Fake *f;
+  if (!ffmpeg || !mkvmerge)
+    {
+      g_test_skip ("needs ffmpeg and mkvmerge");
+      return;
+    }
+  good = make_sample (ffmpeg, 10);
+  short_file = make_sample (ffmpeg, 3);
+  m = g_strdup_printf ("if [ \"$title\" = \"0\" ]; then cp '%s' \"$dest/title_t00.mkv\"; else cp '%s' \"$dest/title_t01.mkv\"; fi\n"
+                       "cat <<'EOF'\n%s\nEOF", good, short_file, SAVED);
+  f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2;0:00:30,3"), m);
+  {
+    g_autoptr (BroRunResult) res = run_fake (f, "0,1", NULL, mkvmerge, FALSE);
+    g_autoptr (GPtrArray) root = names_in (f->root, FALSE);
+    g_autoptr (GPtrArray) items = NULL;
+    g_autofree char *log_path = g_build_filename (f->dir, "job", "log.txt", NULL);
+    g_autofree char *log = NULL;
+    g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+    g_assert_nonnull (strstr (res->error, "doesn't match the disc listing"));
+    g_assert_true (g_file_get_contents (log_path, &log, NULL, NULL));
+    g_assert_nonnull (strstr (log, "Checked title_t00.mkv"));
+    g_assert_cmpuint (root->len, ==, 1);
+    g_assert_cmpstr (root->pdata[0], ==, "Sample Movie [INCOMPLETE]");
+    items = names_in (res->output_dir, FALSE);
+    g_assert_true (has_name (items, "title_t01.mkv"));
+  }
+  fake_free (f);
+}
+
+static BroTitle *
+title_of (BroDiscInfo *info, int i)
+{
+  return bro_disc_info_title (info, i);
+}
+
+static void
+test_rip_checks (void)
+{
+  g_autofree char *l = listing ("X", "2:00:10,1;0:10:00,2");
+  g_autoptr (BroDiscInfo) info = bro_disc_info_from_output (l);
+  const char *json = "{\"container\":{\"recognized\":true,\"properties\":{\"duration\":7212345000000}},"
+                     "\"tracks\":[{\"id\":0,\"type\":\"video\"},{\"id\":1,\"type\":\"audio\"}],\"chapters\":[{\"num_entries\":2}]}";
+  g_autoptr (BroMkvProbe) p = bro_mkv_probe_parse (json);
+  g_autoptr (BroMkvProbe) unknown = bro_mkv_probe_parse ("{\"container\":{\"recognized\":false}}");
+  g_assert_nonnull (p);
+  g_assert_null (unknown);
+  g_assert_cmpuint (p->track_types->len, ==, 2);
+  g_assert_cmpint (p->chapters, ==, 2);
+  g_assert_cmpfloat_with_epsilon (p->duration, 7212.345, 0.001);
+#define CHECK(dur, expect_problems) do { \
+    g_autoptr (GPtrArray) pr = g_ptr_array_new_with_free_func (g_free); \
+    g_autoptr (GPtrArray) no = g_ptr_array_new_with_free_func (g_free); \
+    p->duration = (dur); \
+    bro_rip_check (p, title_of (info, 0), pr, no); \
+    g_assert_cmpuint (pr->len > 0, ==, (expect_problems)); \
+  } while (0)
+  CHECK (7212.4, FALSE);
+  CHECK (5400, TRUE);
+  CHECK (7240, FALSE); /* within 0.5 % of two hours */
+  CHECK (7260, TRUE);
+#undef CHECK
+  {
+    g_autoptr (GPtrArray) pr = g_ptr_array_new_with_free_func (g_free);
+    g_autoptr (GPtrArray) no = g_ptr_array_new_with_free_func (g_free);
+    p->has_duration = FALSE;
+    bro_rip_check (p, title_of (info, 0), pr, no);
+    g_assert_cmpuint (pr->len, ==, 1);
+  }
+}
+
+static void
+test_listing_matcher (void)
+{
+  g_autofree char *a = listing ("DISC", "1:00:00,1;0:20:00,2"), *b = listing ("DISC", "0:01:00,7;1:00:00,1;0:20:00,2");
+  g_autofree char *c = listing ("OTHER", "1:00:00,1"), *d = listing ("", "0:45:00,3"), *e = listing ("", "1:00:00,1");
+  g_autoptr (BroDiscInfo) old = bro_disc_info_from_output (a);
+  g_autoptr (BroDiscInfo) now = bro_disc_info_from_output (b);
+  g_autoptr (BroDiscInfo) other = bro_disc_info_from_output (c);
+  g_autoptr (BroDiscInfo) unlabelled = bro_disc_info_from_output (d);
+  g_autoptr (BroDiscInfo) unlabelled_same = bro_disc_info_from_output (e);
+  g_autoptr (GArray) idx = g_array_new (FALSE, FALSE, sizeof (int));
+  g_autoptr (GHashTable) map = NULL;
+  g_autoptr (GError) err = NULL;
+  g_autofree char *w1 = bro_listing_different_disc (old, now), *w2 = bro_listing_different_disc (old, other);
+  g_autofree char *w3 = bro_listing_different_disc (unlabelled_same, unlabelled);
+  int zero = 0, one = 1;
+  g_array_append_val (idx, zero);
+  g_array_append_val (idx, one);
+  map = bro_listing_map (idx, old, now, NULL, &err);
+  g_assert_nonnull (map);
+  g_assert_cmpint (GPOINTER_TO_INT (g_hash_table_lookup (map, GINT_TO_POINTER (0))), ==, 2);
+  g_assert_cmpint (GPOINTER_TO_INT (g_hash_table_lookup (map, GINT_TO_POINTER (1))), ==, 3);
+  g_assert_null (w1);
+  g_assert_nonnull (w2);
+  g_assert_nonnull (w3);
+  {
+    g_autoptr (GHashTable) m2 = bro_listing_map (idx, old, other, NULL, &err);
+    g_assert_null (m2);
+    g_assert_nonnull (strstr (err->message, "not in the new disc listing"));
+  }
+}
+
+static void
+test_backup_checks (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-backup-XXXXXX", NULL);
+  g_autofree char *bdmv = g_build_filename (dir, "bd", "BDMV", NULL), *bd = g_build_filename (dir, "bd", NULL);
+  g_autofree char *index = g_build_filename (bdmv, "index.bdmv", NULL);
+  g_autofree char *vts = g_build_filename (dir, "dvd", "VIDEO_TS", NULL), *dvd = g_build_filename (dir, "dvd", NULL);
+  g_autofree char *ifo = g_build_filename (vts, "VIDEO_TS.IFO", NULL);
+  g_autofree char *folder_iso = g_build_filename (dir, "folder.iso", NULL), *iso = g_build_filename (dir, "disc.iso", NULL);
+  g_autofree char *missing = g_build_filename (dir, "missing", NULL);
+  char *image = g_malloc0 (40000);
+  g_mkdir_with_parents (bdmv, 0755);
+  g_mkdir_with_parents (vts, 0755);
+  g_mkdir_with_parents (folder_iso, 0755);
+#define PROBLEM(p, i, expect) do { g_autofree char *x = bro_backup_problem (p, i); g_assert_cmpint (x != NULL, ==, expect); } while (0)
+  PROBLEM (bd, FALSE, TRUE);
+  g_file_set_contents (index, "", 0, NULL);
+  PROBLEM (bd, FALSE, FALSE);
+  g_file_set_contents (ifo, "", 0, NULL);
+  PROBLEM (dvd, FALSE, FALSE);
+  PROBLEM (missing, FALSE, TRUE);
+  PROBLEM (folder_iso, TRUE, TRUE);
+  memcpy (image + 32769, "BEA01", 5);
+  g_file_set_contents (iso, image, 40000, NULL);
+  PROBLEM (iso, TRUE, FALSE);
+  memset (image, 0, 40000);
+  g_file_set_contents (iso, image, 40000, NULL);
+  PROBLEM (iso, TRUE, TRUE);
+#undef PROBLEM
+  g_free (image);
+}
+
+static void
+test_errors_state (void)
+{
+  BroPostStep *step = bro_post_step_new ();
+  g_free (step->executable);
+  step->executable = g_strdup ("/bin/true");
+  step->run_on = BRO_RUN_SUCCESS;
+  g_assert_false (bro_post_step_should_run (step, BRO_JOB_COMPLETED_WITH_ERRORS));
+  step->run_on = BRO_RUN_FAILURE;
+  g_assert_true (bro_post_step_should_run (step, BRO_JOB_COMPLETED_WITH_ERRORS));
+  g_assert_true (bro_job_state_finished (BRO_JOB_COMPLETED_WITH_ERRORS));
+  bro_post_step_free (step);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1117,5 +1619,18 @@ main (int argc, char **argv)
   g_test_add_func ("/dvd/jumps-and-numbers", test_dvd_jumps_and_numbers);
   g_test_add_func ("/dvd/iso", test_dvd_iso);
   g_test_add_func ("/runner/split-integration", test_split_integration);
+  g_test_add_func ("/safety/success", test_safety_success);
+  g_test_add_func ("/safety/read-errors", test_safety_read_errors);
+  g_test_add_func ("/safety/listing-errors", test_safety_listing_errors);
+  g_test_add_func ("/safety/failed-title", test_safety_failed_title);
+  g_test_add_func ("/safety/failure-without-files", test_safety_failure_without_files);
+  g_test_add_func ("/safety/shared-folder", test_safety_shared_folder);
+  g_test_add_func ("/safety/different-disc", test_safety_different_disc);
+  g_test_add_func ("/safety/title-numbers", test_safety_title_numbers);
+  g_test_add_func ("/safety/checks-rips", test_safety_checks_rips);
+  g_test_add_func ("/safety/rip-checks", test_rip_checks);
+  g_test_add_func ("/safety/listing-matcher", test_listing_matcher);
+  g_test_add_func ("/safety/backup-checks", test_backup_checks);
+  g_test_add_func ("/safety/errors-state", test_errors_state);
   return g_test_run ();
 }

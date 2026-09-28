@@ -155,3 +155,43 @@ public sealed class DiscInfoBuilder
         return b.Info;
     }
 }
+
+/// <summary>Matches titles of one listing to another: the listing a disc was opened with and the listing read when
+/// the job starts, or a disc and its backup. MakeMKV numbers titles by position, which changes with the minimum
+/// length setting, so titles are matched by source title, duration and segment map.</summary>
+public static class ListingMatcher
+{
+    public static string Key(TitleInfo t) => $"{t.SourceTitleId ?? -1}|{t.DurationSeconds}|{t.SegmentMap}";
+
+    /// <summary>Why <paramref name="now"/> looks like a different disc than <paramref name="old"/>, or null when it may be the same disc.</summary>
+    public static string? DifferentDisc(DiscInfo old, DiscInfo now)
+    {
+        if (old.VolumeName.Length > 0 && now.VolumeName.Length > 0 && old.VolumeName != now.VolumeName)
+            return $"the disc is now “{now.VolumeName}”, it was “{old.VolumeName}” when it was opened";
+        var a = old.Titles.Select(Key).ToHashSet();
+        var b = now.Titles.Select(Key).ToHashSet();
+        if (a.Count > 0 && b.Count > 0 && !a.Overlaps(b)) return "none of its titles match the titles listed when it was opened";
+        return null;
+    }
+
+    /// <summary>Maps each of <paramref name="indices"/> (titles of <paramref name="old"/>) to a title of <paramref name="now"/>.
+    /// Throws when a title is missing, or when <paramref name="sameTracks"/> contains it and its track list changed.</summary>
+    public static Dictionary<int, int> Map(IEnumerable<int> indices, DiscInfo old, DiscInfo now, ISet<int> sameTracks)
+    {
+        var result = new Dictionary<int, int>();
+        var used = new HashSet<int>();
+        foreach (var i in indices.Distinct().OrderBy(i => i))
+        {
+            var t = old.Title(i) ?? throw new Engine.JobException($"Title {i} is not in the disc listing");
+            var candidates = now.Titles.Where(x => Key(x) == Key(t) && !used.Contains(x.Index)).ToList();
+            var match = candidates.FirstOrDefault(x => x.Index == i) ?? candidates.FirstOrDefault()
+                ?? throw new Engine.JobException($"Title {i} ({t.DurationText}, {(t.SourceFileName.Length > 0 ? t.SourceFileName : $"source {t.SourceTitleId?.ToString(CultureInfo.InvariantCulture) ?? "?"}")}) is not in the new disc listing. " +
+                                                 "The disc may have been changed, or the minimum title length differs. Open the disc again and choose the titles.");
+            if (sameTracks.Contains(i) && !t.Tracks.Select(x => x.Kind).SequenceEqual(match.Tracks.Select(x => x.Kind)))
+                throw new Engine.JobException($"The tracks of title {i} differ from the listing the tracks were chosen on. Open the disc again and choose the tracks.");
+            result[i] = match.Index;
+            used.Add(match.Index);
+        }
+        return result;
+    }
+}

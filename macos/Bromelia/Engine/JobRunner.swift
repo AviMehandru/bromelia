@@ -96,6 +96,14 @@ final class JobRunner {
     private var firstEpisodeNumber = 1
     private var episodeWidth = 2
     private var fileTitles: [URL: Int] = [:]
+    // Output (see finishOutput)
+    private var outputDir: URL?
+    private var workDir: URL?
+    /// The output folder was created for this job (not a shared folder), so it may be renamed or removed.
+    private var ownsOutputDir = false
+    /// Error messages of the running makemkvcon count as read errors (rips and backups, not listings).
+    private var collectDataErrors = false
+    private var reportedMissingVerifier = false
 
     init(job: RipJob, config: AppConfig, makemkvcon: URL, mkvmerge: URL?) {
         self.job = job
@@ -138,6 +146,12 @@ final class JobRunner {
             }
         }
         if cancelRequested && status == .succeeded { status = .cancelled }
+        if status == .succeeded && !job.dataErrors.isEmpty {
+            status = .completedWithErrors
+            job.errorMessage = "MakeMKV reported \(job.dataErrors.count) read error(s) while reading the disc, so the files may be damaged. They were kept apart from finished archives."
+            job.appendLog(job.errorMessage!, severity: .error)
+        }
+        status = await finishOutput(status: status)
 
         // Post-processing.
         writeManifest(status: status)
@@ -165,7 +179,8 @@ final class JobRunner {
 
         // Eject.
         if case let .drive(_, device) = job.source,
-           (status == .succeeded && job.drive.automation.ejectWhenDone) || (status == .failed && job.drive.automation.ejectOnFailure) {
+           (status == .succeeded && job.drive.automation.ejectWhenDone)
+            || ((status == .failed || status == .completedWithErrors) && job.drive.automation.ejectOnFailure) {
             job.phase = "Ejecting"
             let ok = await DiscEjector.eject(devicePath: device)
             job.appendLog(ok ? "Disc ejected" : "Could not eject \(device)", severity: ok ? .info : .warning)
@@ -188,6 +203,7 @@ final class JobRunner {
             let body: String
             switch status {
             case .succeeded: body = "\(job.producedFiles.count) item(s) saved to \(job.outputDirectory?.path ?? "")"
+            case .completedWithErrors: body = "Read errors: the files were kept in \(job.outputDirectory?.path ?? "")"
             case .cancelled: body = "Cancelled"
             default: body = job.errorMessage ?? "Failed"
             }
@@ -220,48 +236,69 @@ final class JobRunner {
         job.appendLog("MakeMKV settings: \(home.appendingPathComponent("Library/MakeMKV/settings.conf").path)")
         if let p = env.profilePath { job.appendLog("Profile: \(p)") }
 
-        var info = job.preloadedInfo
-        if info == nil {
-            if job.mode.makesMKV || job.mode == .infoOnly {
-                info = try await scanDisc(job.source)
-            } else {
-                // Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title.
-                do { info = try await scanDisc(job.source) } catch {
-                    if cancelRequested || error is CancellationError { throw error }
+        // The listing is always read again: titles chosen on an opened disc are only ripped when the disc
+        // in the drive is still that disc and the titles can be found in the new listing.
+        let opened = job.preloadedInfo
+        if opened != nil { job.appendLog("Reading the disc listing again to check that the disc hasn't changed since it was opened") }
+        var info: DiscInfo?
+        var usingOpened = false
+        if job.mode.makesMKV || job.mode == .infoOnly {
+            info = try await scanDisc(job.source)
+        } else {
+            // Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title.
+            do { info = try await scanDisc(job.source) } catch {
+                if cancelRequested || error is CancellationError { throw error }
+                if let opened {
+                    info = opened
+                    usingOpened = true
+                    job.appendLog("Using the listing read when the disc was opened: \(error.localizedDescription)", severity: .warning)
+                } else {
                     job.appendLog("Continuing without the disc listing: \(error.localizedDescription)", severity: .warning)
                 }
             }
+        }
+        if let opened, let fresh = info, !usingOpened {
+            if let why = ListingMatcher.differentDisc(old: opened, new: fresh) {
+                throw JobError.message("This is not the disc that was opened: \(why). Open the disc again.")
+            }
+            try applyTitleMap(from: opened, to: fresh)
         }
         job.discInfo = info
         if let n = info?.name, !n.isEmpty { job.discLabel = n }
         resolveIdentity(info: info)
 
         let outDir = try resolveOutputDirectory()
+        outputDir = outDir
         job.outputDirectory = outDir
-        job.appendLog("Output folder: \(outDir.path)")
+        // Everything is written to a hidden staging folder first and only moved into the output folder
+        // once the job has finished and passed its checks.
+        let work = outDir.appendingPathComponent(Self.stagingPrefix + jobShortId, isDirectory: true)
+        workDir = work
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        job.appendLog("Output folder: \(outDir.path) (files are moved there once the job has finished and been checked)")
 
         switch job.mode {
         case .infoOnly:
             guard let info else { throw JobError.message("No disc information available") }
-            let url = try writeDiscInfo(info, to: outDir)
+            let url = try writeDiscInfo(info, to: work)
             job.producedFiles.append(url)
         case .mkv:
             guard let info else { throw JobError.message("No disc information available") }
-            if job.drive.rip.writeDiscInfoJSON { _ = try? writeDiscInfo(info, to: outDir) }
-            try await ripTitles(source: job.source, info: info, outDir: outDir, extraSteps: 0)
+            if job.drive.rip.writeDiscInfoJSON { _ = try? writeDiscInfo(info, to: work) }
+            try await ripTitles(source: job.source, info: info, outDir: work, extraSteps: 0)
         case .backup, .backupDecrypted:
             job.stepCount = 1
-            let dest = try await backup(decrypt: job.mode == .backupDecrypted, outDir: outDir, inSubfolder: false)
+            let dest = try await backup(decrypt: job.mode == .backupDecrypted, outDir: work, inSubfolder: false)
             job.producedFiles.append(dest)
         case .backupThenMkv:
             job.stepCount = 2
-            let dest = try await backup(decrypt: true, outDir: outDir, inSubfolder: true)
+            let dest = try await backup(decrypt: true, outDir: work, inSubfolder: true)
             job.stepIndex = 1
             let backupSource: DiscSource = job.drive.rip.backupFormat == .iso ? .iso(path: dest.path) : .folder(path: dest.path)
             let backupInfo = try await scanDisc(backupSource)
-            remapSelections(from: info, to: backupInfo)
-            if job.drive.rip.writeDiscInfoJSON { _ = try? writeDiscInfo(backupInfo, to: outDir) }
-            try await ripTitles(source: backupSource, info: backupInfo, outDir: outDir, extraSteps: 1)
+            if let info { try applyTitleMap(from: info, to: backupInfo) }
+            if job.drive.rip.writeDiscInfoJSON { _ = try? writeDiscInfo(backupInfo, to: work) }
+            try await ripTitles(source: backupSource, info: backupInfo, outDir: work, extraSteps: 1)
             if job.drive.rip.keepBackupAfterMKV {
                 job.producedFiles.append(dest)
             } else {
@@ -269,7 +306,21 @@ final class JobRunner {
                 try? FileManager.default.removeItem(at: dest)
             }
         }
-        try await archive(outDir: outDir)
+    }
+
+    /// Moves title and track choices made on one listing to the title numbers of another (the listing read
+    /// when the job starts, or the listing of the backup). Throws when a chosen title can't be found.
+    private func applyTitleMap(from old: DiscInfo, to new: DiscInfo) throws {
+        let chosen = Set(job.manualTitles ?? []).union(job.trackSelections.keys).union(job.titleNameOverrides.keys)
+        guard !chosen.isEmpty else { return }
+        let map = try ListingMatcher.map(chosen, from: old, to: new, sameTracks: Set(job.trackSelections.keys))
+        let moved = map.filter { $0.key != $0.value }.sorted { $0.key < $1.key }
+        if !moved.isEmpty {
+            job.appendLog("Title numbers changed: " + moved.map { "\($0.key) → \($0.value)" }.joined(separator: ", "))
+        }
+        if let manual = job.manualTitles { job.manualTitles = manual.compactMap { map[$0] }.sorted() }
+        job.trackSelections = Dictionary(uniqueKeysWithValues: job.trackSelections.compactMap { k, v in map[k].map { ($0, v) } })
+        job.titleNameOverrides = Dictionary(uniqueKeysWithValues: job.titleNameOverrides.compactMap { k, v in map[k].map { ($0, v) } })
     }
 
     // MARK: - Identity
@@ -418,13 +469,146 @@ final class JobRunner {
         return p.hasPrefix(b + "/") ? String(p.dropFirst(b.count + 1)) : url.lastPathComponent
     }
 
-    // MARK: - Archive
+    // MARK: - Output folder and archive
 
-    /// Hashes every produced file and writes SHA256SUMS and bromelia.json into the output folder.
-    private func archive(outDir: URL) async throws {
+    /// Name prefix of the hidden staging folder a job writes to inside its output folder.
+    static let stagingPrefix = ".bromelia-incomplete-"
+
+    private var jobShortId: String { String(job.id.uuidString.prefix(8)).lowercased() }
+
+    /// Names of the entries of `dir` that aren't hidden.
+    static func visibleItems(_ dir: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") }.sorted()
+    }
+
+    /// Moves the job's files out of the staging folder. A job that succeeded goes into the output folder.
+    /// Anything else goes into a folder marked “[INCOMPLETE]” (failed or cancelled) or “[READ ERRORS]”, with a
+    /// note explaining why, so an unfinished or damaged rip can never look like a finished archive.
+    /// Checksums and the archive record are written for complete files, including files with read errors.
+    private func finishOutput(status initial: JobState) async -> JobState {
+        guard let stage = workDir, let out = outputDir else { return initial }
+        var status = initial
+        let fm = FileManager.default
+        if Self.visibleItems(stage).isEmpty {
+            try? fm.removeItem(at: stage)
+            // Remove the folder reserved for this job when nothing was saved.
+            if status != .succeeded, ownsOutputDir,
+               ((try? fm.contentsOfDirectory(atPath: out.path)) ?? ["?"]).allSatisfy({ $0 == ".DS_Store" }) {
+                try? fm.removeItem(at: out)
+                job.outputDirectory = nil
+            }
+            return status
+        }
+
+        // Hash while the files are still in the staging folder: if a file can't be read back, it stays out of the archive.
+        var entries: [Checksums.Entry] = []
         let cfg = job.drive.archive
-        guard cfg.checksums || cfg.archiveRecord, !job.producedFiles.isEmpty else { return }
-        let files = Checksums.files(job.producedFiles, base: outDir)
+        if (status == .succeeded || status == .completedWithErrors) && (cfg.checksums || cfg.archiveRecord) && !job.producedFiles.isEmpty {
+            do {
+                entries = try await hashProducedFiles(base: stage)
+            } catch is CancellationError {
+                status = .cancelled
+                job.errorMessage = "Cancelled by user"
+                job.appendLog("Job cancelled", severity: .warning)
+            } catch {
+                status = .failed
+                job.errorMessage = error.localizedDescription
+                job.appendLog(error.localizedDescription, severity: .error)
+            }
+        }
+
+        var dest = out
+        var from = stage
+        let tag: String? = status == .succeeded ? nil : (status == .completedWithErrors ? "READ ERRORS" : "INCOMPLETE")
+        if let tag { (dest, from) = markedFolder(out: out, stage: stage, tag: tag) }
+
+        job.phase = "Moving files"
+        var moved: [String: URL] = [:]
+        var left = false
+        for name in Self.visibleItems(from) {
+            let target = Paths.uniqueURL(dest.appendingPathComponent(name))
+            do {
+                try fm.moveItem(at: from.appendingPathComponent(name), to: target)
+                moved[name] = target
+            } catch {
+                left = true
+                job.appendLog("Could not move \(name) out of \(from.path): \(error.localizedDescription)", severity: .error)
+            }
+        }
+        if left {
+            if status == .succeeded {
+                status = .failed
+                job.errorMessage = "Some files could not be moved into the output folder; they are still in \(from.path)"
+            }
+        } else {
+            // Only temporary files (hidden) are left.
+            try? fm.removeItem(at: from)
+        }
+
+        // Paths recorded while the files were in the staging folder now point to their final place.
+        let stagePath = stage.standardizedFileURL.path + "/"
+        func relocate(_ u: URL) -> URL {
+            let p = u.standardizedFileURL.path
+            guard p.hasPrefix(stagePath) else { return u }
+            let parts = p.dropFirst(stagePath.count).split(separator: "/", maxSplits: 1).map(String.init)
+            guard let first = parts.first, let top = moved[first] else { return u }
+            return parts.count > 1 ? top.appendingPathComponent(parts[1]) : top
+        }
+        func relocate(relative r: String) -> String { relativePath(relocate(stage.appendingPathComponent(r)), dest) }
+        job.producedFiles = job.producedFiles.map(relocate)
+        fileTitles = Dictionary(fileTitles.map { (relocate($0.key), $0.value) }, uniquingKeysWith: { a, _ in a })
+        job.episodes = job.episodes.map { var e = $0; e.file = relocate(relative: e.file); return e }
+        entries = entries.map { var e = $0; e.path = relocate(relative: e.path); return e }
+        job.outputDirectory = dest
+        job.appendLog(tag == nil ? "Moved \(moved.count) item(s) into \(dest.path)" : "Kept \(moved.count) item(s) apart in \(dest.path)",
+                      severity: tag == nil ? .info : .warning)
+
+        if status == .succeeded || status == .completedWithErrors {
+            if let e = writeArchive(entries, to: dest, status: status), status == .succeeded {
+                status = .failed
+                job.errorMessage = e
+            }
+        }
+        if status != .succeeded { writeNote(in: dest, tag: tag ?? "INCOMPLETE", status: status) }
+        return status
+    }
+
+    /// Where the files of a job that didn't succeed go. When the output folder was created for this job it is
+    /// renamed (“Name [INCOMPLETE]”); in a shared folder a subfolder is used (“INCOMPLETE - 1a2b3c4d”).
+    /// Returns that folder and the staging folder's (possibly new) location.
+    private func markedFolder(out: URL, stage: URL, tag: String) -> (URL, URL) {
+        let fm = FileManager.default
+        if ownsOutputDir, Self.visibleItems(out).isEmpty {
+            let target = Paths.uniqueURL(out.deletingLastPathComponent().appendingPathComponent("\(out.lastPathComponent) [\(tag)]", isDirectory: true))
+            do {
+                try fm.moveItem(at: out, to: target)
+                outputDir = target
+                return (target, target.appendingPathComponent(stage.lastPathComponent, isDirectory: true))
+            } catch {
+                job.appendLog("Could not rename \(out.path): \(error.localizedDescription)", severity: .warning)
+            }
+        }
+        let sub = Paths.uniqueURL(out.appendingPathComponent("\(tag) - \(jobShortId)", isDirectory: true))
+        try? fm.createDirectory(at: sub, withIntermediateDirectories: true)
+        return (sub, stage)
+    }
+
+    /// Explains in the folder itself why its files are not a finished archive.
+    private func writeNote(in dir: URL, tag: String, status: JobState) {
+        var text = "Bromelia job \(job.id.uuidString): \(status.label).\n"
+        text += "These files are NOT a finished archive. Rip the disc again (clean it first if it has read errors),\n"
+        text += "or check the files yourself before using them.\n\n"
+        if let e = job.errorMessage { text += "\(e)\n\n" }
+        if !job.dataErrors.isEmpty {
+            text += "Errors reported by MakeMKV while reading the disc:\n" + job.dataErrors.map { "  \($0)\n" }.joined() + "\n"
+        }
+        text += "Full log: \(job.logFile.path)\n"
+        try? text.write(to: dir.appendingPathComponent("\(tag).txt"), atomically: true, encoding: .utf8)
+    }
+
+    /// SHA-256 of every produced file (folders are walked), paths relative to `base`.
+    private func hashProducedFiles(base: URL) async throws -> [Checksums.Entry] {
+        let files = Checksums.files(job.producedFiles, base: base)
         let sizes = files.map { (try? FileManager.default.attributesOfItem(atPath: $0.url.path)[.size] as? Int64) ?? 0 }
         let total = max(sizes.reduce(0, +), 1)
         job.phase = "Computing checksums"
@@ -435,10 +619,10 @@ final class JobRunner {
         for (i, f) in files.enumerated() {
             if cancelRequested { throw CancellationError() }
             job.currentOperation = f.relative
-            let base = done
+            let before = done
             let progress = ProgressRelay { [weak self] n in
                 self?.job.currentProgress = Double(n) / Double(max(sizes[i], 1))
-                self?.job.totalProgress = Double(base + n) / Double(total)
+                self?.job.totalProgress = Double(before + n) / Double(total)
             }
             let url = f.url
             let flag = cancelFlag
@@ -454,9 +638,15 @@ final class JobRunner {
             entries.append(.init(path: f.relative, size: sizes[i], sha256: hash))
         }
         job.currentOperation = ""
+        return entries
+    }
+
+    /// Writes SHA256SUMS and bromelia.json into `dir`. Returns an error message when SHA256SUMS can't be written.
+    private func writeArchive(_ entries: [Checksums.Entry], to dir: URL, status: JobState) -> String? {
+        let cfg = job.drive.archive
         job.checksums = entries
-        if cfg.checksums {
-            let url = outDir.appendingPathComponent(Checksums.fileName)
+        if cfg.checksums && !entries.isEmpty {
+            let url = dir.appendingPathComponent(Checksums.fileName)
             // Keep entries of earlier jobs that wrote to the same folder.
             var merged: [String: String] = [:]
             if let old = try? String(contentsOf: url, encoding: .utf8) { for e in Checksums.parse(old) { merged[e.path] = e.hash } }
@@ -467,13 +657,15 @@ final class JobRunner {
                 job.checksumFile = url
                 job.appendLog("Wrote SHA-256 checksums of \(entries.count) file(s) to \(Checksums.fileName)")
             } catch {
-                throw JobError.message("Could not write \(url.path): \(error.localizedDescription)")
+                job.appendLog("Could not write \(url.path): \(error.localizedDescription)", severity: .error)
+                return "Could not write \(url.path): \(error.localizedDescription)"
             }
         }
-        if cfg.archiveRecord { writeArchiveRecord(outDir: outDir) }
+        if cfg.archiveRecord { writeArchiveRecord(outDir: dir, status: status) }
+        return nil
     }
 
-    private func writeArchiveRecord(outDir: URL) {
+    private func writeArchiveRecord(outDir: URL, status: JobState) {
         guard let id = job.identity else { return }
         let info = job.discInfo
         let titles = job.ripTitles.compactMap { info?.title(at: $0) }.map {
@@ -481,13 +673,14 @@ final class JobRunner {
                                 chapters: $0.chapterCount, sizeBytes: $0.sizeBytes, segmentMap: $0.segmentMap)
         }
         let record = ArchiveRecord(
-            name: id.name, kind: id.kind.rawValue,
+            status: status.statusWord, name: id.name, kind: id.kind.rawValue,
             disc: .init(label: job.discLabel, volumeName: info?.volumeName ?? "", type: info?.typeName ?? "", format: id.format.rawValue,
                         formatCode: id.formatCode, encrypted: id.encrypted, season: id.label.season, part: id.label.part,
                         volume: id.label.volume, disc: id.label.disc),
             rip: job.mode.makesMKV ? "Rip" : "Backup", mode: job.mode.rawValue, source: job.source.infoArgument, driveName: job.drive.name,
             makemkv: job.makemkvVersion, jobId: job.id.uuidString, startedAt: job.startedAt, finishedAt: Date(), titles: titles,
-            episodes: job.episodes, files: job.checksums, warnings: job.warningCount, errors: job.errorCount, errorMessages: job.errorMessages)
+            episodes: job.episodes, files: job.checksums, warnings: job.warningCount, errors: job.errorCount, errorMessages: job.errorMessages,
+            readErrors: job.dataErrors)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601
@@ -503,9 +696,11 @@ final class JobRunner {
     // MARK: - makemkvcon invocation
 
     @discardableResult
-    private func runMakeMKV(_ args: [String]) async throws -> RunSummary {
+    private func runMakeMKV(_ args: [String], readsData: Bool = false) async throws -> RunSummary {
         if cancelRequested { throw CancellationError() }
         summary = RunSummary()
+        collectDataErrors = readsData
+        defer { collectDataErrors = false }
         lastTotalTitle = ""
         let runner = ProcessRunner(executable: env.executable, arguments: args, environment: env.processEnvironment,
                                    workingDirectory: env.homeDirectory)
@@ -535,7 +730,11 @@ final class JobRunner {
             let sev = m.severity
             if sev == .debug && !showDebug { return }
             job.appendLog(m.text, severity: sev)
-            if sev == .error { summary.errorMessages.append(m.text); job.errorMessages.append(m.text) }
+            if sev == .error {
+                summary.errorMessages.append(m.text)
+                job.errorMessages.append(m.text)
+                if collectDataErrors { job.dataErrors.append(m.text) }
+            }
             switch m.code {
             case 1005:
                 if job.makemkvVersion.isEmpty { job.makemkvVersion = m.parameters.first ?? m.text }
@@ -620,9 +819,10 @@ final class JobRunner {
             let before = Self.mkvFiles(in: outDir)
             env = (!single && job.trackSelections[Int(t) ?? -1] != nil) ? (allTracksEnv ?? baseEnv) : baseEnv
             defer { env = baseEnv }
-            let s = try await runMakeMKV(env.mkvArguments(source: source, title: t, destination: outDir.path, rip: job.drive.rip))
+            let s = try await runMakeMKV(env.mkvArguments(source: source, title: t, destination: outDir.path, rip: job.drive.rip), readsData: true)
             let produced = Self.mkvFiles(in: outDir).subtracting(before).sorted { $0.path < $1.path }
-            if s.exitCode != 0 || (s.failed ?? 0) > 0 || produced.isEmpty {
+            let failed = s.exitCode != 0 || (s.failed ?? 0) > 0 || produced.isEmpty
+            if failed {
                 let why = s.errorMessages.last ?? "makemkvcon exit status \(s.exitCode)"
                 failures.append(single ? why : "title \(t): \(why)")
                 job.appendLog("Title \(t) failed: \(why)", severity: .error)
@@ -630,6 +830,18 @@ final class JobRunner {
             }
             for file in produced {
                 let titleIndex = single ? info.titles.first { $0.outputFileName == file.lastPathComponent }?.index : Int(t)
+                if failed {
+                    // A file of a title that didn't finish keeps MakeMKV's name, so it can't pass for a finished one.
+                    job.appendLog("Kept \(file.lastPathComponent) under MakeMKV's name: the title did not finish", severity: .warning)
+                    job.producedFiles.append(file)
+                    continue
+                }
+                if let ti = titleIndex, let title = info.title(at: ti), let problem = await verify(file, title: title) {
+                    failures.append("title \(ti): \(problem)")
+                    job.appendLog("Title \(ti) failed the check: \(problem)", severity: .error)
+                    job.producedFiles.append(file)
+                    continue
+                }
                 var final = file
                 if let ti = titleIndex, let keep = job.trackSelections[ti], let title = info.title(at: ti) {
                     final = await remux(final, title: title, keep: keep)
@@ -673,10 +885,13 @@ final class JobRunner {
         guard let args = env.backupArguments(source: job.source, decrypt: decrypt, destination: dest.path, rip: job.drive.rip) else {
             throw JobError.message("Backups require a drive source")
         }
-        let s = try await runMakeMKV(args)
+        let s = try await runMakeMKV(args, readsData: true)
         let exists = fm.fileExists(atPath: dest.path) && ((try? fm.contentsOfDirectory(atPath: dest.path).isEmpty == false) ?? true)
         if s.exitCode != 0 || !exists || (s.failed ?? 0) > 0 {
             throw JobError.message("Backup failed: \(s.errorMessages.last ?? "makemkvcon exit status \(s.exitCode)")")
+        }
+        if job.drive.archive.verifyRips, let problem = BackupVerifier.problem(dest, iso: job.drive.rip.backupFormat == .iso) {
+            throw JobError.message("Backup failed the check: \(problem)")
         }
         job.appendLog("Backup saved to \(dest.path)")
         // Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart.
@@ -703,6 +918,31 @@ final class JobRunner {
         if let id = job.identity { values["format"] = id.format.code(encrypted: !decrypt) }
         for k in ["title", "index", "n", "source", "duration", "chapters", "original", "comment"] { values[k] = "" }
         return TemplateRenderer.renderPath(template, values: values).replacingOccurrences(of: "/", with: " - ")
+    }
+
+    /// Checks a ripped file against its title in the disc listing. Returns why it can't be trusted, or nil.
+    private func verify(_ file: URL, title: TitleInfo) async -> String? {
+        guard job.drive.archive.verifyRips else { return nil }
+        guard let mkvmerge else {
+            if !reportedMissingVerifier {
+                reportedMissingVerifier = true
+                job.appendLog("Ripped files can't be checked against the disc listing without mkvmerge (MKVToolNix)", severity: .warning)
+            }
+            return nil
+        }
+        job.phase = "Checking \(file.lastPathComponent)"
+        guard let probe = await RipVerifier.probe(mkvmerge: mkvmerge, file: file) else {
+            if cancelRequested { return nil }
+            return "mkvmerge can't read \(file.lastPathComponent)"
+        }
+        let result = RipVerifier.check(probe, against: title)
+        for n in result.notes { job.appendLog("\(file.lastPathComponent): \(n)", severity: .warning) }
+        guard result.problems.isEmpty else {
+            return "\(file.lastPathComponent) doesn't match the disc listing: " + result.problems.joined(separator: "; ")
+        }
+        let length = probe.durationSeconds.map { TitleInfo.formatDuration(Int($0.rounded())) } ?? "?"
+        job.appendLog("Checked \(file.lastPathComponent): \(length), \(probe.trackTypes.count) track(s), \(probe.chapterCount) chapter(s)")
+        return nil
     }
 
     private func remux(_ file: URL, title: TitleInfo, keep: Set<Int>) async -> URL {
@@ -777,23 +1017,6 @@ final class JobRunner {
         }
     }
 
-    /// Maps title choices made on the disc listing to the listing of the backup copy.
-    private func remapSelections(from disc: DiscInfo?, to backup: DiscInfo) {
-        guard let disc else { return }
-        func key(_ t: TitleInfo) -> String { "\(t.sourceTitleId ?? -1)|\(t.durationSeconds)|\(t.segmentMap)" }
-        var map: [Int: Int] = [:]
-        for t in disc.titles {
-            if let b = backup.titles.first(where: { key($0) == key(t) }) ?? backup.title(at: t.index) { map[t.index] = b.index }
-        }
-        if let manual = job.manualTitles { job.manualTitles = manual.compactMap { map[$0] } }
-        var tracks: [Int: Set<Int>] = [:]
-        for (k, v) in job.trackSelections { if let m = map[k] { tracks[m] = v } }
-        job.trackSelections = tracks
-        var names: [Int: String] = [:]
-        for (k, v) in job.titleNameOverrides { if let m = map[k] { names[m] = v } }
-        job.titleNameOverrides = names
-    }
-
     // MARK: - Output
 
     private func resolveOutputDirectory() throws -> URL {
@@ -801,15 +1024,19 @@ final class JobRunner {
         let root = URL(fileURLWithPath: Paths.expandTilde(config.outputRoot(for: job.drive)), isDirectory: true)
         let rel = TemplateRenderer.renderPath(job.drive.output.folderTemplate, values: templateValues(status: .running))
         var dir = rel.isEmpty ? root : root.appendingPathComponent(rel, isDirectory: true)
-        let nonEmpty = ((try? fm.contentsOfDirectory(atPath: dir.path))?.contains { !$0.hasPrefix(".") }) ?? false
-        if nonEmpty {
+        // A staging folder of a running job counts as content, so two jobs never both take a folder as new.
+        let occupied = ((try? fm.contentsOfDirectory(atPath: dir.path))?.contains { !$0.hasPrefix(".") || $0.hasPrefix(Self.stagingPrefix) }) ?? false
+        // Only a folder made for this disc may be renamed or removed; never the output root itself.
+        var owned = !rel.isEmpty
+        if occupied {
             switch job.drive.output.conflictPolicy {
             case .uniqueSuffix: dir = Paths.uniqueURL(dir)
-            case .overwrite: break
+            case .overwrite: owned = false
             case .skip: throw JobError.message("Output folder \(dir.path) already exists")
             }
         }
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        ownsOutputDir = owned
         return dir
     }
 

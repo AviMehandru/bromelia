@@ -98,7 +98,8 @@ public sealed class JobCard : UserControl
             if (j.EstimatedRemaining is { } r) timing += $" · {JobRunner.FormatElapsed(r)} left";
             _timing.Text = j.State == JobState.Running ? timing : "";
         }
-        _error.Text = j.State is JobState.Failed or JobState.Cancelled ? j.ErrorMessage ?? "" : "";
+        _error.Text = j.State is JobState.Failed or JobState.Cancelled or JobState.CompletedWithErrors ? j.ErrorMessage ?? "" : "";
+        _error.Foreground = new SolidColorBrush(j.State == JobState.CompletedWithErrors ? Colors.DarkOrange : Colors.IndianRed);
         _error.Visibility = _error.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         _summary.Text = j.IsFinished ? $"{j.ProducedFiles.Count} item(s) · {JobRunner.FormatElapsed(j.Elapsed)} · {j.WarningCount} warning(s) · {j.ErrorCount} error(s)" : "";
         _summary.Visibility = j.IsFinished ? Visibility.Visible : Visibility.Collapsed;
@@ -131,6 +132,7 @@ public sealed class JobCard : UserControl
                 break;
             case JobState.Failed:
             case JobState.Cancelled:
+            case JobState.CompletedWithErrors:
                 _buttons.Children.Add(MakeButton("Retry", () => state.Retry(_job)));
                 break;
         }

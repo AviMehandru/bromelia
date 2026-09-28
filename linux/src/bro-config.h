@@ -69,6 +69,7 @@ typedef struct {
 typedef struct {
   gboolean checksums;      /* SHA256SUMS in the output folder */
   gboolean archive_record; /* bromelia.json and the job log in the output folder */
+  gboolean verify_rips;    /* check every ripped MKV against the disc listing with mkvmerge */
 } BroArchiveConfig;
 
 typedef struct {

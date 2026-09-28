@@ -145,6 +145,7 @@ extension JobState {
         case .waiting: return .orange
         case .running: return .accentColor
         case .succeeded: return .green
+        case .completedWithErrors: return .orange
         case .failed: return .red
         case .cancelled: return .gray
         }
@@ -156,6 +157,7 @@ extension JobState {
         case .waiting: return "timer"
         case .running: return "arrow.triangle.2.circlepath"
         case .succeeded: return "checkmark.circle.fill"
+        case .completedWithErrors: return "exclamationmark.triangle.fill"
         case .failed: return "xmark.octagon.fill"
         case .cancelled: return "stop.circle"
         }

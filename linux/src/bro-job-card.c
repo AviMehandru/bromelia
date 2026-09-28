@@ -89,6 +89,7 @@ build_buttons (Card *c)
       break;
     case BRO_JOB_FAILED:
     case BRO_JOB_CANCELLED:
+    case BRO_JOB_COMPLETED_WITH_ERRORS:
       gtk_box_append (GTK_BOX (c->buttons), button ("Retry", G_CALLBACK (on_retry), c));
       break;
     default:
@@ -142,8 +143,19 @@ card_update (Card *c)
       else
         gtk_label_set_text (GTK_LABEL (c->timing), "");
     }
-  gtk_label_set_text (GTK_LABEL (c->error), (j->state == BRO_JOB_FAILED || j->state == BRO_JOB_CANCELLED) && j->error ? j->error : "");
-  gtk_widget_set_visible (c->error, (j->state == BRO_JOB_FAILED || j->state == BRO_JOB_CANCELLED) && j->error);
+  gboolean problem = j->state == BRO_JOB_FAILED || j->state == BRO_JOB_CANCELLED || j->state == BRO_JOB_COMPLETED_WITH_ERRORS;
+  gtk_label_set_text (GTK_LABEL (c->error), problem && j->error ? j->error : "");
+  gtk_widget_set_visible (c->error, problem && j->error);
+  if (j->state == BRO_JOB_COMPLETED_WITH_ERRORS)
+    {
+      gtk_widget_remove_css_class (c->error, "error");
+      gtk_widget_add_css_class (c->error, "warning");
+    }
+  else
+    {
+      gtk_widget_remove_css_class (c->error, "warning");
+      gtk_widget_add_css_class (c->error, "error");
+    }
   if (bro_job_state_finished (j->state))
     {
       g_autofree char *el = bro_format_elapsed (bro_job_elapsed (j));

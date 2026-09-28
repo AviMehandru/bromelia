@@ -171,7 +171,9 @@ history_rebuild (History *h)
       adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
       adw_action_row_set_subtitle (ADW_ACTION_ROW (row), sub);
       adw_action_row_add_prefix (ADW_ACTION_ROW (row),
-                                 gtk_image_new_from_icon_name (g_strcmp0 (r->state, "success") == 0 ? "emblem-ok-symbolic" : "dialog-error-symbolic"));
+                                 gtk_image_new_from_icon_name (g_strcmp0 (r->state, "success") == 0 ? "emblem-ok-symbolic"
+                                                               : g_strcmp0 (r->state, "errors") == 0 ? "dialog-warning-symbolic"
+                                                               : "dialog-error-symbolic"));
       gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), TRUE);
       g_object_set_data_full (G_OBJECT (row), "id", g_strdup (r->id), g_free);
       gtk_list_box_append (GTK_LIST_BOX (h->list), row);

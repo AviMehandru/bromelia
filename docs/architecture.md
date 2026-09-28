@@ -27,7 +27,10 @@ Everything goes through `makemkvcon -r` (robot mode) with `--progress=-same`:
   attribute lines, which become a disc → titles → tracks model.
 - **Rip:** `mkv <source> <title|all> <folder>` per selected title (a single `all` when every title is
   selected and no tracks were hand-picked). Output files are found by comparing the folder contents
-  before and after.
+  before and after. The folder is a hidden staging folder inside the output folder (see below).
+- **Listing:** every job runs `info` again, even when the disc was opened before. Choices made on the
+  opened listing are moved to the new title numbers (matched by source title, length and segment map),
+  and the job stops if the disc changed or a chosen title is gone.
 - **Backup:** `backup [--decrypt] disc:<N> <folder or .iso>`. MakeMKV only accepts `disc:N` for backups,
   so Bromelia checks the `DRV:` lines the job prints to make sure drive *N* is still the expected device.
 
@@ -94,3 +97,14 @@ times) and split with `mkvmerge --split chapters:…` into hidden temporary file
 with the episode number and chapter range. Finally every produced file is hashed (SHA-256, streamed,
 with progress) and `SHA256SUMS` and `bromelia.json` are written before post-processing, so scripts and
 plugins can use them.
+
+## Staging, read errors and checks
+
+Rips and backups are written to `<output folder>/.bromelia-incomplete-<job>`. Every ripped MKV is checked
+against its title in the listing with `mkvmerge -J` (length, tracks) before it is renamed, and backups are
+checked for a disc structure. Error messages that makemkvcon prints during `mkv` and `backup` (read errors,
+hash check failures) are collected; a job that otherwise succeeded but has any of them ends as *completed
+with read errors*. When the job ends, files are hashed in the staging folder and then moved: into the
+output folder on success, or into a folder marked `[READ ERRORS]` / `[INCOMPLETE]` with a note file
+otherwise. Paths recorded during the job (files, episodes, checksums) are rewritten to the final location
+before the manifest, archive record and post-processing see them.

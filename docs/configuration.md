@@ -107,7 +107,8 @@ changed are kept.
   },
   "archive": {
     "checksums": true,                         // SHA256SUMS in the output folder
-    "archiveRecord": true                      // bromelia.json and bromelia-log.txt in the output folder
+    "archiveRecord": true,                     // bromelia.json and bromelia-log.txt in the output folder
+    "verifyRips": true                         // check each MKV against the disc listing (mkvmerge) and each backup's structure
   },
   "episodes": {
     "splitPlayAll": true,                      // split DVD "play all" titles of TV shows into episodes
@@ -117,6 +118,37 @@ changed are kept.
   "postProcess": [ /* PostProcessStep */ ]
 }
 ```
+
+### Output folder, read errors and checks
+
+A job writes into a hidden staging folder inside its output folder (`.bromelia-incomplete-<job>`), and
+files are moved into the output folder only when the job succeeded. Otherwise nothing that looks finished
+is left behind:
+
+| Outcome | Where the files go |
+| --- | --- |
+| Succeeded | The output folder, with `SHA256SUMS`, `bromelia.json` and `bromelia-log.txt` |
+| Completed with read errors: every title was saved, but MakeMKV reported errors while reading the disc (e.g. `MEDIUM ERROR`, hash check failures) | `<folder> [READ ERRORS]`, with checksums, the archive record (`"status": "errors"`, `readErrors`) and a `READ ERRORS.txt` note |
+| Failed or cancelled | `<folder> [INCOMPLETE]`, with an `INCOMPLETE.txt` note. Titles that didn't finish keep MakeMKV's own file name |
+
+The folder is renamed only when it was created for this job; in a shared folder (an empty folder template,
+or `conflictPolicy: overwrite` on a folder that has content) a subfolder such as `INCOMPLETE - 1a2b3c4d` is
+used. A job that saved nothing leaves no folder. Errors while reading the disc listing don't count as read
+errors, only errors during the rip or backup itself.
+
+With `verifyRips`, every MKV is checked with `mkvmerge -J` before it is renamed: its length must match the
+title in the disc listing (within 5 s or 0.5 %, whichever is larger) and it must contain tracks (and video,
+when the title has video). A file that fails the check fails the job. Chapter and track count differences
+are logged as warnings. Backups must contain `BDMV/index.bdmv`, `VIDEO_TS/VIDEO_TS.IFO` or `HVDVD_TS`, and
+ISO backups must be image files with an ISO 9660 / UDF volume descriptor. Without mkvmerge, MKV files are
+not checked (the log says so).
+
+Every job reads the disc listing again. When titles or tracks were chosen on a disc opened earlier, the
+new listing must be the same disc (same volume name, and at least one title in common), and every chosen
+title is found again by its source title (playlist / VTS title), length and segment map, even when its
+number changed (for instance because the minimum title length changed). Titles with hand-picked tracks
+must still have the same track list. Otherwise the job fails before ripping. The same matching is used
+to find the chosen titles in the backup in *backup then MKV* mode.
 
 Title rules are applied in this order: filters (duration, chapters, size, patterns, angles), then
 duplicate removal (same segment map, length and angle), then the strategy, then `maxTitles`.
@@ -134,7 +166,7 @@ name, source file name (e.g. `00800.mpls`), segment map, `#<source id>` and dura
   "interpreter": "",                           // e.g. /usr/bin/python3; empty = run directly
   "arguments": "-i {file} -o \"{outputDir}/{stem}.mp4\"",
   "workingDirectory": "",                      // empty = job output folder
-  "runOn": "success",                          // success | failure | always
+  "runOn": "success",                          // success | failure (also: cancelled, read errors) | always
   "perFile": true,
   "timeoutSeconds": 0,
   "environment": { "PRESET": "{disc}" },
@@ -159,7 +191,7 @@ Environment variables available to every step:
 | Variable | Meaning |
 | --- | --- |
 | `BROMELIA_JOB_ID` | Job identifier |
-| `BROMELIA_STATUS` | `success`, `failed` or `cancelled` |
+| `BROMELIA_STATUS` | `success`, `errors` (completed with read errors), `failed` or `cancelled` |
 | `BROMELIA_MODE` | Rip mode (`mkv`, `backup`, …) |
 | `BROMELIA_DRIVE_NAME`, `BROMELIA_DRIVE_ID` | Drive configuration |
 | `BROMELIA_DEVICE` | OS device of the drive |

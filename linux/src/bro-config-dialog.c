@@ -275,9 +275,13 @@ output_page (Ctx *c)
   g_string_free (tokens, TRUE);
   g = group (page, "Archiving", "Checksums of every file (including backup folders) are saved in the output folder in the standard format; "
                                 "check a copy later with “sha256sum -c SHA256SUMS”. The archive record describes the disc, titles, "
-                                "episodes and files with their sizes and hashes.");
+                                "episodes and files with their sizes and hashes. Files only reach the output folder when the job "
+                                "succeeded; otherwise they are kept in a folder marked [INCOMPLETE] or [READ ERRORS].");
   ADD (g, bro_switch_row ("Write SHA-256 checksums (SHA256SUMS)", NULL, &d->archive.checksums, ctx_changed, c));
   ADD (g, bro_switch_row ("Write an archive record (bromelia.json) and the job log", NULL, &d->archive.archive_record, ctx_changed, c));
+  ADD (g, bro_switch_row ("Check every rip against the disc listing",
+                          "Compares each MKV's length and tracks with the disc listing (needs mkvmerge) and each backup's structure",
+                          &d->archive.verify_rips, ctx_changed, c));
   return page;
 }
 

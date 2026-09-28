@@ -341,6 +341,7 @@ drive_config_init_defaults (BroDriveConfig *c)
   c->automation.play_sound = TRUE;
   c->archive.checksums = TRUE;
   c->archive.archive_record = TRUE;
+  c->archive.verify_rips = TRUE;
   c->episodes.split_play_all = TRUE;
   c->episodes.keep_play_all = TRUE;
   c->episodes.read_menu_numbers = TRUE;
@@ -471,6 +472,7 @@ drive_config_build (JsonBuilder *b, const BroDriveConfig *c)
   json_builder_begin_object (b);
   B ("checksums", c->archive.checksums);
   B ("archiveRecord", c->archive.archive_record);
+  B ("verifyRips", c->archive.verify_rips);
   json_builder_end_object (b);
 
   json_builder_set_member_name (b, "episodes");
@@ -578,6 +580,7 @@ drive_config_from_object (JsonObject *o)
   a = get_obj (o, "archive");
   c->archive.checksums = get_bool (a, "checksums", TRUE);
   c->archive.archive_record = get_bool (a, "archiveRecord", TRUE);
+  c->archive.verify_rips = get_bool (a, "verifyRips", TRUE);
   a = get_obj (o, "episodes");
   c->episodes.split_play_all = get_bool (a, "splitPlayAll", TRUE);
   c->episodes.keep_play_all = get_bool (a, "keepPlayAll", TRUE);

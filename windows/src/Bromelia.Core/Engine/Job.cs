@@ -5,11 +5,13 @@ using Bromelia.Core.Robot;
 
 namespace Bromelia.Core.Engine;
 
-public enum JobState { Queued, Waiting, Running, Succeeded, Failed, Cancelled }
+/// <summary><see cref="CompletedWithErrors"/>: every title was saved, but MakeMKV reported read errors while ripping,
+/// so the files may contain damaged or skipped data. They are kept apart from finished archives.</summary>
+public enum JobState { Queued, Waiting, Running, Succeeded, CompletedWithErrors, Failed, Cancelled }
 
 public static class JobStateExtensions
 {
-    public static bool IsFinished(this JobState s) => s is JobState.Succeeded or JobState.Failed or JobState.Cancelled;
+    public static bool IsFinished(this JobState s) => s is JobState.Succeeded or JobState.CompletedWithErrors or JobState.Failed or JobState.Cancelled;
 
     public static string Label(this JobState s) => s switch
     {
@@ -17,6 +19,7 @@ public static class JobStateExtensions
         JobState.Waiting => "Starting soon",
         JobState.Running => "Running",
         JobState.Succeeded => "Completed",
+        JobState.CompletedWithErrors => "Completed with read errors",
         JobState.Failed => "Failed",
         _ => "Cancelled",
     };
@@ -24,6 +27,7 @@ public static class JobStateExtensions
     public static string StatusWord(this JobState s) => s switch
     {
         JobState.Succeeded => "success",
+        JobState.CompletedWithErrors => "errors",
         JobState.Cancelled => "cancelled",
         _ => "failed",
     };
@@ -109,6 +113,8 @@ public sealed class RipJob : ObservableObject
     public string? ChecksumFile { get; set; }
     public string MakemkvVersion { get; set; } = "";
     public List<string> ErrorMessages { get; } = new();
+    /// <summary>Errors MakeMKV reported while ripping or backing up (read errors, hash check failures, ...).</summary>
+    public List<string> DataErrors { get; } = new();
 
     public string Title => $"{(DiscLabel.Length == 0 ? "Disc" : DiscLabel)} — {SourceLabel}";
 

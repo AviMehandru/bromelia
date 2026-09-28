@@ -20,7 +20,7 @@ public static class PostProcessor
         {
             RunCondition.Always => true,
             RunCondition.Success => status == JobState.Succeeded,
-            _ => status is JobState.Failed or JobState.Cancelled,
+            _ => status is JobState.Failed or JobState.Cancelled or JobState.CompletedWithErrors,
         };
     }
 

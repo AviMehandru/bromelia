@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Bromelia.Core.Logic;
+using Bromelia.Core.Robot;
 
 namespace Bromelia.Core.Engine;
 
@@ -131,7 +132,9 @@ public sealed class ArchiveRecord
     }
 
     public string Format { get; set; } = "bromelia-archive";
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
+    /// <summary><c>success</c>, or <c>errors</c> when MakeMKV reported read errors (the files may be damaged).</summary>
+    public string Status { get; set; } = "success";
     public string Name { get; set; } = "";
     public string Kind { get; set; } = "";
     public DiscEntry Disc { get; set; } = new();
@@ -149,6 +152,8 @@ public sealed class ArchiveRecord
     public int Warnings { get; set; }
     public int Errors { get; set; }
     public List<string> ErrorMessages { get; set; } = new();
+    /// <summary>Errors MakeMKV reported while reading the disc for the rip or backup.</summary>
+    public List<string> ReadErrors { get; set; } = new();
 
     public string ToJson() => JsonSerializer.Serialize(this, new JsonSerializerOptions
     {
@@ -292,5 +297,113 @@ public static class EpisodeSplitter
             return null;
         }
         return parts;
+    }
+}
+
+/// <summary>Checks a ripped MKV against the title in the disc listing, using <c>mkvmerge -J</c>.</summary>
+public static class RipVerifier
+{
+    public sealed record Probe(double? DurationSeconds, List<string> TrackTypes, int ChapterCount);
+
+    public sealed class Result
+    {
+        /// <summary>Reasons the file must not be trusted (wrong or truncated title, unreadable file).</summary>
+        public List<string> Problems { get; } = new();
+        /// <summary>Differences worth noting that don't make the file unusable.</summary>
+        public List<string> Notes { get; } = new();
+    }
+
+    /// <summary>Allowed difference between the listed and the actual duration: 5 s or 0.5 %, whichever is larger.</summary>
+    public static double DurationTolerance(double expected) => Math.Max(5, expected * 0.005);
+
+    /// <summary>Parses <c>mkvmerge -J</c> output. Returns null when mkvmerge did not recognise the file.</summary>
+    public static Probe? Parse(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("container", out var container) || container.ValueKind != JsonValueKind.Object) return null;
+            if (container.TryGetProperty("recognized", out var rec) && rec.ValueKind == JsonValueKind.False) return null;
+            double? duration = container.TryGetProperty("properties", out var props) && props.TryGetProperty("duration", out var d) && d.TryGetDouble(out var ns)
+                ? ns / 1e9 : null;
+            var types = root.TryGetProperty("tracks", out var tracks)
+                ? tracks.EnumerateArray().Select(t => t.TryGetProperty("type", out var ty) ? ty.GetString() ?? "" : "").ToList()
+                : new List<string>();
+            int chapters = root.TryGetProperty("chapters", out var ch)
+                ? ch.EnumerateArray().Sum(c => c.TryGetProperty("num_entries", out var n) && n.TryGetInt32(out var v) ? v : 0)
+                : 0;
+            return new Probe(duration, types, chapters);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    public static Result Check(Probe p, TitleInfo title)
+    {
+        var r = new Result();
+        if (p.TrackTypes.Count == 0) r.Problems.Add("the file contains no tracks");
+        if (p.TrackTypes.Count > 0 && !p.TrackTypes.Contains("video") && title.Tracks.Any(t => t.Kind == TrackKind.Video))
+            r.Problems.Add("the file contains no video track");
+        double expected = title.DurationSeconds;
+        if (expected > 0)
+        {
+            if (p.DurationSeconds is { } d)
+            {
+                if (Math.Abs(d - expected) > DurationTolerance(expected))
+                    r.Problems.Add($"it lasts {TitleInfo.FormatDuration((int)Math.Round(d))}, the disc listing says {TitleInfo.FormatDuration((int)expected)}");
+            }
+            else r.Problems.Add("mkvmerge reports no duration");
+        }
+        if (title.Tracks.Count > 0 && p.TrackTypes.Count > title.Tracks.Count)
+            r.Notes.Add($"{p.TrackTypes.Count} tracks, the disc listing has {title.Tracks.Count}");
+        // MakeMKV may add a chapter at 00:00 (profile option), so allow one extra.
+        if (title.ChapterCount > 1 && (p.ChapterCount < title.ChapterCount || p.ChapterCount > title.ChapterCount + 1))
+            r.Notes.Add($"{p.ChapterCount} chapters, the disc listing has {title.ChapterCount}");
+        return r;
+    }
+
+    /// <summary>Runs <c>mkvmerge -J</c>. Returns null when the file can't be read.</summary>
+    public static async Task<Probe?> ProbeAsync(string mkvmerge, string file, CancellationToken ct = default)
+    {
+        var lines = new LineCollector();
+        try
+        {
+            var r = await new ProcessRunner(mkvmerge, new[] { "-J", file }).RunAsync(lines.Add, TimeSpan.FromMinutes(5), ct);
+            return r.ExitCode <= 1 ? Parse(lines.Joined) : null;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or IOException) { return null; }
+    }
+}
+
+/// <summary>Checks that a backup looks like a disc: a folder with a BDMV / VIDEO_TS / HVDVD_TS structure, or an ISO
+/// image file (ISO 9660 or UDF volume descriptor at sector 16).</summary>
+public static class BackupVerifier
+{
+    public static string? Problem(string path, bool iso)
+    {
+        var name = Path.GetFileName(path);
+        if (iso)
+        {
+            if (Directory.Exists(path)) return $"{name} is a folder, not an ISO image";
+            if (!File.Exists(path)) return $"{name} was not created";
+            try
+            {
+                using var f = File.OpenRead(path);
+                var id = new byte[5];
+                f.Seek(32769, SeekOrigin.Begin);
+                if (f.Read(id, 0, 5) != 5) return $"{name} is not an ISO / UDF image";
+                var s = System.Text.Encoding.ASCII.GetString(id);
+                return s is "CD001" or "BEA01" ? null : $"{name} is not an ISO / UDF image";
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return $"{name} can't be read"; }
+        }
+        if (!Directory.Exists(path)) return File.Exists(path) ? $"{name} is not a folder" : $"{name} was not created";
+        string? Sub(string dir, string n) =>
+            (Directory.Exists(dir) ? Directory.EnumerateFileSystemEntries(dir) : Enumerable.Empty<string>())
+                .FirstOrDefault(e => string.Equals(Path.GetFileName(e), n, StringComparison.OrdinalIgnoreCase));
+        if (Sub(path, "BDMV") is { } bdmv) return Sub(bdmv, "index.bdmv") != null ? null : "BDMV/index.bdmv is missing";
+        if (Sub(path, "VIDEO_TS") is { } vts) return Sub(vts, "VIDEO_TS.IFO") != null ? null : "VIDEO_TS/VIDEO_TS.IFO is missing";
+        if (Sub(path, "HVDVD_TS") != null) return null;
+        return "it contains no BDMV, VIDEO_TS or HVDVD_TS folder";
     }
 }

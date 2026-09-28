@@ -19,6 +19,9 @@ typedef enum {
   BRO_JOB_SUCCEEDED,
   BRO_JOB_FAILED,
   BRO_JOB_CANCELLED,
+  /* Every title was saved, but MakeMKV reported read errors while ripping, so the files may contain damaged or
+   * skipped data. They are kept apart from finished archives. */
+  BRO_JOB_COMPLETED_WITH_ERRORS,
 } BroJobState;
 
 const char *bro_job_state_label (BroJobState s);
@@ -97,6 +100,34 @@ GPtrArray *bro_remux_arguments (const char *mkvmerge, GPtrArray *layout_types, B
 GPtrArray *bro_post_step_argv (const BroPostStep *step, GHashTable *values, GPtrArray *files);
 gboolean   bro_post_step_should_run (const BroPostStep *step, BroJobState status);
 char      *bro_unique_path (const char *path);
+
+/* Name prefix of the hidden staging folder a job writes to inside its output folder. */
+#define BRO_STAGING_PREFIX ".bromelia-incomplete-"
+
+/* A ripped MKV as reported by `mkvmerge -J`. */
+typedef struct {
+  gboolean has_duration;
+  double duration;        /* seconds */
+  GPtrArray *track_types; /* char*: "video", "audio", "subtitles", ... */
+  int chapters;
+} BroMkvProbe;
+
+BroMkvProbe *bro_mkv_probe_parse (const char *json); /* NULL when mkvmerge did not recognise the file */
+void         bro_mkv_probe_free (BroMkvProbe *p);
+/* Checks a ripped MKV against its title in the disc listing. Adds reasons the file can't be trusted to problems
+ * and differences worth noting to notes (both char*). */
+void         bro_rip_check (const BroMkvProbe *p, BroTitle *title, GPtrArray *problems, GPtrArray *notes);
+double       bro_rip_duration_tolerance (double expected);
+/* Why a backup doesn't look like a disc (BDMV / VIDEO_TS / HVDVD_TS folder, or ISO 9660 / UDF image), or NULL. */
+char        *bro_backup_problem (const char *path, gboolean iso);
+/* Why `now` looks like a different disc than `old` (the listing it was opened with), or NULL. */
+char        *bro_listing_different_disc (BroDiscInfo *old, BroDiscInfo *now);
+/* Maps titles of `old` (indices) to titles of `now` by source title, duration and segment map. Returns
+ * int -> (index + 1), or NULL with error when a title is missing or, for titles in same_tracks (int set, may be
+ * NULL), when its track list changed. */
+GHashTable  *bro_listing_map (GArray *indices, BroDiscInfo *old, BroDiscInfo *now, GHashTable *same_tracks, GError **error);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroMkvProbe, bro_mkv_probe_free)
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroRunRequest, bro_run_request_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroRunResult, bro_run_result_free)

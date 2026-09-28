@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Bromelia.Core.Config;
 using Bromelia.Core.Logic;
@@ -59,6 +60,16 @@ public sealed class JobRunner
     Dictionary<int, int> _separateEpisodes = new();   // MakeMKV title → episode offset
     int _firstEpisode = 1, _episodeWidth = 2;
     readonly Dictionary<string, int> _fileTitles = new(StringComparer.Ordinal);
+    // Output (see FinishOutputAsync)
+    string? _outputDir, _workDir;
+    /// <summary>The output folder was created for this job (not a shared folder), so it may be renamed or removed.</summary>
+    bool _ownsOutputDir;
+    /// <summary>Error messages of the running makemkvcon count as read errors (rips and backups, not listings).</summary>
+    bool _collectDataErrors;
+    bool _reportedMissingVerifier;
+
+    /// <summary>Name prefix of the hidden staging folder a job writes to inside its output folder.</summary>
+    public const string StagingPrefix = ".bromelia-incomplete-";
 
     public event Action<RipJob>? Finished;
     public bool CancelRequested { get; private set; }
@@ -110,6 +121,13 @@ public sealed class JobRunner
             _job.AppendLog(e.Message, Severity.Error);
         }
         if (CancelRequested && status == JobState.Succeeded) status = JobState.Cancelled;
+        if (status == JobState.Succeeded && _job.DataErrors.Count > 0)
+        {
+            status = JobState.CompletedWithErrors;
+            _job.ErrorMessage = $"MakeMKV reported {_job.DataErrors.Count} read error(s) while reading the disc, so the files may be damaged. They were kept apart from finished archives.";
+            _job.AppendLog(_job.ErrorMessage, Severity.Error);
+        }
+        status = await FinishOutputAsync(status);
 
         WriteManifest(status);
         var steps = ApplicableSteps(status);
@@ -135,7 +153,8 @@ public sealed class JobRunner
         }
 
         if (_job.Source is DiscSource.Drive d &&
-            ((status == JobState.Succeeded && _job.Drive.Automation.EjectWhenDone) || (status == JobState.Failed && _job.Drive.Automation.EjectOnFailure)))
+            ((status == JobState.Succeeded && _job.Drive.Automation.EjectWhenDone)
+             || (status is JobState.Failed or JobState.CompletedWithErrors && _job.Drive.Automation.EjectOnFailure)))
         {
             _job.Phase = "Ejecting";
             var ok = await _platform.EjectAsync(d.DevicePath);
@@ -161,6 +180,7 @@ public sealed class JobRunner
             var body = status switch
             {
                 JobState.Succeeded => $"{_job.ProducedFiles.Count} item(s) saved to {_job.OutputDirectory}",
+                JobState.CompletedWithErrors => $"Read errors: the files were kept in {_job.OutputDirectory}",
                 JobState.Cancelled => "Cancelled",
                 _ => _job.ErrorMessage ?? "Failed",
             };
@@ -189,24 +209,48 @@ public sealed class JobRunner
         _job.AppendLog(MakeMKVEnvironment.UsesRegistry ? "MakeMKV settings are applied through the registry for each launch" : $"MakeMKV home: {home}");
         if (_env.ProfilePath != null) _job.AppendLog($"Profile: {_env.ProfilePath}");
 
-        var info = _job.PreloadedInfo;
-        if (info == null)
+        // The listing is always read again: titles chosen on an opened disc are only ripped when the disc
+        // in the drive is still that disc and the titles can be found in the new listing.
+        var opened = _job.PreloadedInfo;
+        if (opened != null) _job.AppendLog("Reading the disc listing again to check that the disc hasn't changed since it was opened");
+        DiscInfo? info = null;
+        bool usingOpened = false;
+        if (_job.Mode.MakesMkv() || _job.Mode == RipMode.InfoOnly) info = await ScanDiscAsync(_job.Source);
+        else
         {
-            if (_job.Mode.MakesMkv() || _job.Mode == RipMode.InfoOnly) info = await ScanDiscAsync(_job.Source);
-            else
+            // Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title.
+            try { info = await ScanDiscAsync(_job.Source); }
+            catch (JobException e)
             {
-                // Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title.
-                try { info = await ScanDiscAsync(_job.Source); }
-                catch (JobException e) { _job.AppendLog($"Continuing without the disc listing: {e.Message}", Severity.Warning); }
+                if (opened != null)
+                {
+                    info = opened;
+                    usingOpened = true;
+                    _job.AppendLog($"Using the listing read when the disc was opened: {e.Message}", Severity.Warning);
+                }
+                else _job.AppendLog($"Continuing without the disc listing: {e.Message}", Severity.Warning);
             }
+        }
+        if (opened != null && info != null && !usingOpened)
+        {
+            if (ListingMatcher.DifferentDisc(opened, info) is { } why)
+                throw new JobException($"This is not the disc that was opened: {why}. Open the disc again.");
+            ApplyTitleMap(opened, info);
         }
         _job.DiscInfo = info;
         if (info is { Name.Length: > 0 }) _job.DiscLabel = info.Name;
         ResolveIdentity(info);
 
-        var outDir = ResolveOutputDirectory();
-        _job.OutputDirectory = outDir;
-        _job.AppendLog($"Output folder: {outDir}");
+        var finalDir = ResolveOutputDirectory();
+        _outputDir = finalDir;
+        _job.OutputDirectory = finalDir;
+        // Everything is written to a hidden staging folder first and only moved into the output folder
+        // once the job has finished and passed its checks.
+        var outDir = Path.Combine(finalDir, StagingPrefix + JobShortId);
+        _workDir = outDir;
+        var stage = Directory.CreateDirectory(outDir);
+        try { stage.Attributes |= FileAttributes.Hidden; } catch (IOException) { }
+        _job.AppendLog($"Output folder: {finalDir} (files are moved there once the job has finished and been checked)");
 
         switch (_job.Mode)
         {
@@ -229,7 +273,7 @@ public sealed class JobRunner
                 _job.StepIndex = 1;
                 DiscSource backupSource = _job.Drive.Rip.BackupFormat == BackupFormat.Iso ? new DiscSource.Iso(dest) : new DiscSource.Folder(dest);
                 var backupInfo = await ScanDiscAsync(backupSource);
-                RemapSelections(info, backupInfo);
+                if (info != null) ApplyTitleMap(info, backupInfo);
                 if (_job.Drive.Rip.WriteDiscInfoJson) TryWriteDiscInfo(backupInfo, outDir);
                 await RipTitlesAsync(backupSource, backupInfo, outDir, 1);
                 if (_job.Drive.Rip.KeepBackupAfterMkv) _job.ProducedFiles.Add(dest);
@@ -240,7 +284,20 @@ public sealed class JobRunner
                 }
                 break;
         }
-        await ArchiveAsync(outDir);
+    }
+
+    /// <summary>Moves title and track choices made on one listing to the title numbers of another (the listing read
+    /// when the job starts, or the listing of the backup). Throws when a chosen title can't be found.</summary>
+    void ApplyTitleMap(DiscInfo old, DiscInfo now)
+    {
+        var chosen = (_job.ManualTitles ?? new List<int>()).Concat(_job.TrackSelections.Keys).Concat(_job.TitleNameOverrides.Keys).ToHashSet();
+        if (chosen.Count == 0) return;
+        var map = ListingMatcher.Map(chosen, old, now, _job.TrackSelections.Keys.ToHashSet());
+        var moved = map.Where(kv => kv.Key != kv.Value).OrderBy(kv => kv.Key).ToList();
+        if (moved.Count > 0) _job.AppendLog("Title numbers changed: " + string.Join(", ", moved.Select(kv => $"{kv.Key} → {kv.Value}")));
+        if (_job.ManualTitles is { } manual) _job.ManualTitles = manual.Where(map.ContainsKey).Select(i => map[i]).OrderBy(i => i).ToList();
+        _job.TrackSelections = _job.TrackSelections.Where(kv => map.ContainsKey(kv.Key)).ToDictionary(kv => map[kv.Key], kv => kv.Value);
+        _job.TitleNameOverrides = _job.TitleNameOverrides.Where(kv => map.ContainsKey(kv.Key)).ToDictionary(kv => map[kv.Key], kv => kv.Value);
     }
 
     // --- identity ----------------------------------------------------------------------------------
@@ -402,12 +459,172 @@ public sealed class JobRunner
 
     // --- archive -----------------------------------------------------------------------------------
 
-    /// <summary>Hashes every produced file and writes SHA256SUMS and bromelia.json into the output folder.</summary>
-    async Task ArchiveAsync(string outDir)
+    string JobShortId => _job.Id.ToString("N")[..8];
+
+    /// <summary>Names of the entries of <paramref name="dir"/> that aren't hidden.</summary>
+    public static List<string> VisibleItems(string dir) =>
+        Directory.Exists(dir)
+            ? Directory.EnumerateFileSystemEntries(dir).Select(e => Path.GetFileName(e)!).Where(n => !n.StartsWith('.')).OrderBy(n => n, StringComparer.Ordinal).ToList()
+            : new List<string>();
+
+    /// <summary>Moves the job's files out of the staging folder. A job that succeeded goes into the output folder.
+    /// Anything else goes into a folder marked “[INCOMPLETE]” (failed or cancelled) or “[READ ERRORS]”, with a note
+    /// explaining why, so an unfinished or damaged rip can never look like a finished archive. Checksums and the
+    /// archive record are written for complete files, including files with read errors.</summary>
+    async Task<JobState> FinishOutputAsync(JobState status)
     {
+        if (_workDir is not { } stage || _outputDir is not { } outDir) return status;
+        if (VisibleItems(stage).Count == 0)
+        {
+            TryDelete(stage);
+            // Remove the folder reserved for this job when nothing was saved.
+            if (status != JobState.Succeeded && _ownsOutputDir && Directory.Exists(outDir) &&
+                Directory.EnumerateFileSystemEntries(outDir).All(e => Path.GetFileName(e) is ".DS_Store" or "desktop.ini" or "Thumbs.db"))
+            {
+                TryDelete(outDir);
+                _job.OutputDirectory = null;
+            }
+            return status;
+        }
+
+        // Hash while the files are still in the staging folder: if a file can't be read back, it stays out of the archive.
+        var entries = new List<Checksums.Entry>();
         var cfg = _job.Drive.Archive;
-        if (!(cfg.Checksums || cfg.ArchiveRecord) || _job.ProducedFiles.Count == 0) return;
-        var files = Checksums.Files(_job.ProducedFiles, outDir);
+        if (status is JobState.Succeeded or JobState.CompletedWithErrors && (cfg.Checksums || cfg.ArchiveRecord) && _job.ProducedFiles.Count > 0)
+        {
+            try { entries = await HashProducedFilesAsync(stage); }
+            catch (Exception e) when (CancelRequested || e is OperationCanceledException)
+            {
+                status = JobState.Cancelled;
+                _job.ErrorMessage = "Cancelled by user";
+                _job.AppendLog("Job cancelled", Severity.Warning);
+            }
+            catch (JobException e)
+            {
+                status = JobState.Failed;
+                _job.ErrorMessage = e.Message;
+                _job.AppendLog(e.Message, Severity.Error);
+            }
+        }
+
+        string dest = outDir, from = stage;
+        string? tag = status == JobState.Succeeded ? null : status == JobState.CompletedWithErrors ? "READ ERRORS" : "INCOMPLETE";
+        if (tag != null) (dest, from) = MarkedFolder(outDir, stage, tag);
+
+        _job.Phase = "Moving files";
+        var moved = new Dictionary<string, string>(StringComparer.Ordinal);
+        bool left = false;
+        foreach (var name in VisibleItems(from))
+        {
+            var source = Path.Combine(from, name);
+            var target = Paths.UniquePath(Path.Combine(dest, name));
+            try
+            {
+                if (Directory.Exists(source)) Directory.Move(source, target); else File.Move(source, target);
+                moved[name] = target;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                left = true;
+                _job.AppendLog($"Could not move {name} out of {from}: {e.Message}", Severity.Error);
+            }
+        }
+        if (left)
+        {
+            if (status == JobState.Succeeded)
+            {
+                status = JobState.Failed;
+                _job.ErrorMessage = $"Some files could not be moved into the output folder; they are still in {from}";
+            }
+        }
+        else TryDelete(from);   // only temporary (hidden) files are left
+
+        // Paths recorded while the files were in the staging folder now point to their final place.
+        var stagePath = Path.GetFullPath(stage).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string Relocate(string p)
+        {
+            var full = Path.GetFullPath(p);
+            if (!full.StartsWith(stagePath, StringComparison.OrdinalIgnoreCase)) return p;
+            var rest = full[stagePath.Length..];
+            var cut = rest.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
+            var first = cut < 0 ? rest : rest[..cut];
+            if (!moved.TryGetValue(first, out var top)) return p;
+            return cut < 0 ? top : Path.Combine(top, rest[(cut + 1)..]);
+        }
+        string RelocateRelative(string r) => RelativePath(Relocate(Path.Combine(stage, r.Replace('/', Path.DirectorySeparatorChar))), dest);
+        for (int i = 0; i < _job.ProducedFiles.Count; i++) _job.ProducedFiles[i] = Relocate(_job.ProducedFiles[i]);
+        var titles = _fileTitles.ToList();
+        _fileTitles.Clear();
+        foreach (var kv in titles) _fileTitles[Relocate(kv.Key)] = kv.Value;
+        foreach (var e in _job.Episodes) e.File = RelocateRelative(e.File);
+        entries = entries.Select(e => e with { Path = RelocateRelative(e.Path) }).ToList();
+        _job.OutputDirectory = dest;
+        _job.AppendLog(tag == null ? $"Moved {moved.Count} item(s) into {dest}" : $"Kept {moved.Count} item(s) apart in {dest}",
+            tag == null ? Severity.Info : Severity.Warning);
+
+        if (status is JobState.Succeeded or JobState.CompletedWithErrors && WriteArchive(entries, dest, status) is { } error && status == JobState.Succeeded)
+        {
+            status = JobState.Failed;
+            _job.ErrorMessage = error;
+        }
+        if (status != JobState.Succeeded) WriteNote(dest, tag ?? "INCOMPLETE", status);
+        return status;
+    }
+
+    static void TryDelete(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, true); else if (File.Exists(path)) File.Delete(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Where the files of a job that didn't succeed go. When the output folder was created for this job it is
+    /// renamed (“Name [INCOMPLETE]”); in a shared folder a subfolder is used (“INCOMPLETE - 1a2b3c4d”).
+    /// Returns that folder and the staging folder's (possibly new) location.</summary>
+    (string Dest, string Stage) MarkedFolder(string outDir, string stage, string tag)
+    {
+        if (_ownsOutputDir && VisibleItems(outDir).Count == 0)
+        {
+            var parent = Path.GetDirectoryName(Path.GetFullPath(outDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))!;
+            var target = Paths.UniquePath(Path.Combine(parent, $"{Path.GetFileName(outDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))} [{tag}]"));
+            try
+            {
+                Directory.Move(outDir, target);
+                _outputDir = target;
+                return (target, Path.Combine(target, Path.GetFileName(stage)));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                _job.AppendLog($"Could not rename {outDir}: {e.Message}", Severity.Warning);
+            }
+        }
+        var sub = Paths.UniquePath(Path.Combine(outDir, $"{tag} - {JobShortId}"));
+        Directory.CreateDirectory(sub);
+        return (sub, stage);
+    }
+
+    /// <summary>Explains in the folder itself why its files are not a finished archive.</summary>
+    void WriteNote(string dir, string tag, JobState status)
+    {
+        var text = new StringBuilder();
+        text.Append($"Bromelia job {_job.Id}: {status.Label()}.\n");
+        text.Append("These files are NOT a finished archive. Rip the disc again (clean it first if it has read errors),\n");
+        text.Append("or check the files yourself before using them.\n\n");
+        if (_job.ErrorMessage != null) text.Append(_job.ErrorMessage).Append("\n\n");
+        if (_job.DataErrors.Count > 0)
+        {
+            text.Append("Errors reported by MakeMKV while reading the disc:\n");
+            foreach (var e in _job.DataErrors) text.Append("  ").Append(e).Append('\n');
+            text.Append('\n');
+        }
+        text.Append($"Full log: {_job.LogFile}\n");
+        try { File.WriteAllText(Path.Combine(dir, $"{tag}.txt"), text.ToString()); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>SHA-256 of every produced file (folders are walked), paths relative to <paramref name="baseDir"/>.</summary>
+    async Task<List<Checksums.Entry>> HashProducedFilesAsync(string baseDir)
+    {
+        var files = Checksums.Files(_job.ProducedFiles, baseDir);
         var sizes = files.Select(f => new FileInfo(f.Full).Length).ToList();
         long total = Math.Max(1, sizes.Sum()), done = 0;
         _job.Phase = "Computing checksums";
@@ -441,25 +658,39 @@ public sealed class JobRunner
             entries.Add(new Checksums.Entry(files[i].Relative, sizes[i], hash));
         }
         _job.CurrentOperation = "";
+        return entries;
+    }
+
+    /// <summary>Writes SHA256SUMS and bromelia.json into <paramref name="dir"/>. Returns an error message when SHA256SUMS can't be written.</summary>
+    string? WriteArchive(List<Checksums.Entry> entries, string dir, JobState status)
+    {
+        var cfg = _job.Drive.Archive;
         _job.Checksums = entries;
-        if (cfg.Checksums)
+        if (cfg.Checksums && entries.Count > 0)
         {
             try
             {
-                _job.ChecksumFile = Checksums.WriteMerged(outDir, entries);
+                _job.ChecksumFile = Checksums.WriteMerged(dir, entries);
                 _job.AppendLog($"Wrote SHA-256 checksums of {entries.Count} file(s) to {Checksums.FileName}");
             }
-            catch (IOException e) { throw new JobException($"Could not write {Path.Combine(outDir, Checksums.FileName)}: {e.Message}"); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                var msg = $"Could not write {Path.Combine(dir, Checksums.FileName)}: {e.Message}";
+                _job.AppendLog(msg, Severity.Error);
+                return msg;
+            }
         }
-        if (cfg.ArchiveRecord) WriteArchiveRecord(outDir);
+        if (cfg.ArchiveRecord) WriteArchiveRecord(dir, status);
+        return null;
     }
 
-    void WriteArchiveRecord(string outDir)
+    void WriteArchiveRecord(string outDir, JobState status)
     {
         if (_job.Identity is not { } id) return;
         var info = _job.DiscInfo;
         var record = new ArchiveRecord
         {
+            Status = status.StatusWord(),
             Name = id.Name,
             Kind = id.Kind.Token(),
             Disc = new ArchiveRecord.DiscEntry
@@ -485,6 +716,7 @@ public sealed class JobRunner
             Warnings = _job.WarningCount,
             Errors = _job.ErrorCount,
             ErrorMessages = _job.ErrorMessages.ToList(),
+            ReadErrors = _job.DataErrors.ToList(),
         };
         var path = Paths.UniquePath(Path.Combine(outDir, "bromelia.json"));
         try
@@ -495,10 +727,11 @@ public sealed class JobRunner
         catch (IOException e) { _job.AppendLog($"Could not write {path}: {e.Message}", Severity.Warning); }
     }
 
-    async Task<RunSummary> RunMakeMkvAsync(List<string> args)
+    async Task<RunSummary> RunMakeMkvAsync(List<string> args, bool readsData = false)
     {
         if (CancelRequested) throw new OperationCanceledException();
         var summary = new RunSummary();
+        _collectDataErrors = readsData;
         _summary = summary;
         _lastTotalTitle = "";
         bool showDebug = _env.Settings.TryGetValue("app_ShowDebug", out var dbg) && dbg == "1";
@@ -526,6 +759,7 @@ public sealed class JobRunner
             _active = null;
         }
         await _ui.Barrier();
+        _collectDataErrors = false;
         summary.ExitCode = result.ExitCode;
         if (CancelRequested || result.Cancelled) throw new OperationCanceledException();
         if (summary.DriveMismatch != null) throw new JobException(summary.DriveMismatch);
@@ -541,7 +775,12 @@ public sealed class JobRunner
                 var sev = m.Severity;
                 if (sev == Severity.Debug && !showDebug) return;
                 _job.AppendLog(m.Text, sev);
-                if (sev == Severity.Error) { s.ErrorMessages.Add(m.Text); _job.ErrorMessages.Add(m.Text); }
+                if (sev == Severity.Error)
+                {
+                    s.ErrorMessages.Add(m.Text);
+                    _job.ErrorMessages.Add(m.Text);
+                    if (_collectDataErrors) _job.DataErrors.Add(m.Text);
+                }
                 if (m.Code == 1005 && _job.MakemkvVersion.Length == 0) _job.MakemkvVersion = m.Parameters.Count > 0 ? m.Parameters[0] : m.Text;
                 if (m.Code is 5036 or 5005 && m.Parameters.Count > 0 && int.TryParse(m.Parameters[0], out var saved)) s.Saved = saved;
                 if (m.Code == 5037 && m.Parameters.Count > 1)
@@ -634,10 +873,11 @@ public sealed class JobRunner
             int.TryParse(t, out var tIndex);
             _env = !single && _job.TrackSelections.ContainsKey(tIndex) ? _allTracksEnv ?? _baseEnv : _baseEnv;
             RunSummary s;
-            try { s = await RunMakeMkvAsync(_env.MkvArguments(source, t, outDir, _job.Drive.Rip)); }
+            try { s = await RunMakeMkvAsync(_env.MkvArguments(source, t, outDir, _job.Drive.Rip), readsData: true); }
             finally { _env = _baseEnv; }
             var produced = MkvFiles(outDir).Except(before).OrderBy(p => p, StringComparer.Ordinal).ToList();
-            if (s.ExitCode != 0 || (s.Failed ?? 0) > 0 || produced.Count == 0)
+            bool failed = s.ExitCode != 0 || (s.Failed ?? 0) > 0 || produced.Count == 0;
+            if (failed)
             {
                 var why = s.ErrorMessages.LastOrDefault() ?? $"makemkvcon exit status {s.ExitCode}";
                 failures.Add(single ? why : $"title {t}: {why}");
@@ -647,6 +887,20 @@ public sealed class JobRunner
             foreach (var file in produced)
             {
                 int? titleIndex = single ? info.Titles.FirstOrDefault(x => x.OutputFileName == Path.GetFileName(file))?.Index : tIndex;
+                if (failed)
+                {
+                    // A file of a title that didn't finish keeps MakeMKV's name, so it can't pass for a finished one.
+                    _job.AppendLog($"Kept {Path.GetFileName(file)} under MakeMKV's name: the title did not finish", Severity.Warning);
+                    _job.ProducedFiles.Add(file);
+                    continue;
+                }
+                if (titleIndex is { } vi && info.Title(vi) is { } checkedTitle && await VerifyAsync(file, checkedTitle) is { } problem)
+                {
+                    failures.Add($"title {vi}: {problem}");
+                    _job.AppendLog($"Title {vi} failed the check: {problem}", Severity.Error);
+                    _job.ProducedFiles.Add(file);
+                    continue;
+                }
                 var final = file;
                 if (titleIndex is { } ti && info.Title(ti) is { } title)
                 {
@@ -687,10 +941,12 @@ public sealed class JobRunner
         try
         {
             var args = _env.BackupArguments(_job.Source, decrypt, dest, _job.Drive.Rip) ?? throw new JobException("Backups require a drive source");
-            var s = await RunMakeMkvAsync(args);
+            var s = await RunMakeMkvAsync(args, readsData: true);
             bool exists = File.Exists(dest) || (Directory.Exists(dest) && Directory.EnumerateFileSystemEntries(dest).Any());
             if (s.ExitCode != 0 || !exists || (s.Failed ?? 0) > 0)
                 throw new JobException($"Backup failed: {s.ErrorMessages.LastOrDefault() ?? $"makemkvcon exit status {s.ExitCode}"}");
+            if (_job.Drive.Archive.VerifyRips && BackupVerifier.Problem(dest, _job.Drive.Rip.BackupFormat == BackupFormat.Iso) is { } problem)
+                throw new JobException($"Backup failed the check: {problem}");
         }
         finally { _expectedDrive = null; }
         _job.AppendLog($"Backup saved to {dest}");
@@ -724,6 +980,31 @@ public sealed class JobRunner
         if (_job.Identity is { } id) values["format"] = id.Format.Code(!decrypt);
         foreach (var k in new[] { "title", "index", "n", "source", "duration", "chapters", "original", "comment" }) values[k] = "";
         return TemplateRenderer.RenderPath(template, values).Replace(Path.DirectorySeparatorChar.ToString(), " - ");
+    }
+
+    /// <summary>Checks a ripped file against its title in the disc listing. Returns why it can't be trusted, or null.</summary>
+    async Task<string?> VerifyAsync(string file, TitleInfo title)
+    {
+        if (!_job.Drive.Archive.VerifyRips) return null;
+        var name = Path.GetFileName(file);
+        if (_mkvmerge == null)
+        {
+            if (!_reportedMissingVerifier)
+            {
+                _reportedMissingVerifier = true;
+                _job.AppendLog("Ripped files can't be checked against the disc listing without mkvmerge (MKVToolNix)", Severity.Warning);
+            }
+            return null;
+        }
+        _job.Phase = $"Checking {name}";
+        var probe = await RipVerifier.ProbeAsync(_mkvmerge, file, _cts.Token);
+        if (probe == null) return CancelRequested ? null : $"mkvmerge can't read {name}";
+        var result = RipVerifier.Check(probe, title);
+        foreach (var n in result.Notes) _job.AppendLog($"{name}: {n}", Severity.Warning);
+        if (result.Problems.Count > 0) return $"{name} doesn't match the disc listing: {string.Join("; ", result.Problems)}";
+        var length = probe.DurationSeconds is { } d ? TitleInfo.FormatDuration((int)Math.Round(d)) : "?";
+        _job.AppendLog($"Checked {name}: {length}, {probe.TrackTypes.Count} track(s), {probe.ChapterCount} chapter(s)");
+        return null;
     }
 
     async Task<string> RemuxAsync(string file, TitleInfo title, HashSet<int> keep)
@@ -809,37 +1090,28 @@ public sealed class JobRunner
         }
     }
 
-    void RemapSelections(DiscInfo? disc, DiscInfo backup)
-    {
-        if (disc == null) return;
-        static string Key(TitleInfo t) => $"{t.SourceTitleId ?? -1}|{t.DurationSeconds}|{t.SegmentMap}";
-        var map = new Dictionary<int, int>();
-        foreach (var t in disc.Titles)
-        {
-            var b = backup.Titles.FirstOrDefault(x => Key(x) == Key(t)) ?? backup.Title(t.Index);
-            if (b != null) map[t.Index] = b.Index;
-        }
-        if (_job.ManualTitles is { } manual) _job.ManualTitles = manual.Where(map.ContainsKey).Select(i => map[i]).ToList();
-        _job.TrackSelections = _job.TrackSelections.Where(kv => map.ContainsKey(kv.Key)).ToDictionary(kv => map[kv.Key], kv => kv.Value);
-        _job.TitleNameOverrides = _job.TitleNameOverrides.Where(kv => map.ContainsKey(kv.Key)).ToDictionary(kv => map[kv.Key], kv => kv.Value);
-    }
-
     string ResolveOutputDirectory()
     {
         var root = Paths.ExpandUser(_config.OutputRootFor(_job.Drive));
         if (root.Length == 0) root = Paths.DefaultOutputRoot;
         var rel = TemplateRenderer.RenderPath(_job.Drive.Output.FolderTemplate, TemplateValues(JobState.Running));
         var dir = rel.Length == 0 ? root : Path.Combine(root, rel);
-        bool nonEmpty = Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any(e => !Path.GetFileName(e).StartsWith('.'));
-        if (nonEmpty)
+        // A staging folder of a running job counts as content, so two jobs never both take a folder as new.
+        bool occupied = Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir)
+            .Select(e => Path.GetFileName(e)!).Any(n => !n.StartsWith('.') || n.StartsWith(StagingPrefix, StringComparison.Ordinal));
+        // Only a folder made for this disc may be renamed or removed; never the output root itself.
+        bool owned = rel.Length > 0;
+        if (occupied)
         {
             switch (_job.Drive.Output.ConflictPolicy)
             {
                 case ConflictPolicy.UniqueSuffix: dir = Paths.UniquePath(dir); break;
+                case ConflictPolicy.Overwrite: owned = false; break;
                 case ConflictPolicy.Skip: throw new JobException($"Output folder {dir} already exists");
             }
         }
         Directory.CreateDirectory(dir);
+        _ownsOutputDir = owned;
         return dir;
     }
 

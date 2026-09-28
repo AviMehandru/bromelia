@@ -202,9 +202,10 @@ public static class DriveConfigEditor
         f.Section("Tokens");
         foreach (var (token, help) in TemplateRenderer.FileTokens) f.Add(Form.Help($"{{{token}}}  —  {help}"));
         f.Add(Form.Help("{n:3}  —  zero-pad a number to 3 digits;   {token?text}  —  insert text only when token is not empty"));
-        f.Section("Archiving", "Checksums of every file (including backup folders) are saved in the output folder in the standard format; check a copy later with “sha256sum -c SHA256SUMS” (Git Bash / WSL) or any SHA256SUMS tool. The archive record describes the disc, titles, episodes and files with their sizes and hashes.");
+        f.Section("Archiving", "Checksums of every file (including backup folders) are saved in the output folder in the standard format; check a copy later with “sha256sum -c SHA256SUMS” (Git Bash / WSL) or any SHA256SUMS tool. The archive record describes the disc, titles, episodes and files with their sizes and hashes. Checking compares each MKV's length and tracks with the disc listing (needs mkvmerge) and each backup's structure. Files only reach the output folder when the job succeeded; otherwise they are kept in a folder marked [INCOMPLETE] or [READ ERRORS].");
         f.Toggle("Write SHA-256 checksums (SHA256SUMS)", () => c.Archive.Checksums, v => c.Archive.Checksums = v);
         f.Toggle("Write an archive record (bromelia.json) and the job log", () => c.Archive.ArchiveRecord, v => c.Archive.ArchiveRecord = v);
+        f.Toggle("Check every rip against the disc listing", () => c.Archive.VerifyRips, v => c.Archive.VerifyRips = v);
         Refresh();
         return f.Root;
     }

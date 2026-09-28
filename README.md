@@ -91,6 +91,13 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
   untouched if it doesn't match.
 - **Presets**: save a drive configuration, apply it to other drives, and import/export everything as JSON.
 - **Command transparency**: every job logs and can copy the exact `makemkvcon` command lines.
+- **Nothing unfinished looks finished.** Rips go to a hidden staging folder and reach the output folder only
+  when the job succeeded. If MakeMKV reported read errors (scratches, hash check failures) the job ends as
+  *completed with read errors* and the files are kept in `<folder> [READ ERRORS]`; failed or cancelled jobs
+  leave `<folder> [INCOMPLETE]`, with a note explaining why and unfinished titles under MakeMKV's own names.
+- **Checks against the disc listing.** Every MKV is compared with its title (length, tracks) using
+  `mkvmerge -J`, and backups must contain a disc structure. Every job reads the disc listing again, finds
+  the chosen titles even if MakeMKV renumbered them, and stops if the disc was changed.
 - Safety check: if MakeMKV's drive numbering changes during a backup (backups must use `disc:N`), the job
   stops instead of reading the wrong disc.
 

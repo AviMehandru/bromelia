@@ -23,7 +23,7 @@ enum PostProcessor {
         switch step.runOn {
         case .always: return true
         case .success: return status == .succeeded
-        case .failure: return status == .failed || status == .cancelled
+        case .failure: return status == .failed || status == .cancelled || status == .completedWithErrors
         }
     }
 

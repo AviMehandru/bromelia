@@ -47,7 +47,7 @@ struct JobCard: View {
                 }
             } else {
                 if let err = job.errorMessage, job.state != .succeeded {
-                    Text(err).font(.callout).foregroundStyle(.red).textSelection(.enabled).lineLimit(4)
+                    Text(err).font(.callout).foregroundStyle(job.state == .completedWithErrors ? .orange : .red).textSelection(.enabled).lineLimit(4)
                 }
                 HStack(spacing: 12) {
                     Text("\(job.producedFiles.count) item(s) · \(Formatters.duration(job.elapsed))")
@@ -65,7 +65,7 @@ struct JobCard: View {
                     Button("Cancel", role: .destructive) { model.cancel(job) }
                 case .queued:
                     Button("Remove", role: .destructive) { model.cancel(job) }
-                case .failed, .cancelled:
+                case .failed, .cancelled, .completedWithErrors:
                     Button("Retry") { model.retry(job) }
                 case .succeeded:
                     EmptyView()

@@ -223,16 +223,19 @@ struct ArchiveConfig: Codable, Hashable, Sendable {
     var checksums: Bool = true
     /// Write bromelia.json (disc identity, titles, files with sizes and hashes) and the job log into the output folder.
     var archiveRecord: Bool = true
+    /// Check every ripped MKV against the disc listing (duration, tracks, chapters) with mkvmerge.
+    var verifyRips: Bool = true
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case checksums, archiveRecord }
+    enum CodingKeys: String, CodingKey { case checksums, archiveRecord, verifyRips }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = ArchiveConfig()
         checksums = c.value(.checksums, d.checksums)
         archiveRecord = c.value(.archiveRecord, d.archiveRecord)
+        verifyRips = c.value(.verifyRips, d.verifyRips)
     }
 }
 

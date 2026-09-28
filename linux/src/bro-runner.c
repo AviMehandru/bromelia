@@ -19,6 +19,7 @@ bro_job_state_label (BroJobState s)
     case BRO_JOB_WAITING: return "Starting soon";
     case BRO_JOB_RUNNING: return "Running";
     case BRO_JOB_SUCCEEDED: return "Completed";
+    case BRO_JOB_COMPLETED_WITH_ERRORS: return "Completed with read errors";
     case BRO_JOB_FAILED: return "Failed";
     default: return "Cancelled";
     }
@@ -27,13 +28,13 @@ bro_job_state_label (BroJobState s)
 const char *
 bro_job_state_word (BroJobState s)
 {
-  return s == BRO_JOB_SUCCEEDED ? "success" : s == BRO_JOB_CANCELLED ? "cancelled" : "failed";
+  return s == BRO_JOB_SUCCEEDED ? "success" : s == BRO_JOB_COMPLETED_WITH_ERRORS ? "errors" : s == BRO_JOB_CANCELLED ? "cancelled" : "failed";
 }
 
 gboolean
 bro_job_state_finished (BroJobState s)
 {
-  return s == BRO_JOB_SUCCEEDED || s == BRO_JOB_FAILED || s == BRO_JOB_CANCELLED;
+  return s == BRO_JOB_SUCCEEDED || s == BRO_JOB_COMPLETED_WITH_ERRORS || s == BRO_JOB_FAILED || s == BRO_JOB_CANCELLED;
 }
 
 GHashTable *
@@ -154,6 +155,13 @@ typedef struct {
   char *checksum_file;
   char *makemkv_version;
   GPtrArray *error_messages;   /* char* */
+  /* output (see finish_output) */
+  char *output_dir;            /* final folder, reserved when the job starts */
+  char *work_dir;              /* hidden staging folder inside it */
+  gboolean owns_output_dir;    /* created for this job, so it may be renamed or removed */
+  gboolean collect_data_errors; /* errors of the running makemkvcon are read errors (rips, backups) */
+  gboolean reported_missing_verifier;
+  GPtrArray *data_errors;      /* char*: errors MakeMKV reported while ripping or backing up */
 } Ctx;
 
 typedef struct {
@@ -253,6 +261,8 @@ on_makemkv_line (const char *line, gpointer data)
           {
             g_ptr_array_add (s->errors, g_strdup (ev->text));
             g_ptr_array_add (c->error_messages, g_strdup (ev->text));
+            if (c->collect_data_errors)
+              g_ptr_array_add (c->data_errors, g_strdup (ev->text));
           }
         if (ev->code == 1005 && !c->makemkv_version)
           c->makemkv_version = g_strdup (ev->params->len ? ev->params->pdata[0] : ev->text);
@@ -299,9 +309,10 @@ on_makemkv_line (const char *line, gpointer data)
     }
 }
 
-/* Runs makemkvcon with the current environment. Returns NULL (with error) when it could not run or was cancelled. */
+/* Runs makemkvcon with the current environment. Returns NULL (with error) when it could not run or was cancelled.
+ * With reads_data, error messages count as read errors (rips and backups, not listings). */
 static Summary *
-run_makemkv (Ctx *c, GPtrArray *args, GError **error)
+run_makemkv (Ctx *c, GPtrArray *args, gboolean reads_data, GError **error)
 {
   Summary *s = g_new0 (Summary, 1);
   g_auto (GStrv) envp = bro_makemkv_env_environ (c->env);
@@ -320,9 +331,11 @@ run_makemkv (Ctx *c, GPtrArray *args, GError **error)
   c->last_total = NULL;
 
   c->sum = s;
+  c->collect_data_errors = reads_data;
   if (!bro_process_run ((const char *const *) args->pdata, (const char *const *) envp, c->env->home, 0, c->req->cancellable,
                         on_makemkv_line, c, &s->exit_status, &was_cancelled, NULL, error))
     {
+      c->collect_data_errors = FALSE;
       c->sum = NULL;
       summary_free (s);
       if (error && *error && !g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
@@ -330,6 +343,7 @@ run_makemkv (Ctx *c, GPtrArray *args, GError **error)
       return NULL;
     }
   c->sum = NULL;
+  c->collect_data_errors = FALSE;
   if (s->drive_mismatch)
     {
       g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, s->drive_mismatch);
@@ -352,7 +366,7 @@ scan_disc (Ctx *c, const BroSource *src, GError **error)
   Summary *s;
   BroDiscInfo *info;
   phase (c, "Reading disc information");
-  s = run_makemkv (c, args, error);
+  s = run_makemkv (c, args, FALSE, error);
   if (!s)
     return NULL;
   if (s->info->titles->len == 0)
@@ -457,6 +471,8 @@ resolve_output_dir (Ctx *c, GError **error)
   g_autofree char *rel = bro_template_render_path (c->req->drive->output.folder_template, v);
   char *dir;
   gboolean non_empty = FALSE;
+  /* Only a folder made for this disc may be renamed or removed; never the output root itself. */
+  gboolean owned = *rel != '\0';
 
   if (!root_t || !*root_t)
     root_t = "~/Videos/Bromelia";
@@ -467,8 +483,9 @@ resolve_output_dir (Ctx *c, GError **error)
     {
       g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
       const char *name;
+      /* A staging folder of a running job counts as content, so two jobs never both take a folder as new. */
       while (d && (name = g_dir_read_name (d)))
-        if (name[0] != '.')
+        if (name[0] != '.' || g_str_has_prefix (name, BRO_STAGING_PREFIX))
           non_empty = TRUE;
     }
   if (non_empty)
@@ -487,9 +504,11 @@ resolve_output_dir (Ctx *c, GError **error)
           g_free (dir);
           return NULL;
         default:
+          owned = FALSE;
           break;
         }
     }
+  c->owns_output_dir = owned;
   if (g_mkdir_with_parents (dir, 0755) != 0)
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not create %s", dir);
@@ -1269,18 +1288,14 @@ on_hash_progress (gint64 done, gpointer data)
   return !cancelled (h->c);
 }
 
-static void write_archive_record (Ctx *c, const char *out_dir);
+static void write_archive_record (Ctx *c, const char *out_dir, BroJobState status);
 
-/* Hashes every produced file and writes SHA256SUMS and bromelia.json into the output folder. */
-static gboolean
-archive (Ctx *c, const char *out_dir, GError **error)
+/* SHA-256 of every produced file (folders are walked), paths relative to base. NULL (with error) on failure. */
+static GPtrArray *
+hash_produced_files (Ctx *c, const char *base, GError **error)
 {
-  const BroArchiveConfig *cfg = &c->req->drive->archive;
-  g_autoptr (GPtrArray) files = NULL;
+  g_autoptr (GPtrArray) files = bro_checksum_list_files (c->res->files, base);
   gint64 total = 0, done = 0;
-  if (!(cfg->checksums || cfg->archive_record) || !c->res->files->len)
-    return TRUE;
-  files = bro_checksum_list_files (c->res->files, out_dir);
   for (guint i = 0; i < files->len; i++)
     total += ((BroChecksum *) files->pdata[i])->size;
   phase (c, "Computing checksums");
@@ -1288,7 +1303,7 @@ archive (Ctx *c, const char *out_dir, GError **error)
   for (guint i = 0; i < files->len; i++)
     {
       BroChecksum *e = files->pdata[i];
-      g_autofree char *full = g_build_filename (out_dir, e->path, NULL);
+      g_autofree char *full = g_build_filename (base, e->path, NULL);
       HashProgress h = { c, done, total, e->size, 0 };
       g_autoptr (GError) err = NULL;
       update (c, BRO_UPDATE_OPERATION, BRO_SEV_INFO, e->path, 0, 0);
@@ -1300,30 +1315,309 @@ archive (Ctx *c, const char *out_dir, GError **error)
           else
             g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not read %s to compute its checksum: %s", e->path,
                          err ? err->message : "unknown error");
-          return FALSE;
+          return NULL;
         }
       done += e->size;
     }
   update (c, BRO_UPDATE_OPERATION, BRO_SEV_INFO, "", 0, 0);
+  return g_steal_pointer (&files);
+}
+
+/* Writes SHA256SUMS and bromelia.json into dir. Returns an error message when SHA256SUMS can't be written. */
+static char *
+write_archive (Ctx *c, GPtrArray *entries, const char *dir, BroJobState status)
+{
+  const BroArchiveConfig *cfg = &c->req->drive->archive;
   if (c->checksums)
     g_ptr_array_unref (c->checksums);
-  c->checksums = g_ptr_array_ref (files);
-  if (cfg->checksums)
+  c->checksums = g_ptr_array_ref (entries);
+  if (cfg->checksums && entries->len)
     {
       g_autoptr (GError) err = NULL;
-      char *path = bro_checksums_write_merged (out_dir, files, &err);
+      char *path = bro_checksums_write_merged (dir, entries, &err);
       if (!path)
         {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not write %s: %s", BRO_CHECKSUM_FILE, err ? err->message : "");
-          return FALSE;
+          char *msg = g_strdup_printf ("Could not write %s: %s", BRO_CHECKSUM_FILE, err ? err->message : "");
+          log_line (c, BRO_SEV_ERROR, "%s", msg);
+          return msg;
         }
       g_free (c->checksum_file);
       c->checksum_file = path;
-      log_line (c, BRO_SEV_INFO, "Wrote SHA-256 checksums of %u file(s) to %s", files->len, BRO_CHECKSUM_FILE);
+      log_line (c, BRO_SEV_INFO, "Wrote SHA-256 checksums of %u file(s) to %s", entries->len, BRO_CHECKSUM_FILE);
     }
   if (cfg->archive_record)
-    write_archive_record (c, out_dir);
-  return TRUE;
+    write_archive_record (c, dir, status);
+  return NULL;
+}
+
+/* Names of the entries of dir that aren't hidden, sorted. */
+static GPtrArray *
+visible_items (const char *dir)
+{
+  GPtrArray *names = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  const char *n;
+  while (d && (n = g_dir_read_name (d)))
+    if (n[0] != '.')
+      g_ptr_array_add (names, g_strdup (n));
+  g_ptr_array_sort (names, cmp_strings);
+  return names;
+}
+
+static void
+remove_tree (const char *path)
+{
+  if (g_file_test (path, G_FILE_TEST_IS_DIR) && !g_file_test (path, G_FILE_TEST_IS_SYMLINK))
+    {
+      g_autoptr (GDir) d = g_dir_open (path, 0, NULL);
+      const char *n;
+      while (d && (n = g_dir_read_name (d)))
+        {
+          g_autofree char *child = g_build_filename (path, n, NULL);
+          remove_tree (child);
+        }
+      g_rmdir (path);
+    }
+  else
+    g_unlink (path);
+}
+
+/* Where the files of a job that didn't succeed go. When the output folder was created for this job it is renamed
+ * ("Name [INCOMPLETE]"); in a shared folder a subfolder is used ("INCOMPLETE - 1a2b3c4d"). Sets dest and the
+ * staging folder's (possibly new) location. */
+static void
+marked_folder (Ctx *c, const char *tag, char **dest, char **from)
+{
+  g_autofree char *short_id = g_ascii_strdown (c->req->job_id, MIN (strlen (c->req->job_id), 8));
+  g_autoptr (GPtrArray) items = visible_items (c->output_dir);
+  if (c->owns_output_dir && items->len == 0)
+    {
+      g_autofree char *parent = g_path_get_dirname (c->output_dir);
+      g_autofree char *base = g_path_get_basename (c->output_dir);
+      g_autofree char *name = g_strdup_printf ("%s [%s]", base, tag);
+      g_autofree char *want = g_build_filename (parent, name, NULL);
+      char *target = bro_unique_path (want);
+      if (g_rename (c->output_dir, target) == 0)
+        {
+          g_autofree char *stage = g_path_get_basename (c->work_dir);
+          g_free (c->output_dir);
+          c->output_dir = g_strdup (target);
+          *from = g_build_filename (target, stage, NULL);
+          *dest = target;
+          return;
+        }
+      log_line (c, BRO_SEV_WARNING, "Could not rename %s", c->output_dir);
+      g_free (target);
+    }
+  {
+    g_autofree char *name = g_strdup_printf ("%s - %s", tag, short_id);
+    g_autofree char *want = g_build_filename (c->output_dir, name, NULL);
+    *dest = bro_unique_path (want);
+    g_mkdir_with_parents (*dest, 0755);
+    *from = g_strdup (c->work_dir);
+  }
+}
+
+/* Explains in the folder itself why its files are not a finished archive. */
+static void
+write_note (Ctx *c, const char *dir, const char *tag, BroJobState status)
+{
+  g_autoptr (GString) t = g_string_new (NULL);
+  g_autofree char *name = g_strconcat (tag, ".txt", NULL);
+  g_autofree char *path = g_build_filename (dir, name, NULL);
+  g_autofree char *log = g_build_filename (c->req->job_dir, "log.txt", NULL);
+  g_string_append_printf (t, "Bromelia job %s: %s.\n", c->req->job_id, bro_job_state_label (status));
+  g_string_append (t, "These files are NOT a finished archive. Rip the disc again (clean it first if it has read errors),\n");
+  g_string_append (t, "or check the files yourself before using them.\n\n");
+  if (c->res->error)
+    g_string_append_printf (t, "%s\n\n", c->res->error);
+  if (c->data_errors->len)
+    {
+      g_string_append (t, "Errors reported by MakeMKV while reading the disc:\n");
+      for (guint i = 0; i < c->data_errors->len; i++)
+        g_string_append_printf (t, "  %s\n", (char *) c->data_errors->pdata[i]);
+      g_string_append (t, "\n");
+    }
+  g_string_append_printf (t, "Full log: %s\n", log);
+  g_file_set_contents (path, t->str, -1, NULL);
+}
+
+/* A path under the staging folder, moved to where its top-level item went (moved: name -> new path). */
+static char *
+relocate (const char *path, const char *stage, GHashTable *moved)
+{
+  g_autofree char *prefix = g_strconcat (stage, G_DIR_SEPARATOR_S, NULL);
+  const char *rest, *slash;
+  g_autofree char *first = NULL;
+  const char *top;
+  if (!g_str_has_prefix (path, prefix))
+    return g_strdup (path);
+  rest = path + strlen (prefix);
+  slash = strchr (rest, G_DIR_SEPARATOR);
+  first = slash ? g_strndup (rest, slash - rest) : g_strdup (rest);
+  top = g_hash_table_lookup (moved, first);
+  if (!top)
+    return g_strdup (path);
+  return slash ? g_build_filename (top, slash + 1, NULL) : g_strdup (top);
+}
+
+/* Moves the job's files out of the staging folder. A job that succeeded goes into the output folder. Anything else
+ * goes into a folder marked "[INCOMPLETE]" (failed or cancelled) or "[READ ERRORS]", with a note explaining why, so
+ * an unfinished or damaged rip can never look like a finished archive. Checksums and the archive record are written
+ * for complete files, including files with read errors. */
+static BroJobState
+finish_output (Ctx *c, BroJobState status)
+{
+  const BroArchiveConfig *cfg = &c->req->drive->archive;
+  g_autoptr (GPtrArray) staged = NULL;
+  g_autoptr (GPtrArray) entries = NULL;
+  g_autoptr (GPtrArray) items = NULL;
+  g_autoptr (GHashTable) moved = NULL;
+  g_autofree char *dest = NULL, *from = NULL;
+  const char *tag;
+  gboolean complete, left = FALSE;
+
+  if (!c->work_dir || !c->output_dir)
+    return status;
+  staged = visible_items (c->work_dir);
+  if (staged->len == 0)
+    {
+      remove_tree (c->work_dir);
+      /* Remove the folder reserved for this job when nothing was saved. */
+      if (status != BRO_JOB_SUCCEEDED && c->owns_output_dir)
+        {
+          g_autoptr (GDir) d = g_dir_open (c->output_dir, 0, NULL);
+          const char *n;
+          gboolean empty = d != NULL;
+          while (d && (n = g_dir_read_name (d)))
+            empty &= g_str_equal (n, ".directory");
+          if (empty)
+            {
+              remove_tree (c->output_dir);
+              g_clear_pointer (&c->res->output_dir, g_free);
+              update (c, BRO_UPDATE_OUTPUT_DIR, BRO_SEV_INFO, "", 0, 0);
+            }
+        }
+      return status;
+    }
+
+  /* Hash while the files are still in the staging folder: if a file can't be read back, it stays out of the archive. */
+  complete = status == BRO_JOB_SUCCEEDED || status == BRO_JOB_COMPLETED_WITH_ERRORS;
+  if (complete && (cfg->checksums || cfg->archive_record) && c->res->files->len)
+    {
+      g_autoptr (GError) err = NULL;
+      entries = hash_produced_files (c, c->work_dir, &err);
+      if (!entries)
+        {
+          g_free (c->res->error);
+          if (cancelled (c))
+            {
+              status = BRO_JOB_CANCELLED;
+              c->res->error = g_strdup ("Cancelled by user");
+              log_line (c, BRO_SEV_WARNING, "Job cancelled");
+            }
+          else
+            {
+              status = BRO_JOB_FAILED;
+              c->res->error = g_strdup (err ? err->message : "Could not compute checksums");
+              log_line (c, BRO_SEV_ERROR, "%s", c->res->error);
+            }
+        }
+    }
+
+  tag = status == BRO_JOB_SUCCEEDED ? NULL : status == BRO_JOB_COMPLETED_WITH_ERRORS ? "READ ERRORS" : "INCOMPLETE";
+  if (tag)
+    marked_folder (c, tag, &dest, &from);
+  else
+    {
+      dest = g_strdup (c->output_dir);
+      from = g_strdup (c->work_dir);
+    }
+
+  phase (c, "Moving files");
+  moved = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  items = visible_items (from);
+  for (guint i = 0; i < items->len; i++)
+    {
+      const char *name = items->pdata[i];
+      g_autofree char *source = g_build_filename (from, name, NULL);
+      g_autofree char *want = g_build_filename (dest, name, NULL);
+      char *target = bro_unique_path (want);
+      if (g_rename (source, target) == 0)
+        g_hash_table_insert (moved, g_strdup (name), target);
+      else
+        {
+          left = TRUE;
+          log_line (c, BRO_SEV_ERROR, "Could not move %s out of %s", name, from);
+          g_free (target);
+        }
+    }
+  if (left)
+    {
+      if (status == BRO_JOB_SUCCEEDED)
+        {
+          status = BRO_JOB_FAILED;
+          g_free (c->res->error);
+          c->res->error = g_strdup_printf ("Some files could not be moved into the output folder; they are still in %s", from);
+        }
+    }
+  else
+    remove_tree (from); /* only temporary (hidden) files are left */
+
+  /* Paths recorded while the files were in the staging folder now point to their final place. */
+  for (guint i = 0; i < c->res->files->len; i++)
+    {
+      char *p = relocate (c->res->files->pdata[i], c->work_dir, moved);
+      g_free (c->res->files->pdata[i]);
+      c->res->files->pdata[i] = p;
+    }
+  {
+    GHashTable *titles = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init (&it, c->file_titles);
+    while (g_hash_table_iter_next (&it, &k, &v))
+      g_hash_table_insert (titles, relocate (k, c->work_dir, moved), v);
+    g_hash_table_unref (c->file_titles);
+    c->file_titles = titles;
+  }
+  for (guint i = 0; i < c->episodes->len; i++)
+    {
+      EpisodeRec *e = c->episodes->pdata[i];
+      g_autofree char *old = g_build_filename (c->work_dir, e->file, NULL);
+      g_autofree char *now = relocate (old, c->work_dir, moved);
+      g_free (e->file);
+      e->file = relative_to (now, dest);
+    }
+  for (guint i = 0; entries && i < entries->len; i++)
+    {
+      BroChecksum *e = entries->pdata[i];
+      g_autofree char *old = g_build_filename (c->work_dir, e->path, NULL);
+      g_autofree char *now = relocate (old, c->work_dir, moved);
+      g_free (e->path);
+      e->path = relative_to (now, dest);
+    }
+  g_free (c->res->output_dir);
+  c->res->output_dir = g_strdup (dest);
+  update (c, BRO_UPDATE_OUTPUT_DIR, BRO_SEV_INFO, dest, 0, 0);
+  if (tag)
+    log_line (c, BRO_SEV_WARNING, "Kept %u item(s) apart in %s", g_hash_table_size (moved), dest);
+  else
+    log_line (c, BRO_SEV_INFO, "Moved %u item(s) into %s", g_hash_table_size (moved), dest);
+
+  if ((status == BRO_JOB_SUCCEEDED || status == BRO_JOB_COMPLETED_WITH_ERRORS) && entries)
+    {
+      g_autofree char *err = write_archive (c, entries, dest, status);
+      if (err && status == BRO_JOB_SUCCEEDED)
+        {
+          status = BRO_JOB_FAILED;
+          g_free (c->res->error);
+          c->res->error = g_steal_pointer (&err);
+        }
+    }
+  if (status != BRO_JOB_SUCCEEDED)
+    write_note (c, dest, tag ? tag : "INCOMPLETE", status);
+  return status;
 }
 
 static void
@@ -1380,7 +1674,7 @@ build_checksums (JsonBuilder *b, const char *name, Ctx *c)
 }
 
 static void
-write_archive_record (Ctx *c, const char *out_dir)
+write_archive_record (Ctx *c, const char *out_dir, BroJobState status)
 {
   g_autoptr (JsonBuilder) b = json_builder_new ();
   g_autoptr (JsonNode) root = NULL;
@@ -1400,7 +1694,8 @@ write_archive_record (Ctx *c, const char *out_dir)
   json_builder_begin_object (b);
   S ("format", "bromelia-archive");
   json_builder_set_member_name (b, "version");
-  json_builder_add_int_value (b, 1);
+  json_builder_add_int_value (b, 2);
+  S ("status", bro_job_state_word (status));
   S ("name", id->name);
   S ("kind", bro_kind_token (id->kind));
   json_builder_set_member_name (b, "disc");
@@ -1457,6 +1752,11 @@ write_archive_record (Ctx *c, const char *out_dir)
   for (guint i = 0; i < c->error_messages->len; i++)
     json_builder_add_string_value (b, c->error_messages->pdata[i]);
   json_builder_end_array (b);
+  json_builder_set_member_name (b, "readErrors");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < c->data_errors->len; i++)
+    json_builder_add_string_value (b, c->data_errors->pdata[i]);
+  json_builder_end_array (b);
   json_builder_end_object (b);
 #undef S
   root = json_builder_get_root (b);
@@ -1496,6 +1796,297 @@ backup_name (Ctx *c, gboolean decrypt)
   g_free (rel);
   g_string_replace (out, "/", " - ", 0);
   return g_string_free (out, FALSE);
+}
+
+/* ---- checks against the disc listing ---- */
+
+void
+bro_mkv_probe_free (BroMkvProbe *p)
+{
+  if (!p)
+    return;
+  g_ptr_array_unref (p->track_types);
+  g_free (p);
+}
+
+BroMkvProbe *
+bro_mkv_probe_parse (const char *json)
+{
+  g_autoptr (JsonParser) parser = json_parser_new ();
+  JsonObject *root, *container, *props;
+  BroMkvProbe *p;
+  if (!json || !json_parser_load_from_data (parser, json, -1, NULL) || !JSON_NODE_HOLDS_OBJECT (json_parser_get_root (parser)))
+    return NULL;
+  root = json_node_get_object (json_parser_get_root (parser));
+  container = json_object_has_member (root, "container") ? json_object_get_object_member (root, "container") : NULL;
+  if (!container)
+    return NULL;
+  if (json_object_has_member (container, "recognized") && !json_object_get_boolean_member (container, "recognized"))
+    return NULL;
+  p = g_new0 (BroMkvProbe, 1);
+  p->track_types = g_ptr_array_new_with_free_func (g_free);
+  props = json_object_has_member (container, "properties") ? json_object_get_object_member (container, "properties") : NULL;
+  if (props && json_object_has_member (props, "duration"))
+    {
+      JsonNode *d = json_object_get_member (props, "duration");
+      if (JSON_NODE_HOLDS_VALUE (d))
+        {
+          GType t = json_node_get_value_type (d);
+          p->has_duration = TRUE;
+          p->duration = (t == G_TYPE_DOUBLE ? json_node_get_double (d) : (double) json_node_get_int (d)) / 1e9;
+        }
+    }
+  if (json_object_has_member (root, "tracks"))
+    {
+      JsonArray *tracks = json_object_get_array_member (root, "tracks");
+      for (guint i = 0; tracks && i < json_array_get_length (tracks); i++)
+        {
+          JsonObject *t = json_array_get_object_element (tracks, i);
+          g_ptr_array_add (p->track_types, g_strdup (t && json_object_has_member (t, "type") ? json_object_get_string_member (t, "type") : ""));
+        }
+    }
+  if (json_object_has_member (root, "chapters"))
+    {
+      JsonArray *ch = json_object_get_array_member (root, "chapters");
+      for (guint i = 0; ch && i < json_array_get_length (ch); i++)
+        {
+          JsonObject *e = json_array_get_object_element (ch, i);
+          if (e && json_object_has_member (e, "num_entries"))
+            p->chapters += (int) json_object_get_int_member (e, "num_entries");
+        }
+    }
+  return p;
+}
+
+double
+bro_rip_duration_tolerance (double expected)
+{
+  /* 5 s or 0.5 %, whichever is larger. */
+  return MAX (5.0, expected * 0.005);
+}
+
+static char *
+hms (int s)
+{
+  return g_strdup_printf ("%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60);
+}
+
+void
+bro_rip_check (const BroMkvProbe *p, BroTitle *title, GPtrArray *problems, GPtrArray *notes)
+{
+  gboolean has_video = FALSE, listed_video = FALSE;
+  int expected = bro_title_duration (title), chapters = bro_title_chapters (title);
+  for (guint i = 0; i < p->track_types->len; i++)
+    has_video |= g_str_equal (p->track_types->pdata[i], "video");
+  for (guint i = 0; i < title->tracks->len; i++)
+    listed_video |= bro_track_kind (title->tracks->pdata[i]) == BRO_TRACK_VIDEO;
+  if (p->track_types->len == 0)
+    g_ptr_array_add (problems, g_strdup ("the file contains no tracks"));
+  else if (!has_video && listed_video)
+    g_ptr_array_add (problems, g_strdup ("the file contains no video track"));
+  if (expected > 0)
+    {
+      if (!p->has_duration)
+        g_ptr_array_add (problems, g_strdup ("mkvmerge reports no duration"));
+      else if (ABS (p->duration - expected) > bro_rip_duration_tolerance (expected))
+        {
+          g_autofree char *a = hms ((int) (p->duration + 0.5)), *b = hms (expected);
+          g_ptr_array_add (problems, g_strdup_printf ("it lasts %s, the disc listing says %s", a, b));
+        }
+    }
+  if (title->tracks->len > 0 && p->track_types->len > title->tracks->len)
+    g_ptr_array_add (notes, g_strdup_printf ("%u tracks, the disc listing has %u", p->track_types->len, title->tracks->len));
+  /* MakeMKV may add a chapter at 00:00 (profile option), so allow one extra. */
+  if (chapters > 1 && (p->chapters < chapters || p->chapters > chapters + 1))
+    g_ptr_array_add (notes, g_strdup_printf ("%d chapters, the disc listing has %d", p->chapters, chapters));
+}
+
+static char *
+find_entry (const char *dir, const char *name)
+{
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  const char *n;
+  while (d && (n = g_dir_read_name (d)))
+    if (g_ascii_strcasecmp (n, name) == 0)
+      return g_build_filename (dir, n, NULL);
+  return NULL;
+}
+
+char *
+bro_backup_problem (const char *path, gboolean iso)
+{
+  g_autofree char *name = g_path_get_basename (path);
+  if (iso)
+    {
+      FILE *f;
+      char id[6] = { 0 };
+      gboolean ok;
+      if (g_file_test (path, G_FILE_TEST_IS_DIR))
+        return g_strdup_printf ("%s is a folder, not an ISO image", name);
+      if (!(f = fopen (path, "rb")))
+        return g_strdup_printf ("%s can't be read", name);
+      ok = fseek (f, 32769, SEEK_SET) == 0 && fread (id, 1, 5, f) == 5 && (strcmp (id, "CD001") == 0 || strcmp (id, "BEA01") == 0);
+      fclose (f);
+      return ok ? NULL : g_strdup_printf ("%s is not an ISO / UDF image", name);
+    }
+  if (!g_file_test (path, G_FILE_TEST_IS_DIR))
+    return g_file_test (path, G_FILE_TEST_EXISTS) ? g_strdup_printf ("%s is not a folder", name) : g_strdup_printf ("%s was not created", name);
+  {
+    g_autofree char *bdmv = find_entry (path, "BDMV");
+    g_autofree char *vts = bdmv ? NULL : find_entry (path, "VIDEO_TS");
+    g_autofree char *hd = bdmv || vts ? NULL : find_entry (path, "HVDVD_TS");
+    if (bdmv)
+      {
+        g_autofree char *index = find_entry (bdmv, "index.bdmv");
+        return index ? NULL : g_strdup ("BDMV/index.bdmv is missing");
+      }
+    if (vts)
+      {
+        g_autofree char *ifo = find_entry (vts, "VIDEO_TS.IFO");
+        return ifo ? NULL : g_strdup ("VIDEO_TS/VIDEO_TS.IFO is missing");
+      }
+    return hd ? NULL : g_strdup ("it contains no BDMV, VIDEO_TS or HVDVD_TS folder");
+  }
+}
+
+static char *
+title_key (BroTitle *t)
+{
+  return g_strdup_printf ("%d|%d|%s", bro_title_source_id (t), bro_title_duration (t), bro_title_str (t, BRO_ATTR_SEGMENTS_MAP));
+}
+
+char *
+bro_listing_different_disc (BroDiscInfo *old, BroDiscInfo *now)
+{
+  const char *a = bro_disc_info_attr (old, BRO_ATTR_VOLUME_NAME), *b = bro_disc_info_attr (now, BRO_ATTR_VOLUME_NAME);
+  g_autoptr (GHashTable) keys = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  gboolean common = FALSE;
+  if (a && *a && b && *b && !g_str_equal (a, b))
+    return g_strdup_printf ("the disc is now “%s”, it was “%s” when it was opened", b, a);
+  for (guint i = 0; i < old->titles->len; i++)
+    g_hash_table_add (keys, title_key (old->titles->pdata[i]));
+  for (guint i = 0; i < now->titles->len && !common; i++)
+    {
+      g_autofree char *k = title_key (now->titles->pdata[i]);
+      common = g_hash_table_contains (keys, k);
+    }
+  if (old->titles->len && now->titles->len && !common)
+    return g_strdup ("none of its titles match the titles listed when it was opened");
+  return NULL;
+}
+
+static int
+cmp_int (gconstpointer a, gconstpointer b)
+{
+  return *(const int *) a - *(const int *) b;
+}
+
+GHashTable *
+bro_listing_map (GArray *indices, BroDiscInfo *old, BroDiscInfo *now, GHashTable *same_tracks, GError **error)
+{
+  g_autoptr (GHashTable) map = g_hash_table_new (g_direct_hash, g_direct_equal);
+  g_autoptr (GHashTable) used = g_hash_table_new (g_direct_hash, g_direct_equal);
+  g_autoptr (GArray) sorted = g_array_copy (indices);
+  g_array_sort (sorted, cmp_int);
+  for (guint n = 0; n < sorted->len; n++)
+    {
+      int i = g_array_index (sorted, int, n);
+      BroTitle *t = bro_disc_info_title (old, i), *match = NULL, *first = NULL;
+      g_autofree char *k = NULL;
+      if (g_hash_table_contains (map, GINT_TO_POINTER (i)))
+        continue;
+      if (!t)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Title %d is not in the disc listing", i);
+          return NULL;
+        }
+      k = title_key (t);
+      for (guint j = 0; j < now->titles->len && !match; j++)
+        {
+          BroTitle *x = now->titles->pdata[j];
+          g_autofree char *k2 = title_key (x);
+          if (!g_str_equal (k, k2) || g_hash_table_contains (used, GINT_TO_POINTER (x->index)))
+            continue;
+          if (!first)
+            first = x;
+          if (x->index == i)
+            match = x;
+        }
+      if (!match)
+        match = first;
+      if (!match)
+        {
+          const char *file = bro_title_str (t, BRO_ATTR_SOURCE_FILE_NAME);
+          g_autofree char *where = *file ? g_strdup (file) : g_strdup_printf ("source %d", bro_title_source_id (t));
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Title %d (%s, %s) is not in the new disc listing. The disc may have been changed, or the minimum title "
+                       "length differs. Open the disc again and choose the titles.", i, bro_title_str (t, BRO_ATTR_DURATION), where);
+          return NULL;
+        }
+      if (same_tracks && g_hash_table_contains (same_tracks, GINT_TO_POINTER (i)))
+        {
+          gboolean same = t->tracks->len == match->tracks->len;
+          for (guint j = 0; same && j < t->tracks->len; j++)
+            same = bro_track_kind (t->tracks->pdata[j]) == bro_track_kind (match->tracks->pdata[j]);
+          if (!same)
+            {
+              g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                           "The tracks of title %d differ from the listing the tracks were chosen on. Open the disc again and choose the tracks.", i);
+              return NULL;
+            }
+        }
+      g_hash_table_insert (map, GINT_TO_POINTER (i), GINT_TO_POINTER (match->index + 1));
+      g_hash_table_add (used, GINT_TO_POINTER (match->index));
+    }
+  return g_steal_pointer (&map);
+}
+
+/* Checks a ripped file against its title in the disc listing. Returns why it can't be trusted, or NULL. */
+static char *
+verify_rip (Ctx *c, const char *file, BroTitle *title)
+{
+  g_autofree char *base = g_path_get_basename (file);
+  g_autofree char *ph = NULL;
+  g_autoptr (GPtrArray) problems = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (GPtrArray) notes = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroMkvProbe) probe = NULL;
+  const char *argv[] = { c->req->mkvmerge, "-J", file, NULL };
+  GString *out;
+  int status = -1;
+  gboolean ran;
+
+  if (!c->req->drive->archive.verify_rips)
+    return NULL;
+  if (!c->req->mkvmerge)
+    {
+      if (!c->reported_missing_verifier)
+        log_line (c, BRO_SEV_WARNING, "Ripped files can't be checked against the disc listing without mkvmerge (MKVToolNix)");
+      c->reported_missing_verifier = TRUE;
+      return NULL;
+    }
+  ph = g_strdup_printf ("Checking %s", base);
+  phase (c, ph);
+  out = g_string_new (NULL);
+  ran = bro_process_run (argv, NULL, NULL, 300, c->req->cancellable, collect_line, out, &status, NULL, NULL, NULL);
+  if (ran && status >= 0 && status <= 1)
+    probe = bro_mkv_probe_parse (out->str);
+  g_string_free (out, TRUE);
+  if (!probe)
+    return cancelled (c) ? NULL : g_strdup_printf ("mkvmerge can't read %s", base);
+  bro_rip_check (probe, title, problems, notes);
+  for (guint i = 0; i < notes->len; i++)
+    log_line (c, BRO_SEV_WARNING, "%s: %s", base, (char *) notes->pdata[i]);
+  if (problems->len)
+    {
+      g_ptr_array_add (problems, NULL);
+      g_autofree char *joined = g_strjoinv ("; ", (char **) problems->pdata);
+      return g_strdup_printf ("%s doesn't match the disc listing: %s", base, joined);
+    }
+  {
+    g_autofree char *len = probe->has_duration ? hms ((int) (probe->duration + 0.5)) : g_strdup ("?");
+    log_line (c, BRO_SEV_INFO, "Checked %s: %s, %u track(s), %d chapter(s)", base, len, probe->track_types->len, probe->chapters);
+  }
+  return NULL;
 }
 
 static gboolean
@@ -1543,7 +2134,7 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
       phase (c, ph);
       c->env = (!single && g_hash_table_contains (c->req->track_selections, GINT_TO_POINTER (ti)) && c->all_env) ? c->all_env : c->base_env;
       args = bro_makemkv_mkv_args (c->env, src, tstr, out_dir, &c->req->drive->rip);
-      s = run_makemkv (c, args, error);
+      s = run_makemkv (c, args, TRUE, error);
       c->env = c->base_env;
       if (!s)
         return FALSE;
@@ -1555,7 +2146,8 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
           g_ptr_array_add (produced, g_strdup (key));
       g_ptr_array_sort (produced, (GCompareFunc) g_strcmp0);
 
-      if (s->exit_status != 0 || s->failed > 0 || produced->len == 0)
+      gboolean failed = s->exit_status != 0 || s->failed > 0 || produced->len == 0;
+      if (failed)
         {
           const char *why = s->errors->len ? g_ptr_array_index (s->errors, s->errors->len - 1) : NULL;
           g_autofree char *why_s = why ? g_strdup (why) : g_strdup_printf ("makemkvcon exit status %d", s->exit_status);
@@ -1576,6 +2168,25 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
                   index = ((BroTitle *) info->titles->pdata[k])->index;
             }
           title = index >= 0 ? bro_disc_info_title (info, index) : NULL;
+          if (failed)
+            {
+              /* A file of a title that didn't finish keeps MakeMKV's name, so it can't pass for a finished one. */
+              g_autofree char *base = g_path_get_basename (file);
+              log_line (c, BRO_SEV_WARNING, "Kept %s under MakeMKV's name: the title did not finish", base);
+              g_ptr_array_add (c->res->files, g_strdup (file));
+              continue;
+            }
+          if (title)
+            {
+              g_autofree char *problem = verify_rip (c, file, title);
+              if (problem)
+                {
+                  g_ptr_array_add (failures, g_strdup_printf ("title %d: %s", index, problem));
+                  log_line (c, BRO_SEV_ERROR, "Title %d failed the check: %s", index, problem);
+                  g_ptr_array_add (c->res->files, g_strdup (file));
+                  continue;
+                }
+            }
           char *final = g_strdup (file);
           if (title)
             {
@@ -1659,7 +2270,7 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
   g_free (c->expected_device);
   c->expected_device = g_strdup (src->path);
   args = bro_makemkv_backup_args (c->env, src, decrypt, dest, &c->req->drive->rip);
-  s = run_makemkv (c, args, error);
+  s = run_makemkv (c, args, TRUE, error);
   g_clear_pointer (&c->expected_device, g_free);
   if (!s)
     return NULL;
@@ -1680,6 +2291,15 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
       return NULL;
     }
   summary_free (s);
+  if (c->req->drive->archive.verify_rips)
+    {
+      g_autofree char *problem = bro_backup_problem (dest, c->req->drive->rip.backup_format == BRO_BACKUP_ISO);
+      if (problem)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Backup failed the check: %s", problem);
+          return NULL;
+        }
+    }
   log_line (c, BRO_SEV_INFO, "Backup saved to %s", dest);
   /* Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart. */
   if (c->req->drive->rip.backup_format == BRO_BACKUP_FOLDER)
@@ -1711,52 +2331,62 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
   return g_steal_pointer (&dest);
 }
 
-static char *
-title_key (BroTitle *t)
+/* Moves title and track choices made on one listing to the title numbers of another (the listing read when the
+ * job starts, or the listing of the backup). Fails when a chosen title can't be found. */
+static gboolean
+apply_title_map (Ctx *c, BroDiscInfo *old, BroDiscInfo *now, GError **error)
 {
-  return g_strdup_printf ("%d|%d|%s", bro_title_source_id (t), bro_title_duration (t), bro_title_str (t, BRO_ATTR_SEGMENTS_MAP));
-}
-
-/* Maps title choices made on the disc listing to the listing of the backup copy. */
-static void
-remap_selections (Ctx *c, BroDiscInfo *disc, BroDiscInfo *bk)
-{
-  g_autoptr (GHashTable) map = g_hash_table_new (g_direct_hash, g_direct_equal);
-  if (!disc)
-    return;
-  for (guint i = 0; i < disc->titles->len; i++)
+  g_autoptr (GArray) chosen = g_array_new (FALSE, FALSE, sizeof (int));
+  g_autoptr (GHashTable) map = NULL;
+  g_autoptr (GString) moved = g_string_new (NULL);
+  GHashTableIter it;
+  gpointer k, v;
+  for (guint i = 0; c->req->manual_titles && i < c->req->manual_titles->len; i++)
+    g_array_append_val (chosen, g_array_index (c->req->manual_titles, int, i));
+  g_hash_table_iter_init (&it, c->req->track_selections);
+  while (g_hash_table_iter_next (&it, &k, NULL))
     {
-      BroTitle *t = disc->titles->pdata[i];
-      g_autofree char *k = title_key (t);
-      BroTitle *found = NULL;
-      for (guint j = 0; j < bk->titles->len && !found; j++)
-        {
-          g_autofree char *k2 = title_key (bk->titles->pdata[j]);
-          if (g_str_equal (k, k2))
-            found = bk->titles->pdata[j];
-        }
-      if (!found)
-        found = bro_disc_info_title (bk, t->index);
-      if (found)
-        g_hash_table_insert (map, GINT_TO_POINTER (t->index), GINT_TO_POINTER (found->index + 1));
+      int i = GPOINTER_TO_INT (k);
+      g_array_append_val (chosen, i);
     }
+  g_hash_table_iter_init (&it, c->req->name_overrides);
+  while (g_hash_table_iter_next (&it, &k, NULL))
+    {
+      int i = GPOINTER_TO_INT (k);
+      g_array_append_val (chosen, i);
+    }
+  if (chosen->len == 0)
+    return TRUE;
+  map = bro_listing_map (chosen, old, now, c->req->track_selections, error);
+  if (!map)
+    return FALSE;
 #define MAPPED(i) (GPOINTER_TO_INT (g_hash_table_lookup (map, GINT_TO_POINTER (i))) - 1)
+  g_array_sort (chosen, cmp_int);
+  for (guint i = 0; i < chosen->len; i++)
+    {
+      int from = g_array_index (chosen, int, i);
+      if (i > 0 && g_array_index (chosen, int, i - 1) == from)
+        continue;
+      if (MAPPED (from) != from)
+        g_string_append_printf (moved, "%s%d → %d", moved->len ? ", " : "", from, MAPPED (from));
+    }
+  if (moved->len)
+    log_line (c, BRO_SEV_INFO, "Title numbers changed: %s", moved->str);
   if (c->req->manual_titles)
     {
       GArray *m = g_array_new (FALSE, FALSE, sizeof (int));
       for (guint i = 0; i < c->req->manual_titles->len; i++)
         {
-          int v = MAPPED (g_array_index (c->req->manual_titles, int, i));
-          if (v >= 0)
-            g_array_append_val (m, v);
+          int to = MAPPED (g_array_index (c->req->manual_titles, int, i));
+          if (to >= 0)
+            g_array_append_val (m, to);
         }
+      g_array_sort (m, cmp_int);
       g_array_unref (c->req->manual_titles);
       c->req->manual_titles = m;
     }
   {
     GHashTable *tracks = bro_track_selections_new ();
-    GHashTableIter it;
-    gpointer k, v;
     g_hash_table_iter_init (&it, c->req->track_selections);
     while (g_hash_table_iter_next (&it, &k, &v))
       if (MAPPED (GPOINTER_TO_INT (k)) >= 0)
@@ -1766,8 +2396,6 @@ remap_selections (Ctx *c, BroDiscInfo *disc, BroDiscInfo *bk)
   }
   {
     GHashTable *names = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
-    GHashTableIter it;
-    gpointer k, v;
     g_hash_table_iter_init (&it, c->req->name_overrides);
     while (g_hash_table_iter_next (&it, &k, &v))
       if (MAPPED (GPOINTER_TO_INT (k)) >= 0)
@@ -1776,6 +2404,7 @@ remap_selections (Ctx *c, BroDiscInfo *disc, BroDiscInfo *bk)
     c->req->name_overrides = names;
   }
 #undef MAPPED
+  return TRUE;
 }
 
 static gboolean
@@ -1794,9 +2423,10 @@ execute (Ctx *c, GError **error)
   BroRunRequest *req = c->req;
   gboolean needs_all = bro_rip_mode_makes_mkv (req->mode) && g_hash_table_size (req->track_selections) > 0;
   g_autofree char *home = g_build_filename (req->job_dir, "home", NULL);
-  BroDiscInfo *info = req->preloaded ? bro_disc_info_ref (req->preloaded) : NULL;
-  gboolean need_info;
-  g_autofree char *out_dir = NULL;
+  BroDiscInfo *opened = req->preloaded;
+  BroDiscInfo *info = NULL;
+  gboolean need_info, using_opened = FALSE;
+  g_autofree char *final_dir = NULL, *out_dir = NULL, *short_id = NULL;
 
   if (needs_all && !req->mkvmerge)
     {
@@ -1826,14 +2456,18 @@ execute (Ctx *c, GError **error)
   if (c->env->profile_path)
     log_line (c, BRO_SEV_INFO, "Profile: %s", c->env->profile_path);
 
+  /* The listing is always read again: titles chosen on an opened disc are only ripped when the disc in the drive
+   * is still that disc and the titles can be found in the new listing. */
+  if (opened)
+    log_line (c, BRO_SEV_INFO, "Reading the disc listing again to check that the disc hasn't changed since it was opened");
   need_info = bro_rip_mode_makes_mkv (req->mode) || req->mode == BRO_MODE_INFO_ONLY;
-  if (!info && need_info)
+  if (need_info)
     {
       info = scan_disc (c, req->source, error);
       if (!info)
         return FALSE;
     }
-  else if (!info)
+  else
     {
       /* Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title. */
       g_autoptr (GError) err = NULL;
@@ -1845,7 +2479,29 @@ execute (Ctx *c, GError **error)
               g_propagate_error (error, g_steal_pointer (&err));
               return FALSE;
             }
-          log_line (c, BRO_SEV_WARNING, "Continuing without the disc listing: %s", err ? err->message : "unknown error");
+          if (opened)
+            {
+              info = bro_disc_info_ref (opened);
+              using_opened = TRUE;
+              log_line (c, BRO_SEV_WARNING, "Using the listing read when the disc was opened: %s", err ? err->message : "unknown error");
+            }
+          else
+            log_line (c, BRO_SEV_WARNING, "Continuing without the disc listing: %s", err ? err->message : "unknown error");
+        }
+    }
+  if (opened && info && !using_opened)
+    {
+      g_autofree char *why = bro_listing_different_disc (opened, info);
+      if (why)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "This is not the disc that was opened: %s. Open the disc again.", why);
+          bro_disc_info_unref (info);
+          return FALSE;
+        }
+      if (!apply_title_map (c, opened, info, error))
+        {
+          bro_disc_info_unref (info);
+          return FALSE;
         }
     }
   c->res->info = info;
@@ -1857,12 +2513,26 @@ execute (Ctx *c, GError **error)
     }
   resolve_identity (c, info, 0, -1);
 
-  out_dir = resolve_output_dir (c, error);
-  if (!out_dir)
+  final_dir = resolve_output_dir (c, error);
+  if (!final_dir)
     return FALSE;
-  c->res->output_dir = g_strdup (out_dir);
-  update (c, BRO_UPDATE_OUTPUT_DIR, BRO_SEV_INFO, out_dir, 0, 0);
-  log_line (c, BRO_SEV_INFO, "Output folder: %s", out_dir);
+  c->output_dir = g_strdup (final_dir);
+  c->res->output_dir = g_strdup (final_dir);
+  update (c, BRO_UPDATE_OUTPUT_DIR, BRO_SEV_INFO, final_dir, 0, 0);
+  /* Everything is written to a hidden staging folder first and only moved into the output folder once the job has
+   * finished and passed its checks. */
+  short_id = g_ascii_strdown (req->job_id, MIN (strlen (req->job_id), 8));
+  {
+    g_autofree char *name = g_strconcat (BRO_STAGING_PREFIX, short_id, NULL);
+    out_dir = g_build_filename (final_dir, name, NULL);
+  }
+  c->work_dir = g_strdup (out_dir);
+  if (g_mkdir_with_parents (out_dir, 0755) != 0)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not create %s", out_dir);
+      return FALSE;
+    }
+  log_line (c, BRO_SEV_INFO, "Output folder: %s (files are moved there once the job has finished and been checked)", final_dir);
 
   switch (req->mode)
     {
@@ -1881,7 +2551,7 @@ execute (Ctx *c, GError **error)
     case BRO_MODE_MKV:
       if (req->drive->rip.write_disc_info_json)
         write_disc_info (info, out_dir, NULL);
-      return rip_titles (c, req->source, info, out_dir, 0, error) && archive (c, out_dir, error);
+      return rip_titles (c, req->source, info, out_dir, 0, error);
     case BRO_MODE_BACKUP:
     case BRO_MODE_BACKUP_DECRYPTED:
       {
@@ -1891,7 +2561,7 @@ execute (Ctx *c, GError **error)
         if (!dest)
           return FALSE;
         g_ptr_array_add (c->res->files, dest);
-        return archive (c, out_dir, error);
+        return TRUE;
       }
     case BRO_MODE_BACKUP_THEN_MKV:
       {
@@ -1908,7 +2578,11 @@ execute (Ctx *c, GError **error)
         binfo = scan_disc (c, bsrc, error);
         if (!binfo)
           return FALSE;
-        remap_selections (c, info, binfo);
+        if (info && !apply_title_map (c, info, binfo, error))
+          {
+            bro_disc_info_unref (binfo);
+            return FALSE;
+          }
         if (req->drive->rip.write_disc_info_json)
           write_disc_info (binfo, out_dir, NULL);
         ok = rip_titles (c, bsrc, binfo, out_dir, 1, error);
@@ -1930,7 +2604,7 @@ execute (Ctx *c, GError **error)
             else
               g_file_delete (f, NULL, NULL);
           }
-        return archive (c, out_dir, error);
+        return TRUE;
       }
     }
   return TRUE;
@@ -1947,7 +2621,7 @@ bro_post_step_should_run (const BroPostStep *step, BroJobState status)
     {
     case BRO_RUN_ALWAYS: return TRUE;
     case BRO_RUN_SUCCESS: return status == BRO_JOB_SUCCEEDED;
-    default: return status == BRO_JOB_FAILED || status == BRO_JOB_CANCELLED;
+    default: return status == BRO_JOB_FAILED || status == BRO_JOB_CANCELLED || status == BRO_JOB_COMPLETED_WITH_ERRORS;
     }
 }
 
@@ -2257,6 +2931,7 @@ bro_run_job (BroRunRequest *req)
   c.file_titles = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   c.episodes = g_ptr_array_new_with_free_func ((GDestroyNotify) episode_rec_free);
   c.error_messages = g_ptr_array_new_with_free_func (g_free);
+  c.data_errors = g_ptr_array_new_with_free_func (g_free);
   c.first_episode = 1;
   c.episode_width = 2;
   c.step_count = 1;
@@ -2287,6 +2962,14 @@ bro_run_job (BroRunRequest *req)
     }
   else if (g_cancellable_is_cancelled (req->cancellable))
     status = BRO_JOB_CANCELLED;
+  if (status == BRO_JOB_SUCCEEDED && c.data_errors->len)
+    {
+      status = BRO_JOB_COMPLETED_WITH_ERRORS;
+      res->error = g_strdup_printf ("MakeMKV reported %u read error(s) while reading the disc, so the files may be damaged. "
+                                    "They were kept apart from finished archives.", c.data_errors->len);
+      log_line (&c, BRO_SEV_ERROR, "%s", res->error);
+    }
+  status = finish_output (&c, status);
 
   write_manifest (&c, status);
   if (!g_cancellable_is_cancelled (req->cancellable) && run_post_processing (&c, status) && status == BRO_JOB_SUCCEEDED)
@@ -2298,7 +2981,7 @@ bro_run_job (BroRunRequest *req)
 
   if (!req->skip_eject && req->source->kind == BRO_SOURCE_DRIVE &&
       ((status == BRO_JOB_SUCCEEDED && req->drive->automation.eject_when_done) ||
-       (status == BRO_JOB_FAILED && req->drive->automation.eject_on_failure)))
+       ((status == BRO_JOB_FAILED || status == BRO_JOB_COMPLETED_WITH_ERRORS) && req->drive->automation.eject_on_failure)))
     {
       phase (&c, "Ejecting");
       if (eject_device (req->source->path))
@@ -2338,5 +3021,8 @@ bro_run_job (BroRunRequest *req)
   g_free (c.checksum_file);
   g_free (c.makemkv_version);
   g_ptr_array_unref (c.error_messages);
+  g_ptr_array_unref (c.data_errors);
+  g_free (c.output_dir);
+  g_free (c.work_dir);
   return res;
 }

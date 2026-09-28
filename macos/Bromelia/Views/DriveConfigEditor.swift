@@ -346,10 +346,11 @@ struct OutputTab: View {
             Section {
                 Toggle("Write SHA-256 checksums (SHA256SUMS)", isOn: $config.archive.checksums)
                 Toggle("Write an archive record (bromelia.json) and the job log", isOn: $config.archive.archiveRecord)
+                Toggle("Check every rip against the disc listing", isOn: $config.archive.verifyRips)
             } header: {
                 Text("Archiving")
             } footer: {
-                Text("Checksums of every file (including backup folders) are saved in the output folder in the standard format; check a copy later with “shasum -a 256 -c SHA256SUMS”. The archive record describes the disc, titles, episodes and files with their sizes and hashes.")
+                Text("Checksums of every file (including backup folders) are saved in the output folder in the standard format; check a copy later with “shasum -a 256 -c SHA256SUMS”. The archive record describes the disc, titles, episodes and files with their sizes and hashes. Checking compares each MKV's length and tracks with the disc listing (needs mkvmerge) and each backup's structure. Files only reach the output folder when the job succeeded; otherwise they are kept in a folder marked [INCOMPLETE] or [READ ERRORS].")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

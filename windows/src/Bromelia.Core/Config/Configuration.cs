@@ -171,6 +171,8 @@ public sealed class ArchiveConfig
     public bool Checksums { get; set; } = true;
     /// <summary>Write bromelia.json and the job log into the output folder.</summary>
     public bool ArchiveRecord { get; set; } = true;
+    /// <summary>Check every ripped MKV against the disc listing (duration, tracks, chapters) with mkvmerge.</summary>
+    public bool VerifyRips { get; set; } = true;
 }
 
 public sealed class EpisodeConfig
