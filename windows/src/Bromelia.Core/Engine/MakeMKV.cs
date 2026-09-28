@@ -249,3 +249,48 @@ public static class RegistrySettings
         }
     }
 }
+
+/// <summary>MakeMKV's free beta key, which the developer posts on the forum and replaces about once a month.</summary>
+public static class BetaKey
+{
+    public const string PageUrl = "https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053";
+
+    /// <summary>The key in the forum post (the "T-…" string in its code block).</summary>
+    public static string? Parse(string html)
+    {
+        var code = System.Text.RegularExpressions.Regex.Match(html, @"<code>\s*(T-[A-Za-z0-9@_]{20,})\s*</code>");
+        if (code.Success) return code.Groups[1].Value;
+        var any = System.Text.RegularExpressions.Regex.Match(html, @"T-[A-Za-z0-9@_]{20,}");
+        return any.Success ? any.Value : null;
+    }
+
+    public static async Task<string> FetchAsync(CancellationToken ct = default)
+    {
+        using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var html = await http.GetStringAsync(PageUrl, ct).ConfigureAwait(false);
+        return Parse(html) ?? throw new JobException("No beta key found on the forum page");
+    }
+}
+
+/// <summary>Where a file or folder the user opened leads: MakeMKV opens discs (an image, or a folder holding BDMV /
+/// VIDEO_TS / HVDVD_TS), not single files, so a file inside a disc structure (.IFO, .VOB, .mpls, .m2ts, …) opens the
+/// disc it belongs to.</summary>
+public static class SourceResolver
+{
+    static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase) { ".iso", ".img", ".udf" };
+    static readonly HashSet<string> StructureFolders = new(StringComparer.OrdinalIgnoreCase) { "BDMV", "VIDEO_TS", "HVDVD_TS" };
+
+    public static DiscSource Resolve(string path, bool isDirectory)
+    {
+        var p = path.TrimEnd('\\', '/');
+        if (!isDirectory && ImageExtensions.Contains(Path.GetExtension(p))) return new DiscSource.Iso(p);
+        // The folder holding BDMV / VIDEO_TS / HVDVD_TS, looking from the item itself up to three levels.
+        var dir = isDirectory ? p : Path.GetDirectoryName(p);
+        for (int i = 0; i < 4 && !string.IsNullOrEmpty(dir); i++)
+        {
+            if (StructureFolders.Contains(Path.GetFileName(dir)) && Path.GetDirectoryName(dir) is { Length: > 0 } root) return new DiscSource.Folder(root);
+            dir = Path.GetDirectoryName(dir);
+        }
+        return new DiscSource.Folder(p);
+    }
+}

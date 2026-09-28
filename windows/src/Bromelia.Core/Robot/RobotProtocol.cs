@@ -272,3 +272,51 @@ public static class RobotParser
         return new RobotEvent.Raw(line);
     }
 }
+
+public enum NoticeKind
+{
+    /// <summary>"Using LibreDrive mode (v06.3 id=…)": the drive reads the disc in LibreDrive mode.</summary>
+    LibreDrive,
+    /// <summary>The disc (4K UHD) can only be decrypted by a LibreDrive-compatible drive, and this drive isn't one.</summary>
+    LibreDriveRequired,
+    /// <summary>The evaluation period / beta key has expired (messages 5052 and 5055).</summary>
+    KeyExpired,
+    /// <summary>The evaluation period hasn't been started; makemkvcon can't start it.</summary>
+    EvaluationNotStarted,
+    /// <summary>"This application version is too old": MakeMKV needs updating, or a purchased key.</summary>
+    VersionTooOld,
+}
+
+/// <summary>Messages about the drive and about MakeMKV itself that Bromelia shows outside the log.</summary>
+public sealed record MakeMKVNotice(NoticeKind Kind, string Detail = "")
+{
+    public static MakeMKVNotice? From(RobotMessage m)
+    {
+        var t = m.Text;
+        if (t.StartsWith("Using LibreDrive mode", StringComparison.Ordinal))
+        {
+            int open = t.IndexOf('('), close = t.LastIndexOf(')');
+            return new(NoticeKind.LibreDrive, open >= 0 && close > open ? t[(open + 1)..close] : "");
+        }
+        if (t.Contains("LibreDrive compatible drive is required", StringComparison.Ordinal)) return new(NoticeKind.LibreDriveRequired);
+        if (m.Code is 5052 or 5055 || t.Contains("evaluation period has expired", StringComparison.OrdinalIgnoreCase)
+            || t.Contains("evaluation period expired", StringComparison.OrdinalIgnoreCase)) return new(NoticeKind.KeyExpired);
+        if (t.Contains("Evaluation period not started", StringComparison.Ordinal)
+            || t.Contains("start MakeMKV evaluation from a third-party application", StringComparison.Ordinal)) return new(NoticeKind.EvaluationNotStarted);
+        if (t.Contains("application version is too old", StringComparison.Ordinal)) return new(NoticeKind.VersionTooOld);
+        return null;
+    }
+
+    /// <summary>MakeMKV can't (fully) work until the user acts: a key, an update, or starting the evaluation.</summary>
+    public bool IsLicenseProblem => Kind is NoticeKind.KeyExpired or NoticeKind.EvaluationNotStarted or NoticeKind.VersionTooOld;
+
+    /// <summary>What to tell the user, for banners and failed jobs.</summary>
+    public string Explanation => Kind switch
+    {
+        NoticeKind.LibreDrive => $"The drive reads this disc in LibreDrive mode{(Detail.Length > 0 ? $" ({Detail})" : "")}.",
+        NoticeKind.LibreDriveRequired => "This disc can only be decrypted by a LibreDrive-compatible drive, and this drive isn't one (or its firmware isn't supported).",
+        NoticeKind.KeyExpired => "MakeMKV's key has expired. Blu-ray and 4K UHD discs can't be opened until you enter the current beta key or a purchased key.",
+        NoticeKind.EvaluationNotStarted => "MakeMKV's evaluation hasn't been started. Open the MakeMKV app once, or enter a beta or purchased key.",
+        _ => "This MakeMKV version is too old. Update MakeMKV, or enter a purchased key to keep using this version.",
+    };
+}

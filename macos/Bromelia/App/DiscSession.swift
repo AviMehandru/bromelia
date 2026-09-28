@@ -31,6 +31,8 @@ final class DiscSession: Identifiable {
     var firstEpisode: Int?
     /// File system flags from the drive scan.
     var discFlags: DiscFlags?
+    /// What MakeMKV said about LibreDrive when the disc was opened (drives only).
+    var libreDrive: LibreDriveState?
     @ObservationIgnored var runner: ProcessRunner?
     @ObservationIgnored private var nextLog = 0
 
@@ -58,6 +60,7 @@ final class DiscSession: Identifiable {
         mediaName = ""
         mediaKind = nil
         firstEpisode = nil
+        libreDrive = nil
         progress = 0
         operation = ""
     }
@@ -94,5 +97,23 @@ final class DiscSession: Identifiable {
     var selectedSizeBytes: Int64 {
         guard let info else { return 0 }
         return info.titles.filter { selectedTitles.contains($0.index) }.reduce(0) { $0 + $1.sizeBytes }
+    }
+}
+
+/// LibreDrive as reported while opening a disc.
+enum LibreDriveState: Equatable, Sendable {
+    /// "Using LibreDrive mode (…)", with the details (version and drive id).
+    case enabled(String)
+    /// The disc needs a LibreDrive-compatible drive and this one isn't.
+    case required
+    /// MakeMKV didn't mention LibreDrive: the drive doesn't use it for this disc (fine for DVDs and most Blu-rays).
+    case notInUse
+
+    var label: String {
+        switch self {
+        case .enabled(let d): return "LibreDrive: enabled\(d.isEmpty ? "" : " (\(d))")"
+        case .required: return "LibreDrive required: this drive can't decrypt this disc"
+        case .notInUse: return "LibreDrive: not in use for this disc"
+        }
     }
 }

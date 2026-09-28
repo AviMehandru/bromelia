@@ -194,6 +194,7 @@ bro_session_finalize (GObject *obj)
   g_hash_table_unref (s->name_overrides);
   g_free (s->output_override);
   g_free (s->media_name);
+  g_free (s->libre_drive);
   g_clear_object (&s->cancellable);
   G_OBJECT_CLASS (bro_session_parent_class)->finalize (obj);
 }
@@ -275,6 +276,8 @@ bro_session_reset (BroSession *s)
   s->media_name = g_strdup ("");
   s->media_kind = -1;
   s->first_episode = -1;
+  g_clear_pointer (&s->libre_drive, g_free);
+  s->libre_drive_required = FALSE;
   session_changed (s);
   selection_changed (s);
 }
@@ -869,6 +872,7 @@ typedef struct {
   GPtrArray *messages;
   char *version;
   char *error;
+  int problem;
 } ScanData;
 
 static void
@@ -900,6 +904,8 @@ scan_line (const char *line, gpointer data)
           g_free (d->version);
           d->version = g_strdup (ev->params->pdata[0]);
         }
+      if (bro_notice_is_license_problem (bro_notice_from_event (ev, NULL)))
+        d->problem = bro_notice_from_event (ev, NULL);
       if (bro_event_severity (ev) != BRO_SEV_DEBUG && ev->code != 5010 && ev->code != 5042 && ev->code != 1005 && ev->code != 1004)
         g_ptr_array_add (d->messages, g_strdup (ev->text));
     }
@@ -949,6 +955,8 @@ scan_done (GObject *src, GAsyncResult *res, gpointer data)
         }
       g_ptr_array_unref (self->scan_messages);
       self->scan_messages = g_ptr_array_ref (d->messages);
+      if (d->problem != BRO_NOTICE_NONE)
+        self->makemkv_problem = d->problem;
       bro_state_apply_scan (self, d->entries);
     }
   emit (self, STATE_STATUS_CHANGED);
@@ -1091,28 +1099,21 @@ bro_state_eject (BroState *self, const char *lane)
 BroSession *
 bro_state_open_file (BroState *self, const char *path)
 {
-  gboolean dir = g_file_test (path, G_FILE_TEST_IS_DIR);
-  g_autofree char *p = g_strdup (path);
-  g_autofree char *base = NULL;
-  BroSource *src;
+  /* A disc image, a disc folder, or the disc folder a file (.IFO, .mpls, .m2ts, …) belongs to. */
+  BroSource *src = bro_source_resolve (path, g_file_test (path, G_FILE_TEST_IS_DIR));
   g_autofree char *key = NULL;
   BroSession *s;
-  size_t n = strlen (p);
-  while (n > 1 && p[n - 1] == '/')
-    p[--n] = '\0';
-  base = g_path_get_basename (p);
-  if (dir && (g_ascii_strcasecmp (base, "BDMV") == 0 || g_ascii_strcasecmp (base, "VIDEO_TS") == 0))
-    {
-      char *parent = g_path_get_dirname (p);
-      g_free (p);
-      p = parent;
-    }
-  src = bro_source_new_path (dir ? BRO_SOURCE_FOLDER : BRO_SOURCE_ISO, p);
   key = bro_source_info_argument (src);
   s = g_hash_table_lookup (self->sessions, key);
   if (!s)
     {
       s = session_new (key, src, self->config->default_drive->id);
+      if (src->kind == BRO_SOURCE_FOLDER && !g_str_equal (src->path, path))
+        {
+          g_autofree char *name = g_path_get_basename (path);
+          g_autofree char *msg = g_strdup_printf ("Opening the disc that %s belongs to: %s", name, src->path);
+          session_log (s, BRO_SEV_INFO, msg);
+        }
       g_hash_table_insert (self->sessions, g_strdup (key), s);
       g_ptr_array_add (self->file_sessions, g_object_ref (s));
     }
@@ -1153,6 +1154,9 @@ typedef struct {
   BroDiscInfo *info;
   GPtrArray *errors;
   gint64 last_progress;
+  char *libre_drive;
+  gboolean libre_required;
+  int problem;
 } LoadData;
 
 static void
@@ -1166,6 +1170,7 @@ load_data_free (LoadData *d)
   g_free (d->error);
   if (d->info) bro_disc_info_unref (d->info);
   g_ptr_array_unref (d->errors);
+  g_free (d->libre_drive);
   g_free (d);
 }
 
@@ -1220,6 +1225,16 @@ load_line (const char *line, gpointer data)
   bro_disc_info_consume (d->info, ev);
   if (ev->type == BRO_EV_MESSAGE && bro_event_severity (ev) == BRO_SEV_ERROR)
     g_ptr_array_add (d->errors, g_strdup (ev->text));
+  {
+    g_autofree char *detail = NULL;
+    BroNotice n = bro_notice_from_event (ev, &detail);
+    if (n == BRO_NOTICE_LIBREDRIVE && !d->libre_drive)
+      d->libre_drive = g_steal_pointer (&detail);
+    else if (n == BRO_NOTICE_LIBREDRIVE_REQUIRED)
+      d->libre_required = TRUE;
+    else if (bro_notice_is_license_problem (n))
+      d->problem = n;
+  }
   if ((ev->type == BRO_EV_MESSAGE && bro_event_severity (ev) == BRO_SEV_DEBUG && !d->show_debug) ||
       ev->type == BRO_EV_CINFO || ev->type == BRO_EV_TINFO || ev->type == BRO_EV_SINFO || ev->type == BRO_EV_DRIVE)
     {
@@ -1281,13 +1296,37 @@ load_done (GObject *src, GAsyncResult *res, gpointer data)
     return; /* superseded by a reset */
   g_clear_object (&s->cancellable);
   s->loading = FALSE;
+  if (d->problem != BRO_NOTICE_NONE)
+    {
+      self->makemkv_problem = d->problem;
+      emit (self, STATE_STATUS_CHANGED);
+    }
+  if (s->source->kind == BRO_SOURCE_DRIVE)
+    {
+      g_free (s->libre_drive);
+      s->libre_drive_required = d->libre_required;
+      if (d->libre_required)
+        s->libre_drive = g_strdup ("LibreDrive required: this drive can't decrypt this disc");
+      else if (d->libre_drive)
+        s->libre_drive = *d->libre_drive ? g_strdup_printf ("LibreDrive: enabled (%s)", d->libre_drive) : g_strdup ("LibreDrive: enabled");
+      else
+        s->libre_drive = g_strdup ("LibreDrive: not in use for this disc");
+    }
   if (d->cancelled)
     s->error = g_strdup ("Cancelled");
   else if (d->error)
     s->error = g_strdup (d->error);
   else if (d->info->titles->len == 0)
-    s->error = d->errors->len ? g_strdup (g_ptr_array_index (d->errors, d->errors->len - 1))
-                              : g_strdup_printf ("No titles found (exit status %d).", d->exit_status);
+    {
+      if (bro_notice_is_license_problem (d->problem))
+        s->error = g_strdup (bro_notice_explanation (d->problem));
+      else if (s->source->kind == BRO_SOURCE_FOLDER && d->errors->len == 0)
+        s->error = g_strdup ("MakeMKV found no titles here. It opens disc images and disc folders (with BDMV, VIDEO_TS or HVDVD_TS), "
+                             "not single video files.");
+      else
+        s->error = d->errors->len ? g_strdup (g_ptr_array_index (d->errors, d->errors->len - 1))
+                                  : g_strdup_printf ("No titles found (exit status %d).", d->exit_status);
+    }
   else
     {
       s->info = bro_disc_info_ref (d->info);
@@ -1639,6 +1678,11 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
   if (r)
     {
       j->state = r->status;
+      if (bro_notice_is_license_problem (r->problem))
+        {
+          self->makemkv_problem = r->problem;
+          emit (self, STATE_STATUS_CHANGED);
+        }
       g_free (j->error);
       j->error = g_strdup (r->error);
       g_free (j->output_dir);
@@ -1938,6 +1982,80 @@ char *
 bro_state_register_key_finish (BroState *self, GAsyncResult *res)
 {
   return g_task_propagate_pointer (G_TASK (res), NULL);
+}
+
+/* ---- beta key ---- */
+
+static void
+beta_thread (GTask *task, gpointer source, gpointer task_data, GCancellable *c)
+{
+  const char *exe = task_data;
+  g_autoptr (GError) error = NULL;
+  g_autofree char *key = bro_beta_key_fetch (&error);
+  if (!key)
+    {
+      g_task_return_pointer (task, g_strdup_printf ("Could not get the beta key: %s", error->message), g_free);
+      return;
+    }
+  {
+    const char *argv[] = { exe, "reg", key, NULL };
+    GString *out = g_string_new (NULL);
+    int status = -1;
+    g_autoptr (GError) err = NULL;
+    if (!bro_process_run (argv, NULL, NULL, 60, NULL, reg_line, out, &status, NULL, NULL, &err) || status != 0)
+      {
+        g_autofree char *text = g_string_free (out, FALSE);
+        g_task_return_pointer (task, g_strdup_printf ("Registration failed: %s", err ? err->message : text), g_free);
+        return;
+      }
+    g_string_free (out, TRUE);
+  }
+  g_object_set_data_full (G_OBJECT (task), "key", g_strdup (key), g_free);
+  {
+    g_autofree char *head = g_strndup (key, 8);
+    g_task_return_pointer (task, g_strdup_printf ("Registered the current beta key (%s…).", head), g_free);
+  }
+}
+
+void
+bro_state_install_beta_key (BroState *self, GAsyncReadyCallback cb, gpointer data)
+{
+  g_autofree char *exe = bro_state_makemkvcon (self);
+  GTask *task = g_task_new (self, NULL, cb, data);
+  if (!exe)
+    {
+      g_task_return_pointer (task, g_strdup ("makemkvcon not found"), g_free);
+      g_object_unref (task);
+      return;
+    }
+  g_task_set_task_data (task, g_steal_pointer (&exe), g_free);
+  g_task_run_in_thread (task, beta_thread);
+  g_object_unref (task);
+}
+
+char *
+bro_state_install_beta_key_finish (BroState *self, GAsyncResult *res)
+{
+  const char *key = g_object_get_data (G_OBJECT (res), "key");
+  if (key)
+    {
+      /* A key typed into Bromelia would override the new one for every drive. */
+      if (*self->config->registration_key)
+        {
+          g_free (self->config->registration_key);
+          self->config->registration_key = g_strdup (key);
+          bro_state_config_changed (self);
+        }
+      bro_state_clear_problem (self);
+    }
+  return g_task_propagate_pointer (G_TASK (res), NULL);
+}
+
+void
+bro_state_clear_problem (BroState *self)
+{
+  self->makemkv_problem = BRO_NOTICE_NONE;
+  emit (self, STATE_STATUS_CHANGED);
 }
 
 /* ---- start ---- */

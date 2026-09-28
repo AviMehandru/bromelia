@@ -348,3 +348,55 @@ enum RobotParser {
         }
     }
 }
+
+// MARK: - Notices
+
+/// Messages about the drive and about MakeMKV itself that Bromelia shows outside the log.
+enum MakeMKVNotice: Equatable, Sendable {
+    /// "Using LibreDrive mode (v06.3 id=…)": the drive reads the disc in LibreDrive mode. Holds the details.
+    case libreDrive(String)
+    /// The disc (4K UHD) can only be decrypted by a LibreDrive-compatible drive, and this drive isn't one.
+    case libreDriveRequired
+    /// The evaluation period / beta key has expired (messages 5052 and 5055).
+    case keyExpired
+    /// The evaluation period hasn't been started; makemkvcon can't start it.
+    case evaluationNotStarted
+    /// "This application version is too old": MakeMKV needs updating, or a purchased key.
+    case versionTooOld
+
+    init?(_ m: RobotMessage) {
+        let t = m.text
+        if t.hasPrefix("Using LibreDrive mode") {
+            var detail = ""
+            if let open = t.firstIndex(of: "("), let close = t.lastIndex(of: ")"), open < close {
+                detail = String(t[t.index(after: open)..<close])
+            }
+            self = .libreDrive(detail)
+        } else if t.contains("LibreDrive compatible drive is required") {
+            self = .libreDriveRequired
+        } else if m.code == 5052 || m.code == 5055 || t.localizedCaseInsensitiveContains("evaluation period has expired")
+                    || t.localizedCaseInsensitiveContains("evaluation period expired") {
+            self = .keyExpired
+        } else if t.contains("Evaluation period not started") || t.contains("start MakeMKV evaluation from a third-party application") {
+            self = .evaluationNotStarted
+        } else if t.contains("application version is too old") {
+            self = .versionTooOld
+        } else {
+            return nil
+        }
+    }
+
+    /// MakeMKV can't (fully) work until the user acts: a key, an update, or starting the evaluation.
+    var isLicenseProblem: Bool { self == .keyExpired || self == .evaluationNotStarted || self == .versionTooOld }
+
+    /// What to tell the user, for banners and failed jobs.
+    var explanation: String {
+        switch self {
+        case .libreDrive(let d): return "The drive reads this disc in LibreDrive mode\(d.isEmpty ? "" : " (\(d))")."
+        case .libreDriveRequired: return "This disc can only be decrypted by a LibreDrive-compatible drive, and this drive isn't one (or its firmware isn't supported)."
+        case .keyExpired: return "MakeMKV's key has expired. Blu-ray and 4K UHD discs can't be opened until you enter the current beta key or a purchased key."
+        case .evaluationNotStarted: return "MakeMKV's evaluation hasn't been started. Open the MakeMKV app once, or enter a beta or purchased key."
+        case .versionTooOld: return "This MakeMKV version is too old. Update MakeMKV, or enter a purchased key to keep using this version."
+        }
+    }
+}

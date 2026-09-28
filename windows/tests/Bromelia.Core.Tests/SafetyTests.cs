@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Bromelia.Core.Config;
 using Bromelia.Core.Engine;
+using Bromelia.Core.Logic;
 using Bromelia.Core.Robot;
 using Xunit;
 
@@ -548,5 +549,198 @@ public class ReliabilityTests
         Assert.Contains("megabytes free on the destination", First("rip-disk-full"));
         Assert.Contains("does not exist", First("rip-missing-source"));
         Assert.Contains("MEDIUM ERROR", First("rip-failure"));
+    }
+}
+
+public class ParityTests
+{
+    static RobotMessage Msg(string line) => ((RobotEvent.Message)RobotParser.Parse(line)!).Value;
+
+    [Fact]
+    public void RecognisesNotices()
+    {
+        Assert.Equal(new MakeMKVNotice(NoticeKind.LibreDrive, "v06.3 id=4FBA32AEC678"),
+            MakeMKVNotice.From(Msg("MSG:1011,0,1,\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\",\"%1\",\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\"")));
+        Assert.Equal(NoticeKind.KeyExpired, MakeMKVNotice.From(Msg("MSG:5055,0,0,\"Evaluation period has expired, shareware functionality unavailable.\",\"x\""))!.Kind);
+        Assert.Equal(NoticeKind.KeyExpired, MakeMKVNotice.From(Msg("MSG:5052,516,0,\"Evaluation period has expired. Please purchase an activation key.\",\"x\""))!.Kind);
+        Assert.Equal(NoticeKind.VersionTooOld, MakeMKVNotice.From(Msg("MSG:5021,260,1,\"This application version is too old.  Please download the latest version at http://www.makemkv.com/ or enter a registration key to continue using the current version.\",\"x\",\"http://www.makemkv.com/\""))!.Kind);
+        Assert.Equal(NoticeKind.LibreDriveRequired, MakeMKVNotice.From(Msg("MSG:2024,0,0,\"LibreDrive compatible drive is required to open this disc - video can't be decrypted.\",\"x\""))!.Kind);
+        Assert.Null(MakeMKVNotice.From(Msg("MSG:3007,0,0,\"Using direct disc access mode\",\"Using direct disc access mode\"")));
+        Assert.True(new MakeMKVNotice(NoticeKind.KeyExpired).IsLicenseProblem);
+        Assert.False(new MakeMKVNotice(NoticeKind.LibreDriveRequired).IsLicenseProblem);
+    }
+
+    [Fact]
+    public void ReadsTheBetaKeyFromTheForumPage()
+    {
+        var key = "T-" + string.Concat(Enumerable.Repeat("aB3@_x", 11));
+        var html = "<div class=\"codebox\"><p>Code: <a href=\"#\">Select all</a></p><pre><code>" + key + "</code></pre></div> and is valid until end of October";
+        Assert.Equal(key, BetaKey.Parse(html));
+        Assert.Null(BetaKey.Parse("no key here"));
+    }
+
+    [Theory]
+    [InlineData("/Rips/Disc/VIDEO_TS/VTS_01_1.VOB", false, "file:/Rips/Disc")]
+    [InlineData("/Rips/Disc/VIDEO_TS/VIDEO_TS.IFO", false, "file:/Rips/Disc")]
+    [InlineData("/Rips/Disc/BDMV/PLAYLIST/00800.mpls", false, "file:/Rips/Disc")]
+    [InlineData("/Rips/Disc/BDMV/STREAM/00001.m2ts", false, "file:/Rips/Disc")]
+    [InlineData("/Rips/Disc/BDMV", true, "file:/Rips/Disc")]
+    [InlineData("/Rips/Disc", true, "file:/Rips/Disc")]
+    [InlineData("/Rips/Movie.ISO", false, "iso:/Rips/Movie.ISO")]
+    [InlineData("/Rips/loose.m2ts", false, "file:/Rips/loose.m2ts")]
+    public void OpensTheDiscAFileBelongsTo(string path, bool isDirectory, string expected)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        Assert.Equal(expected, SourceResolver.Resolve(path, isDirectory).InfoArgument);
+    }
+
+    static DiscInfo Titles(params int[] durations)
+    {
+        var d = new DiscInfo();
+        for (int i = 0; i < durations.Length; i++)
+            d.Titles.Add(new TitleInfo
+            {
+                Index = i,
+                Attributes = { [(int)AttributeId.Duration] = TitleInfo.FormatDuration(durations[i]), [(int)AttributeId.OriginalTitleId] = (i + 1).ToString() },
+            });
+        return d;
+    }
+
+    [Fact]
+    public void OnePassNeedsTheLongestTitlesAndEnoughOfThem()
+    {
+        var info = Titles(600, 30, 900, 1200, 40);
+        Assert.Equal(41, OnePass.MinimumLength(new[] { 0, 2, 3 }, info, null));
+        Assert.Null(OnePass.MinimumLength(new[] { 0, 2 }, info, null));
+        Assert.Null(OnePass.MinimumLength(new[] { 0, 1, 2, 3, 4 }, info, null));
+        Assert.Null(OnePass.MinimumLength(new[] { 1, 2, 3 }, info, null));
+        Assert.Null(OnePass.MinimumLength(new[] { 0, 2, 3 }, Titles(600, 599, 900, 1200), null));
+        Assert.Null(OnePass.MinimumLength(new[] { 0, 2, 3 }, info, 120));
+        var shifted = Titles(600, 900, 1200);
+        for (int i = 0; i < 3; i++) shifted.Titles[i].Attributes[(int)AttributeId.OriginalTitleId] = new[] { "1", "3", "4" }[i];
+        Assert.True(OnePass.Matches(shifted, new[] { 0, 2, 3 }, info));
+        Assert.False(OnePass.Matches(Titles(600, 900), new[] { 0, 2, 3 }, info));
+    }
+}
+
+public class OnePassJobTests
+{
+    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-1p-" + Guid.NewGuid().ToString("N")[..8]);
+
+    /// <summary>A stand-in makemkvcon whose info command honours --minlength (titles of at least N seconds, renumbered).</summary>
+    static FakeMakeMkv Fake((string Duration, int Source)[] all, string extraInfo = "")
+    {
+        const string mkv = "if [ \"$title\" = \"all\" ]; then\n" +
+                           "  for t in 0 1 2 3 4 5; do grep -q \"title_t0$t.mkv\" \"$LISTING\" && printf 'mkv data' > \"$dest/title_t0$t.mkv\"; done\n" +
+                           "else\n  printf 'mkv data' > \"$dest/title_t0$title.mkv\"\nfi\n" +
+                           "echo 'MSG:5036,260,1,\"Copy complete. 1 titles saved.\",\"Copy complete. %1 titles saved.\",\"1\"'";
+        var f = new FakeMakeMkv(extraInfo + Listing.Make(all), mkv);
+        foreach (var n in new[] { 6, 11, 21 })
+            File.WriteAllText(Path.Combine(f.Dir, $"min{n}.txt"), Listing.Make(all.Where(t => TitleInfo.ParseDuration(t.Duration) >= n).ToArray()));
+        var listing = Path.Combine(f.Dir, "listing.txt");
+        var script = File.ReadAllText(f.Executable)
+            .Replace("#!/bin/sh\n", "#!/bin/sh\nMIN=0; for a in \"$@\"; do case \"$a\" in --minlength=*) MIN=\"${a#--minlength=}\";; esac; done\n" +
+                                    $"LISTING='{f.Dir}'/min$MIN.txt; [ -f \"$LISTING\" ] || LISTING='{listing}'\n")
+            .Replace($"info) cat '{listing}' ;;", "info) cat \"$LISTING\" ;;");
+        File.WriteAllText(f.Executable, script);
+        return f;
+    }
+
+    RipJob Run(FakeMakeMkv f, Action<DriveConfig> configure)
+    {
+        Directory.CreateDirectory(_root);
+        Paths.DataOverride = Path.Combine(Path.GetTempPath(), "bromelia-test-data");
+        var config = new AppConfig { OutputRoot = _root };
+        var drive = new DriveConfig();
+        drive.Automation.Notify = false;
+        configure(drive);
+        var job = new RipJob(new DiscSource.Iso("/nonexistent/test.iso"), drive, "iso:1p", "test", "", RipMode.Mkv);
+        SingleThreadContext.Run(async () =>
+            await new JobRunner(job, config, f.Executable, null, new UiDispatcher(), new NullPlatformServices(), new[] { "dvd_MinimumTitleLength" }).RunAsync());
+        return job;
+    }
+
+    static readonly (string, int)[] FiveTitles = { ("0:00:30", 1), ("0:00:05", 2), ("0:00:20", 3), ("0:00:40", 4), ("0:00:10", 5) };
+
+    [Fact]
+    public void LongestTitlesAreRippedInOnePass()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var f = Fake(FiveTitles);
+        var job = Run(f, d => { d.Rip.TitleSelection.Strategy = TitleStrategy.Longest; d.Rip.TitleSelection.LongestCount = 3; });
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage + "\n" + f.Calls);
+        var rips = f.Calls.Split('\n').Where(l => l.Contains(" mkv ")).ToList();
+        var rip = Assert.Single(rips);
+        Assert.Contains("--minlength=11", rip);
+        Assert.Contains("mkv iso:/nonexistent/test.iso all ", rip);
+        Assert.Equal(3, job.ProducedFiles.Count);
+        Assert.Equal(new int?[] { 1, 3, 4 }, job.RipInfo!.Titles.Select(t => t.SourceTitleId));
+    }
+
+    [Fact]
+    public void OtherSelectionsAreRippedTitleByTitle()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var f = Fake(FiveTitles);
+        var job = Run(f, d => { d.Rip.TitleSelection.Strategy = TitleStrategy.Indices; d.Rip.TitleSelection.IndexPattern = "0,1,3"; });
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        Assert.Equal(3, f.Calls.Split('\n').Count(l => l.Contains(" mkv ")));
+        Assert.DoesNotContain("--minlength", f.Calls);
+    }
+
+    [Fact]
+    public void ExpiredKeyExplainsTheFailure()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var f = new FakeMakeMkv("MSG:5055,0,0,\"Evaluation period has expired, shareware functionality unavailable.\",\"x\"\nMSG:5010,0,0,\"Failed to open disc\",\"Failed to open disc\"\n", ":");
+        var job = Run(f, _ => { });
+        Assert.Equal(JobState.Failed, job.State);
+        Assert.Equal(NoticeKind.KeyExpired, job.MakemkvProblem?.Kind);
+        Assert.Contains("key has expired", job.ErrorMessage);
+    }
+
+    /// <summary>Rips the three longest titles of a real disc image in one makemkvcon run. Set BROMELIA_TEST_ONEPASS_ISO to a
+    /// DVD image with at least four titles.</summary>
+    [Fact]
+    public void RealDiscImageIsRippedInOnePass()
+    {
+        var iso = Environment.GetEnvironmentVariable("BROMELIA_TEST_ONEPASS_ISO");
+        var exe = Paths.ResolveTool("", Paths.MakemkvconCandidates(), "makemkvcon");
+        if (string.IsNullOrEmpty(iso) || exe == null || OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_root);
+        Paths.DataOverride = Path.Combine(_root, ".data");
+        try
+        {
+            var config = new AppConfig { OutputRoot = _root };
+            var drive = new DriveConfig();
+            drive.Automation.Notify = false;
+            drive.Rip.MinLengthSeconds = 0;
+            drive.Rip.TitleSelection.Strategy = TitleStrategy.Longest;
+            drive.Rip.TitleSelection.LongestCount = 3;
+            drive.Episodes.SplitPlayAll = false;
+            var job = new RipJob(new DiscSource.Iso(iso), drive, "iso:1p", "test", "", RipMode.Mkv);
+            var mkvmerge = Paths.ResolveTool("", Paths.MkvmergeCandidates(), "mkvmerge");
+            SingleThreadContext.Run(async () =>
+                await new JobRunner(job, config, exe, mkvmerge, new UiDispatcher(), new NullPlatformServices(), new[] { "dvd_MinimumTitleLength" }).RunAsync());
+            Assert.True(job.State == JobState.Succeeded, job.ErrorMessage + "\n" + string.Join("\n", job.Log.TakeLast(20).Select(l => l.Text)));
+            var rip = Assert.Single(job.Commands, c => c.Contains(" mkv "));
+            Assert.Contains(" all ", rip);
+            Assert.Equal(3, job.ProducedFiles.Count);
+            Assert.Contains(job.Log, l => l.Text.Contains("in one pass"));
+            Assert.Empty(Checksums.Verify(job.OutputDirectory!));
+        }
+        finally { try { Directory.Delete(_root, true); } catch (IOException) { } }
+    }
+
+    [Fact]
+    public void LibreDriveIsRecorded()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var f = Fake(new[] { ("0:00:30", 1) }, "MSG:1011,0,1,\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\",\"%1\",\"x\"\n");
+        var job = Run(f, _ => { });
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        Assert.Equal("v06.3 id=4FBA32AEC678", job.LibreDrive);
+        var record = JsonDocument.Parse(File.ReadAllText(Path.Combine(job.OutputDirectory!, "bromelia.json"))).RootElement;
+        Assert.Equal("v06.3 id=4FBA32AEC678", record.GetProperty("libreDrive").GetString());
     }
 }

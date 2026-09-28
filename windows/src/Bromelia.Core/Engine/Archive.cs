@@ -154,6 +154,8 @@ public sealed class ArchiveRecord
     public List<string> ErrorMessages { get; set; } = new();
     /// <summary>Errors MakeMKV reported while reading the disc for the rip or backup.</summary>
     public List<string> ReadErrors { get; set; } = new();
+    /// <summary>"Using LibreDrive mode (…)" details when the drive read the disc in LibreDrive mode.</summary>
+    public string? LibreDrive { get; set; }
 
     public string ToJson() => JsonSerializer.Serialize(this, new JsonSerializerOptions
     {

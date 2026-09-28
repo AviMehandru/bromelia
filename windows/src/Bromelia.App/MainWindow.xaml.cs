@@ -129,6 +129,15 @@ public sealed partial class MainWindow : Window
                 ErrorBar.Message = State.LastError ?? "";
                 ErrorBar.IsOpen = State.LastError != null;
                 break;
+            case nameof(AppState.MakemkvProblem):
+                if (State.MakemkvProblem is { } p)
+                {
+                    ProblemBar.Severity = InfoBarSeverity.Error;
+                    ProblemBar.Message = p.Explanation;
+                    ProblemBar.IsOpen = true;
+                }
+                else ProblemBar.IsOpen = false;
+                break;
             case nameof(AppState.IsScanning):
             case nameof(AppState.LastScan):
                 ScanText.Text = State.IsScanning ? "Scanning drives…" : State.LastScan is { } t ? $"Scanned {t:T}" : "";
@@ -187,10 +196,25 @@ public sealed partial class MainWindow : Window
 
     void ErrorBar_Closed(InfoBar sender, InfoBarClosedEventArgs args) => State.LastError = null;
 
+    void ProblemBar_Closed(InfoBar sender, InfoBarClosedEventArgs args) => State.MakemkvProblem = null;
+
+    async void BetaKeyButton_Click(object sender, RoutedEventArgs e)
+    {
+        BetaKeyButton.IsEnabled = false;
+        ProblemBar.Message = "Getting the current beta key…";
+        var result = await State.InstallBetaKeyAsync();
+        BetaKeyButton.IsEnabled = true;
+        // Registering clears the problem (which closes the bar): reopen it with the result.
+        if (State.MakemkvProblem == null) ProblemBar.Severity = InfoBarSeverity.Success;
+        ProblemBar.Message = result;
+        ProblemBar.IsOpen = true;
+    }
+
     public async Task OpenSourcesAsync()
     {
-        // ISO images via a file picker; folders via "Open folder" on the drive tools page or drag & drop.
-        var files = await Pickers.PickFilesAsync(".iso");
+        // Disc images, or any file on a disc (.IFO, .mpls, .m2ts, …: the disc it belongs to is opened); folders via
+        // "Open folder" on the drive tools page or drag & drop.
+        var files = await Pickers.PickFilesAsync();
         foreach (var f in files) OpenSource(f);
         if (files.Count == 0)
         {

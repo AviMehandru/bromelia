@@ -163,6 +163,13 @@ MakeMKV writes an ISO image when a backup's destination ends in `.iso`. If it wr
 (which some versions or discs may do), the folder is checked like a folder backup and kept, without the
 `.iso` extension, and the log says so.
 
+**MakeMKV messages shown outside the log.** “Using LibreDrive mode (…)” while opening a disc is shown on the
+disc page and recorded as `libreDrive` in `bromelia.json`; “LibreDrive compatible drive is required” is shown
+there too. An expired evaluation / beta key (messages 5052, 5055), an evaluation that hasn't been started, and
+“This application version is too old” show a banner with *Get the Current Beta Key* (which downloads the key
+from MakeMKV's forum and runs `makemkvcon reg`; on Linux it needs `curl`), and a job that fails because of
+one of them says so in its error.
+
 **Archive everything.** The drive editor's Presets menu has *Archive everything*: *backup then MKV* with a
 decrypted folder backup kept (every file and title of the disc, including menus and titles shorter than
 the minimum title length), MKV files of every title with every track (selection rule `+sel:all`),

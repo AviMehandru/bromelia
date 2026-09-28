@@ -126,6 +126,9 @@ public sealed class TitleSelection
 
 public sealed class RipConfig
 {
+    /// <summary>A shallow copy (the title selection is shared), for changing switches of one makemkvcon run.</summary>
+    public RipConfig Clone() => (RipConfig)MemberwiseClone();
+
     public RipMode Mode { get; set; } = RipMode.Mkv;
     public BackupFormat BackupFormat { get; set; } = BackupFormat.Folder;
     [JsonPropertyName("keepBackupAfterMKV")]

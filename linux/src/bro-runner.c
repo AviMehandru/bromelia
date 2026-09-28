@@ -96,6 +96,7 @@ bro_run_result_free (BroRunResult *r)
   g_ptr_array_unref (r->files);
   g_free (r->disc_label);
   if (r->info) bro_disc_info_unref (r->info);
+  g_free (r->libre_drive);
   g_free (r);
 }
 
@@ -177,6 +178,8 @@ typedef struct {
   gboolean reported_missing_verifier;
   GPtrArray *data_errors;      /* char*: errors MakeMKV reported while ripping or backing up */
   GCancellable *run_cancel;    /* stops the running makemkvcon only (drive changed, not enough space) */
+  BroNotice problem;           /* a problem with MakeMKV or the drive that explains a failure */
+  BroDiscInfo *rip_info;       /* the listing the titles were ripped from (disc, backup or one-pass listing) */
 } Ctx;
 
 typedef struct {
@@ -271,6 +274,12 @@ on_makemkv_line (const char *line, gpointer data)
     case BRO_EV_MESSAGE:
       {
         BroSeverity sev = bro_event_severity (ev);
+        g_autofree char *detail = NULL;
+        BroNotice notice = bro_notice_from_event (ev, &detail);
+        if (notice == BRO_NOTICE_LIBREDRIVE && !c->res->libre_drive)
+          c->res->libre_drive = g_steal_pointer (&detail);
+        else if (notice != BRO_NOTICE_NONE && notice != BRO_NOTICE_LIBREDRIVE && c->problem == BRO_NOTICE_NONE)
+          c->problem = notice;
         if (sev == BRO_SEV_DEBUG && !c->show_debug)
           return;
         log_line (c, sev, "%s", ev->text);
@@ -1736,7 +1745,7 @@ write_archive_record (Ctx *c, const char *out_dir, BroJobState status)
   g_autofree char *src = bro_source_info_argument (c->req->source);
   g_autofree char *code = NULL;
   BroIdentity *id = c->identity;
-  BroDiscInfo *info = c->res->info;
+  BroDiscInfo *info = c->rip_info ? c->rip_info : c->res->info;
   g_autoptr (GDateTime) now = g_date_time_new_now_utc ();
   g_autofree char *finished = g_date_time_format_iso8601 (now);
   g_autoptr (GDateTime) st = g_date_time_new_from_unix_utc (c->res->started_at);
@@ -1811,6 +1820,8 @@ write_archive_record (Ctx *c, const char *out_dir, BroJobState status)
   for (guint i = 0; i < c->data_errors->len; i++)
     json_builder_add_string_value (b, c->data_errors->pdata[i]);
   json_builder_end_array (b);
+  if (c->res->libre_drive)
+    S ("libreDrive", c->res->libre_drive);
   json_builder_end_object (b);
 #undef S
   root = json_builder_get_root (b);
@@ -2095,6 +2106,59 @@ bro_listing_map (GArray *indices, BroDiscInfo *old, BroDiscInfo *now, GHashTable
   return g_steal_pointer (&map);
 }
 
+int
+bro_one_pass_min_length (GArray *indices, BroDiscInfo *info, int current)
+{
+  g_autoptr (GHashTable) chosen = g_hash_table_new (g_direct_hash, g_direct_equal);
+  int shortest = G_MAXINT, longest_other = -1, picked = 0;
+  for (guint i = 0; i < indices->len; i++)
+    g_hash_table_add (chosen, GINT_TO_POINTER (g_array_index (indices, int, i)));
+  /* Rips with fewer titles gain nothing: the extra listing costs as much as the runs it saves. */
+  if (g_hash_table_size (chosen) < 3 || g_hash_table_size (chosen) >= info->titles->len)
+    return -1;
+  for (guint i = 0; i < info->titles->len; i++)
+    {
+      BroTitle *t = info->titles->pdata[i];
+      int d = bro_title_duration (t);
+      if (g_hash_table_contains (chosen, GINT_TO_POINTER (t->index)))
+        {
+          shortest = MIN (shortest, d);
+          picked++;
+        }
+      else
+        longest_other = MAX (longest_other, d);
+    }
+  /* Listed lengths are rounded to seconds: keep 2 s between the shortest chosen and the longest left out. */
+  if (picked != (int) g_hash_table_size (chosen) || longest_other < 0 || shortest - longest_other < 2)
+    return -1;
+  return longest_other + 1 > MAX (current, 0) ? longest_other + 1 : -1;
+}
+
+gboolean
+bro_one_pass_matches (BroDiscInfo *listing, GArray *indices, BroDiscInfo *info)
+{
+  g_autoptr (GHashTable) map = NULL;
+  g_autoptr (GHashTable) targets = g_hash_table_new (g_direct_hash, g_direct_equal);
+  GHashTableIter it;
+  gpointer v;
+  g_autoptr (GArray) unique = g_array_copy (indices);
+  g_array_sort (unique, cmp_int);
+  for (guint i = 1; i < unique->len;)
+    if (g_array_index (unique, int, i) == g_array_index (unique, int, i - 1))
+      g_array_remove_index (unique, i);
+    else
+      i++;
+  if (listing->titles->len != unique->len)
+    return FALSE;
+  map = bro_listing_map (unique, info, listing, NULL, NULL);
+  if (!map)
+    return FALSE;
+  g_hash_table_iter_init (&it, map);
+  while (g_hash_table_iter_next (&it, NULL, &v))
+    g_hash_table_add (targets, v);
+  return g_hash_table_size (targets) == listing->titles->len;
+}
+
 gint64
 bro_disk_available (const char *path)
 {
@@ -2208,16 +2272,83 @@ verify_rip (Ctx *c, const char *file, BroTitle *title)
   return NULL;
 }
 
+static gboolean apply_title_map (Ctx *c, BroDiscInfo *old, BroDiscInfo *now, GError **error);
+
+/* Checks a listing read with a minimum length that leaves out every title but the chosen ones, so they can be ripped
+ * in one run. Returns that listing (and the length), or NULL to rip title by title. */
+static BroDiscInfo *
+one_pass_listing (Ctx *c, const BroSource *src, BroDiscInfo *info, GArray *indices, int *min_length, GError **error)
+{
+  BroRipConfig rip = c->req->drive->rip;
+  g_autoptr (GPtrArray) args = NULL;
+  Summary *s;
+  BroDiscInfo *listing;
+  int length;
+  if (g_hash_table_size (c->req->track_selections) > 0)
+    return NULL;
+  length = bro_one_pass_min_length (indices, info, rip.min_length_seconds);
+  if (length < 0)
+    return NULL;
+  rip.min_length_seconds = length;
+  phase (c, "Reading the disc listing for a one-pass rip");
+  args = bro_makemkv_info_args (c->env, src, &rip);
+  s = run_makemkv (c, args, FALSE, error);
+  if (!s)
+    return NULL;
+  listing = bro_disc_info_ref (s->info);
+  summary_free (s);
+  if (!bro_one_pass_matches (listing, indices, info))
+    {
+      log_line (c, BRO_SEV_WARNING, "A minimum length of %d s doesn't leave exactly the chosen titles; ripping them one by one", length);
+      bro_disc_info_unref (listing);
+      return NULL;
+    }
+  if (!apply_title_map (c, info, listing, error))
+    {
+      bro_disc_info_unref (listing);
+      return NULL;
+    }
+  log_line (c, BRO_SEV_INFO, "Ripping %u titles in one pass (a minimum title length of %d s leaves out the other %u)",
+            indices->len, length, info->titles->len - indices->len);
+  *min_length = length;
+  return listing;
+}
+
 static gboolean
 rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir, int extra_steps, GError **error)
 {
   g_autoptr (GArray) indices = choose_titles (c, info, error);
   g_autoptr (GPtrArray) failures = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroDiscInfo) pass = NULL;
+  BroRipConfig rip = c->req->drive->rip;
   gboolean every = TRUE, single;
   int count;
 
   if (!indices)
     return FALSE;
+  /* Rip several titles in one makemkvcon run (one read of the disc structure) when they are exactly the titles above
+   * some length: then a minimum length leaves just them, and "all" rips them. */
+  {
+    g_autoptr (GError) err = NULL;
+    int length = -1;
+    pass = one_pass_listing (c, src, info, indices, &length, &err);
+    if (err)
+      {
+        g_propagate_error (error, g_steal_pointer (&err));
+        return FALSE;
+      }
+    if (pass)
+      {
+        info = pass;
+        g_array_set_size (indices, 0);
+        for (guint i = 0; i < pass->titles->len; i++)
+          g_array_append_val (indices, ((BroTitle *) pass->titles->pdata[i])->index);
+        rip.min_length_seconds = length;
+      }
+  }
+  if (c->rip_info)
+    bro_disc_info_unref (c->rip_info);
+  c->rip_info = bro_disc_info_ref (info);
   if (c->rip_titles)
     g_array_unref (c->rip_titles);
   c->rip_titles = g_array_ref (indices);
@@ -2254,7 +2385,7 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
       update (c, BRO_UPDATE_PROGRESS, BRO_SEV_INFO, NULL, 0, 0);
       phase (c, ph);
       c->env = (!single && g_hash_table_contains (c->req->track_selections, GINT_TO_POINTER (ti)) && c->all_env) ? c->all_env : c->base_env;
-      args = bro_makemkv_mkv_args (c->env, src, tstr, out_dir, &c->req->drive->rip);
+      args = bro_makemkv_mkv_args (c->env, src, tstr, out_dir, &rip);
       s = run_makemkv (c, args, TRUE, error);
       c->env = c->base_env;
       if (!s)
@@ -2981,9 +3112,9 @@ write_manifest (Ctx *c, BroJobState status)
   json_builder_end_array (b);
   json_builder_set_member_name (b, "titles");
   json_builder_begin_array (b);
-  for (guint i = 0; c->rip_titles && c->res->info && i < c->rip_titles->len; i++)
+  for (guint i = 0; c->rip_titles && (c->rip_info || c->res->info) && i < c->rip_titles->len; i++)
     {
-      BroTitle *t = bro_disc_info_title (c->res->info, g_array_index (c->rip_titles, int, i));
+      BroTitle *t = bro_disc_info_title (c->rip_info ? c->rip_info : c->res->info, g_array_index (c->rip_titles, int, i));
       if (!t)
         continue;
       json_builder_begin_object (b);
@@ -3099,6 +3230,15 @@ bro_run_job (BroRunRequest *req)
     }
   else if (g_cancellable_is_cancelled (req->cancellable))
     status = BRO_JOB_CANCELLED;
+  /* Name the real cause when MakeMKV itself couldn't work (expired key, LibreDrive required, …). */
+  if (status == BRO_JOB_FAILED && c.problem != BRO_NOTICE_NONE)
+    {
+      char *e = g_strdup_printf ("%s (%s)", bro_notice_explanation (c.problem), res->error ? res->error : "MakeMKV failed");
+      g_free (res->error);
+      res->error = e;
+      log_line (&c, BRO_SEV_ERROR, "%s", bro_notice_explanation (c.problem));
+    }
+  res->problem = c.problem;
   if (status == BRO_JOB_SUCCEEDED && c.data_errors->len)
     {
       status = BRO_JOB_COMPLETED_WITH_ERRORS;
@@ -3161,5 +3301,6 @@ bro_run_job (BroRunRequest *req)
   g_ptr_array_unref (c.data_errors);
   g_free (c.output_dir);
   g_free (c.work_dir);
+  if (c.rip_info) bro_disc_info_unref (c.rip_info);
   return res;
 }

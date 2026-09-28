@@ -164,10 +164,15 @@ public sealed partial class SettingsPage : Page
             result.Text = await State.RegisterWithMakeMkvAsync(c.RegistrationKey);
         }));
         buttons.Children.Add(PageHelpers.Button("Get a key…", () => Shell.Open("https://www.makemkv.com/buy/")));
-        buttons.Children.Add(PageHelpers.Button("Beta key…", () => Shell.Open("https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053")));
+        buttons.Children.Add(PageHelpers.Button("Get the current beta key", async () =>
+        {
+            result.Text = "Getting the current beta key…";
+            result.Text = await State.InstallBetaKeyAsync();
+        }));
+        buttons.Children.Add(PageHelpers.Button("Beta key forum page…", () => Shell.Open(BetaKey.PageUrl)));
         f.Add(buttons);
         f.Add(result);
-        f.Note("“Register key with MakeMKV” runs makemkvcon reg, which stores the key in MakeMKV's own settings so the MakeMKV app uses it too.");
+        f.Note("“Register key with MakeMKV” runs makemkvcon reg, which stores the key in MakeMKV's own settings so the MakeMKV app uses it too. “Get the current beta key” reads the free beta key from MakeMKV's forum and registers it the same way.");
         return f.Root;
     }
 }

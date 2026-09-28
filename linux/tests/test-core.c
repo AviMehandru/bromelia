@@ -1825,6 +1825,295 @@ test_archive_everything (void)
   g_assert_true (empty->prevent_sleep);
 }
 
+/* ---- MakeMKV parity: notices, beta key, single files, one-pass rips ---- */
+
+static BroNotice
+notice_of (const char *line, char **detail)
+{
+  g_autoptr (BroEvent) ev = bro_event_parse (line);
+  return bro_notice_from_event (ev, detail);
+}
+
+static void
+test_notices (void)
+{
+  g_autofree char *detail = NULL;
+  g_assert_cmpint (notice_of ("MSG:1011,0,1,\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\",\"%1\",\"x\"", &detail), ==, BRO_NOTICE_LIBREDRIVE);
+  g_assert_cmpstr (detail, ==, "v06.3 id=4FBA32AEC678");
+  g_assert_cmpint (notice_of ("MSG:5055,0,0,\"Evaluation period has expired, shareware functionality unavailable.\",\"x\"", NULL), ==, BRO_NOTICE_KEY_EXPIRED);
+  g_assert_cmpint (notice_of ("MSG:5052,516,0,\"Evaluation period has expired. Please purchase an activation key.\",\"x\"", NULL), ==, BRO_NOTICE_KEY_EXPIRED);
+  g_assert_cmpint (notice_of ("MSG:5021,260,1,\"This application version is too old.  Please download the latest version at http://www.makemkv.com/ or enter a registration key to continue using the current version.\",\"x\",\"y\"", NULL), ==, BRO_NOTICE_VERSION_TOO_OLD);
+  g_assert_cmpint (notice_of ("MSG:2024,0,0,\"LibreDrive compatible drive is required to open this disc - video can't be decrypted.\",\"x\"", NULL), ==, BRO_NOTICE_LIBREDRIVE_REQUIRED);
+  g_assert_cmpint (notice_of ("MSG:3007,0,0,\"Using direct disc access mode\",\"Using direct disc access mode\"", NULL), ==, BRO_NOTICE_NONE);
+  g_assert_true (bro_notice_is_license_problem (BRO_NOTICE_KEY_EXPIRED));
+  g_assert_false (bro_notice_is_license_problem (BRO_NOTICE_LIBREDRIVE_REQUIRED));
+}
+
+static void
+test_beta_key_parse (void)
+{
+  g_autoptr (GString) key = g_string_new ("T-");
+  g_autofree char *html = NULL, *got = NULL, *none = NULL;
+  for (int i = 0; i < 11; i++)
+    g_string_append (key, "aB3@_x");
+  html = g_strdup_printf ("<div class=\"codebox\"><p>Code: <a href=\"#\">Select all</a></p><pre><code>%s</code></pre></div> and is valid until end of October", key->str);
+  got = bro_beta_key_parse (html);
+  none = bro_beta_key_parse ("no key here");
+  g_assert_cmpstr (got, ==, key->str);
+  g_assert_null (none);
+}
+
+static void
+test_source_resolve (void)
+{
+  static const struct { const char *path; gboolean dir; const char *want; } cases[] = {
+    { "/Rips/Disc/VIDEO_TS/VTS_01_1.VOB", FALSE, "file:/Rips/Disc" },
+    { "/Rips/Disc/VIDEO_TS/VIDEO_TS.IFO", FALSE, "file:/Rips/Disc" },
+    { "/Rips/Disc/BDMV/PLAYLIST/00800.mpls", FALSE, "file:/Rips/Disc" },
+    { "/Rips/Disc/BDMV/STREAM/00001.m2ts", FALSE, "file:/Rips/Disc" },
+    { "/Rips/Disc/BDMV", TRUE, "file:/Rips/Disc" },
+    { "/Rips/Disc", TRUE, "file:/Rips/Disc" },
+    { "/Rips/Movie.ISO", FALSE, "iso:/Rips/Movie.ISO" },
+    { "/Rips/loose.m2ts", FALSE, "file:/Rips/loose.m2ts" },
+  };
+  for (guint i = 0; i < G_N_ELEMENTS (cases); i++)
+    {
+      BroSource *s = bro_source_resolve (cases[i].path, cases[i].dir);
+      g_autofree char *arg = bro_source_info_argument (s);
+      g_assert_cmpstr (arg, ==, cases[i].want);
+      bro_source_free (s);
+    }
+}
+
+static GArray *
+ints (const char *list)
+{
+  g_auto (GStrv) parts = g_strsplit (list, ",", -1);
+  GArray *a = g_array_new (FALSE, FALSE, sizeof (int));
+  for (guint i = 0; parts[i]; i++)
+    {
+      int v = atoi (parts[i]);
+      g_array_append_val (a, v);
+    }
+  return a;
+}
+
+static void
+test_one_pass_rule (void)
+{
+  g_autofree char *l = listing ("X", "0:10:00,1;0:00:30,2;0:15:00,3;0:20:00,4;0:00:40,5");
+  g_autofree char *close = listing ("X", "0:10:00,1;0:09:59,2;0:15:00,3;0:20:00,4");
+  g_autofree char *kept = listing ("X", "0:10:00,1;0:15:00,3;0:20:00,4");
+  g_autofree char *short_list = listing ("X", "0:10:00,1;0:15:00,3");
+  g_autoptr (BroDiscInfo) info = bro_disc_info_from_output (l);
+  g_autoptr (BroDiscInfo) near = bro_disc_info_from_output (close);
+  g_autoptr (BroDiscInfo) filtered = bro_disc_info_from_output (kept);
+  g_autoptr (BroDiscInfo) missing = bro_disc_info_from_output (short_list);
+  g_autoptr (GArray) three = ints ("0,2,3"), two = ints ("0,2"), all = ints ("0,1,2,3,4"), wrong = ints ("1,2,3");
+  g_assert_cmpint (bro_one_pass_min_length (three, info, -1), ==, 41);
+  g_assert_cmpint (bro_one_pass_min_length (two, info, -1), ==, -1);
+  g_assert_cmpint (bro_one_pass_min_length (all, info, -1), ==, -1);
+  g_assert_cmpint (bro_one_pass_min_length (wrong, info, -1), ==, -1);
+  g_assert_cmpint (bro_one_pass_min_length (three, near, -1), ==, -1);
+  g_assert_cmpint (bro_one_pass_min_length (three, info, 120), ==, -1);
+  g_assert_true (bro_one_pass_matches (filtered, three, info));
+  g_assert_false (bro_one_pass_matches (missing, three, info));
+}
+
+/* A fake whose info command honours --minlength (titles of at least N seconds, renumbered), like makemkvcon. */
+static Fake *
+fake_one_pass (const char *titles, const char *extra_info)
+{
+  static const char *mkv = "if [ \"$title\" = \"all\" ]; then\n"
+                           "  for t in 0 1 2 3 4 5; do grep -q \"title_t0$t.mkv\" \"$LISTING\" && printf 'mkv data' > \"$dest/title_t0$t.mkv\"; done\n"
+                           "else\n  printf 'mkv data' > \"$dest/title_t0$title.mkv\"\nfi\n"
+                           "echo 'MSG:5036,260,1,\"Copy complete. 1 titles saved.\",\"Copy complete. %1 titles saved.\",\"1\"'";
+  g_autofree char *full = listing ("SAMPLE_MOVIE", titles);
+  g_autofree char *with_extra = g_strconcat (extra_info ? extra_info : "", full, NULL);
+  Fake *f = fake_new (with_extra, mkv);
+  g_autofree char *list = g_build_filename (f->dir, "listing.txt", NULL);
+  g_autofree char *script = NULL;
+  g_auto (GStrv) parts = g_strsplit (titles, ";", -1);
+  static const int mins[] = { 6, 11, 21 };
+  for (guint m = 0; m < G_N_ELEMENTS (mins); m++)
+    {
+      GString *kept = g_string_new (NULL);
+      g_autofree char *name = g_strdup_printf ("min%d.txt", mins[m]);
+      g_autofree char *path = g_build_filename (f->dir, name, NULL);
+      g_autofree char *text = NULL;
+      for (guint i = 0; parts[i]; i++)
+        {
+          g_auto (GStrv) fields = g_strsplit (parts[i], ",", 2);
+          if (bro_parse_duration (fields[0]) >= mins[m])
+            g_string_append_printf (kept, "%s%s", kept->len ? ";" : "", parts[i]);
+        }
+      text = listing ("SAMPLE_MOVIE", kept->str);
+      g_assert_true (g_file_set_contents (path, text, -1, NULL));
+      g_string_free (kept, TRUE);
+    }
+  g_assert_true (g_file_get_contents (f->exe, &script, NULL, NULL));
+  {
+    g_autofree char *prelude = g_strdup_printf ("#!/bin/sh\nMIN=0; for a in \"$@\"; do case \"$a\" in --minlength=*) MIN=\"${a#--minlength=}\";; esac; done\n"
+                                                "LISTING='%s'/min$MIN.txt; [ -f \"$LISTING\" ] || LISTING='%s'\n", f->dir, list);
+    g_autofree char *old_info = g_strdup_printf ("info) cat '%s' ;;", list);
+    g_auto (GStrv) a = g_strsplit (script, "#!/bin/sh\n", 2);
+    g_autofree char *s1 = g_strconcat (prelude, a[1], NULL);
+    g_auto (GStrv) b = g_strsplit (s1, old_info, 2);
+    g_autofree char *s2 = g_strjoinv ("info) cat \"$LISTING\" ;;", b);
+    g_assert_true (g_file_set_contents (f->exe, s2, -1, NULL));
+  }
+  return f;
+}
+
+static BroRunResult *
+run_rule (Fake *f, BroStrategy strategy, int count, const char *pattern)
+{
+  BroRunRequest *req = bro_run_request_new ();
+  BroRunResult *res;
+  req->job_id = g_uuid_string_random ();
+  req->job_dir = g_build_filename (f->dir, "job", NULL);
+  req->config = bro_app_config_new ();
+  g_free (req->config->output_root);
+  req->config->output_root = g_strdup (f->root);
+  req->drive = bro_drive_config_new ();
+  req->drive->automation.notify = FALSE;
+  req->drive->rip.titles.strategy = strategy;
+  req->drive->rip.titles.longest_count = count;
+  if (pattern)
+    {
+      g_free (req->drive->rip.titles.index_pattern);
+      req->drive->rip.titles.index_pattern = g_strdup (pattern);
+    }
+  req->source = bro_source_new_path (BRO_SOURCE_ISO, "/nonexistent/test.iso");
+  req->mode = BRO_MODE_MKV;
+  req->makemkvcon = g_strdup (f->exe);
+  req->skip_eject = TRUE;
+  res = bro_run_job (req);
+  bro_run_request_free (req);
+  return res;
+}
+
+static guint
+count_mkv_calls (const char *calls, const char **first)
+{
+  g_auto (GStrv) lines = g_strsplit (calls, "\n", -1);
+  guint n = 0;
+  for (guint i = 0; lines[i]; i++)
+    if (strstr (lines[i], " mkv "))
+      {
+        if (n == 0 && first)
+          *first = strstr (calls, lines[i]);
+        n++;
+      }
+  return n;
+}
+
+static void
+test_one_pass_jobs (void)
+{
+  const char *titles = "0:00:30,1;0:00:05,2;0:00:20,3;0:00:40,4;0:00:10,5";
+  {
+    Fake *f = fake_one_pass (titles, NULL);
+    g_autoptr (BroRunResult) res = run_rule (f, BRO_STRATEGY_LONGEST, 3, NULL);
+    g_autofree char *calls = fake_calls (f);
+    const char *first = NULL;
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("one pass: %s\n%s", res->error, calls);
+    g_assert_cmpuint (count_mkv_calls (calls, &first), ==, 1);
+    g_assert_nonnull (strstr (first, "--minlength=11"));
+    g_assert_nonnull (strstr (first, "mkv iso:/nonexistent/test.iso all "));
+    g_assert_cmpuint (res->files->len, ==, 3);
+    fake_free (f);
+  }
+  {
+    Fake *f = fake_one_pass (titles, NULL);
+    g_autoptr (BroRunResult) res = run_rule (f, BRO_STRATEGY_INDICES, 0, "0,1,3");
+    g_autofree char *calls = fake_calls (f);
+    g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+    g_assert_cmpuint (count_mkv_calls (calls, NULL), ==, 3);
+    g_assert_null (strstr (calls, "--minlength"));
+    fake_free (f);
+  }
+}
+
+static void
+test_notices_in_jobs (void)
+{
+  {
+    Fake *f = fake_new ("MSG:5055,0,0,\"Evaluation period has expired, shareware functionality unavailable.\",\"x\"\n"
+                        "MSG:5010,0,0,\"Failed to open disc\",\"Failed to open disc\"\n", ":");
+    g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
+    g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+    g_assert_cmpint (res->problem, ==, BRO_NOTICE_KEY_EXPIRED);
+    g_assert_nonnull (strstr (res->error, "key has expired"));
+    fake_free (f);
+  }
+  {
+    Fake *f = fake_one_pass ("0:00:30,1", "MSG:1011,0,1,\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\",\"%1\",\"x\"\n");
+    g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
+    g_autofree char *path = NULL;
+    g_autoptr (JsonParser) p = json_parser_new ();
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("libredrive: %s", res->error);
+    g_assert_cmpstr (res->libre_drive, ==, "v06.3 id=4FBA32AEC678");
+    path = g_build_filename (res->output_dir, "bromelia.json", NULL);
+    g_assert_true (json_parser_load_from_file (p, path, NULL));
+    g_assert_cmpstr (json_object_get_string_member (json_node_get_object (json_parser_get_root (p)), "libreDrive"), ==, "v06.3 id=4FBA32AEC678");
+    fake_free (f);
+  }
+}
+
+static void
+test_one_pass_integration (void)
+{
+  const char *iso = g_getenv ("BROMELIA_TEST_ONEPASS_ISO");
+  g_autofree char *exe = bro_find_tool ("", "makemkvcon");
+  g_autofree char *out = NULL;
+  BroRunRequest *req;
+  g_autoptr (BroRunResult) res = NULL;
+  g_autofree char *calls = NULL;
+  const char *first = NULL;
+  if (!iso || !exe)
+    {
+      g_test_skip ("set BROMELIA_TEST_ONEPASS_ISO and install makemkvcon to run");
+      return;
+    }
+  out = g_dir_make_tmp ("bromelia-1p-XXXXXX", NULL);
+  req = bro_run_request_new ();
+  req->job_id = g_uuid_string_random ();
+  req->job_dir = g_build_filename (out, ".job", NULL);
+  req->config = bro_app_config_new ();
+  g_free (req->config->output_root);
+  req->config->output_root = g_strdup (out);
+  req->drive = bro_drive_config_new ();
+  req->drive->rip.min_length_seconds = 0;
+  req->drive->rip.titles.strategy = BRO_STRATEGY_LONGEST;
+  req->drive->rip.titles.longest_count = 3;
+  req->drive->episodes.split_play_all = FALSE;
+  req->source = bro_source_new_path (BRO_SOURCE_ISO, iso);
+  req->mode = BRO_MODE_MKV;
+  req->makemkvcon = g_strdup (exe);
+  req->mkvmerge = bro_find_tool ("", "mkvmerge");
+  req->skip_eject = TRUE;
+  res = bro_run_job (req);
+  bro_run_request_free (req);
+  if (res->status != BRO_JOB_SUCCEEDED)
+    g_error ("one-pass rip failed: %s", res->error);
+  {
+    g_autofree char *log_path = g_build_filename (out, ".job", "log.txt", NULL);
+    g_assert_true (g_file_get_contents (log_path, &calls, NULL, NULL));
+  }
+  g_assert_nonnull (strstr (calls, "in one pass"));
+  g_assert_cmpuint (count_mkv_calls (calls, &first), ==, 1);
+  g_assert_nonnull (strstr (first, " all "));
+  g_assert_cmpuint (res->files->len, ==, 3);
+  {
+    g_autoptr (GPtrArray) bad = bro_checksums_verify (res->output_dir, NULL);
+    g_assert_nonnull (bad);
+    g_assert_cmpuint (bad->len, ==, 0);
+  }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1881,5 +2170,12 @@ main (int argc, char **argv)
   g_test_add_func ("/reliability/free-space", test_free_space);
   g_test_add_func ("/reliability/iso-backups", test_iso_backups);
   g_test_add_func ("/reliability/archive-everything", test_archive_everything);
+  g_test_add_func ("/parity/notices", test_notices);
+  g_test_add_func ("/parity/beta-key", test_beta_key_parse);
+  g_test_add_func ("/parity/source-resolve", test_source_resolve);
+  g_test_add_func ("/parity/one-pass-rule", test_one_pass_rule);
+  g_test_add_func ("/parity/one-pass-jobs", test_one_pass_jobs);
+  g_test_add_func ("/parity/notices-in-jobs", test_notices_in_jobs);
+  g_test_add_func ("/parity/one-pass-integration", test_one_pass_integration);
   return g_test_run ();
 }

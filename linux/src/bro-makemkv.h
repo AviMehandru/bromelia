@@ -115,4 +115,13 @@ char **bro_ptr_array_to_strv (GPtrArray *a);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroSource, bro_source_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroMakemkvEnv, bro_makemkv_env_free)
 
+/* MakeMKV's free beta key, which the developer posts on the forum and replaces about once a month. */
+#define BRO_BETA_KEY_URL "https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053"
+char      *bro_beta_key_parse (const char *html); /* the "T-…" key in the post, or NULL */
+char      *bro_beta_key_fetch (GError **error);   /* downloads the forum page with curl; blocking */
+
+/* Where a file or folder the user opened leads: MakeMKV opens discs (an image, or a folder holding BDMV / VIDEO_TS /
+ * HVDVD_TS), not single files, so a file inside a disc structure (.IFO, .VOB, .mpls, .m2ts, …) opens its disc. */
+BroSource *bro_source_resolve (const char *path, gboolean is_dir);
+
 G_END_DECLS

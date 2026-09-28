@@ -585,3 +585,173 @@ struct ReliabilityTests {
         #expect(c.preventSleep)
     }
 }
+
+// MARK: - MakeMKV notices, beta key, single files, one-pass rips
+
+@Suite("MakeMKV parity")
+struct ParityTests {
+    private func message(_ line: String) -> RobotMessage {
+        guard case .message(let m)? = RobotParser.parse(line: line) else { fatalError("not a message: \(line)") }
+        return m
+    }
+
+    @Test func recognisesNotices() {
+        #expect(MakeMKVNotice(message(#"MSG:1011,0,1,"Using LibreDrive mode (v06.3 id=4FBA32AEC678)","%1","Using LibreDrive mode (v06.3 id=4FBA32AEC678)""#))
+                == .libreDrive("v06.3 id=4FBA32AEC678"))
+        #expect(MakeMKVNotice(message(#"MSG:5055,0,0,"Evaluation period has expired, shareware functionality unavailable.","Evaluation period has expired, shareware functionality unavailable.""#)) == .keyExpired)
+        #expect(MakeMKVNotice(message(#"MSG:5052,516,0,"Evaluation period has expired. Please purchase an activation key if you've found this application useful. You may still use all free functionality without any restrictions.","x""#)) == .keyExpired)
+        #expect(MakeMKVNotice(message(#"MSG:5021,260,1,"This application version is too old.  Please download the latest version at http://www.makemkv.com/ or enter a registration key to continue using the current version.","x","http://www.makemkv.com/""#)) == .versionTooOld)
+        #expect(MakeMKVNotice(message(#"MSG:2024,0,0,"LibreDrive compatible drive is required to open this disc - video can't be decrypted.","x""#)) == .libreDriveRequired)
+        #expect(MakeMKVNotice(message(#"MSG:3007,0,0,"Using direct disc access mode","Using direct disc access mode""#)) == nil)
+        #expect(MakeMKVNotice.keyExpired.isLicenseProblem && !MakeMKVNotice.libreDriveRequired.isLicenseProblem)
+    }
+
+    @Test func readsTheBetaKeyFromTheForumPage() {
+        let key = "T-" + String(repeating: "aB3@_x", count: 11)
+        let html = ##"<div class="codebox"><p>Code: <a href="#">Select all</a></p><pre><code>"## + key + ##"</code></pre></div> and is valid until end of October"##
+        #expect(BetaKey.parse(html: html) == key)
+        #expect(BetaKey.parse(html: "no key here") == nil)
+    }
+
+    @Test(arguments: [
+        ("/Rips/Disc/VIDEO_TS/VTS_01_1.VOB", false, "file:/Rips/Disc"),
+        ("/Rips/Disc/VIDEO_TS/VIDEO_TS.IFO", false, "file:/Rips/Disc"),
+        ("/Rips/Disc/BDMV/PLAYLIST/00800.mpls", false, "file:/Rips/Disc"),
+        ("/Rips/Disc/BDMV/STREAM/00001.m2ts", false, "file:/Rips/Disc"),
+        ("/Rips/Disc/BDMV", true, "file:/Rips/Disc"),
+        ("/Rips/Disc", true, "file:/Rips/Disc"),
+        ("/Rips/Movie.ISO", false, "iso:/Rips/Movie.ISO"),
+        ("/Rips/loose.m2ts", false, "file:/Rips/loose.m2ts"),
+    ])
+    func opensTheDiscAFileBelongsTo(path: String, isDirectory: Bool, expected: String) {
+        #expect(SourceResolver.source(for: URL(fileURLWithPath: path), isDirectory: isDirectory).infoArgument == expected)
+    }
+
+    private func titles(_ durations: [Int]) -> DiscInfo {
+        var d = DiscInfo()
+        d.titles = durations.enumerated().map { i, s in
+            var t = TitleInfo(index: i)
+            t.attributes[AttributeID.duration.rawValue] = TitleInfo.formatDuration(s)
+            t.attributes[AttributeID.originalTitleId.rawValue] = String(i + 1)
+            return t
+        }
+        return d
+    }
+
+    @Test func onePassNeedsTheLongestTitlesAndEnoughOfThem() {
+        let info = titles([600, 30, 900, 1200, 40])
+        #expect(OnePass.minimumLength(chosen: [0, 2, 3], of: info, current: nil) == 41)
+        #expect(OnePass.minimumLength(chosen: [0, 2], of: info, current: nil) == nil)          // too few to gain
+        #expect(OnePass.minimumLength(chosen: [0, 1, 2, 3, 4], of: info, current: nil) == nil) // every title: "all" anyway
+        #expect(OnePass.minimumLength(chosen: [1, 2, 3], of: info, current: nil) == nil)       // a longer title left out
+        #expect(OnePass.minimumLength(chosen: [0, 2, 3], of: titles([600, 599, 900, 1200]), current: nil) == nil) // too close
+        #expect(OnePass.minimumLength(chosen: [0, 2, 3], of: info, current: 120) == nil)       // already filtered
+        let filtered = titles([600, 900, 1200].map { $0 })
+        var shifted = filtered
+        for i in shifted.titles.indices { shifted.titles[i].attributes[AttributeID.originalTitleId.rawValue] = ["1", "3", "4"][i] }
+        #expect(OnePass.matches(shifted, chosen: [0, 2, 3], of: info))
+        #expect(!OnePass.matches(titles([600, 900]), chosen: [0, 2, 3], of: info))
+    }
+}
+
+@Suite("One-pass rips and notices in jobs", .serialized)
+@MainActor
+struct OnePassJobTests {
+    let root: URL
+
+    init() throws {
+        Paths.dataOverride = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-test-data", isDirectory: true)
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-1p-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    /// Titles (duration, source id) of the full listing; with `--minlength=N` the fake lists only titles of at
+    /// least N seconds, renumbered, like makemkvcon.
+    private func fake(_ all: [(String, Int)], extraInfo: String = "") throws -> FakeMakeMKV {
+        let full = listing(titles: all)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-1pl-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // One listing per minimum length a test may ask for.
+        for n in [0, 11, 21, 6] {
+            let kept = all.filter { TitleInfo.parseDuration($0.0) >= n }
+            try listing(titles: kept).write(to: dir.appendingPathComponent("min\(n).txt"), atomically: true, encoding: .utf8)
+        }
+        let mkv = """
+            if [ "$title" = "all" ]; then
+              for t in 0 1 2 3 4 5; do grep -q "title_t0$t.mkv" "$LISTING" && printf 'mkv data' > "$dest/title_t0$t.mkv"; done
+            else
+              printf 'mkv data' > "$dest/title_t0$title.mkv"
+            fi
+            echo 'MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"'
+        """
+        let f = try FakeMakeMKV(listing: extraInfo + full, mkv: mkv)
+        // Replace the info branch: pick the listing matching --minlength.
+        var script = try String(contentsOf: f.executable, encoding: .utf8)
+        script = script.replacingOccurrences(of: "echo \"$@\" >>", with: """
+            MIN=0; for a in "$@"; do case "$a" in --minlength=*) MIN="${a#--minlength=}";; esac; done
+            LISTING='\(dir.path)'/min$MIN.txt; [ -f "$LISTING" ] || LISTING='\(f.dir.path)/listing.txt'
+            [ "$MIN" = 0 ] && LISTING='\(f.dir.path)/listing.txt'
+            echo "$@" >>
+            """)
+        script = script.replacingOccurrences(of: "info) cat '\(f.dir.path)/listing.txt' ;;", with: "info) cat \"$LISTING\" ;;")
+        try script.write(to: f.executable, atomically: true, encoding: .utf8)
+        return f
+    }
+
+    private func run(_ f: FakeMakeMKV, configure: (inout DriveConfig) -> Void) async -> RipJob {
+        var config = AppConfig()
+        config.outputRoot = root.path
+        var drive = DriveConfig()
+        drive.automation.notify = false
+        configure(&drive)
+        let job = RipJob(source: .iso(path: "/nonexistent/test.iso"), drive: drive, laneKey: "iso:1p", sourceLabel: "test", discLabel: "", mode: .mkv)
+        await JobRunner(job: job, config: config, makemkvcon: f.executable, mkvmerge: nil).run()
+        return job
+    }
+
+    @Test func longestTitlesAreRippedInOnePass() async throws {
+        let f = try fake([("0:00:30", 1), ("0:00:05", 2), ("0:00:20", 3), ("0:00:40", 4), ("0:00:10", 5)])
+        let job = await run(f) {
+            $0.rip.titleSelection.strategy = .longest
+            $0.rip.titleSelection.longestCount = 3
+        }
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "") \(f.calls)")
+        let mkvCalls = f.calls.split(separator: "\n").filter { $0.contains(" mkv ") }
+        #expect(mkvCalls.count == 1, "\(f.calls)")
+        #expect(mkvCalls.first?.contains("--minlength=11") == true, "\(mkvCalls)")
+        #expect(mkvCalls.first?.contains("mkv iso:/nonexistent/test.iso all ") == true, "\(mkvCalls)")
+        #expect(job.producedFiles.count == 3)
+        #expect(job.ripInfo?.titles.map(\.sourceTitleId) == [1, 3, 4])
+        #expect(job.log.contains { $0.text.contains("in one pass") })
+    }
+
+    @Test func otherSelectionsAreRippedTitleByTitle() async throws {
+        let f = try fake([("0:00:30", 1), ("0:00:05", 2), ("0:00:20", 3), ("0:00:40", 4), ("0:00:10", 5)])
+        let job = await run(f) {
+            $0.rip.titleSelection.strategy = .indices
+            $0.rip.titleSelection.indexPattern = "0,1,3"   // leaves out a longer title (20 s)
+        }
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "")")
+        #expect(f.calls.split(separator: "\n").filter { $0.contains(" mkv ") }.count == 3)
+        #expect(!f.calls.contains("--minlength"))
+    }
+
+    @Test func expiredKeyExplainsTheFailure() async throws {
+        let expired = #"MSG:5055,0,0,"Evaluation period has expired, shareware functionality unavailable.","Evaluation period has expired, shareware functionality unavailable.""#
+        let f = try FakeMakeMKV(listing: expired + "\n" + #"MSG:5010,0,0,"Failed to open disc","Failed to open disc""# + "\n", mkv: ":")
+        let job = await run(f) { _ in }
+        #expect(job.state == .failed)
+        #expect(job.makemkvProblem == .keyExpired)
+        #expect(job.errorMessage?.contains("key has expired") == true, "\(job.errorMessage ?? "")")
+    }
+
+    @Test func libreDriveIsRecorded() async throws {
+        let libre = #"MSG:1011,0,1,"Using LibreDrive mode (v06.3 id=4FBA32AEC678)","%1","Using LibreDrive mode (v06.3 id=4FBA32AEC678)""# + "\n"
+        let f = try fake([("0:00:30", 1)], extraInfo: libre)
+        let job = await run(f) { _ in }
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "")")
+        #expect(job.libreDrive == "v06.3 id=4FBA32AEC678")
+        let record = try JSONSerialization.jsonObject(with: Data(contentsOf: job.outputDirectory!.appendingPathComponent("bromelia.json"))) as? [String: Any]
+        #expect(record?["libreDrive"] as? String == "v06.3 id=4FBA32AEC678")
+    }
+}

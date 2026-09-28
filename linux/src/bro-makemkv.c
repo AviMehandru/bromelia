@@ -780,3 +780,85 @@ bro_process_run_ex (const char *const *argv, const char *const *envp, const char
   g_cond_clear (&st.cond);
   return TRUE;
 }
+
+/* ---- beta key, sources ---- */
+
+char *
+bro_beta_key_parse (const char *html)
+{
+  g_autoptr (GRegex) code = g_regex_new ("<code>\\s*(T-[A-Za-z0-9@_]{20,})\\s*</code>", 0, 0, NULL);
+  g_autoptr (GRegex) any = g_regex_new ("T-[A-Za-z0-9@_]{20,}", 0, 0, NULL);
+  g_autoptr (GMatchInfo) m = NULL;
+  if (!html)
+    return NULL;
+  if (g_regex_match (code, html, 0, &m))
+    return g_match_info_fetch (m, 1);
+  g_clear_pointer (&m, g_match_info_free);
+  if (g_regex_match (any, html, 0, &m))
+    return g_match_info_fetch (m, 0);
+  return NULL;
+}
+
+static void
+append_line (const char *line, gpointer data)
+{
+  g_string_append_printf (data, "%s\n", line);
+}
+
+char *
+bro_beta_key_fetch (GError **error)
+{
+  g_autofree char *curl = g_find_program_in_path ("curl");
+  const char *argv[] = { curl, "-sSL", "--max-time", "30", BRO_BETA_KEY_URL, NULL };
+  g_autoptr (GString) page = g_string_new (NULL);
+  int status = -1;
+  char *key;
+  if (!curl)
+    {
+      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "curl is needed to download the beta key");
+      return NULL;
+    }
+  if (!bro_process_run (argv, NULL, NULL, 60, NULL, append_line, page, &status, NULL, NULL, error))
+    return NULL;
+  key = status == 0 ? bro_beta_key_parse (page->str) : NULL;
+  if (!key)
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                         status == 0 ? "No beta key found on the forum page" : "Could not download the forum page");
+  return key;
+}
+
+BroSource *
+bro_source_resolve (const char *path, gboolean is_dir)
+{
+  static const char *const images[] = { ".iso", ".img", ".udf", NULL };
+  static const char *const folders[] = { "BDMV", "VIDEO_TS", "HVDVD_TS", NULL };
+  g_autofree char *p = g_strdup (path);
+  g_autofree char *dir = NULL;
+  size_t n = strlen (p);
+  while (n > 1 && p[n - 1] == G_DIR_SEPARATOR)
+    p[--n] = '\0';
+  if (!is_dir)
+    {
+      g_autofree char *lower = g_ascii_strdown (p, -1);
+      for (int i = 0; images[i]; i++)
+        if (g_str_has_suffix (lower, images[i]))
+          return bro_source_new_path (BRO_SOURCE_ISO, p);
+    }
+  /* The folder holding BDMV / VIDEO_TS / HVDVD_TS, looking from the item itself up to three levels. */
+  dir = is_dir ? g_strdup (p) : g_path_get_dirname (p);
+  for (int level = 0; level < 4 && strlen (dir) > 1; level++)
+    {
+      g_autofree char *base = g_path_get_basename (dir);
+      char *parent = g_path_get_dirname (dir);
+      for (int i = 0; folders[i]; i++)
+        if (g_ascii_strcasecmp (base, folders[i]) == 0)
+          {
+            BroSource *s = bro_source_new_path (BRO_SOURCE_FOLDER, parent);
+            g_free (parent);
+            return s;
+          }
+      g_free (dir);
+      dir = parent;
+    }
+  return bro_source_new_path (BRO_SOURCE_FOLDER, p);
+}

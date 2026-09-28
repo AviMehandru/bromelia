@@ -81,6 +81,10 @@ struct DiscBrowser: View {
                 Text("\(selected) of \(info.titles.count) titles · \(ByteCountFormatter.string(fromByteCount: session.selectedSizeBytes, countStyle: .file))")
                     .font(.callout)
                 Text(outputPreview).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if let ld = session.libreDrive {
+                    Text(ld.label).font(.caption).foregroundStyle(ld == .required ? .red : .secondary).lineLimit(1)
+                        .help("Blu-ray and 4K UHD discs read through LibreDrive need a supported drive and firmware; MakeMKV reports it when opening the disc.")
+                }
             }
             Button {
                 chooseOutputFolder()

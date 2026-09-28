@@ -142,3 +142,48 @@ struct MakeMKVEnvironment: Sendable {
         ["-r", "--cache=1", "--progress=-same", "--messages=-stdout", "info", "disc:9999"]
     }
 }
+
+/// MakeMKV's free beta key, which the developer posts on the forum and replaces about once a month.
+enum BetaKey {
+    static let pageURL = URL(string: "https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053")!
+
+    /// The key in the forum post (the `T-…` string in its code block).
+    static func parse(html: String) -> String? {
+        let keyPattern = /T-[A-Za-z0-9@_]{20,}/
+        if let code = html.firstMatch(of: /<code>\s*(T-[A-Za-z0-9@_]{20,})\s*<\/code>/) { return String(code.1) }
+        return html.firstMatch(of: keyPattern).map { String($0.0) }
+    }
+
+    static func fetch() async throws -> String {
+        var request = URLRequest(url: pageURL)
+        request.timeoutInterval = 30
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw JobError.message("The forum page answered with HTTP \(http.statusCode)")
+        }
+        guard let key = parse(html: String(decoding: data, as: UTF8.self)) else {
+            throw JobError.message("No beta key found on the forum page")
+        }
+        return key
+    }
+}
+
+/// Where a file or folder the user opened leads: MakeMKV opens discs (an image, or a folder holding BDMV /
+/// VIDEO_TS / HVDVD_TS), not single files, so a file inside a disc structure (an .IFO, .VOB, .mpls, .m2ts,
+/// …) opens the disc it belongs to.
+enum SourceResolver {
+    static let imageExtensions: Set<String> = ["iso", "img", "udf"]
+    static let structureFolders: Set<String> = ["BDMV", "VIDEO_TS", "HVDVD_TS"]
+
+    static func source(for url: URL, isDirectory: Bool) -> DiscSource {
+        if !isDirectory && imageExtensions.contains(url.pathExtension.lowercased()) { return .iso(path: url.path) }
+        // The folder holding BDMV / VIDEO_TS / HVDVD_TS, looking from the item itself up to three levels.
+        var u = isDirectory ? url : url.deletingLastPathComponent()
+        for _ in 0..<4 {
+            if structureFolders.contains(u.lastPathComponent.uppercased()) { return .folder(path: u.deletingLastPathComponent().path) }
+            if u.pathComponents.count <= 1 { break }
+            u = u.deletingLastPathComponent()
+        }
+        return .folder(path: url.path)
+    }
+}

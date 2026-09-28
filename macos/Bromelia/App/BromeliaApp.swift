@@ -119,7 +119,7 @@ struct BromeliaCommands: Commands {
 @MainActor
 func openSourcePanel(_ model: AppModel) {
     let panel = NSOpenPanel()
-    panel.title = "Open Disc Image or Folder"
+    panel.title = "Open Disc Image, Disc Folder or a File on a Disc"
     panel.message = "Choose an ISO image, or a folder containing BDMV / VIDEO_TS"
     panel.canChooseFiles = true
     panel.canChooseDirectories = true

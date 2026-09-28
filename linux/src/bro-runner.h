@@ -84,6 +84,8 @@ typedef struct {
   BroDiscInfo *info;
   int warnings, errors;
   gint64 started_at, finished_at; /* unix seconds */
+  char *libre_drive;              /* "Using LibreDrive mode (…)" details, or NULL */
+  int problem;                    /* BroNotice: a problem with MakeMKV or the drive, BRO_NOTICE_NONE if none */
 } BroRunResult;
 
 BroRunRequest *bro_run_request_new (void);
@@ -120,6 +122,13 @@ void         bro_rip_check (const BroMkvProbe *p, BroTitle *title, GPtrArray *pr
 double       bro_rip_duration_tolerance (double expected);
 /* Why a backup doesn't look like a disc (BDMV / VIDEO_TS / HVDVD_TS folder, or ISO 9660 / UDF image), or NULL. */
 char        *bro_backup_problem (const char *path, gboolean iso);
+/* Ripping chosen titles in one makemkvcon run: the minimum length (seconds) that keeps exactly the chosen titles
+ * (indices of info), or -1 when that isn't possible or worthwhile (fewer than three titles, every title, a title left out
+ * that is about as long as a chosen one, or not above current). */
+int          bro_one_pass_min_length (GArray *indices, BroDiscInfo *info, int current);
+/* Whether listing (read with that minimum length) holds exactly the chosen titles of info. */
+gboolean     bro_one_pass_matches (BroDiscInfo *listing, GArray *indices, BroDiscInfo *info);
+
 /* Bytes free on the volume holding path (or its nearest existing parent), or -1 when unknown. */
 gint64       bro_disk_available (const char *path);
 /* bytes plus a margin (2 % or 256 MB, whichever is larger). */

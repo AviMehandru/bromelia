@@ -776,3 +776,61 @@ bro_track_summary (BroTrack *t)
     }
   return g_string_free (s, FALSE);
 }
+
+/* ---- notices ---- */
+
+static gboolean
+contains_nocase (const char *text, const char *needle)
+{
+  g_autofree char *a = g_ascii_strdown (text, -1), *b = g_ascii_strdown (needle, -1);
+  return strstr (a, b) != NULL;
+}
+
+BroNotice
+bro_notice_from_event (const BroEvent *ev, char **detail)
+{
+  const char *t;
+  if (!ev || ev->type != BRO_EV_MESSAGE || !ev->text)
+    return BRO_NOTICE_NONE;
+  t = ev->text;
+  if (g_str_has_prefix (t, "Using LibreDrive mode"))
+    {
+      const char *open = strchr (t, '('), *close = strrchr (t, ')');
+      if (detail)
+        *detail = open && close > open ? g_strndup (open + 1, close - open - 1) : g_strdup ("");
+      return BRO_NOTICE_LIBREDRIVE;
+    }
+  if (strstr (t, "LibreDrive compatible drive is required"))
+    return BRO_NOTICE_LIBREDRIVE_REQUIRED;
+  if (ev->code == 5052 || ev->code == 5055 || contains_nocase (t, "evaluation period has expired") || contains_nocase (t, "evaluation period expired"))
+    return BRO_NOTICE_KEY_EXPIRED;
+  if (strstr (t, "Evaluation period not started") || strstr (t, "start MakeMKV evaluation from a third-party application"))
+    return BRO_NOTICE_EVALUATION_NOT_STARTED;
+  if (strstr (t, "application version is too old"))
+    return BRO_NOTICE_VERSION_TOO_OLD;
+  return BRO_NOTICE_NONE;
+}
+
+gboolean
+bro_notice_is_license_problem (BroNotice n)
+{
+  return n == BRO_NOTICE_KEY_EXPIRED || n == BRO_NOTICE_EVALUATION_NOT_STARTED || n == BRO_NOTICE_VERSION_TOO_OLD;
+}
+
+const char *
+bro_notice_explanation (BroNotice n)
+{
+  switch (n)
+    {
+    case BRO_NOTICE_LIBREDRIVE: return "The drive reads this disc in LibreDrive mode.";
+    case BRO_NOTICE_LIBREDRIVE_REQUIRED:
+      return "This disc can only be decrypted by a LibreDrive-compatible drive, and this drive isn't one (or its firmware isn't supported).";
+    case BRO_NOTICE_KEY_EXPIRED:
+      return "MakeMKV's key has expired. Blu-ray and 4K UHD discs can't be opened until you enter the current beta key or a purchased key.";
+    case BRO_NOTICE_EVALUATION_NOT_STARTED:
+      return "MakeMKV's evaluation hasn't been started. Open the MakeMKV app once, or enter a beta or purchased key.";
+    case BRO_NOTICE_VERSION_TOO_OLD:
+      return "This MakeMKV version is too old. Update MakeMKV, or enter a purchased key to keep using this version.";
+    default: return "";
+    }
+}

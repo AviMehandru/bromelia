@@ -130,6 +130,12 @@ public sealed class JobRunner
             _job.AppendLog(e.Message, Severity.Error);
         }
         if (CancelRequested && status == JobState.Succeeded) status = JobState.Cancelled;
+        // Name the real cause when MakeMKV itself couldn't work (expired key, LibreDrive required, …).
+        if (status == JobState.Failed && _job.MakemkvProblem is { } problem)
+        {
+            _job.ErrorMessage = $"{problem.Explanation} ({_job.ErrorMessage ?? "MakeMKV failed"})";
+            _job.AppendLog(problem.Explanation, Severity.Error);
+        }
         if (status == JobState.Succeeded && _job.DataErrors.Count > 0)
         {
             status = JobState.CompletedWithErrors;
@@ -696,7 +702,7 @@ public sealed class JobRunner
     void WriteArchiveRecord(string outDir, JobState status)
     {
         if (_job.Identity is not { } id) return;
-        var info = _job.DiscInfo;
+        var info = _job.RipInfo ?? _job.DiscInfo;
         var record = new ArchiveRecord
         {
             Status = status.StatusWord(),
@@ -726,6 +732,7 @@ public sealed class JobRunner
             Errors = _job.ErrorCount,
             ErrorMessages = _job.ErrorMessages.ToList(),
             ReadErrors = _job.DataErrors.ToList(),
+            LibreDrive = _job.LibreDrive,
         };
         var path = Paths.UniquePath(Path.Combine(outDir, "bromelia.json"));
         try
@@ -789,6 +796,11 @@ public sealed class JobRunner
         switch (ev)
         {
             case RobotEvent.Message { Value: var m }:
+                if (MakeMKVNotice.From(m) is { } notice)
+                {
+                    if (notice.Kind == NoticeKind.LibreDrive) _job.LibreDrive ??= notice.Detail;
+                    else _job.MakemkvProblem ??= notice;
+                }
                 var sev = m.Severity;
                 if (sev == Severity.Debug && !showDebug) return;
                 _job.AppendLog(m.Text, sev);
@@ -874,9 +886,21 @@ public sealed class JobRunner
         return result.SelectedIndices;
     }
 
-    async Task RipTitlesAsync(DiscSource source, DiscInfo info, string outDir, int extraSteps)
+    async Task RipTitlesAsync(DiscSource source, DiscInfo discInfo, string outDir, int extraSteps)
     {
+        var info = discInfo;
         var indices = ChooseTitles(info);
+        var ripConfig = _job.Drive.Rip;
+        // Rip several titles in one makemkvcon run (one read of the disc structure) when they are exactly the
+        // titles above some length: then a minimum length leaves just them, and "all" rips them.
+        if (await OnePassListingAsync(source, info, indices) is { } pass)
+        {
+            info = pass.Info;
+            indices = info.Titles.Select(t => t.Index).ToList();
+            ripConfig = ripConfig.Clone();
+            ripConfig.MinLengthSeconds = pass.MinLength;
+        }
+        _job.RipInfo = info;
         _job.RipTitles = indices;
         _fileTitles.Clear();
         await PrepareEpisodesAsync(source, info, indices);
@@ -899,7 +923,7 @@ public sealed class JobRunner
             int.TryParse(t, out var tIndex);
             _env = !single && _job.TrackSelections.ContainsKey(tIndex) ? _allTracksEnv ?? _baseEnv : _baseEnv;
             RunSummary s;
-            try { s = await RunMakeMkvAsync(_env.MkvArguments(source, t, outDir, _job.Drive.Rip), readsData: true); }
+            try { s = await RunMakeMkvAsync(_env.MkvArguments(source, t, outDir, ripConfig), readsData: true); }
             finally { _env = _baseEnv; }
             var produced = MkvFiles(outDir).Except(before).OrderBy(p => p, StringComparer.Ordinal).ToList();
             bool failed = s.ExitCode != 0 || (s.Failed ?? 0) > 0 || produced.Count == 0;
@@ -1019,6 +1043,27 @@ public sealed class JobRunner
         if (_job.Identity is { } id) values["format"] = id.Format.Code(!decrypt);
         foreach (var k in new[] { "title", "index", "n", "source", "duration", "chapters", "original", "comment" }) values[k] = "";
         return TemplateRenderer.RenderPath(template, values).Replace(Path.DirectorySeparatorChar.ToString(), " - ");
+    }
+
+    /// <summary>A listing that holds exactly <paramref name="indices"/>, read with a minimum length that leaves out every
+    /// other title, so they can be ripped in one run. Returns null (rip title by title) when that isn't possible or
+    /// worthwhile: fewer than three titles, hand-picked tracks, or a title left out that is as long as a chosen one.</summary>
+    async Task<(DiscInfo Info, int MinLength)?> OnePassListingAsync(DiscSource source, DiscInfo info, List<int> indices)
+    {
+        if (_job.TrackSelections.Count > 0 || OnePass.MinimumLength(indices, info, _job.Drive.Rip.MinLengthSeconds) is not { } minLength) return null;
+        var rip = _job.Drive.Rip.Clone();
+        rip.MinLengthSeconds = minLength;
+        _job.Phase = "Reading the disc listing for a one-pass rip";
+        var s = await RunMakeMkvAsync(_env.InfoArguments(source, rip));
+        var listing = s.Info.Info;
+        if (!OnePass.Matches(listing, indices, info))
+        {
+            _job.AppendLog($"A minimum length of {minLength} s doesn't leave exactly the chosen titles; ripping them one by one", Severity.Warning);
+            return null;
+        }
+        ApplyTitleMap(info, listing);
+        _job.AppendLog($"Ripping {indices.Count} titles in one pass (a minimum title length of {minLength} s leaves out the other {info.Titles.Count - indices.Count})");
+        return (listing, minLength);
     }
 
     /// <summary>Fails the job before ripping when the destination can't hold the chosen titles (sizes from the listing),
@@ -1269,7 +1314,7 @@ public sealed class JobRunner
 
     void WriteManifest(JobState status)
     {
-        var info = _job.DiscInfo;
+        var info = _job.RipInfo ?? _job.DiscInfo;
         var m = new JobManifest
         {
             JobId = _job.Id.ToString(),

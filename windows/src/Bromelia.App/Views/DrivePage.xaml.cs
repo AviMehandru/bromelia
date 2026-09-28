@@ -381,7 +381,8 @@ public sealed partial class DrivePage : Page
         var info = _session.Info;
         SelectionSummary.Text = info == null ? "" :
             $"{_session.SelectedTitles.Count} of {info.Titles.Count} titles · {TitleInfo.FormatBytes(_session.SelectedSizeBytes)}" +
-            (_session.TrackSelections.Keys.Any(_session.SelectedTitles.Contains) ? " · custom tracks" : "");
+            (_session.TrackSelections.Keys.Any(_session.SelectedTitles.Contains) ? " · custom tracks" : "") +
+            (_session.LibreDrive is { } ld ? " · " + ld : "");
         MakeMkvButton.IsEnabled = _session.SelectedTitles.Count > 0 && !DriveBusy;
         BackupButton.IsEnabled = !DriveBusy;
         SelectRuleItem.Text = $"Apply “{CurrentConfig.Name}” title rules";

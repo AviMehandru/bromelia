@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Bromelia.Core.Config;
+using Bromelia.Core.Engine;
 using Bromelia.Core.Robot;
 
 namespace Bromelia.Core.Logic;
@@ -166,4 +167,38 @@ public static class TitleSelector
     public static string MatchText(TitleInfo t) =>
         string.Join(" ", new[] { t.Name, t.Comment, t.OutputFileName, t.SourceFileName, t.SegmentMap,
             t.SourceTitleId is { } id ? $"#{id}" : "", t.DurationText }.Where(s => s.Length > 0));
+}
+
+/// <summary>Ripping chosen titles in one makemkvcon run. "mkv" takes one title or "all", so a subset can only be
+/// ripped in one run when a minimum title length leaves exactly that subset.</summary>
+public static class OnePass
+{
+    /// <summary>Rips with fewer titles gain nothing: the extra listing costs as much as the runs it saves.</summary>
+    public const int MinimumTitles = 3;
+
+    /// <summary>The minimum length (seconds) that keeps the chosen titles and drops the others, or null. Listed lengths
+    /// are rounded to seconds, so the longest title left out must be at least 2 s shorter than the shortest chosen.</summary>
+    public static int? MinimumLength(IReadOnlyCollection<int> chosen, DiscInfo info, int? current)
+    {
+        var set = chosen.ToHashSet();
+        if (set.Count < MinimumTitles || set.Count >= info.Titles.Count) return null;
+        var picked = info.Titles.Where(t => set.Contains(t.Index)).Select(t => t.DurationSeconds).ToList();
+        var others = info.Titles.Where(t => !set.Contains(t.Index)).Select(t => t.DurationSeconds).ToList();
+        if (picked.Count != set.Count || others.Count == 0 || picked.Min() - others.Max() < 2) return null;
+        int length = others.Max() + 1;
+        return length > (current ?? 0) ? length : null;
+    }
+
+    /// <summary>Whether <paramref name="listing"/> (read with that minimum length) holds exactly the chosen titles of <paramref name="info"/>.</summary>
+    public static bool Matches(DiscInfo listing, IReadOnlyCollection<int> chosen, DiscInfo info)
+    {
+        var set = chosen.ToHashSet();
+        if (listing.Titles.Count != set.Count) return false;
+        try
+        {
+            var map = ListingMatcher.Map(set, info, listing, new HashSet<int>());
+            return map.Values.ToHashSet().SetEquals(listing.Titles.Select(t => t.Index));
+        }
+        catch (JobException) { return false; }
+    }
 }

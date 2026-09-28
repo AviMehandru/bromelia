@@ -19,7 +19,7 @@ struct ContentView: View {
                 Button {
                     openSourcePanel(model)
                 } label: { Label("Open Image", systemImage: "doc.badge.plus") }
-                .help("Open an ISO image or a BDMV / VIDEO_TS folder")
+                .help("Open an ISO image, a BDMV / VIDEO_TS folder, or a file inside one (.IFO, .mpls, .m2ts, …)")
                 Button {
                     Task { await model.refreshDrives(force: true) }
                 } label: { Label("Rescan", systemImage: "arrow.clockwise") }
@@ -37,10 +37,13 @@ struct ContentView: View {
             return true
         }
         .overlay(alignment: .top) {
-            if let err = model.lastError {
-                ErrorBanner(text: err) { model.lastError = nil }
-                    .padding(.top, 8)
+            VStack(spacing: 8) {
+                if let p = model.makemkvProblem { MakeMKVProblemBanner(problem: p) }
+                if let err = model.lastError {
+                    ErrorBanner(text: err) { model.lastError = nil }
+                }
             }
+            .padding(.top, 8)
         }
     }
 
@@ -80,6 +83,44 @@ struct ErrorBanner: View {
             Text(text).textSelection(.enabled)
             Spacer()
             Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.borderless)
+        }
+        .padding(10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(radius: 4)
+        .frame(maxWidth: 560)
+    }
+}
+
+/// Expired key, outdated MakeMKV or evaluation not started, with the way out.
+struct MakeMKVProblemBanner: View {
+    @Environment(AppModel.self) private var model
+    let problem: MakeMKVNotice
+    @State private var working = false
+    @State private var result: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                Image(systemName: "key.fill").foregroundStyle(.orange)
+                Text(problem.explanation).textSelection(.enabled)
+                Spacer()
+                Button { model.makemkvProblem = nil } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+            }
+            HStack {
+                Button(working ? "Getting the Beta Key…" : "Get the Current Beta Key") {
+                    Task {
+                        working = true
+                        result = await model.installBetaKey()
+                        working = false
+                    }
+                }
+                .disabled(working)
+                if problem == .versionTooOld {
+                    Button("Download MakeMKV") { NSWorkspace.shared.open(URL(string: "https://www.makemkv.com/download/")!) }
+                }
+                SettingsLink { Text("Enter a Key…") }
+            }
+            if let result { Text(result).font(.caption).textSelection(.enabled) }
         }
         .padding(10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))

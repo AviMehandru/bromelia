@@ -139,6 +139,8 @@ struct ArchiveRecord: Codable, Sendable {
     var errorMessages: [String]
     /// Errors MakeMKV reported while reading the disc for the rip or backup.
     var readErrors: [String]
+    /// "Using LibreDrive mode (…)" details when the drive read the disc in LibreDrive mode.
+    var libreDrive: String?
 }
 
 /// Checks a ripped MKV against the title in the disc listing, using `mkvmerge -J`.

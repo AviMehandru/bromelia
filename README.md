@@ -21,7 +21,10 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 
 ### Everything the MakeMKV GUI does
 - Drive list with drive model, device, tray state, disc label and disc type, updated automatically.
-- Open a disc, an **ISO image** or a **BDMV / VIDEO_TS folder** (menu, file dialog or drag and drop).
+- Open a disc, an **ISO image**, a **BDMV / VIDEO_TS folder**, or a file inside one (`.IFO`, `.VOB`, `.mpls`,
+  `.m2ts`, …: the disc it belongs to is opened) from the menu, the file dialog or drag and drop.
+- **LibreDrive** status of the drive for the opened disc (enabled with its version, not in use, or required but
+  not available).
 - Title and track tree with checkboxes, and an information panel showing every attribute MakeMKV reports.
 - **Make MKV** from the selected titles, choosing individual tracks.
 - **Backup**, encrypted (1:1) or with video files decrypted.
@@ -35,6 +38,11 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - MakeMKV profiles, either the default, a generated one or your own `.mmcp.xml`: selection rules, MKV
   default-track flags, ISO 639-2/T codes, chapter 0, and LPCM → FLAC/WAV conversion.
 - Registration key entry (`makemkvcon reg`) and read-only drive/firmware information (`makemkvcon f`).
+- **Expired key or outdated MakeMKV** is detected in every `makemkvcon` run and shown as a banner (and as the
+  reason of failed jobs), with a button that reads the current free beta key from MakeMKV's forum and
+  registers it.
+- **One pass for several titles**: when the chosen titles are the longest ones on the disc, they are ripped in a
+  single `makemkvcon` run (like the GUI) instead of one run per title.
 
 ### And more
 - **Per-drive configuration.** Each drive is matched by the identification string MakeMKV reports

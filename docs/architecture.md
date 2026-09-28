@@ -28,6 +28,11 @@ Everything goes through `makemkvcon -r` (robot mode) with `--progress=-same`:
 - **Rip:** `mkv <source> <title|all> <folder>` per selected title (a single `all` when every title is
   selected and no tracks were hand-picked). Output files are found by comparing the folder contents
   before and after. The folder is a hidden staging folder inside the output folder (see below).
+- **One pass:** `mkv` takes one title or `all`, so a set of titles normally needs one run each (each run reads
+  the disc structure again). When three or more titles are chosen and they are exactly the titles longer than
+  some length, the job reads the listing with `--minlength` set between them and the rest, checks that it holds
+  exactly the chosen titles (by source title, length and segment map), and rips `all` with that minimum length:
+  one run. Files are mapped to titles through that listing's output file names.
 - **Listing:** every job runs `info` again, even when the disc was opened before. Choices made on the
   opened listing are moved to the new title numbers (matched by source title, length and segment map),
   and the job stops if the disc changed or a chosen title is gone.

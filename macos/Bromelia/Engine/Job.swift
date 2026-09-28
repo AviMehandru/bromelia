@@ -98,6 +98,12 @@ final class RipJob: Identifiable {
     var errorMessages: [String] = []
     /// Errors MakeMKV reported while ripping or backing up (read errors, hash check failures, ...).
     var dataErrors: [String] = []
+    /// "Using LibreDrive mode (…)" details, when the drive read the disc in LibreDrive mode.
+    var libreDrive: String?
+    /// A problem with MakeMKV or the drive that explains a failure (expired key, LibreDrive required, …).
+    var makemkvProblem: MakeMKVNotice?
+    /// The listing the titles were ripped from (the disc's, a backup's, or a one-pass listing).
+    var ripInfo: DiscInfo?
 
     @ObservationIgnored private var nextLogId = 0
     @ObservationIgnored var logHandle: FileHandle?

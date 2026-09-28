@@ -46,6 +46,8 @@ final class AppModel {
     var scanMessages: [RobotMessage] = []
     var makemkvVersion = ""
     var lastError: String?
+    /// A problem with MakeMKV itself (expired key, outdated version) reported by the last makemkvcon run.
+    var makemkvProblem: MakeMKVNotice?
     var selection: SidebarSelection? = .queue
 
     @ObservationIgnored private var runners: [UUID: JobRunner] = [:]
@@ -185,6 +187,7 @@ final class AppModel {
                 case .drive(let d)?: entries.append(d)
                 case .message(let m)?:
                     if m.code == 1005, let v = m.parameters.first { makemkvVersion = v }
+                    if let n = MakeMKVNotice(m), n.isLicenseProblem { makemkvProblem = n }
                     if m.severity != .debug { messages.append(m) }
                 default: break
                 }
@@ -311,13 +314,15 @@ final class AppModel {
 
     func openFileSource(_ url: URL) {
         let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-        var path = url.path
-        // Opening a BDMV / VIDEO_TS folder itself: use its parent (the disc root).
-        if isDir, ["BDMV", "VIDEO_TS"].contains(url.lastPathComponent.uppercased()) { path = url.deletingLastPathComponent().path }
-        let source: DiscSource = isDir ? .folder(path: path) : .iso(path: path)
+        // A disc image, a disc folder, or the disc folder a file (.IFO, .mpls, .m2ts, …) belongs to.
+        let source = SourceResolver.source(for: url, isDirectory: isDir)
         let key = source.infoArgument
         if sessions[key] == nil {
-            sessions[key] = DiscSession(id: key, source: source, configId: config.defaultDrive.id)
+            let s = DiscSession(id: key, source: source, configId: config.defaultDrive.id)
+            if case .folder(let p) = source, p != url.path {
+                s.appendLog("Opening the disc that \(url.lastPathComponent) belongs to: \(p)", severity: .info)
+            }
+            sessions[key] = s
             fileSessionIds.append(key)
         }
         selection = .source(key)
@@ -358,11 +363,17 @@ final class AppModel {
             var builder = DiscInfoBuilder()
             let showDebug = env.settings["app_ShowDebug"] == "1"
             var errors: [String] = []
-            let sink = EventSink { [weak s] ev in
+            let sink = EventSink { [weak s, weak self] ev in
                 guard let s else { return }
                 builder.consume(ev)
                 switch ev {
                 case .message(let m):
+                    switch MakeMKVNotice(m) {
+                    case .libreDrive(let d)?: s.libreDrive = .enabled(d)
+                    case .libreDriveRequired?: s.libreDrive = .required
+                    case let n? where n.isLicenseProblem: self?.makemkvProblem = n
+                    default: break
+                    }
                     if m.severity == .debug && !showDebug { break }
                     s.appendLog(m.text, severity: m.severity)
                     if m.severity == .error { errors.append(m.text) }
@@ -376,9 +387,16 @@ final class AppModel {
             await sink.drain()
             s.runner = nil
             s.isLoading = false
+            if case .drive = s.source, s.libreDrive == nil { s.libreDrive = .notInUse }
             if out.wasCancelled { s.loadError = "Cancelled"; return }
             if builder.info.titles.isEmpty {
-                s.loadError = errors.last ?? "No titles found (exit status \(out.exitCode))."
+                if let p = makemkvProblem, p.isLicenseProblem {
+                    s.loadError = p.explanation
+                } else if case .folder = s.source, errors.isEmpty {
+                    s.loadError = "MakeMKV found no titles here. It opens disc images and disc folders (with BDMV, VIDEO_TS or HVDVD_TS), not single video files."
+                } else {
+                    s.loadError = errors.last ?? "No titles found (exit status \(out.exitCode))."
+                }
                 return
             }
             s.info = builder.info
@@ -534,6 +552,7 @@ final class AppModel {
             guard let self else { return }
             self.runners[finished.id] = nil
             self.updateKeepAwake()
+            if let p = finished.makemkvProblem, p.isLicenseProblem { self.makemkvProblem = p }
             self.recordHistory(finished)
             self.scheduleRescan(after: 3)
             self.pump()
@@ -593,6 +612,18 @@ final class AppModel {
     }
 
     // MARK: - Registration
+
+    /// Downloads the current beta key from the MakeMKV forum and registers it with MakeMKV.
+    func installBetaKey() async -> String {
+        let key: String
+        do { key = try await BetaKey.fetch() } catch { return "Could not get the beta key: \(error.localizedDescription)" }
+        let result = await registerWithMakeMKV(key: key)
+        // A key typed into Bromelia would override the new one for every drive.
+        if !config.registrationKey.isEmpty { config.registrationKey = key }
+        if result.lowercased().contains("fail") { return result }
+        makemkvProblem = nil
+        return "Registered the current beta key (\(key.prefix(8))…). \(result)"
+    }
 
     func registerWithMakeMKV(key: String) async -> String {
         guard let exe = makemkvcon else { return "makemkvcon not found" }

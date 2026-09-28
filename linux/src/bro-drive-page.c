@@ -621,8 +621,9 @@ sync_checks (Page *p)
   if (p->session->info)
     {
       g_autofree char *size = bro_format_bytes (bro_session_selected_size (p->session));
-      g_autofree char *text = g_strdup_printf ("%u of %u titles · %s%s", g_hash_table_size (p->session->selected),
-                                               p->session->info->titles->len, size, custom ? " · custom tracks" : "");
+      g_autofree char *text = g_strdup_printf ("%u of %u titles · %s%s%s%s", g_hash_table_size (p->session->selected),
+                                               p->session->info->titles->len, size, custom ? " · custom tracks" : "",
+                                               p->session->libre_drive ? " · " : "", p->session->libre_drive ? p->session->libre_drive : "");
       gtk_label_set_text (GTK_LABEL (p->summary), text);
     }
   {

@@ -115,6 +115,12 @@ public sealed class RipJob : ObservableObject
     public List<string> ErrorMessages { get; } = new();
     /// <summary>Errors MakeMKV reported while ripping or backing up (read errors, hash check failures, ...).</summary>
     public List<string> DataErrors { get; } = new();
+    /// <summary>"Using LibreDrive mode (…)" details, when the drive read the disc in LibreDrive mode.</summary>
+    public string? LibreDrive { get; set; }
+    /// <summary>A problem with MakeMKV or the drive that explains a failure (expired key, LibreDrive required, …).</summary>
+    public MakeMKVNotice? MakemkvProblem { get; set; }
+    /// <summary>The listing the titles were ripped from (the disc's, a backup's, or a one-pass listing).</summary>
+    public DiscInfo? RipInfo { get; set; }
 
     public string Title => $"{(DiscLabel.Length == 0 ? "Disc" : DiscLabel)} — {SourceLabel}";
 

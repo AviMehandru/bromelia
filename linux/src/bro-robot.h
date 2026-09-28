@@ -154,4 +154,19 @@ char *bro_format_bytes (gint64 bytes);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroEvent, bro_event_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroDiscInfo, bro_disc_info_unref)
 
+/* Messages about the drive and about MakeMKV itself that Bromelia shows outside the log. */
+typedef enum {
+  BRO_NOTICE_NONE,
+  BRO_NOTICE_LIBREDRIVE,             /* "Using LibreDrive mode (v06.3 id=…)" */
+  BRO_NOTICE_LIBREDRIVE_REQUIRED,    /* the disc (4K UHD) needs a LibreDrive-compatible drive */
+  BRO_NOTICE_KEY_EXPIRED,            /* evaluation period / beta key expired (5052, 5055) */
+  BRO_NOTICE_EVALUATION_NOT_STARTED, /* makemkvcon can't start the evaluation */
+  BRO_NOTICE_VERSION_TOO_OLD,        /* "This application version is too old" */
+} BroNotice;
+
+/* The notice a message carries; for LibreDrive, *detail (optional) receives "v06.3 id=…". */
+BroNotice   bro_notice_from_event (const BroEvent *ev, char **detail);
+gboolean    bro_notice_is_license_problem (BroNotice n);
+const char *bro_notice_explanation (BroNotice n);
+
 G_END_DECLS

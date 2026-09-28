@@ -173,3 +173,30 @@ enum TitleSelector {
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
 }
+
+/// Ripping chosen titles in one makemkvcon run. `mkv` takes one title or "all", so a subset can only be ripped
+/// in one run when a minimum title length leaves exactly that subset.
+enum OnePass {
+    /// Rips with fewer titles gain nothing: the extra listing costs as much as the runs it saves.
+    static let minimumTitles = 3
+
+    /// The minimum length (seconds) that keeps the chosen titles and drops the others, or nil. Listed lengths are
+    /// rounded to seconds, so the longest title left out must be at least 2 s shorter than the shortest chosen.
+    static func minimumLength(chosen: [Int], of info: DiscInfo, current: Int?) -> Int? {
+        let set = Set(chosen)
+        guard set.count >= minimumTitles, set.count < info.titles.count else { return nil }
+        let picked = info.titles.filter { set.contains($0.index) }.map(\.durationSeconds)
+        let others = info.titles.filter { !set.contains($0.index) }.map(\.durationSeconds)
+        guard picked.count == set.count, let shortest = picked.min(), let longestOther = others.max(),
+              shortest - longestOther >= 2 else { return nil }
+        let length = longestOther + 1
+        return length > (current ?? 0) ? length : nil
+    }
+
+    /// Whether `listing` (read with that minimum length) holds exactly the chosen titles of `info`.
+    static func matches(_ listing: DiscInfo, chosen: [Int], of info: DiscInfo) -> Bool {
+        guard listing.titles.count == Set(chosen).count,
+              let map = try? ListingMatcher.map(Set(chosen), from: info, to: listing, sameTracks: []) else { return false }
+        return Set(map.values) == Set(listing.titles.map(\.index))
+    }
+}

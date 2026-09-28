@@ -6,6 +6,7 @@ struct _BroWindow {
   AdwNavigationSplitView *split;
   AdwToastOverlay *toasts;
   AdwBanner *banner;
+  AdwBanner *problem_banner;
   GtkListBox *sidebar;
   AdwToolbarView *content_view;
   AdwNavigationPage *content_page;
@@ -223,6 +224,14 @@ on_status_changed (BroState *st, BroWindow *self)
     }
   else
     adw_banner_set_revealed (self->banner, FALSE);
+  if (bro_notice_is_license_problem (st->makemkv_problem))
+    {
+      if (!adw_banner_get_revealed (self->problem_banner))
+        adw_banner_set_title (self->problem_banner, bro_notice_explanation (st->makemkv_problem));
+      adw_banner_set_revealed (self->problem_banner, TRUE);
+    }
+  else
+    adw_banner_set_revealed (self->problem_banner, FALSE);
   {
     g_autofree char *when = NULL;
     if (st->last_scan)
@@ -241,6 +250,24 @@ static void
 on_banner_button (AdwBanner *b, BroWindow *self)
 {
   bro_state_set_error (bro_app_state (), NULL);
+}
+
+static void
+beta_key_done (GObject *src, GAsyncResult *res, gpointer data)
+{
+  BroWindow *self = data;
+  g_autofree char *text = bro_state_install_beta_key_finish (BRO_STATE (src), res);
+  /* On success the problem is cleared and the banner hides; otherwise say why. */
+  adw_banner_set_title (self->problem_banner, text);
+  adw_banner_set_button_label (self->problem_banner, "Get the Current Beta Key");
+  g_object_unref (self);
+}
+
+static void
+on_problem_button (AdwBanner *b, BroWindow *self)
+{
+  adw_banner_set_title (b, "Getting the current beta key…");
+  bro_state_install_beta_key (bro_app_state (), beta_key_done, g_object_ref (self));
 }
 
 /* ---- opening images ---- */
@@ -446,6 +473,10 @@ bro_window_init (BroWindow *self)
   adw_banner_set_button_label (self->banner, "Dismiss");
   g_signal_connect (self->banner, "button-clicked", G_CALLBACK (on_banner_button), self);
   adw_toolbar_view_add_top_bar (self->content_view, GTK_WIDGET (self->banner));
+  self->problem_banner = ADW_BANNER (adw_banner_new (""));
+  adw_banner_set_button_label (self->problem_banner, "Get the Current Beta Key");
+  g_signal_connect (self->problem_banner, "button-clicked", G_CALLBACK (on_problem_button), self);
+  adw_toolbar_view_add_top_bar (self->content_view, GTK_WIDGET (self->problem_banner));
   self->content_page = adw_navigation_page_new (GTK_WIDGET (self->content_view), "Queue");
 
   self->split = ADW_NAVIGATION_SPLIT_VIEW (adw_navigation_split_view_new ());

@@ -240,10 +240,18 @@ private struct RegistrationPreferences: View {
                     }
                     .disabled(model.config.registrationKey.isEmpty || working)
                     Button("Get a Key…") { NSWorkspace.shared.open(URL(string: "https://www.makemkv.com/buy/")!) }
-                    Button("Beta Key…") { NSWorkspace.shared.open(URL(string: "https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053")!) }
+                    Button(working ? "Working…" : "Get the Current Beta Key") {
+                        Task {
+                            working = true
+                            result = await model.installBetaKey()
+                            working = false
+                        }
+                    }
+                    .disabled(working)
+                    Button("Beta Key Forum Page…") { NSWorkspace.shared.open(BetaKey.pageURL) }
                 }
                 if let result { Text(result).font(.caption).textSelection(.enabled) }
-                Text("“Register Key with MakeMKV” runs makemkvcon reg, which stores the key in MakeMKV's own settings so the MakeMKV app uses it too.")
+                Text("“Register Key with MakeMKV” runs makemkvcon reg, which stores the key in MakeMKV's own settings so the MakeMKV app uses it too. “Get the Current Beta Key” reads the free beta key from MakeMKV's forum and registers it the same way.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

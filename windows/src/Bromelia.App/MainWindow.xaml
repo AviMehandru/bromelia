@@ -31,7 +31,14 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <InfoBar x:Name="ErrorBar" Severity="Warning" IsOpen="False" Margin="12,8,12,0" Closed="ErrorBar_Closed" />
+                <StackPanel>
+                    <InfoBar x:Name="ProblemBar" Severity="Error" IsOpen="False" Margin="12,8,12,0" Title="MakeMKV" Closed="ProblemBar_Closed">
+                        <InfoBar.ActionButton>
+                            <Button x:Name="BetaKeyButton" Content="Get the current beta key" Click="BetaKeyButton_Click" />
+                        </InfoBar.ActionButton>
+                    </InfoBar>
+                    <InfoBar x:Name="ErrorBar" Severity="Warning" IsOpen="False" Margin="12,8,12,0" Closed="ErrorBar_Closed" />
+                </StackPanel>
                 <Frame x:Name="ContentFrame" Grid.Row="1" />
             </Grid>
         </NavigationView>

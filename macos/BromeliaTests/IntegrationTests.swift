@@ -142,4 +142,35 @@ struct IntegrationTests {
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("wrong-plugin.txt").path))
         if let layout = await Remuxer.identify(mkvmerge: mkvmerge, file: job.producedFiles[0]) { #expect(!layout.isEmpty) }
     }
+
+    nonisolated static var onePassISO: String? { ProcessInfo.processInfo.environment["BROMELIA_TEST_ONEPASS_ISO"] }
+
+    /// Rips the three longest titles of a disc image in one makemkvcon run: with no minimum length the disc lists
+    /// short titles too, and a minimum length between them and the chosen ones leaves just the three.
+    /// Set TEST_RUNNER_BROMELIA_TEST_ONEPASS_ISO to a DVD image with at least four titles.
+    @Test(.enabled(if: IntegrationTests.onePassISO != nil, "set BROMELIA_TEST_ONEPASS_ISO to run"))
+    func ripsTheLongestTitlesInOnePass() async throws {
+        let iso = try #require(Self.onePassISO)
+        let exe = try #require(Paths.resolveTool(configured: "", candidates: Paths.makemkvconCandidates), "makemkvcon not installed")
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-1p-\(UUID().uuidString.prefix(6))")
+        defer { try? FileManager.default.removeItem(at: out) }
+        var config = AppConfig()
+        config.outputRoot = out.path
+        var drive = DriveConfig()
+        drive.automation.notify = false
+        drive.rip.minLengthSeconds = 0
+        drive.rip.titleSelection.strategy = .longest
+        drive.rip.titleSelection.longestCount = 3
+        drive.episodes.splitPlayAll = false
+        let job = RipJob(source: .iso(path: iso), drive: drive, laneKey: "iso:onepass", sourceLabel: "test", discLabel: "", mode: .mkv)
+        await JobRunner(job: job, config: config, makemkvcon: exe, mkvmerge: Paths.resolveTool(configured: "", candidates: Paths.mkvmergeCandidates)).run()
+
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "") \n\(job.log.suffix(30).map(\.text).joined(separator: "\n"))")
+        let rips = job.commands.filter { $0.contains(" mkv ") }
+        #expect(rips.count == 1 && rips[0].contains(" all "), "\(rips)")
+        #expect(job.producedFiles.count == 3)
+        #expect(job.log.contains { $0.text.contains("in one pass") })
+        let dir = try #require(job.outputDirectory)
+        #expect(try Checksums.verify(folder: dir).isEmpty)
+    }
 }

@@ -153,6 +153,11 @@ final class JobRunner {
             }
         }
         if cancelRequested && status == .succeeded { status = .cancelled }
+        // Name the real cause when MakeMKV itself couldn't work (expired key, LibreDrive required, …).
+        if status == .failed, let p = job.makemkvProblem {
+            job.errorMessage = "\(p.explanation) (\(job.errorMessage ?? "MakeMKV failed"))"
+            job.appendLog(p.explanation, severity: .error)
+        }
         if status == .succeeded && !job.dataErrors.isEmpty {
             status = .completedWithErrors
             job.errorMessage = "MakeMKV reported \(job.dataErrors.count) read error(s) while reading the disc, so the files may be damaged. They were kept apart from finished archives."
@@ -674,7 +679,7 @@ final class JobRunner {
 
     private func writeArchiveRecord(outDir: URL, status: JobState) {
         guard let id = job.identity else { return }
-        let info = job.discInfo
+        let info = job.ripInfo ?? job.discInfo
         let titles = job.ripTitles.compactMap { info?.title(at: $0) }.map {
             ArchiveRecord.Title(index: $0.index, sourceTitleId: $0.sourceTitleId, sourceFile: $0.sourceFileName, duration: $0.durationText,
                                 chapters: $0.chapterCount, sizeBytes: $0.sizeBytes, segmentMap: $0.segmentMap)
@@ -687,7 +692,7 @@ final class JobRunner {
             rip: job.mode.makesMKV ? "Rip" : "Backup", mode: job.mode.rawValue, source: job.source.infoArgument, driveName: job.drive.name,
             makemkv: job.makemkvVersion, jobId: job.id.uuidString, startedAt: job.startedAt, finishedAt: Date(), titles: titles,
             episodes: job.episodes, files: job.checksums, warnings: job.warningCount, errors: job.errorCount, errorMessages: job.errorMessages,
-            readErrors: job.dataErrors)
+            readErrors: job.dataErrors, libreDrive: job.libreDrive)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601
@@ -744,6 +749,14 @@ final class JobRunner {
         summary.info.consume(ev)
         switch ev {
         case .message(let m):
+            switch MakeMKVNotice(m) {
+            case .libreDrive(let d)?:
+                if job.libreDrive == nil { job.libreDrive = d }
+            case let n?:
+                job.makemkvProblem = job.makemkvProblem ?? n
+            case nil:
+                break
+            }
             let sev = m.severity
             if sev == .debug && !showDebug { return }
             job.appendLog(m.text, severity: sev)
@@ -824,8 +837,18 @@ final class JobRunner {
         return result.selectedIndices
     }
 
-    private func ripTitles(source: DiscSource, info: DiscInfo, outDir: URL, extraSteps: Int) async throws {
-        let indices = try chooseTitles(info)
+    private func ripTitles(source: DiscSource, info discInfo: DiscInfo, outDir: URL, extraSteps: Int) async throws {
+        var info = discInfo
+        var indices = try chooseTitles(info)
+        var ripConfig = job.drive.rip
+        // Rip several titles in one makemkvcon run (one read of the disc structure) when they are exactly the
+        // titles above some length: then a minimum length leaves just them, and "all" rips them.
+        if let pass = try await onePassListing(source: source, info: info, indices: indices) {
+            info = pass.info
+            indices = info.titles.map(\.index)
+            ripConfig.minLengthSeconds = pass.minLength
+        }
+        job.ripInfo = info
         job.ripTitles = indices
         fileTitles = [:]
         await prepareEpisodes(source: source, info: info, indices: indices)
@@ -845,7 +868,7 @@ final class JobRunner {
             let before = Self.mkvFiles(in: outDir)
             env = (!single && job.trackSelections[Int(t) ?? -1] != nil) ? (allTracksEnv ?? baseEnv) : baseEnv
             defer { env = baseEnv }
-            let s = try await runMakeMKV(env.mkvArguments(source: source, title: t, destination: outDir.path, rip: job.drive.rip), readsData: true)
+            let s = try await runMakeMKV(env.mkvArguments(source: source, title: t, destination: outDir.path, rip: ripConfig), readsData: true)
             let produced = Self.mkvFiles(in: outDir).subtracting(before).sorted { $0.path < $1.path }
             let failed = s.exitCode != 0 || (s.failed ?? 0) > 0 || produced.isEmpty
             if failed {
@@ -955,6 +978,26 @@ final class JobRunner {
         if let id = job.identity { values["format"] = id.format.code(encrypted: !decrypt) }
         for k in ["title", "index", "n", "source", "duration", "chapters", "original", "comment"] { values[k] = "" }
         return TemplateRenderer.renderPath(template, values: values).replacingOccurrences(of: "/", with: " - ")
+    }
+
+    /// A listing that holds exactly `indices`, read with a minimum length that leaves out every other title, so
+    /// they can be ripped in one run. Returns nil (rip title by title) when that isn't possible or worthwhile:
+    /// fewer than three titles, hand-picked tracks, or a title left out that is as long as a chosen one.
+    private func onePassListing(source: DiscSource, info: DiscInfo, indices: [Int]) async throws -> (info: DiscInfo, minLength: Int)? {
+        guard let minLength = OnePass.minimumLength(chosen: indices, of: info, current: job.drive.rip.minLengthSeconds),
+              job.trackSelections.isEmpty else { return nil }
+        var rip = job.drive.rip
+        rip.minLengthSeconds = minLength
+        job.phase = "Reading the disc listing for a one-pass rip"
+        let s = try await runMakeMKV(env.infoArguments(source: source, rip: rip))
+        let listing = s.info.info
+        guard OnePass.matches(listing, chosen: indices, of: info) else {
+            job.appendLog("A minimum length of \(minLength) s doesn't leave exactly the chosen titles; ripping them one by one", severity: .warning)
+            return nil
+        }
+        try applyTitleMap(from: info, to: listing)
+        job.appendLog("Ripping \(indices.count) titles in one pass (a minimum title length of \(minLength) s leaves out the other \(info.titles.count - indices.count))")
+        return (listing, minLength)
     }
 
     /// Fails the job before ripping when the destination can't hold the chosen titles (sizes from the listing),
@@ -1190,7 +1233,7 @@ final class JobRunner {
     }
 
     private func writeManifest(status: JobState) {
-        let info = job.discInfo
+        let info = job.ripInfo ?? job.discInfo
         var titles: [JobManifest.Title] = []
         for i in job.ripTitles {
             guard let t = info?.title(at: i) else { continue }

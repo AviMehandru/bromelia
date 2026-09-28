@@ -16,6 +16,7 @@ public sealed class DiscSession : ObservableObject
     string _operation = "";
     Guid _configId;
     string _outputFolderOverride = "";
+    string? _libreDrive;
 
     public DiscSession(string id, DiscSource source, Guid configId)
     {
@@ -34,6 +35,9 @@ public sealed class DiscSession : ObservableObject
     public double Progress { get => _progress; set => Set(ref _progress, value); }
     public string Operation { get => _operation; set => Set(ref _operation, value); }
     public string OutputFolderOverride { get => _outputFolderOverride; set => Set(ref _outputFolderOverride, value); }
+    /// <summary>What MakeMKV said about LibreDrive when the disc was opened (drives only), as a line for the disc page.</summary>
+    public string? LibreDrive { get => _libreDrive; set => Set(ref _libreDrive, value); }
+    public bool LibreDriveRequired { get; set; }
     /// <summary>Movie / show name for file names. Empty = inferred from the disc.</summary>
     public string MediaName { get; set; } = "";
     /// <summary>Null = decide automatically.</summary>
@@ -71,6 +75,8 @@ public sealed class DiscSession : ObservableObject
         MediaName = "";
         MediaKind = null;
         FirstEpisode = null;
+        LibreDrive = null;
+        LibreDriveRequired = false;
         Progress = 0;
         Operation = "";
         SelectionChanged?.Invoke();
@@ -175,6 +181,9 @@ public sealed class AppState : ObservableObject
     public bool IsScanning { get => _isScanning; private set => Set(ref _isScanning, value); }
     public string MakemkvVersion { get => _makemkvVersion; private set => Set(ref _makemkvVersion, value); }
     public string? LastError { get => _lastError; set => Set(ref _lastError, value); }
+    MakeMKVNotice? _makemkvProblem;
+    /// <summary>A problem with MakeMKV itself (expired key, outdated version) reported by the last makemkvcon run.</summary>
+    public MakeMKVNotice? MakemkvProblem { get => _makemkvProblem; set => Set(ref _makemkvProblem, value); }
     public DateTime? LastScan { get => _lastScan; private set => Set(ref _lastScan, value); }
 
     /// <summary>Raised whenever the drive list or configurations change.</summary>
@@ -321,6 +330,7 @@ public sealed class AppState : ObservableObject
                     case RobotEvent.Drive d: entries.Add(d.Entry); break;
                     case RobotEvent.Message { Value: var m }:
                         if (m.Code == 1005 && m.Parameters.Count > 0) MakemkvVersion = m.Parameters[0];
+                        if (MakeMKVNotice.From(m) is { IsLicenseProblem: true } problem) MakemkvProblem = problem;
                         if (m.Severity != Severity.Debug && m.Code is not (5010 or 5042 or 1005 or 1004)) ScanMessages.Add(m);
                         break;
                 }
@@ -406,14 +416,14 @@ public sealed class AppState : ObservableObject
 
     public DiscSession OpenFileSource(string path)
     {
-        bool isDir = Directory.Exists(path);
-        if (isDir && Path.GetFileName(path.TrimEnd('\\', '/')).ToUpperInvariant() is "BDMV" or "VIDEO_TS")
-            path = Path.GetDirectoryName(path.TrimEnd('\\', '/'))!;
-        DiscSource source = isDir ? new DiscSource.Folder(path) : new DiscSource.Iso(path);
+        // A disc image, a disc folder, or the disc folder a file (.IFO, .mpls, .m2ts, …) belongs to.
+        var source = SourceResolver.Resolve(path, Directory.Exists(path));
         var key = source.InfoArgument;
         if (!Sessions.TryGetValue(key, out var s))
         {
             s = new DiscSession(key, source, Config.DefaultDrive.Id);
+            if (source is DiscSource.Folder f && !string.Equals(f.Path, path.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                s.AppendLog($"Opening the disc that {Path.GetFileName(path)} belongs to: {f.Path}", Severity.Info);
             Sessions[key] = s;
             FileSessions.Add(s);
         }
@@ -458,6 +468,15 @@ public sealed class AppState : ObservableObject
                     switch (ev)
                     {
                         case RobotEvent.Message { Value: var m }:
+                            switch (MakeMKVNotice.From(m))
+                            {
+                                case { Kind: NoticeKind.LibreDrive } n: s.LibreDrive = $"LibreDrive: enabled{(n.Detail.Length > 0 ? $" ({n.Detail})" : "")}"; break;
+                                case { Kind: NoticeKind.LibreDriveRequired }:
+                                    s.LibreDrive = "LibreDrive required: this drive can't decrypt this disc";
+                                    s.LibreDriveRequired = true;
+                                    break;
+                                case { IsLicenseProblem: true } n: MakemkvProblem = n; break;
+                            }
                             if (m.Severity == Severity.Debug && !showDebug) break;
                             s.AppendLog(m.Text, m.Severity);
                             if (m.Severity == Severity.Error) errors.Add(m.Text);
@@ -471,10 +490,14 @@ public sealed class AppState : ObservableObject
             await _ui.Barrier();
             s.Runner = null;
             s.IsLoading = false;
+            if (s.Source is DiscSource.Drive && s.LibreDrive == null) s.LibreDrive = "LibreDrive: not in use for this disc";
             if (result.Cancelled) { s.LoadError = "Cancelled"; return; }
             if (builder.Info.Titles.Count == 0)
             {
-                s.LoadError = errors.LastOrDefault() ?? $"No titles found (exit status {result.ExitCode}).";
+                if (MakemkvProblem is { IsLicenseProblem: true } p) s.LoadError = p.Explanation;
+                else if (s.Source is DiscSource.Folder && errors.Count == 0)
+                    s.LoadError = "MakeMKV found no titles here. It opens disc images and disc folders (with BDMV, VIDEO_TS or HVDVD_TS), not single video files.";
+                else s.LoadError = errors.LastOrDefault() ?? $"No titles found (exit status {result.ExitCode}).";
                 return;
             }
             s.Info = builder.Info;
@@ -627,6 +650,7 @@ public sealed class AppState : ObservableObject
         {
             _runners.Remove(finished.Id);
             UpdateKeepAwake();
+            if (finished.MakemkvProblem is { IsLicenseProblem: true } problem) MakemkvProblem = problem;
             RecordHistory(finished);
             _ = Task.Delay(3000).ContinueWith(_ => _ui.Post(() => _ = RefreshDrivesAsync(true)), TaskScheduler.Default);
             Pump();
@@ -674,6 +698,20 @@ public sealed class AppState : ObservableObject
         }
         History.Clear();
         ConfigStore.SaveHistory(History);
+    }
+
+    /// <summary>Downloads the current beta key from the MakeMKV forum and registers it with MakeMKV.</summary>
+    public async Task<string> InstallBetaKeyAsync()
+    {
+        string key;
+        try { key = await BetaKey.FetchAsync(); }
+        catch (Exception e) { return $"Could not get the beta key: {e.Message}"; }
+        var result = await RegisterWithMakeMkvAsync(key);
+        // A key typed into Bromelia would override the new one for every drive.
+        if (Config.RegistrationKey.Length > 0) { Config.RegistrationKey = key; ConfigChanged(); }
+        if (result.Contains("fail", StringComparison.OrdinalIgnoreCase)) return result;
+        MakemkvProblem = null;
+        return $"Registered the current beta key ({key[..Math.Min(8, key.Length)]}…). {result}";
     }
 
     public async Task<string> RegisterWithMakeMkvAsync(string key)

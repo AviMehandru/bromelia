@@ -90,6 +90,8 @@ struct _BroSession {
   int first_episode;            /* -1 = read from the menus, or 1 */
   int disc_flags;               /* DRV flags, -1 = unknown */
   GCancellable *cancellable;
+  char *libre_drive;            /* what MakeMKV said about LibreDrive when the disc was opened (drives only), or NULL */
+  gboolean libre_drive_required;
 };
 
 void     bro_session_reset (BroSession *s);
@@ -142,6 +144,7 @@ struct _BroState {
   char *last_error;
   gint64 last_scan;
   GPtrArray *scan_messages;  /* char* */
+  int makemkv_problem;       /* BroNotice: expired key, outdated MakeMKV…, from the last makemkvcon run */
   guint save_source, tick_source, poll_source, rescan_source;
   GVolumeMonitor *monitor;
 };
@@ -167,6 +170,10 @@ void            bro_state_eject (BroState *self, const char *lane);
 BroSession     *bro_state_session (BroState *self, const char *id);
 BroDriveConfig *bro_state_session_config (BroState *self, BroSession *s);
 BroSession     *bro_state_open_file (BroState *self, const char *path);
+/* Downloads the current beta key from the MakeMKV forum and registers it; the result is a message for the user. */
+void            bro_state_install_beta_key (BroState *self, GAsyncReadyCallback cb, gpointer data);
+char           *bro_state_install_beta_key_finish (BroState *self, GAsyncResult *res);
+void            bro_state_clear_problem (BroState *self);
 void            bro_state_close_file (BroState *self, BroSession *s);
 void            bro_state_load_disc (BroState *self, BroSession *s);
 

@@ -328,6 +328,22 @@ on_register (GtkButton *b, GtkWidget *label)
 }
 
 static void
+beta_done (GObject *src, GAsyncResult *res, gpointer data)
+{
+  GtkWidget *label = data;
+  g_autofree char *text = bro_state_install_beta_key_finish (BRO_STATE (src), res);
+  gtk_label_set_text (GTK_LABEL (label), text);
+  g_object_unref (label);
+}
+
+static void
+on_beta_key (GtkButton *b, GtkWidget *label)
+{
+  gtk_label_set_text (GTK_LABEL (label), "Getting the current beta key…");
+  bro_state_install_beta_key (bro_app_state (), beta_done, g_object_ref (label));
+}
+
+static void
 on_key_changed (GtkEditable *e, gpointer data)
 {
   BroState *st = bro_app_state ();
@@ -365,15 +381,17 @@ registration_page (void)
   adw_preferences_group_add (g, key);
   adw_preferences_group_add (g, button_row ("Register key with MakeMKV", "Runs makemkvcon reg so the MakeMKV app uses the key too", "Register",
                                             G_CALLBACK (on_register), result));
+  adw_preferences_group_add (g, button_row ("Current beta key", "Reads the free beta key from MakeMKV's forum (needs curl) and registers it",
+                                            "Get", G_CALLBACK (on_beta_key), result));
   {
     GtkWidget *row = adw_action_row_new ();
     GtkWidget *buy = gtk_button_new_with_label ("Get a Key…");
-    GtkWidget *beta = gtk_button_new_with_label ("Beta Key…");
+    GtkWidget *beta = gtk_button_new_with_label ("Beta Key Forum Page…");
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), "Keys");
     gtk_widget_set_valign (buy, GTK_ALIGN_CENTER);
     gtk_widget_set_valign (beta, GTK_ALIGN_CENTER);
     g_signal_connect (buy, "clicked", G_CALLBACK (open_uri), (gpointer) "https://www.makemkv.com/buy/");
-    g_signal_connect (beta, "clicked", G_CALLBACK (open_uri), (gpointer) "https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053");
+    g_signal_connect (beta, "clicked", G_CALLBACK (open_uri), (gpointer) BRO_BETA_KEY_URL);
     adw_action_row_add_suffix (ADW_ACTION_ROW (row), buy);
     adw_action_row_add_suffix (ADW_ACTION_ROW (row), beta);
     adw_preferences_group_add (g, row);
