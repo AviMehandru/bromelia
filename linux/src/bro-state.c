@@ -51,6 +51,7 @@ bro_job_finalize (GObject *obj)
   if (j->manual_titles) g_array_unref (j->manual_titles);
   g_hash_table_unref (j->track_selections);
   g_hash_table_unref (j->name_overrides);
+  g_free (j->media_name);
   g_free (j->phase);
   g_free (j->operation);
   g_free (j->total_operation);
@@ -78,6 +79,10 @@ bro_job_init (BroJob *j)
   j->id = g_uuid_string_random ();
   j->track_selections = bro_track_selections_new ();
   j->name_overrides = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  j->media_name = g_strdup ("");
+  j->media_kind = -1;
+  j->first_episode = -1;
+  j->disc_flags = -1;
   j->phase = g_strdup ("Queued");
   j->operation = g_strdup ("");
   j->total_operation = g_strdup ("");
@@ -188,6 +193,7 @@ bro_session_finalize (GObject *obj)
   g_hash_table_unref (s->track_selections);
   g_hash_table_unref (s->name_overrides);
   g_free (s->output_override);
+  g_free (s->media_name);
   g_clear_object (&s->cancellable);
   G_OBJECT_CLASS (bro_session_parent_class)->finalize (obj);
 }
@@ -212,6 +218,10 @@ bro_session_init (BroSession *s)
   s->track_selections = bro_track_selections_new ();
   s->name_overrides = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
   s->output_override = g_strdup ("");
+  s->media_name = g_strdup ("");
+  s->media_kind = -1;
+  s->first_episode = -1;
+  s->disc_flags = -1;
 }
 
 static BroSession *
@@ -261,6 +271,10 @@ bro_session_reset (BroSession *s)
   g_hash_table_remove_all (s->selected);
   g_hash_table_remove_all (s->track_selections);
   g_hash_table_remove_all (s->name_overrides);
+  g_free (s->media_name);
+  s->media_name = g_strdup ("");
+  s->media_kind = -1;
+  s->first_episode = -1;
   session_changed (s);
   selection_changed (s);
 }
@@ -714,6 +728,7 @@ ensure_sessions (BroState *self)
         {
           bro_source_free (s->source);
           s->source = bro_source_new_drive (e->index, e->device);
+          s->disc_flags = e->flags;
           if (g_strcmp0 (s->config_id, cfg_id) != 0)
             {
               g_free (s->config_id);
@@ -721,7 +736,11 @@ ensure_sessions (BroState *self)
             }
         }
       else
-        g_hash_table_insert (self->sessions, g_strdup (lane), session_new (lane, bro_source_new_drive (e->index, e->device), cfg_id));
+        {
+          s = session_new (lane, bro_source_new_drive (e->index, e->device), cfg_id);
+          s->disc_flags = e->flags;
+          g_hash_table_insert (self->sessions, g_strdup (lane), s);
+        }
     }
 }
 
@@ -742,7 +761,21 @@ static BroJob *
 make_drive_job (BroDriveEntry *e, const BroDriveConfig *cfg, BroRipMode mode)
 {
   g_autofree char *lane = bro_drive_entry_lane (e);
-  return job_new (bro_source_new_drive (e->index, e->device), cfg, lane, cfg->name, e->disc_name, mode);
+  BroJob *j = job_new (bro_source_new_drive (e->index, e->device), cfg, lane, cfg->name, e->disc_name, mode);
+  j->disc_flags = e->flags;
+  return j;
+}
+
+/* Name, movie / TV and first episode chosen on the disc page. */
+static void
+apply_identity_choices (BroSession *s, BroJob *j)
+{
+  g_free (j->media_name);
+  j->media_name = g_strstrip (g_strdup (s->media_name ? s->media_name : ""));
+  j->media_kind = s->media_kind;
+  j->first_episode = s->first_episode;
+  if (j->disc_flags < 0)
+    j->disc_flags = s->disc_flags;
 }
 
 static void enqueue (BroState *self, BroJob *job);
@@ -1375,6 +1408,7 @@ bro_state_quick_rip (BroState *self, BroDriveItem *item, int mode)
       job->preloaded = bro_disc_info_ref (s->info);
       g_free (job->disc_label);
       job->disc_label = g_strdup (bro_disc_info_name (s->info));
+      apply_identity_choices (s, job);
     }
   enqueue (self, job);
 }
@@ -1387,6 +1421,7 @@ bro_state_rip_session (BroState *self, BroSession *s, BroRipMode mode)
   BroJob *job = job_new (bro_source_copy (s->source), cfg, s->id, label, s->info ? bro_disc_info_name (s->info) : "", mode);
   if (s->info)
     job->preloaded = bro_disc_info_ref (s->info);
+  apply_identity_choices (s, job);
   if (bro_rip_mode_makes_mkv (mode))
     {
       GHashTableIter it;
@@ -1710,6 +1745,11 @@ start_job (BroState *self, BroJob *j)
     while (g_hash_table_iter_next (&it, &k, &v))
       g_hash_table_insert (req->name_overrides, k, g_strdup (v));
   }
+  g_free (req->media_name);
+  req->media_name = g_strdup (j->media_name);
+  req->media_kind = j->media_kind;
+  req->first_episode = j->first_episode;
+  req->disc_flags = j->disc_flags;
   req->makemkvcon = g_steal_pointer (&exe);
   req->mkvmerge = bro_state_mkvmerge (self);
   g_object_unref (req->cancellable);
@@ -1808,6 +1848,11 @@ bro_state_retry (BroState *self, BroJob *job)
   g_hash_table_iter_init (&it, job->name_overrides);
   while (g_hash_table_iter_next (&it, &k, &v))
     g_hash_table_insert (j->name_overrides, k, g_strdup (v));
+  g_free (j->media_name);
+  j->media_name = g_strdup (job->media_name);
+  j->media_kind = job->media_kind;
+  j->first_episode = job->first_episode;
+  j->disc_flags = job->disc_flags;
   enqueue (self, j);
 }
 

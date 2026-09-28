@@ -384,12 +384,26 @@ bro_selection_result_reason (BroSelectionResult *r, int title)
 /* ---- templates ---- */
 
 const BroTokenHelp bro_folder_tokens[] = {
+  { "name", "Movie or show name (inferred from the disc, or as entered)" },
+  { "discLabel", "Place in the set, e.g. Season 2 Part 7 Disc 2 (empty when unknown)" },
+  { "format", "Format code: DVD, BR, 4K; DVDe, BRe, 4Ke for backups that are not decrypted" },
+  { "rip", "Rip or Backup" }, { "kind", "movie or tv" },
+  { "season", "Season number from the disc label" }, { "discNumber", "Disc number from the disc label" },
+  { "part", "Part number from the disc label" }, { "volumeNumber", "Volume number from the disc label" },
   { "disc", "Disc name (falls back to the volume label)" }, { "volume", "Volume label" },
   { "type", "dvd, bd, hddvd or disc" }, { "drive", "Name of the drive configuration" },
   { "date", "Date, yyyy-MM-dd" }, { "time", "Time, HH-mm-ss" }, { "year", "Year" }, { "month", "Month" }, { "day", "Day" },
   { "job", "Short job identifier" }, { NULL, NULL } };
 
 const BroTokenHelp bro_file_tokens[] = {
+  { "name", "Movie or show name (inferred from the disc, or as entered)" },
+  { "discLabel", "Place in the set, e.g. Season 2 Part 7 Disc 2 (empty when unknown)" },
+  { "format", "Format code: DVD, BR, 4K; DVDe, BRe, 4Ke for backups that are not decrypted" },
+  { "rip", "Rip or Backup" }, { "kind", "movie or tv" },
+  { "season", "Season number from the disc label" }, { "discNumber", "Disc number from the disc label" },
+  { "part", "Part number from the disc label" }, { "volumeNumber", "Volume number from the disc label" },
+  { "episode", "Episode 138 (TV shows; empty for other titles)" }, { "episodeNumber", "Episode number alone" },
+  { "track", "Source title: Title 11, Title 11 Ch 8-14 (split episodes) or Playlist 00800" },
   { "disc", "Disc name (falls back to the volume label)" }, { "volume", "Volume label" },
   { "type", "dvd, bd, hddvd or disc" }, { "drive", "Name of the drive configuration" },
   { "date", "Date, yyyy-MM-dd" }, { "time", "Time, HH-mm-ss" }, { "year", "Year" }, { "month", "Month" }, { "day", "Day" },
@@ -401,13 +415,22 @@ const BroTokenHelp bro_file_tokens[] = {
   { NULL, NULL } };
 
 const BroTokenHelp bro_script_tokens[] = {
+  { "name", "Movie or show name (inferred from the disc, or as entered)" },
+  { "discLabel", "Place in the set, e.g. Season 2 Part 7 Disc 2 (empty when unknown)" },
+  { "format", "Format code: DVD, BR, 4K; DVDe, BRe, 4Ke for backups that are not decrypted" },
+  { "rip", "Rip or Backup" }, { "kind", "movie or tv" },
+  { "season", "Season number from the disc label" }, { "discNumber", "Disc number from the disc label" },
+  { "part", "Part number from the disc label" }, { "volumeNumber", "Volume number from the disc label" },
+  { "episode", "Episode 138 (TV shows; empty for other titles)" }, { "episodeNumber", "Episode number alone" },
+  { "track", "Source title: Title 11, Title 11 Ch 8-14 (split episodes) or Playlist 00800" },
   { "disc", "Disc name" }, { "volume", "Volume label" }, { "type", "dvd, bd, hddvd or disc" },
   { "drive", "Name of the drive configuration" }, { "date", "Date" }, { "time", "Time" }, { "job", "Short job identifier" },
   { "outputDir", "Job output folder" }, { "file", "Current file (per-file steps) or first file" },
   { "filename", "Current file name (per-file steps)" }, { "stem", "Current file name without extension (per-file steps)" },
   { "files", "All produced files (a lone {files} argument expands to one argument per file)" },
   { "status", "success, failed or cancelled" }, { "manifest", "Path of the job manifest JSON" },
-  { "device", "OS device of the drive" }, { NULL, NULL } };
+  { "device", "OS device of the drive" }, { "checksums", "Path of the SHA256SUMS file (empty when checksums are off)" },
+  { NULL, NULL } };
 
 char *
 bro_sanitize_component (const char *s)

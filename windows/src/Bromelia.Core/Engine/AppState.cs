@@ -34,6 +34,14 @@ public sealed class DiscSession : ObservableObject
     public double Progress { get => _progress; set => Set(ref _progress, value); }
     public string Operation { get => _operation; set => Set(ref _operation, value); }
     public string OutputFolderOverride { get => _outputFolderOverride; set => Set(ref _outputFolderOverride, value); }
+    /// <summary>Movie / show name for file names. Empty = inferred from the disc.</summary>
+    public string MediaName { get; set; } = "";
+    /// <summary>Null = decide automatically.</summary>
+    public MediaKind? MediaKind { get; set; }
+    /// <summary>First episode number on this disc. Null = read from the menus or 1.</summary>
+    public int? FirstEpisode { get; set; }
+    /// <summary>File system flags from the drive scan.</summary>
+    public DiscFlags? DiscFlags { get; set; }
     public ObservableCollection<LogEntry> Log { get; } = new();
     public HashSet<int> SelectedTitles { get; } = new();
     /// <summary>Only titles whose tracks the user customised.</summary>
@@ -60,6 +68,9 @@ public sealed class DiscSession : ObservableObject
         SelectedTitles.Clear();
         TrackSelections.Clear();
         TitleNameOverrides.Clear();
+        MediaName = "";
+        MediaKind = null;
+        FirstEpisode = null;
         Progress = 0;
         Operation = "";
         SelectionChanged?.Invoke();
@@ -363,8 +374,9 @@ public sealed class AppState : ObservableObject
             {
                 s.Source = new DiscSource.Drive(e.Index, e.DevicePath);
                 s.ConfigId = cfgId;
+                s.DiscFlags = e.Flags;
             }
-            else Sessions[e.LaneKey] = new DiscSession(e.LaneKey, new DiscSource.Drive(e.Index, e.DevicePath), cfgId);
+            else Sessions[e.LaneKey] = new DiscSession(e.LaneKey, new DiscSource.Drive(e.Index, e.DevicePath), cfgId) { DiscFlags = e.Flags };
         }
     }
 
@@ -478,17 +490,26 @@ public sealed class AppState : ObservableObject
     // --- jobs ---------------------------------------------------------------------------------
 
     public RipJob MakeJob(DriveScanEntry e, DriveConfig cfg, RipMode mode) =>
-        new(new DiscSource.Drive(e.Index, e.DevicePath), cfg.Clone(), e.LaneKey, cfg.Name, e.DiscName, mode);
+        new(new DiscSource.Drive(e.Index, e.DevicePath), cfg.Clone(), e.LaneKey, cfg.Name, e.DiscName, mode) { DiscFlags = e.Flags };
+
+    static void ApplyIdentityChoices(DiscSession s, RipJob job)
+    {
+        job.MediaName = s.MediaName.Trim();
+        job.MediaKind = s.MediaKind;
+        job.FirstEpisode = s.FirstEpisode;
+        job.DiscFlags ??= s.DiscFlags;
+    }
 
     public void QuickRip(DriveItem item, RipMode? mode = null)
     {
         if (item.Entry == null) return;
         var cfg = item.Config ?? Config.DefaultDrive;
         var job = MakeJob(item.Entry, cfg, mode ?? cfg.Rip.Mode);
-        if (Sessions.GetValueOrDefault(item.LaneKey)?.Info is { } info)
+        if (Sessions.GetValueOrDefault(item.LaneKey) is { Info: { } info } session)
         {
             job.PreloadedInfo = info;
             job.DiscLabel = info.Name;
+            ApplyIdentityChoices(session, job);
         }
         Enqueue(job);
     }
@@ -498,6 +519,7 @@ public sealed class AppState : ObservableObject
         var cfg = ConfigForSession(s).Clone();
         var label = s.Source is DiscSource.Drive ? cfg.Name : s.Source.DisplayName;
         var job = new RipJob(s.Source, cfg, s.Id, label, s.Info?.Name ?? "", mode) { PreloadedInfo = s.Info };
+        ApplyIdentityChoices(s, job);
         if (mode.MakesMkv())
         {
             job.ManualTitles = s.SelectedTitles.OrderBy(i => i).ToList();
@@ -547,6 +569,10 @@ public sealed class AppState : ObservableObject
             ManualTitles = job.ManualTitles,
             TrackSelections = job.TrackSelections,
             TitleNameOverrides = job.TitleNameOverrides,
+            MediaName = job.MediaName,
+            MediaKind = job.MediaKind,
+            FirstEpisode = job.FirstEpisode,
+            DiscFlags = job.DiscFlags,
         };
         Enqueue(j);
     }

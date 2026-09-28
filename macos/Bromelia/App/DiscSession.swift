@@ -23,6 +23,14 @@ final class DiscSession: Identifiable {
     var titleNameOverrides: [Int: String] = [:]
     /// One-off output folder for the next rip from this disc. Empty = the configuration's folder.
     var outputFolderOverride = ""
+    /// Movie / show name for file names. Empty = inferred from the disc.
+    var mediaName = ""
+    /// nil = decide automatically.
+    var mediaKind: MediaKind?
+    /// First episode number on this disc. nil = read from the menus or start at 1.
+    var firstEpisode: Int?
+    /// File system flags from the drive scan.
+    var discFlags: DiscFlags?
     @ObservationIgnored var runner: ProcessRunner?
     @ObservationIgnored private var nextLog = 0
 
@@ -47,6 +55,9 @@ final class DiscSession: Identifiable {
         selectedTitles = []
         trackSelections = [:]
         titleNameOverrides = [:]
+        mediaName = ""
+        mediaKind = nil
+        firstEpisode = nil
         progress = 0
         operation = ""
     }

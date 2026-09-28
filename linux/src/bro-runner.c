@@ -1,11 +1,14 @@
 /* bro-runner.c — job pipeline, post-processing and mkvmerge remuxing. */
 #include "bro-runner.h"
+#include "bro-dvd.h"
+#include "bro-identity.h"
 #include "bro-logic.h"
 
 #include <glib/gstdio.h>
 #include <json-glib/json-glib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 const char *
 bro_job_state_label (BroJobState s)
@@ -51,6 +54,10 @@ bro_run_request_new (void)
   BroRunRequest *r = g_new0 (BroRunRequest, 1);
   r->track_selections = bro_track_selections_new ();
   r->name_overrides = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  r->media_name = g_strdup ("");
+  r->media_kind = -1;
+  r->first_episode = -1;
+  r->disc_flags = -1;
   r->cancellable = g_cancellable_new ();
   return r;
 }
@@ -70,6 +77,7 @@ bro_run_request_free (BroRunRequest *r)
   if (r->manual_titles) g_array_unref (r->manual_titles);
   g_hash_table_unref (r->track_selections);
   g_hash_table_unref (r->name_overrides);
+  g_free (r->media_name);
   g_free (r->makemkvcon);
   g_free (r->mkvmerge);
   g_clear_object (&r->cancellable);
@@ -134,7 +142,31 @@ typedef struct {
   Summary *sum;
   GArray *rip_titles;
   GPtrArray *commands;
+  /* identity, episodes and archiving */
+  BroIdentity *identity;
+  BroVideoTS *videots;
+  BroEpisodePlan *plan;        /* "play all" title to split */
+  GHashTable *separate;        /* MakeMKV title -> episode offset + 1 */
+  int first_episode, episode_width;
+  GHashTable *file_titles;     /* char* path -> title index + 1 */
+  GPtrArray *episodes;         /* EpisodeRec* */
+  GPtrArray *checksums;        /* BroChecksum* */
+  char *checksum_file;
+  char *makemkv_version;
+  GPtrArray *error_messages;   /* char* */
 } Ctx;
+
+typedef struct {
+  char *file; /* relative to the output folder */
+  int episode, source, first, last;
+} EpisodeRec;
+
+static void
+episode_rec_free (EpisodeRec *e)
+{
+  g_free (e->file);
+  g_free (e);
+}
 
 static void
 update (Ctx *c, BroUpdateKind kind, BroSeverity sev, const char *text, double cur, double tot)
@@ -218,7 +250,12 @@ on_makemkv_line (const char *line, gpointer data)
           return;
         log_line (c, sev, "%s", ev->text);
         if (sev == BRO_SEV_ERROR)
-          g_ptr_array_add (s->errors, g_strdup (ev->text));
+          {
+            g_ptr_array_add (s->errors, g_strdup (ev->text));
+            g_ptr_array_add (c->error_messages, g_strdup (ev->text));
+          }
+        if (ev->code == 1005 && !c->makemkv_version)
+          c->makemkv_version = g_strdup (ev->params->len ? ev->params->pdata[0] : ev->text);
         if ((ev->code == 5036 || ev->code == 5005) && ev->params->len > 0)
           s->saved = atoi (ev->params->pdata[0]);
         if (ev->code == 5037 && ev->params->len > 1)
@@ -357,7 +394,35 @@ base_values (Ctx *c, BroJobState status)
     g_string_append_printf (files, "%s%s", i ? " " : "", (char *) c->res->files->pdata[i]);
   bro_template_values_set (v, "files", files->str);
   g_string_free (files, TRUE);
+  if (c->identity)
+    bro_identity_template_values (c->identity, v, bro_rip_mode_makes_mkv (c->req->mode) ? "Rip" : "Backup");
+  else
+    {
+      BroIdentity *id = bro_identity_resolve (info, c->res->disc_label, c->req->disc_flags, -1, c->req->mode == BRO_MODE_BACKUP,
+                                              c->req->media_name, c->req->media_kind, 0);
+      bro_identity_template_values (id, v, bro_rip_mode_makes_mkv (c->req->mode) ? "Rip" : "Backup");
+      bro_identity_free (id);
+    }
+  bro_template_values_set (v, "checksums", c->checksum_file ? c->checksum_file : "");
   return v;
+}
+
+static void
+resolve_identity (Ctx *c, BroDiscInfo *info, int play_all, int format)
+{
+  int fmt = format >= 0 ? format : (c->identity ? (int) c->identity->format : -1);
+  BroIdentity *id = bro_identity_resolve (info, c->res->disc_label, c->req->disc_flags, fmt, c->req->mode == BRO_MODE_BACKUP,
+                                          c->req->media_name, c->req->media_kind, play_all);
+  if (!bro_identity_equal (id, c->identity))
+    {
+      g_autofree char *set = bro_label_set_description (&id->label);
+      g_autofree char *code = bro_identity_format_code (id);
+      g_autofree char *paren = *set ? g_strdup_printf (" (%s)", set) : g_strdup ("");
+      log_line (c, BRO_SEV_INFO, "Identified as %s “%s”%s, %s, format code %s — %s", id->kind == BRO_KIND_TV ? "TV show" : "movie",
+                id->name, paren, bro_format_label (id->format), code, id->reason);
+    }
+  bro_identity_free (c->identity);
+  c->identity = id;
 }
 
 static void
@@ -619,21 +684,28 @@ remux (Ctx *c, const char *file, BroTitle *title, GHashTable *keep)
 }
 
 static char *
-rename_file (Ctx *c, const char *file, BroTitle *title, int ordinal, BroDiscInfo *info, const char *out_dir)
+relative_to (const char *path, const char *base)
 {
-  const char *explicit_name = g_hash_table_lookup (c->req->name_overrides, GINT_TO_POINTER (title->index));
-  const char *tmpl = explicit_name && *explicit_name ? explicit_name : c->req->drive->output.file_name_template;
-  g_autoptr (GHashTable) v = NULL;
-  g_autofree char *rel = NULL;
+  g_autofree char *prefix = g_strconcat (base, G_DIR_SEPARATOR_S, NULL);
+  return g_str_has_prefix (path, prefix) ? g_strdup (path + strlen (prefix)) : g_path_get_basename (path);
+}
+
+/* Moves file to the name rendered from tmpl. With an empty template the file keeps its name, or gets
+ * fallback (split episodes, whose temporary names are meaningless). */
+static char *
+rename_to (Ctx *c, const char *file, GHashTable *v, const char *tmpl, const char *fallback, const char *out_dir)
+{
+  g_autofree char *t = g_strstrip (g_strdup (tmpl ? tmpl : ""));
+  g_autofree char *rel = *t ? bro_template_render_path (t, v) : g_strdup ("");
   g_autofree char *target = NULL;
   g_autofree char *base = g_path_get_basename (file);
   char *unique;
 
-  if (!tmpl || !*tmpl)
-    return g_strdup (file);
-  v = base_values (c, BRO_JOB_RUNNING);
-  title_values (v, title, ordinal, info, file);
-  rel = bro_template_render_path (tmpl, v);
+  if (!*rel && fallback)
+    {
+      g_free (rel);
+      rel = bro_sanitize_component (fallback);
+    }
   if (!*rel)
     return g_strdup (file);
   if (!g_str_has_suffix (rel, ".mkv"))
@@ -660,6 +732,772 @@ rename_file (Ctx *c, const char *file, BroTitle *title, int ordinal, BroDiscInfo
   return unique;
 }
 
+static void
+add_episode (Ctx *c, const char *file, const char *out_dir, int episode, int source, int first, int last)
+{
+  EpisodeRec *e = g_new0 (EpisodeRec, 1);
+  e->file = relative_to (file, out_dir);
+  e->episode = episode;
+  e->source = source;
+  e->first = first;
+  e->last = last;
+  g_ptr_array_add (c->episodes, e);
+}
+
+static char *
+rename_file (Ctx *c, const char *file, BroTitle *title, int ordinal, BroDiscInfo *info, const char *out_dir)
+{
+  const char *explicit_name = g_hash_table_lookup (c->req->name_overrides, GINT_TO_POINTER (title->index));
+  const char *tmpl = explicit_name && *explicit_name ? explicit_name : c->req->drive->output.file_name_template;
+  g_autoptr (GHashTable) v = base_values (c, BRO_JOB_RUNNING);
+  g_autofree char *track = bro_track_label (title);
+  int k = GPOINTER_TO_INT (g_hash_table_lookup (c->separate, GINT_TO_POINTER (title->index))) - 1;
+  char *final;
+
+  title_values (v, title, ordinal, info, file);
+  bro_template_values_set (v, "track", track);
+  if (k >= 0)
+    {
+      g_autofree char *label = bro_episode_label (c->first_episode + k, c->episode_width);
+      g_autofree char *num = g_strdup_printf ("%d", c->first_episode + k);
+      bro_template_values_set (v, "episode", label);
+      bro_template_values_set (v, "episodeNumber", num);
+    }
+  final = rename_to (c, file, v, tmpl, NULL, out_dir);
+  if (k >= 0)
+    add_episode (c, final, out_dir, c->first_episode + k, bro_title_source_id (title) >= 0 ? bro_title_source_id (title) : title->index,
+                 1, MAX (1, bro_title_chapters (title)));
+  return final;
+}
+
+/* ---- episodes ---- */
+
+/* A command-line tool next to sibling, on PATH, or in the usual install folders. */
+static char *
+find_tool (const char *name, const char *sibling)
+{
+  static const char *const dirs[] = { "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", NULL };
+  char *p;
+  if (sibling)
+    {
+      g_autofree char *dir = g_path_get_dirname (sibling);
+      p = g_build_filename (dir, name, NULL);
+      if (g_file_test (p, G_FILE_TEST_IS_EXECUTABLE))
+        return p;
+      g_free (p);
+    }
+  if ((p = g_find_program_in_path (name)))
+    return p;
+  for (int i = 0; dirs[i]; i++)
+    {
+      p = g_build_filename (dirs[i], name, NULL);
+      if (g_file_test (p, G_FILE_TEST_IS_EXECUTABLE))
+        return p;
+      g_free (p);
+    }
+  return NULL;
+}
+
+/* Mount point of a disc in a drive (from /proc/self/mounts). */
+static char *
+mount_point (const char *device)
+{
+  g_autofree char *text = NULL;
+  g_auto (GStrv) lines = NULL;
+  if (!device || !g_file_get_contents ("/proc/self/mounts", &text, NULL, NULL))
+    return NULL;
+  lines = g_strsplit (text, "\n", -1);
+  for (char **l = lines; *l; l++)
+    {
+      g_auto (GStrv) f = g_strsplit (*l, " ", 3);
+      if (f[0] && f[1] && g_str_equal (f[0], device))
+        {
+          GString *mp = g_string_new (f[1]);
+          g_string_replace (mp, "\\040", " ", 0);
+          return g_string_free (mp, FALSE);
+        }
+    }
+  return NULL;
+}
+
+static BroVideoTS *
+open_videots (Ctx *c, const BroSource *src)
+{
+  switch (src->kind)
+    {
+    case BRO_SOURCE_ISO:
+      return bro_videots_open_iso (src->path);
+    case BRO_SOURCE_FOLDER:
+      return bro_videots_open_folder (src->path, c->res->disc_label);
+    default:
+      {
+        g_autofree char *mp = mount_point (src->path);
+        return mp ? bro_videots_open_folder (mp, c->res->disc_label) : NULL;
+      }
+    }
+}
+
+static gboolean
+run_quiet (const char *const *argv, int timeout, GCancellable *cancel, GString *out)
+{
+  int status = -1;
+  return bro_process_run (argv, NULL, NULL, timeout, cancel, out ? collect_line : NULL, out, &status, NULL, NULL, NULL) && status == 0;
+}
+
+/* Episode numbers read from the menu screens with ffmpeg + tesseract; NULL (with why) when the tools are missing. */
+static GArray *
+ocr_episode_numbers (Ctx *c, BroVideoTS *r, char **why)
+{
+  g_autofree char *ffmpeg = find_tool ("ffmpeg", NULL);
+  g_autofree char *tesseract = find_tool ("tesseract", NULL);
+  g_autofree char *dir = NULL;
+  g_autoptr (GPtrArray) stills = NULL;
+  GArray *numbers;
+  if (!ffmpeg || !tesseract)
+    {
+      *why = g_strdup ("ffmpeg and tesseract are needed to read episode numbers from the menus");
+      return NULL;
+    }
+  dir = g_dir_make_tmp ("bromelia-ocr-XXXXXX", NULL);
+  numbers = g_array_new (FALSE, FALSE, sizeof (int));
+  if (!dir)
+    return numbers;
+  stills = bro_dvd_menu_stills (r);
+  for (guint i = 0; i < stills->len && !cancelled (c); i++)
+    {
+      g_autofree char *mpg_name = g_strdup_printf ("menu%u.mpg", i), *png_name = g_strdup_printf ("menu%u.png", i);
+      g_autofree char *mpg = g_build_filename (dir, mpg_name, NULL), *png = g_build_filename (dir, png_name, NULL);
+      gsize len;
+      const char *data = g_bytes_get_data (stills->pdata[i], &len);
+      GString *text = g_string_new (NULL);
+      const char *ff[] = { ffmpeg, "-v", "quiet", "-y", "-f", "mpeg", "-i", mpg, "-frames:v", "1", "-vf", "scale=2160:1440,format=gray", png, NULL };
+      const char *ts[] = { tesseract, png, "stdout", "--psm", "11", NULL };
+      if (g_file_set_contents (mpg, data, len, NULL) && run_quiet (ff, 60, c->req->cancellable, NULL) && g_file_test (png, G_FILE_TEST_EXISTS))
+        {
+          g_autoptr (GArray) found = NULL;
+          run_quiet (ts, 60, c->req->cancellable, text);
+          found = bro_dvd_episode_numbers (text->str);
+          for (guint k = 0; k < found->len; k++)
+            {
+              gboolean dup = FALSE;
+              for (guint j = 0; j < numbers->len; j++)
+                dup |= g_array_index (numbers, int, j) == g_array_index (found, int, k);
+              if (!dup)
+                g_array_append_val (numbers, g_array_index (found, int, k));
+            }
+        }
+      g_string_free (text, TRUE);
+      g_unlink (mpg);
+      g_unlink (png);
+    }
+  g_rmdir (dir);
+  return numbers;
+}
+
+static int
+cmp_title_index (gconstpointer a, gconstpointer b)
+{
+  return (*(BroTitle *const *) a)->index - (*(BroTitle *const *) b)->index;
+}
+
+static int
+cmp_int_values (gconstpointer a, gconstpointer b)
+{
+  return *(const int *) a - *(const int *) b;
+}
+
+static char *
+numbers_text (GArray *n)
+{
+  GString *s = g_string_new ("[");
+  g_autoptr (GArray) sorted = g_array_copy (n);
+  g_array_sort (sorted, cmp_int_values);
+  for (guint i = 0; i < sorted->len; i++)
+    g_string_append_printf (s, "%s%d", i ? ", " : "", g_array_index (sorted, int, i));
+  g_string_append_c (s, ']');
+  return g_string_free (s, FALSE);
+}
+
+/* Decides, before ripping, which titles are episodes: a DVD "play all" title that will be split, or
+ * separate episode-length titles. Also settles movie vs. TV and the first episode number. */
+static void
+prepare_episodes (Ctx *c, const BroSource *src, BroDiscInfo *info, GArray *indices)
+{
+  g_autoptr (GPtrArray) ripped = g_ptr_array_new ();
+  g_autoptr (GPtrArray) plans = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_episode_plan_free);
+  BroEpisodePlan *strict = NULL;
+  int count, first = c->req->first_episode;
+  g_autofree char *how = NULL;
+
+  g_clear_pointer (&c->plan, bro_episode_plan_free);
+  g_hash_table_remove_all (c->separate);
+  for (guint i = 0; i < indices->len; i++)
+    {
+      BroTitle *t = bro_disc_info_title (info, g_array_index (indices, int, i));
+      if (t)
+        g_ptr_array_add (ripped, t);
+    }
+  if (c->identity && c->identity->format == BRO_FORMAT_DVD && c->req->drive->episodes.split_play_all)
+    {
+      phase (c, "Reading the disc menus");
+      g_clear_pointer (&c->videots, bro_videots_free);
+      c->videots = open_videots (c, src);
+      if (c->videots)
+        {
+          g_autoptr (BroDvdAnalysis) a = bro_dvd_analyse (c->videots);
+          g_autoptr (GPtrArray) all = a ? bro_dvd_plans (a) : NULL;
+          for (guint i = 0; all && i < all->len; i++)
+            {
+              BroEpisodePlan *p = all->pdata[i];
+              gboolean ripped_title = FALSE;
+              for (guint k = 0; k < ripped->len; k++)
+                ripped_title |= bro_title_source_id (ripped->pdata[k]) == p->title;
+              if (!ripped_title)
+                continue;
+              GString *eps = g_string_new (NULL);
+              for (guint k = 0; k < p->starts->len; k++)
+                {
+                  int ch = g_array_index (p->starts, int, k);
+                  g_autofree char *at = bro_dvd_hms (g_array_index (p->chapter_starts, double, ch - 1));
+                  g_string_append_printf (eps, "%s%d (%s, %s)", k ? ", " : "", ch, at, (char *) p->reasons->pdata[k]);
+                }
+              GString *tail = g_string_new (NULL);
+              for (guint k = 0; k < p->tail->len; k++)
+                g_string_append_printf (tail, "%s%d", k ? "," : "", g_array_index (p->tail, int, k));
+              log_line (c, BRO_SEV_INFO, "Disc title %d: menus start %u episodes at chapters %s; last episode ends at chapter %d (%s)%s%s%s",
+                        p->title, p->starts->len, eps->str, p->last_end, p->end_rule, tail->len ? "; chapter(s) " : "", tail->str,
+                        tail->len ? " follow it" : "");
+              g_string_free (eps, TRUE);
+              g_string_free (tail, TRUE);
+              g_ptr_array_add (plans, g_ptr_array_steal_index (all, i));
+              i--;
+            }
+        }
+      else
+        log_line (c, BRO_SEV_WARNING, "Could not open the disc's VIDEO_TS to look for episodes");
+    }
+  for (guint i = 0; i < plans->len && !strict; i++)
+    if (bro_episode_plan_plausible (plans->pdata[i], TRUE))
+      strict = plans->pdata[i];
+  resolve_identity (c, info, strict ? (int) strict->starts->len : 0, -1);
+  if (c->identity->kind != BRO_KIND_TV)
+    return;
+
+  for (guint i = 0; i < plans->len && !c->plan; i++)
+    {
+      BroEpisodePlan *p = plans->pdata[i];
+      BroTitle *t = NULL;
+      if (!bro_episode_plan_plausible (p, FALSE))
+        continue;
+      for (guint k = 0; k < ripped->len && !t; k++)
+        if (bro_title_source_id (ripped->pdata[k]) == p->title)
+          t = ripped->pdata[k];
+      if (t && bro_episode_plan_matches_chapters (p, bro_title_chapters (t)))
+        c->plan = g_ptr_array_steal_index (plans, i);
+      else
+        log_line (c, BRO_SEV_WARNING, "MakeMKV's title %d has a different chapter count than the disc's navigation; not splitting it", p->title);
+      break;
+    }
+  if (!c->plan && plans->len)
+    {
+      BroEpisodePlan *p = plans->pdata[0];
+      GString *d = g_string_new (NULL);
+      for (guint k = 0; k < p->episode_durations->len; k++)
+        {
+          g_autofree char *h = bro_dvd_hms (g_array_index (p->episode_durations, double, k));
+          g_string_append_printf (d, "%s%s", k ? ", " : "", h);
+        }
+      log_line (c, BRO_SEV_INFO, "The menu jumps don't look like episodes (lengths %s); not splitting", d->str);
+      g_string_free (d, TRUE);
+    }
+  if (!c->plan)
+    {
+      g_autoptr (GPtrArray) eps = bro_episode_like_titles (ripped);
+      g_ptr_array_sort (eps, cmp_title_index);
+      for (guint k = 0; k < eps->len; k++)
+        g_hash_table_insert (c->separate, GINT_TO_POINTER (((BroTitle *) eps->pdata[k])->index), GINT_TO_POINTER (k + 1));
+    }
+  count = c->plan ? (int) c->plan->starts->len : (int) g_hash_table_size (c->separate);
+  if (!count)
+    return;
+  how = g_strdup ("entered for this disc");
+  if (first < 0 && c->req->drive->episodes.read_menu_numbers && c->videots)
+    {
+      char *why = NULL;
+      g_autoptr (GArray) numbers = NULL;
+      phase (c, "Reading episode numbers from the menus");
+      numbers = ocr_episode_numbers (c, c->videots, &why);
+      g_free (how);
+      if (numbers && (first = bro_dvd_first_episode (numbers, count)) >= 0)
+        {
+          g_autofree char *n = numbers_text (numbers);
+          how = g_strdup_printf ("menu text %s", n);
+        }
+      else if (why)
+        how = why;
+      else
+        {
+          g_autofree char *n = numbers_text (numbers);
+          how = g_strdup_printf ("menus read %s, no clear numbering", n);
+        }
+    }
+  if (first < 0)
+    {
+      char *h = g_strdup_printf ("numbered from 1 (%s)", how);
+      g_free (how);
+      how = h;
+    }
+  c->first_episode = first >= 0 ? first : 1;
+  {
+    g_autofree char *last = g_strdup_printf ("%d", c->first_episode + count - 1);
+    c->episode_width = MAX (2, (int) strlen (last));
+  }
+  log_line (c, BRO_SEV_INFO, "Episodes %d–%d (%s)", c->first_episode, c->first_episode + count - 1, how);
+}
+
+static double
+mkv_duration (Ctx *c, const char *file)
+{
+  const char *argv[] = { c->req->mkvmerge, "-J", file, NULL };
+  GString *out = g_string_new (NULL);
+  g_autoptr (JsonParser) parser = json_parser_new ();
+  double d = -1;
+  if (run_quiet (argv, 120, NULL, out) && json_parser_load_from_data (parser, out->str, -1, NULL))
+    {
+      JsonObject *root = json_node_get_object (json_parser_get_root (parser));
+      JsonObject *cont = root && json_object_has_member (root, "container") ? json_object_get_object_member (root, "container") : NULL;
+      JsonObject *props = cont && json_object_has_member (cont, "properties") ? json_object_get_object_member (cont, "properties") : NULL;
+      if (props && json_object_has_member (props, "duration"))
+        d = json_object_get_double_member (props, "duration") / 1e9;
+    }
+  g_string_free (out, TRUE);
+  return d;
+}
+
+static GArray *
+mkv_chapter_starts (Ctx *c, const char *file)
+{
+  g_autofree char *mkvextract = find_tool ("mkvextract", c->req->mkvmerge);
+  g_autofree char *tmp = NULL;
+  g_autofree char *text = NULL;
+  int fd;
+  GArray *out = NULL;
+  if (!mkvextract)
+    return NULL;
+  fd = g_file_open_tmp ("bromelia-chapters-XXXXXX.txt", &tmp, NULL);
+  if (fd < 0)
+    return NULL;
+  close (fd);
+  {
+    const char *argv[] = { mkvextract, file, "chapters", "--simple", tmp, NULL };
+    int status = -1;
+    if (bro_process_run (argv, NULL, NULL, 120, NULL, NULL, NULL, &status, NULL, NULL, NULL) && status <= 1 &&
+        g_file_get_contents (tmp, &text, NULL, NULL))
+      out = bro_parse_simple_chapters (text);
+  }
+  g_unlink (tmp);
+  return out;
+}
+
+static int
+cmp_strings (gconstpointer a, gconstpointer b)
+{
+  return strcmp (*(char *const *) a, *(char *const *) b);
+}
+
+/* Splits the ripped "play all" title into episode files named with the file name template. */
+static gboolean
+split_episodes (Ctx *c, const char *out_dir, BroDiscInfo *info, GError **error)
+{
+  BroEpisodePlan *p = c->plan;
+  GHashTableIter it;
+  gpointer k, v;
+  const char *file = NULL;
+  BroTitle *title = NULL;
+  g_autofree char *base = NULL, *dir = NULL, *uuid = NULL, *prefix = NULL, *pattern = NULL, *stem = NULL;
+  g_autoptr (GArray) starts = NULL, split = NULL, mapped = NULL;
+  g_autoptr (GPtrArray) parts = NULL, outputs = NULL;
+  GString *list;
+  int status = -1;
+  double dur;
+  guint at;
+
+  if (!p)
+    return TRUE;
+  g_hash_table_iter_init (&it, c->file_titles);
+  while (g_hash_table_iter_next (&it, &k, &v))
+    {
+      BroTitle *t = bro_disc_info_title (info, GPOINTER_TO_INT (v) - 1);
+      if (t && bro_title_source_id (t) == p->title)
+        {
+          file = k;
+          title = t;
+        }
+    }
+  if (!file)
+    return TRUE;
+  base = g_path_get_basename (file);
+  if (!c->req->mkvmerge)
+    {
+      log_line (c, BRO_SEV_WARNING, "Splitting episodes needs mkvmerge (MKVToolNix); kept %s as one file", base);
+      return TRUE;
+    }
+  phase (c, "Splitting episodes");
+  dur = mkv_duration (c, file);
+  if (dur >= 0 && ABS (dur - p->duration) > 2)
+    {
+      g_autofree char *a = bro_dvd_hms (dur), *b = bro_dvd_hms (p->duration);
+      log_line (c, BRO_SEV_WARNING, "%s lasts %s, the disc title %s; not splitting", base, a, b);
+      return TRUE;
+    }
+  starts = mkv_chapter_starts (c, file);
+  split = bro_episode_plan_split_chapters (p);
+  mapped = bro_dvd_mkv_chapters (split, p, starts);
+  if (!mapped)
+    {
+      log_line (c, BRO_SEV_WARNING, "The chapters of %s don't line up with the disc's episodes; not splitting", base);
+      return TRUE;
+    }
+  dir = g_path_get_dirname (file);
+  uuid = g_uuid_string_random ();
+  prefix = g_strdup_printf (".bromelia-split-%.8s", uuid);
+  {
+    g_autofree char *name = g_strdup_printf ("%s-%%03d.mkv", prefix);
+    pattern = g_build_filename (dir, name, NULL);
+  }
+  list = g_string_new ("chapters:");
+  for (guint i = 0; i < mapped->len; i++)
+    g_string_append_printf (list, "%s%d", i ? "," : "", g_array_index (mapped, int, i));
+  {
+    const char *argv[] = { c->req->mkvmerge, "-o", pattern, "--split", list->str, file, NULL };
+    g_autofree char *cmd = bro_command_line (argv);
+    log_line (c, BRO_SEV_INFO, "$ %s", cmd);
+    bro_process_run (argv, NULL, NULL, 0, c->req->cancellable, NULL, NULL, &status, NULL, NULL, NULL);
+  }
+  g_string_free (list, TRUE);
+  parts = g_ptr_array_new_with_free_func (g_free);
+  {
+    g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+    const char *name;
+    while (d && (name = g_dir_read_name (d)))
+      if (g_str_has_prefix (name, prefix))
+        g_ptr_array_add (parts, g_build_filename (dir, name, NULL));
+  }
+  g_ptr_array_sort (parts, cmp_strings);
+  if (status < 0 || status > 1 || parts->len != mapped->len + 1)
+    {
+      for (guint i = 0; i < parts->len; i++)
+        g_unlink (parts->pdata[i]);
+      if (cancelled (c))
+        {
+          g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
+          return FALSE;
+        }
+      log_line (c, BRO_SEV_WARNING, "mkvmerge could not split %s; kept it as one file", base);
+      return TRUE;
+    }
+  stem = g_strdup (base);
+  if (strrchr (stem, '.')) *strrchr (stem, '.') = '\0';
+  outputs = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < parts->len; i++)
+    {
+      g_autoptr (GHashTable) vals = base_values (c, BRO_JOB_RUNNING);
+      g_autofree char *track = bro_track_label (title);
+      g_autofree char *range = NULL, *full_track = NULL, *fallback = NULL;
+      int f, l;
+      title_values (vals, title, (int) i + 1, info, parts->pdata[i]);
+      if (i < p->starts->len)
+        {
+          g_autofree char *label = bro_episode_label (c->first_episode + (int) i, c->episode_width);
+          g_autofree char *num = g_strdup_printf ("%d", c->first_episode + (int) i);
+          bro_episode_plan_range (p, i, &f, &l);
+          bro_template_values_set (vals, "episode", label);
+          bro_template_values_set (vals, "episodeNumber", num);
+          fallback = g_strdup_printf ("%s - Episode %d", stem, c->first_episode + (int) i);
+        }
+      else
+        {
+          f = g_array_index (p->tail, int, 0);
+          l = g_array_index (p->tail, int, p->tail->len - 1);
+          fallback = g_strdup_printf ("%s - after last episode", stem);
+        }
+      range = f == l ? g_strdup_printf ("%d", f) : g_strdup_printf ("%d-%d", f, l);
+      full_track = g_strdup_printf ("%s Ch %s", track, range);
+      bro_template_values_set (vals, "track", full_track);
+      char *final = rename_to (c, parts->pdata[i], vals, c->req->drive->output.file_name_template, fallback, out_dir);
+      if (i < p->starts->len)
+        add_episode (c, final, out_dir, c->first_episode + (int) i, p->title, f, l);
+      g_ptr_array_add (outputs, final);
+    }
+  log_line (c, BRO_SEV_INFO, "Split %s into %u episode(s)%s", base, p->starts->len, parts->len > p->starts->len ? " and a closing clip" : "");
+  for (at = 0; at < c->res->files->len && !g_str_equal (c->res->files->pdata[at], file); at++)
+    ;
+  if (!c->req->drive->episodes.keep_play_all)
+    {
+      if (at < c->res->files->len)
+        g_ptr_array_remove_index (c->res->files, at);
+      g_unlink (file);
+      log_line (c, BRO_SEV_INFO, "Removed the unsplit title %s", base);
+    }
+  else if (at < c->res->files->len)
+    at++;
+  for (guint i = 0; i < outputs->len; i++)
+    {
+      g_ptr_array_insert (c->res->files, (gint) MIN (at + i, c->res->files->len), g_strdup (outputs->pdata[i]));
+      update (c, BRO_UPDATE_FILE, BRO_SEV_INFO, outputs->pdata[i], 0, 0);
+    }
+  return TRUE;
+}
+
+/* ---- archive ---- */
+
+typedef struct {
+  Ctx *c;
+  gint64 before, total, size, last_update;
+} HashProgress;
+
+static gboolean
+on_hash_progress (gint64 done, gpointer data)
+{
+  HashProgress *h = data;
+  gint64 now = g_get_monotonic_time ();
+  if (now - h->last_update > 100000)
+    {
+      h->last_update = now;
+      update (h->c, BRO_UPDATE_PROGRESS, BRO_SEV_INFO, NULL, (double) done / MAX (h->size, 1), (double) (h->before + done) / MAX (h->total, 1));
+    }
+  return !cancelled (h->c);
+}
+
+static void write_archive_record (Ctx *c, const char *out_dir);
+
+/* Hashes every produced file and writes SHA256SUMS and bromelia.json into the output folder. */
+static gboolean
+archive (Ctx *c, const char *out_dir, GError **error)
+{
+  const BroArchiveConfig *cfg = &c->req->drive->archive;
+  g_autoptr (GPtrArray) files = NULL;
+  gint64 total = 0, done = 0;
+  if (!(cfg->checksums || cfg->archive_record) || !c->res->files->len)
+    return TRUE;
+  files = bro_checksum_list_files (c->res->files, out_dir);
+  for (guint i = 0; i < files->len; i++)
+    total += ((BroChecksum *) files->pdata[i])->size;
+  phase (c, "Computing checksums");
+  steps (c, c->step_count, c->step_count);
+  for (guint i = 0; i < files->len; i++)
+    {
+      BroChecksum *e = files->pdata[i];
+      g_autofree char *full = g_build_filename (out_dir, e->path, NULL);
+      HashProgress h = { c, done, total, e->size, 0 };
+      g_autoptr (GError) err = NULL;
+      update (c, BRO_UPDATE_OPERATION, BRO_SEV_INFO, e->path, 0, 0);
+      e->sha256 = bro_sha256_file (full, on_hash_progress, &h, &err);
+      if (!e->sha256)
+        {
+          if (cancelled (c))
+            g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
+          else
+            g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not read %s to compute its checksum: %s", e->path,
+                         err ? err->message : "unknown error");
+          return FALSE;
+        }
+      done += e->size;
+    }
+  update (c, BRO_UPDATE_OPERATION, BRO_SEV_INFO, "", 0, 0);
+  if (c->checksums)
+    g_ptr_array_unref (c->checksums);
+  c->checksums = g_ptr_array_ref (files);
+  if (cfg->checksums)
+    {
+      g_autoptr (GError) err = NULL;
+      char *path = bro_checksums_write_merged (out_dir, files, &err);
+      if (!path)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not write %s: %s", BRO_CHECKSUM_FILE, err ? err->message : "");
+          return FALSE;
+        }
+      g_free (c->checksum_file);
+      c->checksum_file = path;
+      log_line (c, BRO_SEV_INFO, "Wrote SHA-256 checksums of %u file(s) to %s", files->len, BRO_CHECKSUM_FILE);
+    }
+  if (cfg->archive_record)
+    write_archive_record (c, out_dir);
+  return TRUE;
+}
+
+static void
+add_optional_int (JsonBuilder *b, const char *name, int v)
+{
+  if (v < 0)
+    return;
+  json_builder_set_member_name (b, name);
+  json_builder_add_int_value (b, v);
+}
+
+static void
+build_episodes (JsonBuilder *b, Ctx *c)
+{
+  json_builder_set_member_name (b, "episodes");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < c->episodes->len; i++)
+    {
+      EpisodeRec *e = c->episodes->pdata[i];
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "file");
+      json_builder_add_string_value (b, e->file);
+      json_builder_set_member_name (b, "episode");
+      json_builder_add_int_value (b, e->episode);
+      json_builder_set_member_name (b, "sourceTitleId");
+      json_builder_add_int_value (b, e->source);
+      json_builder_set_member_name (b, "firstChapter");
+      json_builder_add_int_value (b, e->first);
+      json_builder_set_member_name (b, "lastChapter");
+      json_builder_add_int_value (b, e->last);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+}
+
+static void
+build_checksums (JsonBuilder *b, const char *name, Ctx *c)
+{
+  json_builder_set_member_name (b, name);
+  json_builder_begin_array (b);
+  for (guint i = 0; c->checksums && i < c->checksums->len; i++)
+    {
+      BroChecksum *e = c->checksums->pdata[i];
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "path");
+      json_builder_add_string_value (b, e->path);
+      json_builder_set_member_name (b, "size");
+      json_builder_add_int_value (b, e->size);
+      json_builder_set_member_name (b, "sha256");
+      json_builder_add_string_value (b, e->sha256 ? e->sha256 : "");
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+}
+
+static void
+write_archive_record (Ctx *c, const char *out_dir)
+{
+  g_autoptr (JsonBuilder) b = json_builder_new ();
+  g_autoptr (JsonNode) root = NULL;
+  g_autofree char *text = NULL, *target = NULL, *path = g_build_filename (out_dir, "bromelia.json", NULL);
+  g_autofree char *src = bro_source_info_argument (c->req->source);
+  g_autofree char *code = NULL;
+  BroIdentity *id = c->identity;
+  BroDiscInfo *info = c->res->info;
+  g_autoptr (GDateTime) now = g_date_time_new_now_utc ();
+  g_autofree char *finished = g_date_time_format_iso8601 (now);
+  g_autoptr (GDateTime) st = g_date_time_new_from_unix_utc (c->res->started_at);
+  g_autofree char *started = g_date_time_format_iso8601 (st);
+  if (!id)
+    return;
+  code = bro_identity_format_code (id);
+#define S(k, v) do { json_builder_set_member_name (b, k); json_builder_add_string_value (b, (v) ? (v) : ""); } while (0)
+  json_builder_begin_object (b);
+  S ("format", "bromelia-archive");
+  json_builder_set_member_name (b, "version");
+  json_builder_add_int_value (b, 1);
+  S ("name", id->name);
+  S ("kind", bro_kind_token (id->kind));
+  json_builder_set_member_name (b, "disc");
+  json_builder_begin_object (b);
+  S ("label", c->res->disc_label);
+  S ("volumeName", info ? bro_disc_info_attr (info, BRO_ATTR_VOLUME_NAME) : "");
+  S ("type", info ? bro_disc_info_attr (info, BRO_ATTR_TYPE) : "");
+  S ("format", bro_format_token (id->format));
+  S ("formatCode", code);
+  json_builder_set_member_name (b, "encrypted");
+  json_builder_add_boolean_value (b, id->encrypted);
+  add_optional_int (b, "season", id->label.season);
+  add_optional_int (b, "part", id->label.part);
+  add_optional_int (b, "volume", id->label.volume);
+  add_optional_int (b, "disc", id->label.disc);
+  json_builder_end_object (b);
+  S ("rip", bro_rip_mode_makes_mkv (c->req->mode) ? "Rip" : "Backup");
+  S ("mode", bro_rip_mode_to_string (c->req->mode));
+  S ("source", src);
+  S ("driveName", c->req->drive->name);
+  S ("makemkv", c->makemkv_version);
+  S ("jobId", c->req->job_id);
+  S ("startedAt", started);
+  S ("finishedAt", finished);
+  json_builder_set_member_name (b, "titles");
+  json_builder_begin_array (b);
+  for (guint i = 0; c->rip_titles && info && i < c->rip_titles->len; i++)
+    {
+      BroTitle *t = bro_disc_info_title (info, g_array_index (c->rip_titles, int, i));
+      if (!t)
+        continue;
+      json_builder_begin_object (b);
+      json_builder_set_member_name (b, "index");
+      json_builder_add_int_value (b, t->index);
+      add_optional_int (b, "sourceTitleId", bro_title_source_id (t));
+      S ("sourceFile", bro_title_str (t, BRO_ATTR_SOURCE_FILE_NAME));
+      S ("duration", bro_title_str (t, BRO_ATTR_DURATION));
+      json_builder_set_member_name (b, "chapters");
+      json_builder_add_int_value (b, bro_title_chapters (t));
+      json_builder_set_member_name (b, "sizeBytes");
+      json_builder_add_int_value (b, bro_title_size (t));
+      S ("segmentMap", bro_title_str (t, BRO_ATTR_SEGMENTS_MAP));
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  build_episodes (b, c);
+  build_checksums (b, "files", c);
+  json_builder_set_member_name (b, "warnings");
+  json_builder_add_int_value (b, c->res->warnings);
+  json_builder_set_member_name (b, "errors");
+  json_builder_add_int_value (b, c->res->errors);
+  json_builder_set_member_name (b, "errorMessages");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < c->error_messages->len; i++)
+    json_builder_add_string_value (b, c->error_messages->pdata[i]);
+  json_builder_end_array (b);
+  json_builder_end_object (b);
+#undef S
+  root = json_builder_get_root (b);
+  text = bro_json_to_string (root, TRUE);
+  target = bro_unique_path (path);
+  if (g_file_set_contents (target, text, -1, NULL))
+    {
+      g_autofree char *name = g_path_get_basename (target);
+      log_line (c, BRO_SEV_INFO, "Wrote the archive record %s", name);
+    }
+  else
+    log_line (c, BRO_SEV_WARNING, "Could not write %s", target);
+}
+
+/* File / folder name of a backup from the file name template (rip = Backup, no episode or track). */
+static char *
+backup_name (Ctx *c, gboolean decrypt)
+{
+  g_autofree char *tmpl = g_strstrip (g_strdup (c->req->drive->output.file_name_template));
+  g_autoptr (GHashTable) v = NULL;
+  static const char *const blank[] = { "title", "index", "n", "source", "duration", "chapters", "original", "comment", NULL };
+  char *rel;
+  GString *out;
+  if (!*tmpl)
+    return g_strdup ("");
+  v = base_values (c, BRO_JOB_RUNNING);
+  bro_template_values_set (v, "rip", "Backup");
+  if (c->identity)
+    {
+      g_autofree char *code = bro_format_code (c->identity->format, !decrypt);
+      bro_template_values_set (v, "format", code);
+    }
+  for (int i = 0; blank[i]; i++)
+    bro_template_values_set (v, blank[i], "");
+  rel = bro_template_render_path (tmpl, v);
+  out = g_string_new (rel);
+  g_free (rel);
+  g_string_replace (out, "/", " - ", 0);
+  return g_string_free (out, FALSE);
+}
+
 static gboolean
 rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir, int extra_steps, GError **error)
 {
@@ -673,6 +1511,8 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
   if (c->rip_titles)
     g_array_unref (c->rip_titles);
   c->rip_titles = g_array_ref (indices);
+  g_hash_table_remove_all (c->file_titles);
+  prepare_episodes (c, src, info, indices);
   if (indices->len != info->titles->len)
     every = FALSE;
   single = every && g_hash_table_size (c->req->track_selections) == 0;
@@ -749,6 +1589,7 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
               char *renamed = rename_file (c, final, title, ordinal, info, out_dir);
               g_free (final);
               final = renamed;
+              g_hash_table_insert (c->file_titles, g_strdup (final), GINT_TO_POINTER (index + 1));
             }
           g_ptr_array_add (c->res->files, final);
           update (c, BRO_UPDATE_FILE, BRO_SEV_INFO, final, 0, 0);
@@ -768,7 +1609,7 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
         g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%u titles failed: %s", failures->len - 1, joined);
       return FALSE;
     }
-  return TRUE;
+  return split_episodes (c, out_dir, info, error);
 }
 
 static char *
@@ -793,14 +1634,25 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
       dest = g_build_filename (out_dir, *sub ? sub : "backup", NULL);
     }
   g_mkdir_with_parents (dest, 0755);
-  if (c->req->drive->rip.backup_format == BRO_BACKUP_ISO)
-    {
-      g_autofree char *name = bro_sanitize_component (c->res->disc_label && *c->res->disc_label ? c->res->disc_label : "disc");
-      g_autofree char *iso_name = g_strconcat (name, ".iso", NULL);
-      g_autofree char *iso = g_build_filename (dest, iso_name, NULL);
-      g_free (dest);
-      dest = bro_unique_path (iso);
-    }
+  {
+    g_autofree char *templ_name = backup_name (c, decrypt);
+    if (c->req->drive->rip.backup_format == BRO_BACKUP_ISO)
+      {
+        g_autofree char *name = *templ_name ? g_strdup (templ_name)
+                                             : bro_sanitize_component (c->res->disc_label && *c->res->disc_label ? c->res->disc_label : "disc");
+        g_autofree char *iso_name = g_strconcat (name, ".iso", NULL);
+        g_autofree char *iso = g_build_filename (dest, iso_name, NULL);
+        g_free (dest);
+        dest = bro_unique_path (iso);
+      }
+    else if (*templ_name)
+      {
+        g_autofree char *folder = g_build_filename (dest, templ_name, NULL);
+        g_free (dest);
+        dest = bro_unique_path (folder);
+        g_mkdir_with_parents (dest, 0755);
+      }
+  }
   phase (c, decrypt ? "Backing up disc (decrypted)" : "Backing up disc");
   update (c, BRO_UPDATE_PROGRESS, BRO_SEV_INFO, NULL, 0, 0);
   c->expected_index = src->index;
@@ -829,6 +1681,33 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
     }
   summary_free (s);
   log_line (c, BRO_SEV_INFO, "Backup saved to %s", dest);
+  /* Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart. */
+  if (c->req->drive->rip.backup_format == BRO_BACKUP_FOLDER)
+    {
+      BroDiscFormat found = bro_detect_backup_folder (dest);
+      if (found != BRO_FORMAT_UNKNOWN && (!c->identity || found != c->identity->format))
+        {
+          g_autofree char *renamed = NULL;
+          g_autofree char *current = g_path_get_basename (dest);
+          resolve_identity (c, c->res->info, 0, found);
+          renamed = backup_name (c, decrypt);
+          if (*renamed && !g_str_equal (renamed, current))
+            {
+              g_autofree char *parent = g_path_get_dirname (dest);
+              g_autofree char *want = g_build_filename (parent, renamed, NULL);
+              char *target = bro_unique_path (want);
+              if (g_rename (dest, target) == 0)
+                {
+                  g_autofree char *tn = g_path_get_basename (target);
+                  log_line (c, BRO_SEV_INFO, "Renamed the backup to %s", tn);
+                  g_free (dest);
+                  dest = target;
+                }
+              else
+                g_free (target);
+            }
+        }
+    }
   return g_steal_pointer (&dest);
 }
 
@@ -947,12 +1826,27 @@ execute (Ctx *c, GError **error)
   if (c->env->profile_path)
     log_line (c, BRO_SEV_INFO, "Profile: %s", c->env->profile_path);
 
-  need_info = bro_rip_mode_makes_mkv (req->mode) || req->mode == BRO_MODE_INFO_ONLY || !c->res->disc_label || !*c->res->disc_label;
+  need_info = bro_rip_mode_makes_mkv (req->mode) || req->mode == BRO_MODE_INFO_ONLY;
   if (!info && need_info)
     {
       info = scan_disc (c, req->source, error);
       if (!info)
         return FALSE;
+    }
+  else if (!info)
+    {
+      /* Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title. */
+      g_autoptr (GError) err = NULL;
+      info = scan_disc (c, req->source, &err);
+      if (!info)
+        {
+          if (cancelled (c) || g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            {
+              g_propagate_error (error, g_steal_pointer (&err));
+              return FALSE;
+            }
+          log_line (c, BRO_SEV_WARNING, "Continuing without the disc listing: %s", err ? err->message : "unknown error");
+        }
     }
   c->res->info = info;
   if (info && *bro_disc_info_name (info))
@@ -961,6 +1855,7 @@ execute (Ctx *c, GError **error)
       c->res->disc_label = g_strdup (bro_disc_info_name (info));
       update (c, BRO_UPDATE_DISC_LABEL, BRO_SEV_INFO, c->res->disc_label, 0, 0);
     }
+  resolve_identity (c, info, 0, -1);
 
   out_dir = resolve_output_dir (c, error);
   if (!out_dir)
@@ -986,7 +1881,7 @@ execute (Ctx *c, GError **error)
     case BRO_MODE_MKV:
       if (req->drive->rip.write_disc_info_json)
         write_disc_info (info, out_dir, NULL);
-      return rip_titles (c, req->source, info, out_dir, 0, error);
+      return rip_titles (c, req->source, info, out_dir, 0, error) && archive (c, out_dir, error);
     case BRO_MODE_BACKUP:
     case BRO_MODE_BACKUP_DECRYPTED:
       {
@@ -996,7 +1891,7 @@ execute (Ctx *c, GError **error)
         if (!dest)
           return FALSE;
         g_ptr_array_add (c->res->files, dest);
-        return TRUE;
+        return archive (c, out_dir, error);
       }
     case BRO_MODE_BACKUP_THEN_MKV:
       {
@@ -1035,7 +1930,7 @@ execute (Ctx *c, GError **error)
             else
               g_file_delete (f, NULL, NULL);
           }
-        return TRUE;
+        return archive (c, out_dir, error);
       }
     }
   return TRUE;
@@ -1117,8 +2012,9 @@ static gboolean
 run_post_processing (Ctx *c, BroJobState status)
 {
   gboolean failed = FALSE;
-  GPtrArray *steps_arr = c->req->drive->post_process;
+  g_autoptr (GPtrArray) steps_arr = g_ptr_array_new ();
   g_auto (GStrv) base_env = g_get_environ ();
+  g_autofree char *code = c->identity ? bro_identity_format_code (c->identity) : g_strdup ("");
   g_autofree char *manifest = g_build_filename (c->req->job_dir, "manifest.json", NULL);
   g_autofree char *logpath = g_build_filename (c->req->job_dir, "log.txt", NULL);
   g_autofree char *count = g_strdup_printf ("%u", c->res->files->len);
@@ -1145,7 +2041,30 @@ run_post_processing (Ctx *c, BroJobState status)
     SETENV ("BROMELIA_DEVICE", c->req->source->path);
   if (c->res->error)
     SETENV ("BROMELIA_ERROR", c->res->error);
+  if (c->identity)
+    {
+      g_autofree char *season = c->identity->label.season >= 0 ? g_strdup_printf ("%d", c->identity->label.season) : g_strdup ("");
+      g_autofree char *disc = c->identity->label.disc >= 0 ? g_strdup_printf ("%d", c->identity->label.disc) : g_strdup ("");
+      g_autofree char *set = bro_label_set_description (&c->identity->label);
+      SETENV ("BROMELIA_NAME", c->identity->name);
+      SETENV ("BROMELIA_KIND", bro_kind_token (c->identity->kind));
+      SETENV ("BROMELIA_FORMAT", code);
+      SETENV ("BROMELIA_ENCRYPTED", c->identity->encrypted ? "1" : "0");
+      SETENV ("BROMELIA_SEASON", season);
+      SETENV ("BROMELIA_DISC_NUMBER", disc);
+      SETENV ("BROMELIA_DISC_SET", set);
+    }
+  if (c->checksum_file)
+    SETENV ("BROMELIA_CHECKSUMS", c->checksum_file);
 #undef SETENV
+  /* The drive's steps, then the global plugins; each limited by its name / format conditions. */
+  for (int pass = 0; pass < 2; pass++)
+    {
+      GPtrArray *src = pass == 0 ? c->req->drive->post_process : c->req->config->plugins;
+      for (guint i = 0; i < src->len; i++)
+        if (bro_plugin_matches (src->pdata[i], c->identity ? c->identity->name : c->res->disc_label, c->res->disc_label, code))
+          g_ptr_array_add (steps_arr, src->pdata[i]);
+    }
   g_string_free (files, TRUE);
 
   for (guint i = 0; i < steps_arr->len; i++)
@@ -1271,6 +2190,22 @@ write_manifest (Ctx *c, BroJobState status)
       json_builder_end_object (b);
     }
   json_builder_end_array (b);
+  if (c->identity)
+    {
+      g_autofree char *code = bro_identity_format_code (c->identity);
+      S ("name", c->identity->name);
+      S ("kind", bro_kind_token (c->identity->kind));
+      S ("format", bro_format_token (c->identity->format));
+      S ("formatCode", code);
+      json_builder_set_member_name (b, "encrypted");
+      json_builder_add_boolean_value (b, c->identity->encrypted);
+      add_optional_int (b, "season", c->identity->label.season);
+      add_optional_int (b, "discNumber", c->identity->label.disc);
+    }
+  build_episodes (b, c);
+  if (c->checksum_file)
+    S ("checksumFile", c->checksum_file);
+  build_checksums (b, "checksums", c);
   if (c->res->error)
     S ("error", c->res->error);
 #undef S
@@ -1318,6 +2253,12 @@ bro_run_job (BroRunRequest *req)
   c.req = req;
   c.res = res;
   c.commands = g_ptr_array_new_with_free_func (g_free);
+  c.separate = g_hash_table_new (g_direct_hash, g_direct_equal);
+  c.file_titles = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  c.episodes = g_ptr_array_new_with_free_func ((GDestroyNotify) episode_rec_free);
+  c.error_messages = g_ptr_array_new_with_free_func (g_free);
+  c.first_episode = 1;
+  c.episode_width = 2;
   c.step_count = 1;
   g_mkdir_with_parents (req->job_dir, 0755);
   logpath = g_build_filename (req->job_dir, "log.txt", NULL);
@@ -1372,11 +2313,30 @@ bro_run_job (BroRunRequest *req)
   log_line (&c, BRO_SEV_INFO, "Finished: %s", bro_job_state_label (status));
   if (c.log)
     fclose (c.log);
+  if (req->drive->archive.archive_record && res->output_dir && res->files->len)
+    {
+      g_autofree char *want = g_build_filename (res->output_dir, "bromelia-log.txt", NULL);
+      g_autofree char *target = bro_unique_path (want);
+      g_autofree char *contents = NULL;
+      gsize len = 0;
+      if (g_file_get_contents (logpath, &contents, &len, NULL))
+        g_file_set_contents (target, contents, len, NULL);
+    }
   if (c.base_env) bro_makemkv_env_free (c.base_env);
   if (c.all_env) bro_makemkv_env_free (c.all_env);
   if (c.rip_titles) g_array_unref (c.rip_titles);
   g_free (c.last_total);
   g_free (c.expected_device);
   g_ptr_array_unref (c.commands);
+  bro_identity_free (c.identity);
+  if (c.videots) bro_videots_free (c.videots);
+  if (c.plan) bro_episode_plan_free (c.plan);
+  g_hash_table_unref (c.separate);
+  g_hash_table_unref (c.file_titles);
+  g_ptr_array_unref (c.episodes);
+  if (c.checksums) g_ptr_array_unref (c.checksums);
+  g_free (c.checksum_file);
+  g_free (c.makemkv_version);
+  g_ptr_array_unref (c.error_messages);
   return res;
 }

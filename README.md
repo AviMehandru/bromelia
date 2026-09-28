@@ -56,14 +56,36 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
   maximum count. A live preview shows why each title is picked or skipped.
 - **Automatic ripping on disc insert** with a cancellable countdown, plus automatic eject on success
   and/or failure and desktop notifications.
-- **Output templates** for folders and file names using `{disc}`, `{type}`, `{drive}`, `{date}`,
-  `{title}`, `{index}`, `{n:2}`, `{source}`, `{duration}`, `{chapters}`, `{original}`, and conditional
-  text such as `{comment? - {comment}}`.
+- **Knows what it is ripping.** The movie or show name is read from the disc (Blu-ray metadata title or
+  the volume label: `ONE_PIECE_S2_P7_D2` → *One Piece*, Season 2 Part 7 Disc 2), movies and TV shows are
+  told apart (season / volume markers, episode-length titles, episode menus), and the format is detected:
+  DVD, Blu-ray or 4K Ultra HD (2160p / HEVC video, or `index.bdmv` version 3 in a backup). The name and
+  movie / TV choice can be changed on the disc page before ripping.
+- **Archive-style names.** Files and backups are named
+  `{Name} - {Episode} - {Disc} - {Rip/Backup} - {Title} - {Format}`, leaving out parts that don't apply,
+  e.g. `One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv` or
+  `Inception - Backup - 4Ke`. Format codes are `DVD`, `BR` and `4K`, with an `e` suffix (`DVDe`, `BRe`,
+  `4Ke`) for backups that were not decrypted.
+- **TV episodes from “play all” titles.** Many TV DVDs store several episodes in one title. Bromelia reads
+  the disc's own menu navigation (IFO title tables, menu and button jump commands) to find where each
+  episode starts and ends, and splits the MKV into one file per episode with `mkvmerge` (no re-encoding).
+  Episode numbers are read from the episode menus with `ffmpeg` + `tesseract` when installed, or entered on
+  the disc page. Works from a disc, an ISO or a backup.
+- **Checksums and archive records.** Every output folder gets `SHA256SUMS` (checkable with
+  `sha256sum -c SHA256SUMS` / `shasum -a 256 -c SHA256SUMS`), `bromelia.json` (disc identity, titles,
+  episodes, files with sizes and hashes, MakeMKV version, errors) and the job log.
+- **Output templates** for folders and file names using `{name}`, `{episode}`, `{discLabel}`, `{rip}`,
+  `{track}`, `{format}`, `{season}`, `{disc}`, `{type}`, `{drive}`, `{date}`, `{title}`, `{index}`,
+  `{n:2}`, `{source}`, `{duration}`, `{chapters}`, `{original}`, and conditional text such as
+  `{comment? - {comment}}`.
 - **Post-processing**: any number of steps per drive (programs or scripts; `.ps1`, `.bat` and `.py` on
   Windows), run on success, failure or always, once per job or once per file, with a timeout and optional
-  "fail the job". Steps get `BROMELIA_*` environment variables and a JSON manifest of the job. They can
-  be test-run from the editor, and ready-made examples are included (move to library, HandBrake,
-  logging, notifications).
+  "fail the job". Steps get `BROMELIA_*` environment variables (including the name, format code and
+  checksum file) and a JSON manifest of the job. They can be test-run from the editor, and ready-made
+  examples are included (move to library, HandBrake, logging, notifications).
+- **Plugins**: post-processing steps for every drive that run only for matching discs — by movie / show
+  name or disc label (regular expression) and by format code (`DVD`, `BRe`, `BR*`, …). Use them for
+  anything particular to one show, one disc or one kind of disc.
 - **Hand-picked tracks**: when you untick tracks, the title is ripped with every track and the unwanted
   ones are removed with `mkvmerge` (MKVToolNix). Bromelia checks the track layout and keeps the file
   untouched if it doesn't match.
@@ -87,14 +109,19 @@ Or open `macos/Bromelia.xcodeproj` in Xcode. The app is not sandboxed (it runs `
 and `mkvmerge`) and is ad-hoc signed; set your own team for distribution.
 
 ### Windows
-Requires Windows 10 1809+ and the .NET 8 SDK (Visual Studio 2022 with the *Windows application
-development* workload also works; open `windows/Bromelia.sln`).
+Requires Windows 10 1809+, the .NET 8 SDK (or newer) and Visual Studio 2022 or newer (or its Build Tools)
+with the *Windows application development* workload; open `windows/Bromelia.sln`, or build from a
+*Developer PowerShell*:
 
 ```powershell
 cd windows
-dotnet build src/Bromelia.App/Bromelia.App.csproj -c Release -p:Platform=x64
-dotnet publish src/Bromelia.App/Bromelia.App.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained -o publish
+msbuild src/Bromelia.App/Bromelia.App.csproj -restore -p:Configuration=Release -p:Platform=x64
+msbuild src/Bromelia.App/Bromelia.App.csproj -restore -t:Publish -p:Configuration=Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:PublishDir=publish\
 ```
+
+Use Visual Studio's `msbuild`, not `dotnet build`: the Windows App SDK loads its resource (PRI) build
+tasks from Visual Studio's MSBuild folder, which the .NET SDK doesn't include (`dotnet build` fails with
+MSB4062 *ExpandPriContent*). The core library and its tests build with plain `dotnet`.
 
 The app is unpackaged and self-contained (Windows App SDK included). MakeMKV is found in
 `Program Files (x86)\MakeMKV` automatically.
@@ -115,9 +142,15 @@ sudo ninja -C builddir install   # optional: desktop file, icon, AppStream metad
 
 ## Testing
 
-Unit tests on all three platforms run against the shared fixtures. Each suite also contains an
-end-to-end test that rips a real disc image through the complete pipeline (title choice, `mkvmerge`
-track removal, renaming, post-processing script, manifest) when `BROMELIA_TEST_ISO` points to an ISO.
+Unit tests on all three platforms run against the shared fixtures, including the navigation files
+(IFOs only, no video) of a TV DVD with a six-episode “play all” title. Each suite also contains
+end-to-end tests that run a real disc image through the complete pipeline when pointed at one:
+
+| Variable | Test |
+| --- | --- |
+| `BROMELIA_TEST_ISO` | Any disc image: title choice, `mkvmerge` track removal, renaming, post-processing script, manifest |
+| `BROMELIA_TEST_DVD_ISO` | `One_Piece_S2_P7_D2.iso`: episode analysis straight from the ISO, menu OCR |
+| `BROMELIA_TEST_PLAYALL_ISO` | Same ISO: rip → split into episodes 138–143 → names → `SHA256SUMS` → plugins |
 
 ```bash
 # macOS
@@ -152,4 +185,11 @@ See [docs/architecture.md](docs/architecture.md) for how the pieces fit together
 - Firmware flashing isn't offered. Only read-only commands of MakeMKV's firmware tool are exposed.
 - On Windows, per-drive MakeMKV settings rely on applying registry values around each launch. If the
   MakeMKV GUI is open at the same time and saves its preferences, it may write values back.
-- Individual track selection needs `mkvmerge` from MKVToolNix.
+- Individual track selection and episode splitting need `mkvmerge` from MKVToolNix; reading episode
+  numbers from menus needs `ffmpeg` and `tesseract`.
+- Episode splitting works for DVDs (their menu navigation says where episodes start). Blu-ray TV discs
+  normally store each episode as its own playlist, which is ripped and named per episode anyway.
+- The name comes from the disc itself; there is no online database lookup. Change it on the disc page
+  when the label is cryptic.
+- The `e` format codes mean “not decrypted by Bromelia”: a DVD without CSS backed up without decryption
+  is still labelled `DVDe`.

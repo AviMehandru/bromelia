@@ -210,6 +210,8 @@ bro_post_step_new (void)
   s->working_directory = g_strdup ("");
   s->run_on = BRO_RUN_SUCCESS;
   s->environment = str_table_new ();
+  s->match_name = g_strdup ("");
+  s->match_formats = g_ptr_array_new_with_free_func (g_free);
   return s;
 }
 
@@ -225,6 +227,8 @@ bro_post_step_free (BroPostStep *s)
   g_free (s->arguments);
   g_free (s->working_directory);
   g_hash_table_unref (s->environment);
+  g_free (s->match_name);
+  g_ptr_array_unref (s->match_formats);
   g_free (s);
 }
 
@@ -244,6 +248,12 @@ post_step_to_json (JsonBuilder *b, const BroPostStep *s)
   I ("timeoutSeconds", s->timeout_seconds);
   add_str_table (b, "environment", s->environment);
   B ("failJobOnError", s->fail_job_on_error);
+  S ("matchName", s->match_name);
+  json_builder_set_member_name (b, "matchFormats");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < s->match_formats->len; i++)
+    json_builder_add_string_value (b, s->match_formats->pdata[i]);
+  json_builder_end_array (b);
   json_builder_end_object (b);
 }
 
@@ -264,6 +274,17 @@ post_step_from_json (JsonObject *o)
   s->timeout_seconds = get_int (o, "timeoutSeconds", 0);
   s->environment = get_str_table (o, "environment");
   s->fail_job_on_error = get_bool (o, "failJobOnError", FALSE);
+  s->match_name = dup_str (o, "matchName", "");
+  s->match_formats = g_ptr_array_new_with_free_func (g_free);
+  {
+    JsonArray *f = get_arr (o, "matchFormats");
+    for (guint i = 0; f && i < json_array_get_length (f); i++)
+      {
+        JsonNode *n = json_array_get_element (f, i);
+        if (JSON_NODE_HOLDS_VALUE (n) && json_node_get_value_type (n) == G_TYPE_STRING)
+          g_ptr_array_add (s->match_formats, g_strdup (json_node_get_string (n)));
+      }
+  }
   return s;
 }
 
@@ -311,13 +332,18 @@ drive_config_init_defaults (BroDriveConfig *c)
   c->rip.direct_io = -1;
   c->rip.extra_arguments = g_strdup ("");
   c->output.root_override = g_strdup ("");
-  c->output.folder_template = g_strdup ("{disc}");
-  c->output.file_name_template = g_strdup ("");
+  c->output.folder_template = g_strdup (BRO_DEFAULT_FOLDER_TEMPLATE);
+  c->output.file_name_template = g_strdup (BRO_DEFAULT_FILE_TEMPLATE);
   c->output.backup_subfolder = g_strdup ("backup");
   c->automation.auto_rip_delay_seconds = 10;
   c->automation.eject_when_done = TRUE;
   c->automation.notify = TRUE;
   c->automation.play_sound = TRUE;
+  c->archive.checksums = TRUE;
+  c->archive.archive_record = TRUE;
+  c->episodes.split_play_all = TRUE;
+  c->episodes.keep_play_all = TRUE;
+  c->episodes.read_menu_numbers = TRUE;
   c->post_process = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_post_step_free);
 }
 
@@ -441,6 +467,19 @@ drive_config_build (JsonBuilder *b, const BroDriveConfig *c)
   B ("playSound", c->automation.play_sound);
   json_builder_end_object (b);
 
+  json_builder_set_member_name (b, "archive");
+  json_builder_begin_object (b);
+  B ("checksums", c->archive.checksums);
+  B ("archiveRecord", c->archive.archive_record);
+  json_builder_end_object (b);
+
+  json_builder_set_member_name (b, "episodes");
+  json_builder_begin_object (b);
+  B ("splitPlayAll", c->episodes.split_play_all);
+  B ("keepPlayAll", c->episodes.keep_play_all);
+  B ("readMenuNumbers", c->episodes.read_menu_numbers);
+  json_builder_end_object (b);
+
   json_builder_set_member_name (b, "postProcess");
   json_builder_begin_array (b);
   for (guint i = 0; i < c->post_process->len; i++)
@@ -523,8 +562,8 @@ drive_config_from_object (JsonObject *o)
 
   out = get_obj (o, "output");
   REPLACE (c->output.root_override, dup_str (out, "rootOverride", ""));
-  REPLACE (c->output.folder_template, dup_str (out, "folderTemplate", "{disc}"));
-  REPLACE (c->output.file_name_template, dup_str (out, "fileNameTemplate", ""));
+  REPLACE (c->output.folder_template, dup_str (out, "folderTemplate", BRO_DEFAULT_FOLDER_TEMPLATE));
+  REPLACE (c->output.file_name_template, dup_str (out, "fileNameTemplate", BRO_DEFAULT_FILE_TEMPLATE));
   REPLACE (c->output.backup_subfolder, dup_str (out, "backupSubfolder", "backup"));
   c->output.conflict_policy = enum_parse (conflicts, get_str (out, "conflictPolicy", NULL), BRO_CONFLICT_UNIQUE);
 
@@ -536,6 +575,14 @@ drive_config_from_object (JsonObject *o)
   c->automation.notify = get_bool (a, "notify", TRUE);
   c->automation.play_sound = get_bool (a, "playSound", TRUE);
 
+  a = get_obj (o, "archive");
+  c->archive.checksums = get_bool (a, "checksums", TRUE);
+  c->archive.archive_record = get_bool (a, "archiveRecord", TRUE);
+  a = get_obj (o, "episodes");
+  c->episodes.split_play_all = get_bool (a, "splitPlayAll", TRUE);
+  c->episodes.keep_play_all = get_bool (a, "keepPlayAll", TRUE);
+  c->episodes.read_menu_numbers = get_bool (a, "readMenuNumbers", TRUE);
+
   steps = get_arr (o, "postProcess");
   if (steps)
     for (guint i = 0; i < json_array_get_length (steps); i++)
@@ -546,6 +593,22 @@ drive_config_from_object (JsonObject *o)
       }
 #undef REPLACE
   return c;
+}
+
+void
+bro_drive_config_upgrade_naming (BroDriveConfig *c)
+{
+  g_autofree char *file = g_strstrip (g_strdup (c->output.file_name_template));
+  if (!*file)
+    {
+      g_free (c->output.file_name_template);
+      c->output.file_name_template = g_strdup (BRO_DEFAULT_FILE_TEMPLATE);
+    }
+  if (g_strcmp0 (c->output.folder_template, BRO_LEGACY_FOLDER_TEMPLATE) == 0)
+    {
+      g_free (c->output.folder_template);
+      c->output.folder_template = g_strdup (BRO_DEFAULT_FOLDER_TEMPLATE);
+    }
 }
 
 BroDriveConfig *
@@ -640,7 +703,7 @@ BroAppConfig *
 bro_app_config_new (void)
 {
   BroAppConfig *c = g_new0 (BroAppConfig, 1);
-  c->version = 1;
+  c->version = BRO_CONFIG_VERSION;
   c->makemkvcon_path = g_strdup ("");
   c->mkvmerge_path = g_strdup ("");
   c->output_root = g_strdup ("~/Videos/Bromelia");
@@ -652,6 +715,7 @@ bro_app_config_new (void)
   c->default_drive->name = g_strdup ("Default");
   c->drives = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_drive_config_free);
   c->presets = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_preset_free);
+  c->plugins = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_post_step_free);
   c->history_limit = 500;
   return c;
 }
@@ -669,6 +733,7 @@ bro_app_config_free (BroAppConfig *c)
   bro_drive_config_free (c->default_drive);
   g_ptr_array_unref (c->drives);
   g_ptr_array_unref (c->presets);
+  g_ptr_array_unref (c->plugins);
   g_free (c);
 }
 
@@ -705,6 +770,11 @@ bro_app_config_to_json (const BroAppConfig *c)
       drive_config_build (b, p->config);
       json_builder_end_object (b);
     }
+  json_builder_end_array (b);
+  json_builder_set_member_name (b, "plugins");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < c->plugins->len; i++)
+    post_step_to_json (b, c->plugins->pdata[i]);
   json_builder_end_array (b);
   I ("historyLimit", c->history_limit);
   json_builder_end_object (b);
@@ -751,7 +821,22 @@ bro_app_config_from_json (JsonNode *node)
           p->config = drive_config_from_object (get_obj (po, "config"));
           g_ptr_array_add (c->presets, p);
         }
+  if ((arr = get_arr (o, "plugins")))
+    for (guint i = 0; i < json_array_get_length (arr); i++)
+      if (JSON_NODE_HOLDS_OBJECT (json_array_get_element (arr, i)))
+        g_ptr_array_add (c->plugins, post_step_from_json (json_array_get_object_element (arr, i)));
   c->history_limit = get_int (o, "historyLimit", 500);
+  /* Version 1 kept MakeMKV's file names and named folders after the disc label; version 2 names
+   * everything "{name} - … - {format}". Only untouched defaults are replaced. */
+  if (c->version < 2)
+    {
+      bro_drive_config_upgrade_naming (c->default_drive);
+      for (guint i = 0; i < c->drives->len; i++)
+        bro_drive_config_upgrade_naming (c->drives->pdata[i]);
+      for (guint i = 0; i < c->presets->len; i++)
+        bro_drive_config_upgrade_naming (((BroPreset *) c->presets->pdata[i])->config);
+    }
+  c->version = BRO_CONFIG_VERSION;
 #undef REPLACE
   return c;
 }

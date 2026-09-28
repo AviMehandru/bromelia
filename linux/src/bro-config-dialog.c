@@ -1,5 +1,6 @@
 /* bro-config-dialog.c — per-drive configuration (live-edited, saved automatically) and the settings catalog editor. */
 #include "bro-pages.h"
+#include "bro-identity.h"
 #include "bro-logic.h"
 
 #include <string.h>
@@ -25,6 +26,8 @@ typedef struct {
   GtkWidget *preview_rows;
   AdwPreferencesGroup *post_group;
   GPtrArray *post_rows;
+  GPtrArray *steps;             /* the step list being edited: the drive's steps or the global plugins */
+  GtkWidget *folder_row, *file_row;
   AdwPreferencesDialog *dialog;
   int direct_io_choice;
 } Ctx;
@@ -188,6 +191,14 @@ ripping_page (Ctx *c)
   ADD (g, bro_combo_row ("Backup format", backup_format_labels, (int *) &d->rip.backup_format, ripping_changed, c));
   ADD (g, bro_switch_row ("Keep the backup after the MKV files are made", "Backup + MKV mode", &d->rip.keep_backup_after_mkv, ripping_changed, c));
 
+  g = group (page, "TV episodes", "DVDs often store several episodes in one title. Bromelia reads the disc's menu navigation to find where "
+                                  "each episode starts and splits the MKV with mkvmerge, without re-encoding. Episode numbers are read "
+                                  "from the menu screens with ffmpeg and tesseract when installed; otherwise enter the first episode "
+                                  "number on the disc page, or episodes are numbered from 1.");
+  ADD (g, bro_switch_row ("Split “play all” titles of TV shows into episodes", NULL, &d->episodes.split_play_all, ctx_changed, c));
+  ADD (g, bro_switch_row ("Keep the unsplit title as well", NULL, &d->episodes.keep_play_all, ctx_changed, c));
+  ADD (g, bro_switch_row ("Read episode numbers from the disc menus", NULL, &d->episodes.read_menu_numbers, ctx_changed, c));
+
   g = group (page, "Titles to rip", NULL);
   ADD (g, bro_combo_row ("Choose", strategy_labels, (int *) &t->strategy, ripping_changed, c));
   ADD (g, bro_spin_row ("Number of longest titles", NULL, &t->longest_count, 1, 99, ripping_changed, c));
@@ -227,6 +238,13 @@ ripping_page (Ctx *c)
 
 /* ---- output ---- */
 
+static void
+on_standard_naming (GtkButton *b, Ctx *c)
+{
+  gtk_editable_set_text (GTK_EDITABLE (c->folder_row), BRO_DEFAULT_FOLDER_TEMPLATE);
+  gtk_editable_set_text (GTK_EDITABLE (c->file_row), BRO_DEFAULT_FILE_TEMPLATE);
+}
+
 static AdwPreferencesPage *
 output_page (Ctx *c)
 {
@@ -235,16 +253,31 @@ output_page (Ctx *c)
   AdwPreferencesGroup *g = group (page, "Location", "Leave the output folder empty to use the global default from Preferences.");
   GString *tokens = g_string_new (NULL);
   ADD (g, bro_path_row ("Output folder", &d->output.root_override, TRUE, ctx_changed, c));
-  ADD (g, bro_entry_row ("Folder name template", &d->output.folder_template, NULL, ctx_changed, c));
+  c->folder_row = bro_entry_row ("Folder name template", &d->output.folder_template, NULL, ctx_changed, c);
+  ADD (g, c->folder_row);
   ADD (g, bro_combo_row ("If the folder already exists", conflict_labels, (int *) &d->output.conflict_policy, ctx_changed, c));
-  g = group (page, "File names", "Leave empty to keep MakeMKV's own file names.");
-  ADD (g, bro_entry_row ("Rename MKV files to (e.g. {disc} - {n:2})", &d->output.file_name_template, NULL, ctx_changed, c));
+  g = group (page, "File names", "Used for MKV files and backups. Standard naming: {name} - {episode} - {discLabel} - {rip} - {track} - "
+                                 "{format}, leaving out parts that don't apply. Format codes: DVD, BR (Blu-ray), 4K (Ultra HD Blu-ray); "
+                                 "DVDe, BRe, 4Ke for backups that are not decrypted. Leave empty to keep MakeMKV's own file names.");
+  c->file_row = bro_entry_row ("Name files and backups", &d->output.file_name_template, NULL, ctx_changed, c);
+  ADD (g, c->file_row);
+  {
+    GtkWidget *std = gtk_button_new_with_label ("Use the Standard Naming");
+    gtk_widget_add_css_class (std, "flat");
+    g_signal_connect (std, "clicked", G_CALLBACK (on_standard_naming), c);
+    adw_preferences_group_set_header_suffix (g, std);
+  }
   ADD (g, bro_entry_row ("Backup subfolder (backup + MKV mode)", &d->output.backup_subfolder, NULL, ctx_changed, c));
   for (int i = 0; bro_file_tokens[i].token; i++)
     g_string_append_printf (tokens, "{%s} — %s\n", bro_file_tokens[i].token, bro_file_tokens[i].help);
   g_string_append (tokens, "{n:3} — zero-pad a number to 3 digits\n{token?text} — insert text only when token is not empty");
   g = group (page, "Tokens", tokens->str);
   g_string_free (tokens, TRUE);
+  g = group (page, "Archiving", "Checksums of every file (including backup folders) are saved in the output folder in the standard format; "
+                                "check a copy later with “sha256sum -c SHA256SUMS”. The archive record describes the disc, titles, "
+                                "episodes and files with their sizes and hashes.");
+  ADD (g, bro_switch_row ("Write SHA-256 checksums (SHA256SUMS)", NULL, &d->archive.checksums, ctx_changed, c));
+  ADD (g, bro_switch_row ("Write an archive record (bromelia.json) and the job log", NULL, &d->archive.archive_record, ctx_changed, c));
   return page;
 }
 
@@ -353,13 +386,13 @@ post_move (Ctx *c, BroPostStep *s, int offset)
 {
   guint i;
   int k;
-  if (!g_ptr_array_find (c->config->post_process, s, &i))
+  if (!g_ptr_array_find (c->steps, s, &i))
     return;
   k = (int) i + offset;
-  if (k < 0 || k >= (int) c->config->post_process->len)
+  if (k < 0 || k >= (int) c->steps->len)
     return;
-  c->config->post_process->pdata[i] = c->config->post_process->pdata[k];
-  c->config->post_process->pdata[k] = s;
+  c->steps->pdata[i] = c->steps->pdata[k];
+  c->steps->pdata[k] = s;
   ctx_changed (c);
   rebuild_post (c);
 }
@@ -370,7 +403,7 @@ static void on_post_down (GtkButton *b, Ctx *c) { post_move (c, g_object_get_dat
 static void
 on_post_remove (GtkButton *b, Ctx *c)
 {
-  g_ptr_array_remove (c->config->post_process, g_object_get_data (G_OBJECT (b), "step"));
+  g_ptr_array_remove (c->steps, g_object_get_data (G_OBJECT (b), "step"));
   ctx_changed (c);
   rebuild_post (c);
 }
@@ -434,6 +467,16 @@ test_thread (GTask *task, gpointer src, gpointer data, GCancellable *cancel)
   bro_template_values_set (values, "file", "");
   bro_template_values_set (values, "files", "");
   bro_template_values_set (values, "device", "");
+  bro_template_values_set (values, "checksums", "");
+  {
+    BroIdentity *id = bro_identity_resolve (NULL, "SAMPLE_DISC", -1, BRO_FORMAT_BLURAY, FALSE, "Sample Disc", BRO_KIND_MOVIE, 0);
+    bro_identity_template_values (id, values, "Rip");
+    bro_identity_free (id);
+  }
+  envp = g_environ_setenv (envp, "BROMELIA_NAME", "Sample Disc", TRUE);
+  envp = g_environ_setenv (envp, "BROMELIA_KIND", "movie", TRUE);
+  envp = g_environ_setenv (envp, "BROMELIA_FORMAT", "BR", TRUE);
+  envp = g_environ_setenv (envp, "BROMELIA_ENCRYPTED", "0", TRUE);
   envp = g_environ_setenv (envp, "BROMELIA_STATUS", "success", TRUE);
   envp = g_environ_setenv (envp, "BROMELIA_DISC_NAME", "SAMPLE_DISC", TRUE);
   envp = g_environ_setenv (envp, "BROMELIA_OUTPUT_DIR", tmp, TRUE);
@@ -517,6 +560,41 @@ post_step_changed (gpointer data)
   ctx_changed (data);
 }
 
+static char *
+step_summary (BroPostStep *s)
+{
+  GString *out = g_string_new (bro_run_condition_label (s->run_on));
+  if (s->per_file)
+    g_string_append (out, " · per file");
+  if (s->match_name && *s->match_name)
+    g_string_append_printf (out, " · “%s”", s->match_name);
+  for (guint i = 0; i < s->match_formats->len; i++)
+    g_string_append_printf (out, "%s%s", i ? ", " : " · ", (char *) s->match_formats->pdata[i]);
+  return g_string_free (out, FALSE);
+}
+
+static void
+on_formats_changed (GtkEditable *e, Ctx *c)
+{
+  BroPostStep *s = g_object_get_data (G_OBJECT (e), "step");
+  g_auto (GStrv) parts = g_strsplit_set (gtk_editable_get_text (e), ", ", -1);
+  g_ptr_array_set_size (s->match_formats, 0);
+  for (int i = 0; parts[i]; i++)
+    if (*parts[i])
+      g_ptr_array_add (s->match_formats, g_strdup (parts[i]));
+  ctx_changed (c);
+}
+
+static void
+on_match_name_changed (GtkEditable *e, GtkWidget *row)
+{
+  g_autofree char *err = bro_plugin_validate (gtk_editable_get_text (e));
+  if (err)
+    gtk_widget_add_css_class (row, "error");
+  else
+    gtk_widget_remove_css_class (row, "error");
+}
+
 static void
 rebuild_post (Ctx *c)
 {
@@ -525,9 +603,9 @@ rebuild_post (Ctx *c)
   if (c->post_rows)
     g_ptr_array_unref (c->post_rows);
   c->post_rows = g_ptr_array_new ();
-  for (guint i = 0; i < c->config->post_process->len; i++)
+  for (guint i = 0; i < c->steps->len; i++)
     {
-      BroPostStep *s = c->config->post_process->pdata[i];
+      BroPostStep *s = c->steps->pdata[i];
       GtkWidget *exp = adw_expander_row_new ();
       GtkWidget *env_row = gtk_list_box_row_new ();
       GtkWidget *env_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
@@ -538,7 +616,11 @@ rebuild_post (Ctx *c)
       g_autofree char *name = g_markup_escape_text (s->name, -1);
 
       adw_preferences_row_set_title (ADW_PREFERENCES_ROW (exp), name);
-      adw_expander_row_set_subtitle (ADW_EXPANDER_ROW (exp), bro_run_condition_label (s->run_on));
+      {
+        g_autofree char *summary = step_summary (s);
+        g_autofree char *escaped = g_markup_escape_text (summary, -1);
+        adw_expander_row_set_subtitle (ADW_EXPANDER_ROW (exp), escaped);
+      }
       adw_expander_row_add_suffix (ADW_EXPANDER_ROW (exp), step_button ("media-playback-start-symbolic", "Run with sample values", s, G_CALLBACK (on_post_test), c));
       adw_expander_row_add_suffix (ADW_EXPANDER_ROW (exp), step_button ("go-up-symbolic", "Move up", s, G_CALLBACK (on_post_up), c));
       adw_expander_row_add_suffix (ADW_EXPANDER_ROW (exp), step_button ("go-down-symbolic", "Move down", s, G_CALLBACK (on_post_down), c));
@@ -548,6 +630,23 @@ rebuild_post (Ctx *c)
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Enabled", NULL, &s->enabled, post_step_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_combo_row ("Run", run_labels, (int *) &s->run_on, post_step_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Run once for every produced file", NULL, &s->per_file, post_step_changed, c));
+      {
+        GtkWidget *name_row = bro_entry_row ("Only for names or disc labels matching (regular expression)", &s->match_name,
+                                             "e.g. ^One Piece$ for a show, or S2_P7 for one disc; empty = every disc", post_step_changed, c);
+        GtkWidget *formats = adw_entry_row_new ();
+        GString *f = g_string_new (NULL);
+        for (guint k = 0; k < s->match_formats->len; k++)
+          g_string_append_printf (f, "%s%s", k ? ", " : "", (char *) s->match_formats->pdata[k]);
+        g_signal_connect (name_row, "changed", G_CALLBACK (on_match_name_changed), name_row);
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (formats), "Only for formats (DVD, DVDe, BR, BRe, 4K, 4Ke; BR* = BR and BRe)");
+        gtk_widget_set_tooltip_text (formats, "Comma separated; empty = every format. The e codes are backups that are not decrypted.");
+        gtk_editable_set_text (GTK_EDITABLE (formats), f->str);
+        g_string_free (f, TRUE);
+        g_object_set_data (G_OBJECT (formats), "step", s);
+        g_signal_connect (formats, "changed", G_CALLBACK (on_formats_changed), c);
+        adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), name_row);
+        adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), formats);
+      }
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_path_row ("Program or script", &s->executable, FALSE, post_step_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Interpreter (optional, e.g. /usr/bin/python3)", &s->interpreter, NULL, post_step_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Arguments ({tokens} allowed)", &s->arguments, NULL, post_step_changed, c));
@@ -590,7 +689,7 @@ add_step (Ctx *c, const char *name, const char *exe, const char *args, BroRunCon
   s->arguments = g_strdup (args);
   s->run_on = run;
   s->per_file = per_file;
-  g_ptr_array_add (c->config->post_process, s);
+  g_ptr_array_add (c->steps, s);
   ctx_changed (c);
   rebuild_post (c);
 }
@@ -610,29 +709,32 @@ on_add_step (GtkButton *b, Ctx *c)
     add_step (c, "Desktop notification", "/usr/bin/notify-send", "Bromelia \"{disc}: {status}\"", BRO_RUN_ALWAYS, FALSE);
   else
     {
-      g_autofree char *n = g_strdup_printf ("Step %u", c->config->post_process->len + 1);
+      g_autofree char *n = g_strdup_printf ("Step %u", c->steps->len + 1);
       add_step (c, n, "", "{outputDir}", BRO_RUN_SUCCESS, FALSE);
     }
 }
 
 static AdwPreferencesPage *
-post_page (Ctx *c)
+post_page (Ctx *c, const char *title, const char *icon, const char *intro)
 {
-  AdwPreferencesPage *page = page_new ("Post-processing", "utilities-terminal-symbolic");
+  AdwPreferencesPage *page = page_new (title, icon);
   AdwPreferencesGroup *g;
   GtkWidget *add = gtk_menu_button_new ();
   GtkWidget *pop = gtk_popover_new ();
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
-  GString *help = g_string_new ("Steps run after each job, in order. Arguments are split like a shell command line and then {tokens} "
+  GString *help = g_string_new (intro);
+  g_string_append (help, "Arguments are split like a shell command line and then {tokens} "
                                 "are filled in; a lone {files} expands to one argument per file. Environment: BROMELIA_JOB_ID, "
                                 "BROMELIA_STATUS, BROMELIA_MODE, BROMELIA_DRIVE_NAME, BROMELIA_DRIVE_ID, BROMELIA_DEVICE, "
                                 "BROMELIA_DISC_NAME, BROMELIA_DISC_TYPE, BROMELIA_OUTPUT_DIR, BROMELIA_FILES, BROMELIA_FILE_COUNT, "
-                                "BROMELIA_FILE (per-file), BROMELIA_MANIFEST, BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR.\nTokens: ");
+                                "BROMELIA_FILE (per-file), BROMELIA_MANIFEST, BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR, BROMELIA_NAME, "
+                                "BROMELIA_KIND, BROMELIA_FORMAT, BROMELIA_ENCRYPTED, BROMELIA_SEASON, BROMELIA_DISC_NUMBER, BROMELIA_DISC_SET, "
+                                "BROMELIA_CHECKSUMS.\nTokens: ");
   const char *kinds[][2] = { { "empty", "Empty step" }, { "move", "Move files to a library folder" }, { "handbrake", "Encode with HandBrakeCLI" },
                              { "log", "Append to a log file" }, { "notify", "Desktop notification" } };
   for (int i = 0; bro_script_tokens[i].token; i++)
     g_string_append_printf (help, "%s{%s}", i ? ", " : "", bro_script_tokens[i].token);
-  g = group (page, "Steps", help->str);
+  g = group (page, c->config ? "Steps" : "Plugins", help->str);
   g_string_free (help, TRUE);
   for (guint i = 0; i < G_N_ELEMENTS (kinds); i++)
     {
@@ -670,14 +772,31 @@ bro_drive_config_pages_add (AdwPreferencesDialog *dialog, BroDriveConfig *config
   c->changed = changed;
   c->data = data;
   c->dialog = dialog;
+  c->steps = config->post_process;
   adw_preferences_dialog_add (dialog, general_page (c));
   adw_preferences_dialog_add (dialog, ripping_page (c));
   adw_preferences_dialog_add (dialog, output_page (c));
   adw_preferences_dialog_add (dialog, ADW_PREFERENCES_PAGE (bro_catalog_page_new (config->settings, st->config->global_settings, TRUE, changed, data)));
   adw_preferences_dialog_add (dialog, profile_page (c));
-  adw_preferences_dialog_add (dialog, post_page (c));
+  adw_preferences_dialog_add (dialog, post_page (c, "Post-processing", "utilities-terminal-symbolic", "Steps run after each job, in order. "));
   g_object_set_data_full (G_OBJECT (dialog), "bro-ctx", c, (GDestroyNotify) ctx_free);
   return GTK_WIDGET (dialog);
+}
+
+GtkWidget *
+bro_plugins_page_new (GPtrArray *steps, BroChangedFunc changed, gpointer data)
+{
+  Ctx *c = g_new0 (Ctx, 1);
+  AdwPreferencesPage *page;
+  c->steps = steps;
+  c->changed = changed;
+  c->data = data;
+  page = post_page (c, "Plugins", "application-x-addon-symbolic",
+                    "Plugins are post-processing steps for every drive, usually limited to a movie or show (by name or disc label) "
+                    "and to formats such as DVD or 4Ke — for example a script that archives one series in a particular way. They "
+                    "run after the drive's own steps. ");
+  g_object_set_data_full (G_OBJECT (page), "bro-ctx", c, (GDestroyNotify) ctx_free);
+  return GTK_WIDGET (page);
 }
 
 static void

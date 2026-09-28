@@ -36,6 +36,10 @@ struct _BroJob {
   GArray *manual_titles;       /* int or NULL */
   GHashTable *track_selections;
   GHashTable *name_overrides;
+  char *media_name;            /* "" = inferred */
+  int media_kind;              /* BroMediaKind, -1 = inferred */
+  int first_episode;           /* -1 = menus / 1 */
+  int disc_flags;              /* DRV flags, -1 = unknown */
   gboolean automatic;
   gint64 start_at;             /* unix seconds; 0 = start when possible */
 
@@ -81,6 +85,10 @@ struct _BroSession {
   GHashTable *track_selections; /* int -> int set; only customised titles */
   GHashTable *name_overrides;   /* int -> char* */
   char *output_override;
+  char *media_name;             /* movie / show name for file names; "" = inferred */
+  int media_kind;               /* BroMediaKind, -1 = inferred */
+  int first_episode;            /* -1 = read from the menus, or 1 */
+  int disc_flags;               /* DRV flags, -1 = unknown */
   GCancellable *cancellable;
 };
 

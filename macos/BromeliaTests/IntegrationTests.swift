@@ -89,4 +89,57 @@ struct IntegrationTests {
         #expect(job.errorMessage == "No titles matched the title selection rules")
         #expect(FileManager.default.fileExists(atPath: out.appendingPathComponent("failed-marker").path))
     }
+
+    nonisolated static var playAllISO: String? { ProcessInfo.processInfo.environment["BROMELIA_TEST_PLAYALL_ISO"] }
+
+    /// Rips DVD title 11 of One_Piece_S2_P7_D2 (six episodes in one "play all" title) and checks that it is
+    /// split into named episodes with checksums. Set TEST_RUNNER_BROMELIA_TEST_PLAYALL_ISO to that ISO.
+    @Test(.enabled(if: IntegrationTests.playAllISO != nil, "set BROMELIA_TEST_PLAYALL_ISO to run"))
+    func splitsPlayAllTitleIntoEpisodes() async throws {
+        let iso = try #require(Self.playAllISO)
+        let exe = try #require(Paths.resolveTool(configured: "", candidates: Paths.makemkvconCandidates), "makemkvcon not installed")
+        let mkvmerge = try #require(Paths.resolveTool(configured: "", candidates: Paths.mkvmergeCandidates), "mkvmerge not installed")
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-split-\(UUID().uuidString.prefix(6))")
+        defer { try? FileManager.default.removeItem(at: out) }
+
+        var config = AppConfig()
+        config.outputRoot = out.path
+        var drive = DriveConfig()
+        drive.automation.notify = false
+        drive.rip.titleSelection.strategy = .indices
+        drive.rip.titleSelection.indexBase = .source
+        drive.rip.titleSelection.indexPattern = "11"
+        drive.episodes.keepPlayAll = false
+        var plugin = PostProcessStep()
+        plugin.name = "One Piece DVDs"
+        plugin.executable = "/bin/sh"
+        plugin.arguments = "-c 'echo \"$BROMELIA_NAME|$BROMELIA_FORMAT|$BROMELIA_FILE_COUNT\" > plugin.txt'"
+        plugin.matchName = "one piece"
+        plugin.matchFormats = ["DVD"]
+        var other = plugin
+        other.id = UUID()
+        other.matchFormats = ["BR*"]
+        other.arguments = "-c 'touch wrong-plugin.txt'"
+        config.plugins = [plugin, other]
+
+        let job = RipJob(source: .iso(path: iso), drive: drive, laneKey: "iso:split", sourceLabel: "test", discLabel: "", mode: .mkv)
+        let runner = JobRunner(job: job, config: config, makemkvcon: exe, mkvmerge: mkvmerge)
+        await runner.run()
+
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "") \n\(job.log.suffix(30).map(\.text).joined(separator: "\n"))")
+        let dir = try #require(job.outputDirectory)
+        #expect(dir.lastPathComponent == "One Piece - Season 2 Part 7 Disc 2")
+        let names = job.producedFiles.map(\.lastPathComponent)
+        #expect(names == (0..<6).map { "One Piece - Episode \(138 + $0) - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch \(1 + 7 * $0)-\(7 + 7 * $0) - DVD.mkv" }
+                + ["One Piece - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 43 - DVD.mkv"])
+        #expect(job.episodes.map(\.episode) == [138, 139, 140, 141, 142, 143])
+        let sums = Checksums.parse(try String(contentsOf: dir.appendingPathComponent("SHA256SUMS"), encoding: .utf8))
+        #expect(sums.count == 7)
+        #expect(try Checksums.verify(folder: dir).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("bromelia.json").path))
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("bromelia-log.txt").path))
+        #expect(try String(contentsOf: dir.appendingPathComponent("plugin.txt"), encoding: .utf8) == "One Piece|DVD|7\n")
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("wrong-plugin.txt").path))
+        if let layout = await Remuxer.identify(mkvmerge: mkvmerge, file: job.producedFiles[0]) { #expect(!layout.isEmpty) }
+    }
 }

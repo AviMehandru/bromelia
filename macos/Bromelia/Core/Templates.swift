@@ -8,6 +8,13 @@ import Foundation
 /// Unknown tokens are left untouched so typos are visible in the output.
 enum TemplateRenderer {
     static let folderTokens: [(String, String)] = [
+        ("name", "Movie or show name (inferred from the disc, or as entered)"),
+        ("discLabel", "Place in the set, e.g. Season 2 Part 7 Disc 2 (empty when unknown)"),
+        ("format", "Format code: DVD, BR, 4K; DVDe, BRe, 4Ke for backups that are not decrypted"),
+        ("rip", "Rip or Backup"),
+        ("kind", "movie or tv"),
+        ("season", "Season number from the disc label"), ("discNumber", "Disc number from the disc label"),
+        ("part", "Part number from the disc label"), ("volumeNumber", "Volume number from the disc label"),
         ("disc", "Disc name (falls back to the volume label)"),
         ("volume", "Volume label"),
         ("type", "dvd, bd, hddvd or disc"),
@@ -19,6 +26,9 @@ enum TemplateRenderer {
     ]
 
     static let fileTokens: [(String, String)] = folderTokens + [
+        ("episode", "Episode 138 (TV shows; empty for other titles)"),
+        ("episodeNumber", "Episode number alone"),
+        ("track", "Source title: Title 11, Title 11 Ch 8-14 (split episodes) or Playlist 00800"),
         ("title", "Title name (or the disc name when the title has none)"),
         ("index", "MakeMKV title number (0-based)"),
         ("n", "Position of the title in this job (1-based)"),
@@ -38,6 +48,7 @@ enum TemplateRenderer {
         ("status", "success, failed or cancelled"),
         ("manifest", "Path of the job manifest JSON"),
         ("device", "OS device path of the drive"),
+        ("checksums", "Path of the SHA256SUMS file (empty when checksums are off)"),
     ]
 
     static func render(_ template: String, values: [String: String], sanitize: ((String) -> String)? = nil) -> String {

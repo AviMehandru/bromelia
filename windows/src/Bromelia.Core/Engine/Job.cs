@@ -51,6 +51,14 @@ public sealed class RipJob : ObservableObject
     public List<int>? ManualTitles { get; set; }
     public Dictionary<int, HashSet<int>> TrackSelections { get; set; } = new();
     public Dictionary<int, string> TitleNameOverrides { get; set; } = new();
+    /// <summary>Movie / show name typed by the user. Empty = inferred from the disc.</summary>
+    public string MediaName { get; set; } = "";
+    /// <summary>Movie or TV show as chosen by the user. Null = inferred.</summary>
+    public Logic.MediaKind? MediaKind { get; set; }
+    /// <summary>First episode number entered by the user. Null = read from the menus or 1.</summary>
+    public int? FirstEpisode { get; set; }
+    /// <summary>File system flags from the drive scan (used when the listing is unavailable).</summary>
+    public DiscFlags? DiscFlags { get; set; }
     public bool IsAutomatic { get; set; }
     public DateTime? StartAt { get; set; }
 
@@ -95,6 +103,12 @@ public sealed class RipJob : ObservableObject
     public List<string> Commands { get; } = new();
     public List<int> RipTitles { get; set; } = new();
     public DiscInfo? DiscInfo { get; set; }
+    public Logic.MediaIdentity? Identity { get; set; }
+    public List<ArchiveRecord.EpisodeEntry> Episodes { get; } = new();
+    public List<Checksums.Entry> Checksums { get; set; } = new();
+    public string? ChecksumFile { get; set; }
+    public string MakemkvVersion { get; set; } = "";
+    public List<string> ErrorMessages { get; } = new();
 
     public string Title => $"{(DiscLabel.Length == 0 ? "Disc" : DiscLabel)} — {SourceLabel}";
 
@@ -196,6 +210,16 @@ public sealed class JobManifest
     public string OutputDirectory { get; set; } = "";
     public List<string> Files { get; set; } = new();
     public List<TitleEntry> Titles { get; set; } = new();
+    public string Name { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string Format { get; set; } = "";
+    public string FormatCode { get; set; } = "";
+    public bool Encrypted { get; set; }
+    public int? Season { get; set; }
+    public int? DiscNumber { get; set; }
+    public List<ArchiveRecord.EpisodeEntry> Episodes { get; set; } = new();
+    public string? ChecksumFile { get; set; }
+    public List<Checksums.Entry> Checksums { get; set; } = new();
     public DateTime? StartedAt { get; set; }
     public DateTime? FinishedAt { get; set; }
     public string? Error { get; set; }

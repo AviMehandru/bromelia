@@ -237,7 +237,7 @@ public sealed partial class DrivePage : Page
         if (s.Info is { } info)
         {
             Show(BrowserPanel);
-            if (!ReferenceEquals(info, _shownInfo)) BuildTitles(info);
+            if (!ReferenceEquals(info, _shownInfo)) { BuildTitles(info); BuildIdentityBar(info); }
             RefreshHeader();
             return;
         }
@@ -386,6 +386,87 @@ public sealed partial class DrivePage : Page
         BackupButton.IsEnabled = !DriveBusy;
         SelectRuleItem.Text = $"Apply “{CurrentConfig.Name}” title rules";
         OutputPreview.Text = "→ " + OutputPreviewText();
+        if (_sampleName != null) _sampleName.Text = SampleFileName();
+    }
+
+    // --- identity (name, movie / TV, first episode) ------------------------------------------
+
+    TextBlock? _sampleName;
+    TextBlock? _formatBadge;
+
+    MediaIdentity Identity(bool overrides = true)
+    {
+        var s = _session!;
+        return MediaIdentity.Resolve(s.Info, s.Info?.Name ?? "", false, s.DiscFlags, null,
+            overrides ? s.MediaName : "", overrides ? s.MediaKind : null);
+    }
+
+    void BuildIdentityBar(DiscInfo info)
+    {
+        IdentityBar.Children.Clear();
+        if (_session == null) return;
+        var s = _session;
+        var auto = Identity(false);
+        var name = new TextBox { Text = s.MediaName, PlaceholderText = auto.Name, Width = 240 };
+        ToolTipService.SetToolTip(name, $"Movie or show name used for folder and file names. Empty = “{auto.Name}”, read from the disc.");
+        var kind = new ComboBox { Width = 170 };
+        kind.Items.Add($"Auto ({auto.Kind.Label()})");
+        kind.Items.Add(MediaKind.Movie.Label());
+        kind.Items.Add(MediaKind.Tv.Label());
+        kind.SelectedIndex = s.MediaKind switch { MediaKind.Movie => 1, MediaKind.Tv => 2, _ => 0 };
+        ToolTipService.SetToolTip(kind, $"Detected: {auto.Reason}");
+        var first = new NumberBox { PlaceholderText = "First episode", Width = 130, Minimum = 0, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden };
+        first.Value = s.FirstEpisode is { } fe ? fe : double.NaN;
+        ToolTipService.SetToolTip(first, "Number of the first episode on this disc. Empty = read from the disc menus, or 1.");
+        _formatBadge = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+        _sampleName = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 640,
+                                      Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] };
+        void Update()
+        {
+            var id = Identity();
+            first.Visibility = id.Kind == MediaKind.Tv ? Visibility.Visible : Visibility.Collapsed;
+            _formatBadge.Text = id.FormatCode;
+            ToolTipService.SetToolTip(_formatBadge, id.Format.Label());
+            _sampleName.Text = SampleFileName();
+            OutputPreview.Text = "→ " + OutputPreviewText();
+        }
+        name.TextChanged += (_, _) => { s.MediaName = name.Text; Update(); };
+        kind.SelectionChanged += (_, _) =>
+        {
+            s.MediaKind = kind.SelectedIndex switch { 1 => MediaKind.Movie, 2 => MediaKind.Tv, _ => null };
+            Update();
+        };
+        first.ValueChanged += (_, a) => { s.FirstEpisode = double.IsNaN(a.NewValue) ? null : (int)Math.Round(a.NewValue); Update(); };
+        IdentityBar.Children.Add(name);
+        IdentityBar.Children.Add(kind);
+        IdentityBar.Children.Add(first);
+        IdentityBar.Children.Add(_formatBadge);
+        IdentityBar.Children.Add(_sampleName);
+        Update();
+    }
+
+    string SampleFileName()
+    {
+        if (_session is not { Info: { } info } session) return "";
+        var cfg = CurrentConfig;
+        var template = cfg.Output.FileNameTemplate.Trim();
+        if (template.Length == 0) return "MakeMKV's file names";
+        var id = Identity();
+        var v = TemplateRenderer.DateValues();
+        foreach (var kv in id.TemplateValues("Rip")) v[kv.Key] = kv.Value;
+        v["disc"] = info.Name; v["volume"] = info.VolumeName; v["type"] = info.TypeToken; v["drive"] = cfg.Name; v["job"] = "xxxxxxxx";
+        var title = info.Titles.FirstOrDefault(t => session.SelectedTitles.Contains(t.Index)) ?? info.Titles.FirstOrDefault();
+        if (title != null)
+        {
+            foreach (var kv in JobRunner.TitleValues(title, 1, info, null)) v[kv.Key] = kv.Value;
+            v["track"] = MediaIdentity.TrackLabel(title);
+        }
+        if (id.Kind == MediaKind.Tv)
+        {
+            v["episode"] = MediaIdentity.EpisodeLabel(session.FirstEpisode ?? 1, 2);
+            v["episodeNumber"] = (session.FirstEpisode ?? 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return "e.g. " + TemplateRenderer.RenderPath(template, v) + ".mkv";
     }
 
     string OutputPreviewText()
@@ -398,6 +479,7 @@ public sealed partial class DrivePage : Page
         v["type"] = _session?.Info?.TypeToken ?? "disc";
         v["drive"] = cfg.Name;
         v["job"] = "xxxxxxxx";
+        if (_session?.Info != null) foreach (var kv in Identity().TemplateValues("Rip")) v[kv.Key] = kv.Value;
         var root = Paths.ExpandUser(State.Config.OutputRootFor(cfg));
         var rel = TemplateRenderer.RenderPath(cfg.Output.FolderTemplate, v);
         return rel.Length == 0 ? root : Path.Combine(root, rel);

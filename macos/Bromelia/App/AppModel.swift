@@ -299,8 +299,11 @@ final class AppModel {
             if let s = sessions[lane] {
                 s.source = .drive(index: e.index, devicePath: e.devicePath)
                 if s.configId != cfgId { s.configId = cfgId }
+                if s.discFlags != e.flags { s.discFlags = e.flags }
             } else {
-                sessions[lane] = DiscSession(id: lane, source: .drive(index: e.index, devicePath: e.devicePath), configId: cfgId)
+                let s = DiscSession(id: lane, source: .drive(index: e.index, devicePath: e.devicePath), configId: cfgId)
+                s.discFlags = e.flags
+                sessions[lane] = s
             }
         }
     }
@@ -388,8 +391,10 @@ final class AppModel {
     // MARK: - Jobs
 
     func makeJob(for e: DriveScanEntry, config cfg: DriveConfig, mode: RipMode) -> RipJob {
-        RipJob(source: .drive(index: e.index, devicePath: e.devicePath), drive: cfg, laneKey: DriveItem.laneKey(for: e),
-               sourceLabel: cfg.name, discLabel: e.discName, mode: mode)
+        let job = RipJob(source: .drive(index: e.index, devicePath: e.devicePath), drive: cfg, laneKey: DriveItem.laneKey(for: e),
+                         sourceLabel: cfg.name, discLabel: e.discName, mode: mode)
+        job.discFlags = e.flags
+        return job
     }
 
     /// Queues a job for a drive using its configured mode and rules (no disc listing required).
@@ -400,6 +405,7 @@ final class AppModel {
         if let s = sessions[item.laneKey], let info = s.info {
             job.preloadedInfo = info
             job.discLabel = info.name
+            applyIdentityChoices(from: s, to: job)
         }
         enqueue(job)
     }
@@ -418,6 +424,8 @@ final class AppModel {
                          discLabel: s.info?.name ?? "", mode: mode)
         }
         job.preloadedInfo = s.info
+        applyIdentityChoices(from: s, to: job)
+        if case .drive = s.source, job.discFlags == nil { job.discFlags = s.discFlags }
         if useChosenTitles && mode.makesMKV {
             job.manualTitles = s.selectedTitles.sorted()
             job.trackSelections = s.trackSelections.filter { s.selectedTitles.contains($0.key) }
@@ -430,6 +438,13 @@ final class AppModel {
             job.drive.output.conflictPolicy = .overwrite
         }
         enqueue(job)
+    }
+
+    private func applyIdentityChoices(from s: DiscSession, to job: RipJob) {
+        job.mediaName = s.mediaName.trimmingCharacters(in: .whitespaces)
+        job.mediaKind = s.mediaKind
+        job.firstEpisode = s.firstEpisode
+        if job.discFlags == nil { job.discFlags = s.discFlags }
     }
 
     func enqueue(_ job: RipJob) {
@@ -463,6 +478,10 @@ final class AppModel {
         j.manualTitles = job.manualTitles
         j.trackSelections = job.trackSelections
         j.titleNameOverrides = job.titleNameOverrides
+        j.mediaName = job.mediaName
+        j.mediaKind = job.mediaKind
+        j.firstEpisode = job.firstEpisode
+        j.discFlags = job.discFlags
         enqueue(j)
     }
 

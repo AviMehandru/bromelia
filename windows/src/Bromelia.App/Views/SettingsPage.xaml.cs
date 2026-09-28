@@ -22,6 +22,12 @@ public sealed partial class SettingsPage : Page
         pivot.Items.Add(Tab("MakeMKV", SettingsCatalogPanel.Build(State.Config.GlobalSettings, State.Config.GlobalSettings, driveMode: false, State.ConfigChanged)));
         pivot.Items.Add(new PivotItem { Header = "Default drive", Content = DriveConfigEditor.Build(State.Config.DefaultDrive, true, null, State.ConfigChanged) });
         pivot.Items.Add(Tab("Drives & presets", Drives()));
+        pivot.Items.Add(new PivotItem
+        {
+            Header = "Plugins",
+            Content = new PostProcessEditor(State.Config.Plugins, "All drives", State.ConfigChanged,
+                "Plugins are post-processing steps for every drive, usually limited to a movie or show (by name or disc label) and to formats such as DVD or 4Ke — for example a script that archives one series in a particular way. They run after the drive's own steps."),
+        });
         pivot.Items.Add(Tab("Registration", Registration()));
         Body.Content = pivot;
     }

@@ -103,6 +103,11 @@ public static class DriveConfigEditor
         f.Choice("Backup format", new[] { (BackupFormat.Folder, "Folder (BDMV / VIDEO_TS)"), (BackupFormat.Iso, "ISO image") }, () => c.Rip.BackupFormat, v => c.Rip.BackupFormat = v);
         f.Toggle("Keep the backup after the MKV files are made (backup + MKV mode)", () => c.Rip.KeepBackupAfterMkv, v => c.Rip.KeepBackupAfterMkv = v);
 
+        f.Section("TV episodes", "DVDs often store several episodes in one title. Bromelia reads the disc's menu navigation to find where each episode starts and splits the MKV with mkvmerge, without re-encoding. Episode numbers are read from the menu screens with ffmpeg and tesseract when installed; otherwise enter the first episode number on the disc page, or episodes are numbered from 1.");
+        f.Toggle("Split “play all” titles of TV shows into episodes", () => c.Episodes.SplitPlayAll, v => c.Episodes.SplitPlayAll = v);
+        f.Toggle("Keep the unsplit title as well", () => c.Episodes.KeepPlayAll, v => c.Episodes.KeepPlayAll = v);
+        f.Toggle("Read episode numbers from the disc menus", () => c.Episodes.ReadMenuNumbers, v => c.Episodes.ReadMenuNumbers = v);
+
         var r = c.Rip.TitleSelection;
         f.Section("Titles to rip");
         f.Choice("Choose", Enum.GetValues<TitleStrategy>().Select(s => (s, s.Label())), () => r.Strategy, v => r.Strategy = v);
@@ -152,29 +157,54 @@ public static class DriveConfigEditor
         var f = new Form();
         var preview = Form.Help("");
         var filePreview = Form.Help("");
-        void Refresh()
+        var tvPreview = Form.Help("");
+        static Dictionary<string, string> Sample(DriveConfig c, bool tv)
         {
             var v = TemplateRenderer.DateValues();
-            v["disc"] = "MOVIE_TITLE"; v["volume"] = "MOVIE_TITLE"; v["type"] = "bd"; v["drive"] = c.Name; v["job"] = "1a2b3c4d";
-            v["title"] = "Movie Title"; v["index"] = "3"; v["n"] = "1"; v["source"] = "800"; v["duration"] = "1-58-02";
-            v["chapters"] = "24"; v["original"] = "MOVIE_TITLE_t03"; v["comment"] = "";
+            var label = tv ? "SHOW_NAME_S2_D3" : "MOVIE_TITLE";
+            var id = new MediaIdentity(tv ? "Show Name" : "Movie Title", tv ? MediaKind.Tv : MediaKind.Movie, tv ? DiscFormat.Dvd : DiscFormat.Bluray,
+                false, LabelParser.Parse(label), "");
+            foreach (var kv in id.TemplateValues("Rip")) v[kv.Key] = kv.Value;
+            v["disc"] = label; v["volume"] = label; v["type"] = tv ? "dvd" : "bd"; v["drive"] = c.Name; v["job"] = "1a2b3c4d";
+            v["title"] = id.Name; v["index"] = "3"; v["n"] = "1"; v["source"] = tv ? "4" : "800"; v["duration"] = tv ? "0-23-40" : "1-58-02";
+            v["chapters"] = "24"; v["original"] = label + "_t03"; v["comment"] = "";
+            v["track"] = tv ? "Title 4" : "Playlist 00800";
+            if (tv) { v["episode"] = "Episode 07"; v["episodeNumber"] = "7"; }
+            return v;
+        }
+        void Refresh()
+        {
+            var v = Sample(c, false);
             var root = c.Output.RootOverride.Length > 0 ? c.Output.RootOverride : App.State.Config.OutputRoot;
             preview.Text = "Preview: " + Path.Combine(Paths.ExpandUser(root), TemplateRenderer.RenderPath(c.Output.FolderTemplate, v));
-            filePreview.Text = c.Output.FileNameTemplate.Length == 0 ? "MakeMKV's file names are kept." : "Preview: " + TemplateRenderer.RenderPath(c.Output.FileNameTemplate, v) + ".mkv";
+            filePreview.Text = c.Output.FileNameTemplate.Length == 0 ? "MakeMKV's file names are kept." : "Movie: " + TemplateRenderer.RenderPath(c.Output.FileNameTemplate, v) + ".mkv";
+            tvPreview.Text = c.Output.FileNameTemplate.Length == 0 ? "" : "TV: " + TemplateRenderer.RenderPath(c.Output.FileNameTemplate, Sample(c, true)) + ".mkv";
         }
         f.Changed += () => { Refresh(); changed(); };
         f.Section("Location");
         f.PathPicker("Output folder", () => c.Output.RootOverride, v => c.Output.RootOverride = v, folder: true, placeholder: $"Global default: {App.State.Config.OutputRoot}");
-        f.Text("Folder name", () => c.Output.FolderTemplate, v => c.Output.FolderTemplate = v, "{disc}");
+        var folderBox = f.Text("Folder name", () => c.Output.FolderTemplate, v => c.Output.FolderTemplate = v, OutputConfig.DefaultFolderTemplate);
         f.Add(preview);
         f.Choice("If the folder already exists", Enum.GetValues<ConflictPolicy>().Select(p => (p, p.Label())), () => c.Output.ConflictPolicy, v => c.Output.ConflictPolicy = v);
         f.Section("File names");
-        f.Text("Rename MKV files to", () => c.Output.FileNameTemplate, v => c.Output.FileNameTemplate = v, "Empty keeps MakeMKV's names, e.g. {disc} - {n:2}");
+        var fileBox = f.Text("Name files and backups", () => c.Output.FileNameTemplate, v => c.Output.FileNameTemplate = v, "Empty keeps MakeMKV's names", width: 460);
         f.Add(filePreview);
+        f.Add(tvPreview);
+        var standard = new Button { Content = "Use the standard naming" };
+        standard.Click += (_, _) =>
+        {
+            fileBox.Text = OutputConfig.DefaultFileNameTemplate;
+            folderBox.Text = OutputConfig.DefaultFolderTemplate;
+        };
+        f.Add(standard);
+        f.Note("Standard naming: {name} - {episode} - {discLabel} - {rip} - {track} - {format}, leaving out parts that don't apply. Format codes: DVD, BR (Blu-ray), 4K (Ultra HD Blu-ray); DVDe, BRe, 4Ke for backups that are not decrypted.");
         f.Text("Backup subfolder (backup + MKV mode)", () => c.Output.BackupSubfolder, v => c.Output.BackupSubfolder = v);
         f.Section("Tokens");
         foreach (var (token, help) in TemplateRenderer.FileTokens) f.Add(Form.Help($"{{{token}}}  —  {help}"));
         f.Add(Form.Help("{n:3}  —  zero-pad a number to 3 digits;   {token?text}  —  insert text only when token is not empty"));
+        f.Section("Archiving", "Checksums of every file (including backup folders) are saved in the output folder in the standard format; check a copy later with “sha256sum -c SHA256SUMS” (Git Bash / WSL) or any SHA256SUMS tool. The archive record describes the disc, titles, episodes and files with their sizes and hashes.");
+        f.Toggle("Write SHA-256 checksums (SHA256SUMS)", () => c.Archive.Checksums, v => c.Archive.Checksums = v);
+        f.Toggle("Write an archive record (bromelia.json) and the job log", () => c.Archive.ArchiveRecord, v => c.Archive.ArchiveRecord = v);
         Refresh();
         return f.Root;
     }

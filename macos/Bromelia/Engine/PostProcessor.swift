@@ -12,6 +12,7 @@ enum PostProcessor {
     }
 
     struct StepResult: Sendable {
+        var stepId: UUID
         var name: String
         var exitCode: Int32
         var timedOut: Bool
@@ -89,11 +90,11 @@ enum PostProcessor {
                     register(nil)
                     let sev: RobotMessage.Severity = out.exitCode == 0 ? .info : (step.failJobOnError ? .error : .warning)
                     log(out.timedOut ? "\(label) timed out after \(step.timeoutSeconds) s" : "\(label) exited with status \(out.exitCode)", out.timedOut ? .warning : sev)
-                    results.append(StepResult(name: step.name, exitCode: out.exitCode, timedOut: out.timedOut))
+                    results.append(StepResult(stepId: step.id, name: step.name, exitCode: out.exitCode, timedOut: out.timedOut))
                 } catch {
                     register(nil)
                     log("\(label) could not be started: \(error.localizedDescription)", step.failJobOnError ? .error : .warning)
-                    results.append(StepResult(name: step.name, exitCode: -1, timedOut: false))
+                    results.append(StepResult(stepId: step.id, name: step.name, exitCode: -1, timedOut: false))
                 }
             }
         }

@@ -390,6 +390,7 @@ bro_preferences_present (GtkWidget *parent)
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), general_page ());
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), ADW_PREFERENCES_PAGE (catalog));
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), drives_page ());
+  adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), ADW_PREFERENCES_PAGE (bro_plugins_page_new (st->config->plugins, changed_cb, NULL)));
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), registration_page ());
   adw_dialog_set_content_width (dialog, 760);
   adw_dialog_set_content_height (dialog, 720);

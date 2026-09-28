@@ -16,6 +16,10 @@ struct PreferencesView: View {
                 .tabItem { Label("Default Drive", systemImage: "opticaldiscdrive") }
             DrivesPreferences()
                 .tabItem { Label("Drives & Presets", systemImage: "square.stack.3d.up") }
+            PostProcessTab(steps: $model.config.plugins, driveName: "All drives",
+                           emptyText: "Plugins are post-processing steps for every drive, usually limited to a movie or show (by name or disc label) and to formats such as DVD or 4Ke — for example a script that archives one series in a particular way. They run after the drive's own steps.")
+                .padding(12)
+                .tabItem { Label("Plugins", systemImage: "puzzlepiece.extension") }
             RegistrationPreferences()
                 .tabItem { Label("Registration", systemImage: "key") }
         }

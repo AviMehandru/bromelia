@@ -60,6 +60,10 @@ typedef struct {
   GArray *manual_titles;         /* int, owned, or NULL for the drive's rules */
   GHashTable *track_selections;  /* int -> GHashTable* (int set), owned */
   GHashTable *name_overrides;    /* int -> char*, owned */
+  char *media_name;              /* movie / show name; "" = inferred from the disc */
+  int media_kind;                /* BroMediaKind, -1 = inferred */
+  int first_episode;             /* -1 = read from the menus, or 1 */
+  int disc_flags;                /* DRV flags, -1 = unknown */
   char *makemkvcon;
   char *mkvmerge;                /* may be NULL */
   gboolean skip_eject;

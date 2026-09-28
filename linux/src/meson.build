@@ -5,6 +5,8 @@ core_sources = files(
   'bro-makemkv.c',
   'bro-runner.c',
   'bro-state.c',
+  'bro-identity.c',
+  'bro-dvd.c',
 )
 
 core_deps = [glib_dep, gio_dep, json_dep]

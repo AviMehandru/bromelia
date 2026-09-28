@@ -3,6 +3,7 @@ import SwiftUI
 struct PostProcessTab: View {
     @Binding var steps: [PostProcessStep]
     let driveName: String
+    var emptyText = "Post-processing steps run after each job, in order. Use them to move, rename, encode or catalogue files, or to call any script."
     @State private var selected: PostProcessStep.ID?
 
     var body: some View {
@@ -15,7 +16,7 @@ struct PostProcessTab: View {
                                 .foregroundStyle(step.enabled ? Color.accentColor : .secondary)
                             VStack(alignment: .leading) {
                                 Text(step.name)
-                                Text(step.runOn.label + (step.perFile ? " · per file" : ""))
+                                Text(step.runOn.label + (step.perFile ? " · per file" : "") + Self.conditionSummary(step))
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -48,7 +49,7 @@ struct PostProcessTab: View {
                     ContentUnavailableView {
                         Label("No step selected", systemImage: "terminal")
                     } description: {
-                        Text("Post-processing steps run after each job, in order. Use them to move, rename, encode or catalogue files, or to call any script.")
+                        Text(emptyText)
                     } actions: {
                         Button("Add Step") { add() }
                     }
@@ -57,6 +58,13 @@ struct PostProcessTab: View {
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear { if selected == nil { selected = steps.first?.id } }
+    }
+
+    static func conditionSummary(_ s: PostProcessStep) -> String {
+        var parts: [String] = []
+        if !s.matchName.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("“\(s.matchName)”") }
+        if !s.matchFormats.isEmpty { parts.append(s.matchFormats.joined(separator: ", ")) }
+        return parts.isEmpty ? "" : " · " + parts.joined(separator: " · ")
     }
 
     private func add() {
@@ -117,6 +125,28 @@ private struct PostStepEditor: View {
                 }
                 Toggle("Run once for every produced file", isOn: $step.perFile)
             }
+            Section {
+                TextField("Movie / show name or disc label matches", text: $step.matchName, prompt: Text("Any — regular expression, e.g. ^One Piece$ or S2_P7"))
+                if let err = PluginMatcher.validate(step.matchName) { Text(err).font(.caption).foregroundStyle(.red) }
+                LabeledContent("Formats") {
+                    HStack {
+                        ForEach(DiscFormat.allCodes.filter { !$0.hasPrefix("HDDVD") }, id: \.self) { code in
+                            Toggle(code, isOn: Binding(
+                                get: { step.matchFormats.contains(code) },
+                                set: { on in
+                                    step.matchFormats.removeAll { $0 == code }
+                                    if on { step.matchFormats.append(code) }
+                                }))
+                            .toggleStyle(.button)
+                        }
+                    }
+                }
+            } header: {
+                Text("Applies to")
+            } footer: {
+                Text("Leave both empty to run for every disc. The name is the movie or show name used for file names; the disc label (e.g. ONE_PIECE_S2_P7_D2) lets a step target one specific disc. No format selected = all formats; the e codes are backups that are not decrypted.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Command") {
                 PathField(title: "Program or script", path: $step.executable, kind: .file, placeholder: "/path/to/script.sh")
                 TextField("Interpreter", text: $step.interpreter, prompt: Text("Optional, e.g. /usr/bin/python3"))
@@ -136,7 +166,7 @@ private struct PostStepEditor: View {
             } header: {
                 Text("Environment")
             } footer: {
-                Text("Always set: BROMELIA_JOB_ID, BROMELIA_STATUS, BROMELIA_MODE, BROMELIA_DRIVE_NAME, BROMELIA_DRIVE_ID, BROMELIA_DEVICE, BROMELIA_DISC_NAME, BROMELIA_DISC_TYPE, BROMELIA_OUTPUT_DIR, BROMELIA_FILES (newline separated), BROMELIA_FILE_COUNT, BROMELIA_FILE (per-file steps), BROMELIA_MANIFEST (JSON), BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR.")
+                Text("Always set: BROMELIA_JOB_ID, BROMELIA_STATUS, BROMELIA_MODE, BROMELIA_DRIVE_NAME, BROMELIA_DRIVE_ID, BROMELIA_DEVICE, BROMELIA_DISC_NAME, BROMELIA_DISC_TYPE, BROMELIA_OUTPUT_DIR, BROMELIA_FILES (newline separated), BROMELIA_FILE_COUNT, BROMELIA_FILE (per-file steps), BROMELIA_MANIFEST (JSON), BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR, BROMELIA_NAME, BROMELIA_KIND (movie / tv), BROMELIA_FORMAT (DVD, BRe, 4K, …), BROMELIA_ENCRYPTED (1 / 0), BROMELIA_SEASON, BROMELIA_DISC_NUMBER, BROMELIA_DISC_SET, BROMELIA_CHECKSUMS (SHA256SUMS path).")
                     .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Section("Test") {
@@ -168,9 +198,12 @@ private struct PostStepEditor: View {
         var values = TemplateRenderer.dateValues()
         values["disc"] = "SAMPLE_DISC"; values["volume"] = "SAMPLE_DISC"; values["type"] = "bd"; values["drive"] = driveName
         values["job"] = "test0000"; values["outputDir"] = tmp.path; values["status"] = "success"; values["manifest"] = ""
-        values["file"] = ""; values["files"] = ""; values["device"] = ""
+        values["file"] = ""; values["files"] = ""; values["device"] = ""; values["checksums"] = ""
+        let id = MediaIdentity(name: "Sample Disc", kind: .movie, format: .bluray, encrypted: false, label: LabelInfo(), reason: "")
+        for (k, v) in id.templateValues(rip: "Rip") { values[k] = v }
         let env = ["BROMELIA_STATUS": "success", "BROMELIA_DISC_NAME": "SAMPLE_DISC", "BROMELIA_OUTPUT_DIR": tmp.path,
-                   "BROMELIA_DRIVE_NAME": driveName, "BROMELIA_FILES": "", "BROMELIA_FILE_COUNT": "0", "BROMELIA_MODE": "mkv"]
+                   "BROMELIA_DRIVE_NAME": driveName, "BROMELIA_FILES": "", "BROMELIA_FILE_COUNT": "0", "BROMELIA_MODE": "mkv",
+                   "BROMELIA_NAME": id.name, "BROMELIA_KIND": "movie", "BROMELIA_FORMAT": id.formatCode, "BROMELIA_ENCRYPTED": "0"]
         var s = step
         s.runOn = .always
         s.enabled = true

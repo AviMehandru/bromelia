@@ -29,7 +29,11 @@ enum DebugSnapshots {
         left.rip.titleSelection.strategy = .longest
         left.profile.mode = .generated
         var step = PostProcessStep(); step.name = "Move to library"; step.executable = "/bin/mv"
+        step.matchName = "^One Piece$"; step.matchFormats = ["DVD", "DVDe"]
         left.postProcess = [step]
+        var plugin = PostProcessStep(); plugin.name = "Archive 4K discs to NAS"; plugin.executable = "~/bin/archive-uhd.sh"
+        plugin.matchFormats = ["4K", "4Ke"]
+        model.config.plugins = [plugin]
         var right = model.config.defaultDrive
         right.id = UUID(); right.name = "Right drive"; right.match = DriveMatch(driveName: drives[1].driveName)
         right.rip.mode = .backupThenMkv
@@ -82,9 +86,8 @@ enum DebugSnapshots {
     @MainActor
     private static func configTabs(_ c: DriveConfig, session: DiscSession?) -> [(String, AnyView)] {
         [
-            ("rip", AnyView(ConfigTabHost(config: c) { b in
-                Form { TitleRuleEditor(rule: b.rip.titleSelection, previewInfo: session?.info) }.formStyle(.grouped)
-            })),
+            ("rip", AnyView(ConfigTabHost(config: c) { b in RipTab(config: b, previewInfo: session?.info) })),
+            ("output", AnyView(ConfigTabHost(config: c) { b in OutputTab(config: b) })),
             ("settings", AnyView(ConfigTabHost(config: c) { b in MakeMKVSettingsTab(settings: b.settings, mode: .drive) })),
             ("profile", AnyView(ConfigTabHost(config: c) { b in ProfileTab(profile: b.profile) })),
             ("post", AnyView(ConfigTabHost(config: c) { b in PostProcessTab(steps: b.postProcess, driveName: c.name) })),

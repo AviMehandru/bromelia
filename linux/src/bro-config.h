@@ -43,6 +43,12 @@ typedef struct {
   gboolean write_disc_info_json;
 } BroRipConfig;
 
+/* {name} - {episode} - {discLabel} - {rip} - {track} - {format}, leaving out parts that don't apply. */
+#define BRO_DEFAULT_FILE_TEMPLATE "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
+#define BRO_DEFAULT_FOLDER_TEMPLATE "{name}{discLabel? - {discLabel}}"
+#define BRO_LEGACY_FOLDER_TEMPLATE "{disc}"
+#define BRO_CONFIG_VERSION 2
+
 typedef struct {
   char *root_override;
   char *folder_template;
@@ -61,6 +67,17 @@ typedef struct {
 } BroAutomation;
 
 typedef struct {
+  gboolean checksums;      /* SHA256SUMS in the output folder */
+  gboolean archive_record; /* bromelia.json and the job log in the output folder */
+} BroArchiveConfig;
+
+typedef struct {
+  gboolean split_play_all;    /* split DVD "play all" titles of TV shows into episodes */
+  gboolean keep_play_all;     /* keep the unsplit title too */
+  gboolean read_menu_numbers; /* OCR episode numbers from the menus (ffmpeg + tesseract) */
+} BroEpisodeConfig;
+
+typedef struct {
   char *id;
   char *name;
   gboolean enabled;
@@ -73,6 +90,8 @@ typedef struct {
   int timeout_seconds;
   GHashTable *environment; /* char* -> char* */
   gboolean fail_job_on_error;
+  char *match_name;        /* regular expression on the name / disc label; "" = all */
+  GPtrArray *match_formats; /* char*: DVD, DVDe, BR, BRe, 4K, 4Ke, "BR*"…; empty = all */
 } BroPostStep;
 
 typedef struct {
@@ -105,6 +124,8 @@ typedef struct {
   BroRipConfig rip;
   BroOutputConfig output;
   BroAutomation automation;
+  BroArchiveConfig archive;
+  BroEpisodeConfig episodes;
   GPtrArray *post_process; /* BroPostStep* */
 } BroDriveConfig;
 
@@ -127,6 +148,7 @@ typedef struct {
   BroDriveConfig *default_drive;
   GPtrArray *drives;  /* BroDriveConfig* */
   GPtrArray *presets; /* BroPreset* */
+  GPtrArray *plugins; /* BroPostStep*: steps for every drive, usually limited by match_name / match_formats */
   int history_limit;
 } BroAppConfig;
 
@@ -154,6 +176,7 @@ BroDriveConfig *bro_drive_config_apply_body (const BroDriveConfig *identity, con
 gboolean        bro_drive_config_matches (const BroDriveConfig *c, const BroDriveEntry *e);
 JsonNode       *bro_drive_config_to_json (const BroDriveConfig *c);
 BroDriveConfig *bro_drive_config_from_json (JsonNode *node);
+void            bro_drive_config_upgrade_naming (BroDriveConfig *c);
 
 BroPreset      *bro_preset_new (const char *name, const BroDriveConfig *config);
 void            bro_preset_free (BroPreset *p);

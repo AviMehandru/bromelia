@@ -94,7 +94,10 @@
         </Grid>
 
         <!-- Action bar -->
-        <Grid x:Name="ActionBar" Grid.Row="3" ColumnSpacing="10" Visibility="Collapsed">
+        <StackPanel x:Name="ActionBar" Grid.Row="3" Spacing="8" Visibility="Collapsed">
+        <!-- Movie / show name, movie or TV, first episode (filled in code) -->
+        <StackPanel x:Name="IdentityBar" Orientation="Horizontal" Spacing="10" />
+        <Grid ColumnSpacing="10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -131,5 +134,6 @@
                 <StackPanel Orientation="Horizontal" Spacing="6"><SymbolIcon Symbol="Video" /><TextBlock Text="Make MKV" /></StackPanel>
             </Button>
         </Grid>
+        </StackPanel>
     </Grid>
 </Page>

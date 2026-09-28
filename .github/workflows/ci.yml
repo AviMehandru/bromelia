@@ -27,12 +27,18 @@ jobs:
       - name: Test core
         working-directory: windows
         run: dotnet test tests/Bromelia.Core.Tests/Bromelia.Core.Tests.csproj
+      # The WinUI app is built with Visual Studio's MSBuild, not `dotnet build`: Windows App SDK 1.6
+      # loads its PRI tasks (Microsoft.Build.Packaging.Pri.Tasks.dll) from Visual Studio's
+      # MSBuild\Microsoft\VisualStudio\v<version>\AppxPackage folder, which the .NET SDK does not ship.
+      - uses: microsoft/setup-msbuild@v2
       - name: Build app (x64)
         working-directory: windows
-        run: dotnet build src/Bromelia.App/Bromelia.App.csproj -c Release -p:Platform=x64
+        run: msbuild src/Bromelia.App/Bromelia.App.csproj -restore -m -p:Configuration=Release -p:Platform=x64
       - name: Publish app (x64, self-contained)
         working-directory: windows
-        run: dotnet publish src/Bromelia.App/Bromelia.App.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained -o publish
+        run: >-
+          msbuild src/Bromelia.App/Bromelia.App.csproj -restore -m -t:Publish -p:Configuration=Release -p:Platform=x64
+          -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:PublishDir=${{ github.workspace }}/windows/publish/
       - uses: actions/upload-artifact@v4
         with:
           name: Bromelia-windows-x64

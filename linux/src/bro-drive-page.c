@@ -1,5 +1,6 @@
 /* bro-drive-page.c — a drive (or an opened image / folder): header, active job, title browser, rip actions. */
 #include "bro-pages.h"
+#include "bro-identity.h"
 #include "bro-logic.h"
 
 #include <stdlib.h>
@@ -24,6 +25,7 @@ typedef struct {
   GtkWidget *error_status, *error_log_box;
   GtkWidget *titles_list, *info_list;
   GtkWidget *action_bar, *summary, *output_preview, *mkv_btn, *backup_btn, *folder_btn;
+  GtkWidget *identity_bar, *name_entry, *kind_dropdown, *first_spin, *format_label, *sample_label;
 
   BroDiscInfo *shown_info;
   GHashTable *title_checks; /* int -> GtkCheckButton* */
@@ -37,6 +39,8 @@ static void refresh_header (Page *p);
 static void refresh_disc (Page *p);
 static void sync_checks (Page *p);
 static void show_info (Page *p, int title, int track);
+static void build_identity (Page *p);
+static BroIdentity *session_identity (Page *p, gboolean overrides);
 
 static BroState *st (void) { return bro_app_state (); }
 
@@ -384,6 +388,7 @@ build_titles (Page *p, BroDiscInfo *info)
   if (p->shown_info)
     bro_disc_info_unref (p->shown_info);
   p->shown_info = bro_disc_info_ref (info);
+  build_identity (p);
   g_hash_table_remove_all (p->title_checks);
   g_hash_table_remove_all (p->title_rows);
   while ((c = gtk_widget_get_first_child (p->titles_list)))
@@ -463,10 +468,137 @@ output_preview (Page *p)
   bro_template_values_set (v, "drive", cfg->name);
   bro_template_values_set (v, "job", "xxxxxxxx");
   bro_template_values_set (v, "volume", "");
+  if (p->session && p->session->info)
+    {
+      BroIdentity *id = session_identity (p, TRUE);
+      bro_identity_template_values (id, v, "Rip");
+      bro_identity_free (id);
+    }
   root = bro_app_config_output_root (st ()->config, cfg);
   root_x = g_str_has_prefix (root, "~") ? g_build_filename (g_get_home_dir (), root + 1, NULL) : g_strdup (root);
   rel = bro_template_render_path (cfg->output.folder_template, v);
   return *rel ? g_strdup_printf ("→ %s/%s", root_x, rel) : g_strdup_printf ("→ %s", root_x);
+}
+
+static BroIdentity *
+session_identity (Page *p, gboolean overrides)
+{
+  BroSession *s = p->session;
+  return bro_identity_resolve (s->info, s->info ? bro_disc_info_name (s->info) : "", s->disc_flags, -1, FALSE,
+                               overrides ? s->media_name : "", overrides ? s->media_kind : -1, 0);
+}
+
+static char *
+sample_file_name (Page *p)
+{
+  BroDriveConfig *cfg = current_config (p);
+  g_autofree char *tmpl = g_strstrip (g_strdup (cfg->output.file_name_template));
+  g_autoptr (GHashTable) v = bro_template_values_new ();
+  BroDiscInfo *info = p->session->info;
+  BroIdentity *id;
+  BroTitle *title = NULL;
+  g_autofree char *rel = NULL;
+  if (!*tmpl)
+    return g_strdup ("MakeMKV's file names");
+  id = session_identity (p, TRUE);
+  bro_identity_template_values (id, v, "Rip");
+  bro_template_values_set (v, "disc", bro_disc_info_name (info));
+  bro_template_values_set (v, "type", bro_disc_info_type_token (info));
+  bro_template_values_set (v, "drive", cfg->name);
+  bro_template_values_set (v, "job", "xxxxxxxx");
+  for (guint i = 0; i < info->titles->len && !title; i++)
+    if (g_hash_table_contains (p->session->selected, GINT_TO_POINTER (((BroTitle *) info->titles->pdata[i])->index)))
+      title = info->titles->pdata[i];
+  if (!title && info->titles->len)
+    title = info->titles->pdata[0];
+  if (title)
+    {
+      g_autofree char *track = bro_track_label (title);
+      g_autofree char *d = g_strdup_printf ("%d", bro_title_chapters (title));
+      bro_template_values_set (v, "track", track);
+      bro_template_values_set (v, "title", *bro_title_str (title, BRO_ATTR_NAME) ? bro_title_str (title, BRO_ATTR_NAME) : bro_disc_info_name (info));
+      bro_template_values_set (v, "chapters", d);
+    }
+  if (id->kind == BRO_KIND_TV)
+    {
+      int first = p->session->first_episode >= 0 ? p->session->first_episode : 1;
+      g_autofree char *label = bro_episode_label (first, 2);
+      g_autofree char *num = g_strdup_printf ("%d", first);
+      bro_template_values_set (v, "episode", label);
+      bro_template_values_set (v, "episodeNumber", num);
+    }
+  bro_identity_free (id);
+  rel = bro_template_render_path (tmpl, v);
+  return g_strdup_printf ("e.g. %s.mkv", rel);
+}
+
+static void
+refresh_identity (Page *p)
+{
+  BroIdentity *id;
+  g_autofree char *code = NULL, *sample = NULL, *prev = NULL;
+  if (!p->session || !p->session->info)
+    return;
+  id = session_identity (p, TRUE);
+  code = bro_identity_format_code (id);
+  gtk_label_set_text (GTK_LABEL (p->format_label), code);
+  gtk_widget_set_tooltip_text (p->format_label, bro_format_label (id->format));
+  gtk_widget_set_visible (p->first_spin, id->kind == BRO_KIND_TV);
+  bro_identity_free (id);
+  sample = sample_file_name (p);
+  gtk_label_set_text (GTK_LABEL (p->sample_label), sample);
+  prev = output_preview (p);
+  gtk_label_set_text (GTK_LABEL (p->output_preview), prev);
+}
+
+static void
+on_media_name (GtkEditable *e, Page *p)
+{
+  if (p->syncing || !p->session)
+    return;
+  g_free (p->session->media_name);
+  p->session->media_name = g_strdup (gtk_editable_get_text (e));
+  refresh_identity (p);
+}
+
+static void
+on_media_kind (GObject *dd, GParamSpec *pspec, Page *p)
+{
+  guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+  if (p->syncing || !p->session)
+    return;
+  p->session->media_kind = i == 1 ? BRO_KIND_MOVIE : i == 2 ? BRO_KIND_TV : -1;
+  refresh_identity (p);
+}
+
+static void
+on_first_episode (GtkSpinButton *sb, Page *p)
+{
+  int v = gtk_spin_button_get_value_as_int (sb);
+  if (p->syncing || !p->session)
+    return;
+  p->session->first_episode = v > 0 ? v : -1;
+  refresh_identity (p);
+}
+
+/* Fills the identity bar from the session (after a disc was opened). */
+static void
+build_identity (Page *p)
+{
+  BroIdentity *automatic = session_identity (p, FALSE);
+  g_autofree char *auto_label = g_strdup_printf ("Auto (%s)", bro_kind_label (automatic->kind));
+  const char *kinds[] = { auto_label, "Movie", "TV show", NULL };
+  g_autofree char *tip = g_strdup_printf ("Detected: %s", automatic->reason);
+  p->syncing = TRUE;
+  gtk_entry_set_placeholder_text (GTK_ENTRY (p->name_entry), automatic->name);
+  gtk_editable_set_text (GTK_EDITABLE (p->name_entry), p->session->media_name ? p->session->media_name : "");
+  gtk_drop_down_set_model (GTK_DROP_DOWN (p->kind_dropdown), G_LIST_MODEL (gtk_string_list_new (kinds)));
+  gtk_drop_down_set_selected (GTK_DROP_DOWN (p->kind_dropdown), p->session->media_kind == BRO_KIND_MOVIE ? 1 : p->session->media_kind == BRO_KIND_TV ? 2 : 0);
+  gtk_widget_set_tooltip_text (p->kind_dropdown, tip);
+  gtk_spin_button_set_value (GTK_SPIN_BUTTON (p->first_spin), p->session->first_episode > 0 ? p->session->first_episode : 0);
+  p->syncing = FALSE;
+  bro_identity_free (automatic);
+  refresh_identity (p);
 }
 
 static void
@@ -497,6 +629,11 @@ sync_checks (Page *p)
     g_autofree char *prev = output_preview (p);
     gtk_label_set_text (GTK_LABEL (p->output_preview), prev);
   }
+  if (p->session->info && p->sample_label)
+    {
+      g_autofree char *sample = sample_file_name (p);
+      gtk_label_set_text (GTK_LABEL (p->sample_label), sample);
+    }
   job = bro_state_active_job (st (), lane_of (p));
   gtk_widget_set_sensitive (p->mkv_btn, g_hash_table_size (p->session->selected) > 0 && !(job && job->state == BRO_JOB_RUNNING));
   gtk_widget_set_sensitive (p->backup_btn, !(job && job->state == BRO_JOB_RUNNING));
@@ -642,6 +779,7 @@ refresh_disc (Page *p)
     }
   gtk_stack_set_visible_child_name (GTK_STACK (p->stack), page);
   gtk_widget_set_visible (p->action_bar, g_str_equal (page, "browser"));
+  gtk_widget_set_visible (p->identity_bar, g_str_equal (page, "browser"));
 }
 
 static void
@@ -1011,10 +1149,39 @@ bro_drive_page_new (const char *tag)
   g_object_unref (backup_menu);
   g_object_unref (select_menu);
 
+  /* Identity bar: movie / show name, movie or TV, first episode, format code and a sample file name. */
+  p->identity_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+  gtk_widget_set_margin_start (p->identity_bar, 8);
+  gtk_widget_set_margin_end (p->identity_bar, 8);
+  gtk_widget_set_margin_top (p->identity_bar, 6);
+  gtk_widget_set_margin_bottom (p->identity_bar, 2);
+  p->name_entry = gtk_entry_new ();
+  gtk_widget_set_size_request (p->name_entry, 220, -1);
+  gtk_widget_set_tooltip_text (p->name_entry, "Movie or show name used for folder and file names. Empty = the name read from the disc.");
+  g_signal_connect (p->name_entry, "changed", G_CALLBACK (on_media_name), p);
+  p->kind_dropdown = gtk_drop_down_new (NULL, NULL);
+  g_signal_connect (p->kind_dropdown, "notify::selected", G_CALLBACK (on_media_kind), p);
+  p->first_spin = gtk_spin_button_new_with_range (0, 9999, 1);
+  gtk_widget_set_tooltip_text (p->first_spin, "Number of the first episode on this disc. 0 = read from the disc menus, or 1.");
+  g_signal_connect (p->first_spin, "value-changed", G_CALLBACK (on_first_episode), p);
+  p->format_label = gtk_label_new ("");
+  gtk_widget_add_css_class (p->format_label, "heading");
+  p->sample_label = bro_caption ("");
+  gtk_label_set_ellipsize (GTK_LABEL (p->sample_label), PANGO_ELLIPSIZE_MIDDLE);
+  gtk_label_set_selectable (GTK_LABEL (p->sample_label), TRUE);
+  gtk_widget_set_hexpand (p->sample_label, TRUE);
+  gtk_label_set_xalign (GTK_LABEL (p->sample_label), 0);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->name_entry);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->kind_dropdown);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->first_spin);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->format_label);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->sample_label);
+
   content = p->root;
   gtk_box_append (GTK_BOX (content), header);
   gtk_box_append (GTK_BOX (content), p->job_box);
   gtk_box_append (GTK_BOX (content), p->stack);
+  gtk_box_append (GTK_BOX (content), p->identity_bar);
   gtk_box_append (GTK_BOX (content), p->action_bar);
 
   g_object_set_data_full (G_OBJECT (p->root), "bro-page", p, (GDestroyNotify) page_free);

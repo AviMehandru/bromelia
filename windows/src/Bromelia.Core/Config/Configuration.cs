@@ -141,9 +141,16 @@ public sealed class RipConfig
 
 public sealed class OutputConfig
 {
+    /// <summary>{name} - {episode} - {discLabel} - {rip} - {track} - {format}, leaving out parts that don't apply.</summary>
+    public const string DefaultFileNameTemplate = "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}";
+    public const string DefaultFolderTemplate = "{name}{discLabel? - {discLabel}}";
+    /// <summary>Folder template of configuration version 1, replaced when a configuration is upgraded.</summary>
+    public const string LegacyFolderTemplate = "{disc}";
+
     public string RootOverride { get; set; } = "";
-    public string FolderTemplate { get; set; } = "{disc}";
-    public string FileNameTemplate { get; set; } = "";
+    public string FolderTemplate { get; set; } = DefaultFolderTemplate;
+    /// <summary>Used for MKV files and backups (without extension). Empty = keep MakeMKV's names.</summary>
+    public string FileNameTemplate { get; set; } = DefaultFileNameTemplate;
     public string BackupSubfolder { get; set; } = "backup";
     public ConflictPolicy ConflictPolicy { get; set; } = ConflictPolicy.UniqueSuffix;
 }
@@ -156,6 +163,24 @@ public sealed class AutomationConfig
     public bool EjectOnFailure { get; set; }
     public bool Notify { get; set; } = true;
     public bool PlaySound { get; set; } = true;
+}
+
+public sealed class ArchiveConfig
+{
+    /// <summary>Write SHA256SUMS for every produced file into the output folder.</summary>
+    public bool Checksums { get; set; } = true;
+    /// <summary>Write bromelia.json and the job log into the output folder.</summary>
+    public bool ArchiveRecord { get; set; } = true;
+}
+
+public sealed class EpisodeConfig
+{
+    /// <summary>Split DVD "play all" titles of TV shows into one file per episode.</summary>
+    public bool SplitPlayAll { get; set; } = true;
+    /// <summary>Keep the unsplit title next to the episode files.</summary>
+    public bool KeepPlayAll { get; set; } = true;
+    /// <summary>Read episode numbers from the menus (needs ffmpeg and tesseract).</summary>
+    public bool ReadMenuNumbers { get; set; } = true;
 }
 
 public sealed class PostProcessStep
@@ -172,6 +197,10 @@ public sealed class PostProcessStep
     public int TimeoutSeconds { get; set; }
     public Dictionary<string, string> Environment { get; set; } = new();
     public bool FailJobOnError { get; set; }
+    /// <summary>Run only when the movie / show name or disc label matches this regular expression (empty = all).</summary>
+    public string MatchName { get; set; } = "";
+    /// <summary>Run only for these format codes (DVD, DVDe, BR, BRe, 4K, 4Ke; "BR*" = any code starting with BR). Empty = all.</summary>
+    public List<string> MatchFormats { get; set; } = new();
 }
 
 public sealed class GeneratedProfile
@@ -228,7 +257,18 @@ public sealed class DriveConfig
     public RipConfig Rip { get; set; } = new();
     public OutputConfig Output { get; set; } = new();
     public AutomationConfig Automation { get; set; } = new();
+    public ArchiveConfig Archive { get; set; } = new();
+    public EpisodeConfig Episodes { get; set; } = new();
     public List<PostProcessStep> PostProcess { get; set; } = new();
+
+    /// <summary>Version 1 defaults kept MakeMKV's file names and named folders after the disc label; version 2
+    /// names everything "{name} - … - {format}". Only untouched defaults are replaced.</summary>
+    public void UpgradeNaming(int fromVersion)
+    {
+        if (fromVersion >= 2) return;
+        if (string.IsNullOrWhiteSpace(Output.FileNameTemplate)) Output.FileNameTemplate = OutputConfig.DefaultFileNameTemplate;
+        if (Output.FolderTemplate == OutputConfig.LegacyFolderTemplate) Output.FolderTemplate = OutputConfig.DefaultFolderTemplate;
+    }
 
     public DriveConfig Clone() => JsonSerializer.Deserialize<DriveConfig>(JsonSerializer.Serialize(this, ConfigJson.Options), ConfigJson.Options)!;
 
@@ -254,7 +294,9 @@ public sealed class DrivePreset
 
 public sealed class AppConfig
 {
-    public int Version { get; set; } = 1;
+    public const int CurrentVersion = 2;
+
+    public int Version { get; set; } = CurrentVersion;
     public string MakemkvconPath { get; set; } = "";
     public string MkvmergePath { get; set; } = "";
     public string OutputRoot { get; set; } = "";
@@ -266,7 +308,23 @@ public sealed class AppConfig
     public DriveConfig DefaultDrive { get; set; } = new() { Name = "Default" };
     public List<DriveConfig> Drives { get; set; } = new();
     public List<DrivePreset> Presets { get; set; } = new();
+    /// <summary>Post-processing steps for every drive, usually limited with MatchName / MatchFormats ("plugins").
+    /// They run after the drive's own steps.</summary>
+    public List<PostProcessStep> Plugins { get; set; } = new();
     public int HistoryLimit { get; set; } = 500;
+
+    /// <summary>Upgrades a configuration loaded from a file of version <paramref name="loaded"/>.</summary>
+    public AppConfig Upgrade(int loaded)
+    {
+        if (loaded < 2)
+        {
+            DefaultDrive.UpgradeNaming(loaded);
+            foreach (var d in Drives) d.UpgradeNaming(loaded);
+            foreach (var p in Presets) p.Config.UpgradeNaming(loaded);
+        }
+        Version = CurrentVersion;
+        return this;
+    }
 
     public DriveConfig? DriveConfigFor(DriveScanEntry e) =>
         Drives.FirstOrDefault(d => d.Enabled && d.Match.Matches(e)) ?? Drives.FirstOrDefault(d => d.Match.Matches(e));
@@ -305,6 +363,16 @@ public static class ConfigJson
         return o;
     }
 
-    public static AppConfig Parse(string json) => JsonSerializer.Deserialize<AppConfig>(json, Options) ?? new AppConfig();
+    public static AppConfig Parse(string json)
+    {
+        var config = JsonSerializer.Deserialize<AppConfig>(json, Options) ?? new AppConfig();
+        // Files without a version are version 1.
+        int loaded = 1;
+        using (var doc = JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true }))
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                foreach (var p in doc.RootElement.EnumerateObject())
+                    if (string.Equals(p.Name, "version", StringComparison.OrdinalIgnoreCase) && p.Value.TryGetInt32(out var v)) loaded = v;
+        return config.Upgrade(loaded);
+    }
     public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, Options);
 }

@@ -14,14 +14,17 @@ public sealed class PostProcessEditor : UserControl
     readonly List<PostProcessStep> _steps;
     readonly string _driveName;
     readonly Action _changed;
+    readonly string _emptyText;
     readonly ListView _list = new() { SelectionMode = ListViewSelectionMode.Single };
     readonly ScrollViewer _editorHost = new() { Padding = new Thickness(0, 0, 16, 24) };
 
-    public PostProcessEditor(List<PostProcessStep> steps, string driveName, Action changed)
+    public PostProcessEditor(List<PostProcessStep> steps, string driveName, Action changed,
+        string emptyText = "Post-processing steps run after each job, in order. Use them to move, rename, encode or catalogue files, or to call any script. Add a step or pick an example.")
     {
         _steps = steps;
         _driveName = driveName;
         _changed = changed;
+        _emptyText = emptyText;
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         buttons.Children.Add(IconButton("\uE710", "Add step", () => Add(new PostProcessStep { Name = $"Step {_steps.Count + 1}" })));
@@ -122,11 +125,24 @@ public sealed class PostProcessEditor : UserControl
         {
             var sp = new StackPanel { Padding = new Thickness(0, 4, 0, 4), Opacity = s.Enabled ? 1 : 0.6 };
             sp.Children.Add(new TextBlock { Text = s.Name });
-            sp.Children.Add(Form.Help(s.RunOn.Label() + (s.PerFile ? " · per file" : "")));
+            sp.Children.Add(Form.Help(Summary(s)));
             _list.Items.Add(sp);
         }
         if (select >= 0 && select < _steps.Count) _list.SelectedIndex = select;
         else ShowEditor();
+    }
+
+    static string Summary(PostProcessStep s)
+    {
+        var parts = new List<string> { s.RunOn.Label() + (s.PerFile ? " · per file" : "") };
+        if (s.MatchName.Trim().Length > 0) parts.Add($"“{s.MatchName}”");
+        if (s.MatchFormats.Count > 0) parts.Add(string.Join(", ", s.MatchFormats));
+        return string.Join(" · ", parts);
+    }
+
+    void UpdateSummary(int i)
+    {
+        if (i >= 0 && i < _list.Items.Count && _list.Items[i] is StackPanel sp && sp.Children.Count > 1 && sp.Children[1] is TextBlock tb) tb.Text = Summary(_steps[i]);
     }
 
     void ShowEditor()
@@ -134,7 +150,7 @@ public sealed class PostProcessEditor : UserControl
         int i = _list.SelectedIndex;
         if (i < 0 || i >= _steps.Count)
         {
-            _editorHost.Content = Form.Help("Post-processing steps run after each job, in order. Use them to move, rename, encode or catalogue files, or to call any script. Add a step or pick an example.");
+            _editorHost.Content = Form.Help(_emptyText);
             return;
         }
         var s = _steps[i];
@@ -143,12 +159,32 @@ public sealed class PostProcessEditor : UserControl
         {
             _changed();
             if (_list.Items[i] is StackPanel sp && sp.Children[0] is TextBlock tb) tb.Text = s.Name;
+            UpdateSummary(i);
         };
         f.Section("Step");
         f.Text("Name", () => s.Name, v => s.Name = v);
         f.Toggle("Enabled", () => s.Enabled, v => s.Enabled = v);
         f.Choice("Run", Enum.GetValues<RunCondition>().Select(r => (r, r.Label())), () => s.RunOn, v => s.RunOn = v);
         f.Toggle("Run once for every produced file", () => s.PerFile, v => s.PerFile = v);
+        f.Section("Applies to", "Leave both empty to run for every disc. The name is the movie or show name used for file names; the disc label (e.g. ONE_PIECE_S2_P7_D2) lets a step target one specific disc. No format ticked = all formats; the e codes are backups that are not decrypted.");
+        var nameError = Form.Help(PluginMatcher.Validate(s.MatchName) ?? "");
+        var nameBox = f.Text("Movie / show name or disc label matches", () => s.MatchName, v => s.MatchName = v, "Any — regular expression, e.g. ^One Piece$", width: 320);
+        nameBox.TextChanged += (_, _) => nameError.Text = PluginMatcher.Validate(nameBox.Text) ?? "";
+        f.Add(nameError);
+        var formats = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        foreach (var code in DiscFormatExtensions.AllCodes.Where(c => !c.StartsWith("HDDVD", StringComparison.Ordinal)))
+        {
+            var cb = new CheckBox { Content = code, IsChecked = s.MatchFormats.Contains(code), MinWidth = 70 };
+            cb.Click += (_, _) =>
+            {
+                s.MatchFormats.Remove(code);
+                if (cb.IsChecked == true) s.MatchFormats.Add(code);
+                _changed();
+                UpdateSummary(i);
+            };
+            formats.Children.Add(cb);
+        }
+        f.Row("Formats", formats);
         f.Section("Command", "Arguments are split like a command line and then {tokens} are filled in, so values with spaces stay a single argument. A lone {files} expands to one argument per file. .ps1, .bat, .cmd and .py scripts are started with the matching interpreter.");
         f.PathPicker("Program or script", () => s.Executable, v => s.Executable = v, folder: false, placeholder: @"C:\Scripts\after-rip.ps1");
         f.Text("Interpreter", () => s.Interpreter, v => s.Interpreter = v, "Optional, e.g. python.exe");
@@ -157,7 +193,7 @@ public sealed class PostProcessEditor : UserControl
         f.Number("Time limit (0 = none)", () => s.TimeoutSeconds, v => s.TimeoutSeconds = v, 0, 86400, suffix: "seconds");
         f.Toggle("Mark the job as failed if this step fails", () => s.FailJobOnError, v => s.FailJobOnError = v);
 
-        f.Section("Environment variables", "Always set: BROMELIA_JOB_ID, BROMELIA_STATUS, BROMELIA_MODE, BROMELIA_DRIVE_NAME, BROMELIA_DRIVE_ID, BROMELIA_DEVICE, BROMELIA_DISC_NAME, BROMELIA_DISC_TYPE, BROMELIA_OUTPUT_DIR, BROMELIA_FILES (newline separated), BROMELIA_FILE_COUNT, BROMELIA_FILE (per-file steps), BROMELIA_MANIFEST (JSON), BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR.");
+        f.Section("Environment variables", "Always set: BROMELIA_JOB_ID, BROMELIA_STATUS, BROMELIA_MODE, BROMELIA_DRIVE_NAME, BROMELIA_DRIVE_ID, BROMELIA_DEVICE, BROMELIA_DISC_NAME, BROMELIA_DISC_TYPE, BROMELIA_OUTPUT_DIR, BROMELIA_FILES (newline separated), BROMELIA_FILE_COUNT, BROMELIA_FILE (per-file steps), BROMELIA_MANIFEST (JSON), BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR, BROMELIA_NAME, BROMELIA_KIND (movie / tv), BROMELIA_FORMAT (DVD, BRe, 4K, …), BROMELIA_ENCRYPTED (1 / 0), BROMELIA_SEASON, BROMELIA_DISC_NUMBER, BROMELIA_DISC_SET, BROMELIA_CHECKSUMS (SHA256SUMS path).");
         var env = new StackPanel { Spacing = 6 };
         void RebuildEnv()
         {
@@ -209,11 +245,14 @@ public sealed class PostProcessEditor : UserControl
             var values = TemplateRenderer.DateValues();
             values["disc"] = "SAMPLE_DISC"; values["volume"] = "SAMPLE_DISC"; values["type"] = "bd"; values["drive"] = _driveName;
             values["job"] = "test0000"; values["outputDir"] = tmp; values["status"] = "success"; values["manifest"] = "";
-            values["file"] = ""; values["files"] = ""; values["device"] = "";
+            values["file"] = ""; values["files"] = ""; values["device"] = ""; values["checksums"] = "";
+            var sample = new MediaIdentity("Sample Disc", MediaKind.Movie, DiscFormat.Bluray, false, new LabelInfo(), "");
+            foreach (var kv in sample.TemplateValues("Rip")) values[kv.Key] = kv.Value;
             var envVars = new Dictionary<string, string>
             {
                 ["BROMELIA_STATUS"] = "success", ["BROMELIA_DISC_NAME"] = "SAMPLE_DISC", ["BROMELIA_OUTPUT_DIR"] = tmp,
                 ["BROMELIA_DRIVE_NAME"] = _driveName, ["BROMELIA_FILES"] = "", ["BROMELIA_FILE_COUNT"] = "0", ["BROMELIA_MODE"] = "mkv",
+                ["BROMELIA_NAME"] = sample.Name, ["BROMELIA_KIND"] = "movie", ["BROMELIA_FORMAT"] = sample.FormatCode, ["BROMELIA_ENCRYPTED"] = "0",
             };
             var copy = System.Text.Json.JsonSerializer.Deserialize<PostProcessStep>(ConfigJson.Serialize(s), ConfigJson.Options)!;
             copy.Enabled = true;

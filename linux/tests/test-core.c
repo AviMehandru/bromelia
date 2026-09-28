@@ -6,6 +6,8 @@
 #include <json-glib/json-glib.h>
 
 #include "bro-config.h"
+#include "bro-dvd.h"
+#include "bro-identity.h"
 #include "bro-logic.h"
 #include "bro-makemkv.h"
 #include "bro-robot.h"
@@ -610,6 +612,474 @@ test_integration (void)
   }
 }
 
+/* ---- identity, naming, plugins, checksums, DVD navigation ---- */
+
+static void
+test_labels (void)
+{
+  static const struct { const char *label, *title; int season, part, volume, disc; gboolean series; } cases[] = {
+    { "ONE_PIECE_S2_P7_D2", "One Piece", 2, 7, -1, 2, TRUE },
+    { "One_Piece_S3_P1_D1", "One Piece", 3, 1, -1, 1, TRUE },
+    { "THE_LORD_OF_THE_RINGS_DISC_2", "The Lord of the Rings", -1, -1, -1, 2, FALSE },
+    { "FRIENDS_SEASON_4_DISC_3", "Friends", 4, -1, -1, 3, TRUE },
+    { "BREAKING_BAD_S1D2", "Breaking Bad", 1, -1, -1, 2, TRUE },
+    { "NARUTO_VOL_12", "Naruto", -1, -1, 12, -1, TRUE },
+    { "BLADE_RUNNER_2049", "Blade Runner 2049", -1, -1, -1, -1, FALSE },
+    { "ROCKY_II_WS", "Rocky II", -1, -1, -1, -1, FALSE },
+    { "SPIDER-MAN_NO_WAY_HOME", "Spider-Man No Way Home", -1, -1, -1, -1, FALSE },
+    { "The Matrix - Disc 1", "The Matrix", -1, -1, -1, 1, FALSE },
+  };
+  for (guint i = 0; i < G_N_ELEMENTS (cases); i++)
+    {
+      BroLabelInfo l;
+      bro_label_parse (cases[i].label, &l);
+      g_assert_cmpstr (l.title, ==, cases[i].title);
+      g_assert_cmpint (l.season, ==, cases[i].season);
+      g_assert_cmpint (l.part, ==, cases[i].part);
+      g_assert_cmpint (l.volume, ==, cases[i].volume);
+      g_assert_cmpint (l.disc, ==, cases[i].disc);
+      g_assert_cmpint (l.looks_like_series, ==, cases[i].series);
+      bro_label_clear (&l);
+    }
+  {
+    BroLabelInfo l;
+    g_autofree char *set = NULL;
+    bro_label_parse ("ONE_PIECE_S2_P7_D2", &l);
+    set = bro_label_set_description (&l);
+    g_assert_cmpstr (set, ==, "Season 2 Part 7 Disc 2");
+    bro_label_clear (&l);
+  }
+}
+
+static void
+test_identity (void)
+{
+  g_autofree char *text = fixture ("info-dvd");
+  g_autoptr (BroDiscInfo) info = bro_disc_info_from_output (text);
+  BroIdentity *id = bro_identity_resolve (info, "", -1, -1, FALSE, "", -1, 0);
+  g_autofree char *code = bro_identity_format_code (id);
+  g_autofree char *set = bro_label_set_description (&id->label);
+  g_assert_cmpstr (id->name, ==, "One Piece");
+  g_assert_cmpint (id->kind, ==, BRO_KIND_TV);
+  g_assert_cmpstr (code, ==, "DVD");
+  g_assert_cmpstr (set, ==, "Season 3 Part 1 Disc 1");
+  bro_identity_free (id);
+  id = bro_identity_resolve (info, "", -1, -1, TRUE, "One Piece (2001)", BRO_KIND_MOVIE, 0);
+  g_free (code);
+  code = bro_identity_format_code (id);
+  g_assert_cmpstr (code, ==, "DVDe");
+  g_assert_cmpstr (id->name, ==, "One Piece (2001)");
+  g_assert_cmpint (id->kind, ==, BRO_KIND_MOVIE);
+  bro_identity_free (id);
+
+  {
+    g_autoptr (BroDiscInfo) bd = bro_disc_info_from_output ("CINFO:1,6209,\"Blu-ray disc\"\nCINFO:2,0,\"The Dark Knight™\"\nCINFO:32,0,\"DARK_KNIGHT_D1\"\n"
+                                                            "TINFO:0,9,0,\"2:32:00\"\nSINFO:0,0,1,6201,\"Video\"\nSINFO:0,0,19,0,\"1920x1080\"\n");
+    id = bro_identity_resolve (bd, "", -1, -1, FALSE, "", -1, 0);
+    g_assert_cmpstr (id->name, ==, "The Dark Knight");
+    g_assert_cmpint (id->kind, ==, BRO_KIND_MOVIE);
+    g_assert_cmpint (id->format, ==, BRO_FORMAT_BLURAY);
+    g_assert_cmpint (id->label.disc, ==, 1);
+    bro_identity_free (id);
+  }
+  {
+    g_autoptr (BroDiscInfo) uhd = bro_disc_info_from_output ("CINFO:1,6209,\"Blu-ray disc\"\nSINFO:0,0,1,6201,\"Video\"\nSINFO:0,0,19,0,\"3840x2160\"\n");
+    g_autofree char *c4 = bro_format_code (bro_detect_format (uhd, -1), TRUE);
+    g_assert_cmpstr (c4, ==, "4Ke");
+    g_assert_cmpint (bro_detect_format (NULL, BRO_DISC_BLURAY | BRO_DISC_AACS), ==, BRO_FORMAT_BLURAY);
+    g_assert_cmpint (bro_detect_format (NULL, -1), ==, BRO_FORMAT_UNKNOWN);
+  }
+  {
+    g_autoptr (BroDiscInfo) tv = bro_disc_info_from_output ("CINFO:1,6209,\"Blu-ray disc\"\nCINFO:32,0,\"SOME_SHOW\"\n"
+                                                            "TINFO:0,9,0,\"0:45:10\"\nTINFO:1,9,0,\"0:44:10\"\nTINFO:2,9,0,\"0:44:50\"\n"
+                                                            "TINFO:3,9,0,\"0:45:05\"\nTINFO:4,9,0,\"0:05:00\"\n");
+    g_autoptr (GPtrArray) eps = bro_episode_like_titles (tv->titles);
+    g_assert_cmpuint (eps->len, ==, 4);
+    id = bro_identity_resolve (tv, "", -1, -1, FALSE, "", -1, 0);
+    g_assert_cmpint (id->kind, ==, BRO_KIND_TV);
+    bro_identity_free (id);
+  }
+  {
+    g_autofree char *dir = g_dir_make_tmp ("bromelia-bdmv-XXXXXX", NULL);
+    g_autofree char *bdmv = g_build_filename (dir, "BDMV", NULL);
+    g_autofree char *index = g_build_filename (bdmv, "index.bdmv", NULL);
+    g_mkdir_with_parents (bdmv, 0755);
+    g_file_set_contents (index, "INDX0300xxxxxxxx", -1, NULL);
+    g_assert_cmpint (bro_detect_backup_folder (dir), ==, BRO_FORMAT_UHD);
+    g_file_set_contents (index, "INDX0200xxxxxxxx", -1, NULL);
+    g_assert_cmpint (bro_detect_backup_folder (dir), ==, BRO_FORMAT_BLURAY);
+    g_unlink (index);
+    g_rmdir (bdmv);
+    g_rmdir (dir);
+  }
+}
+
+static char *
+render_default (BroIdentity *id, const char *rip, const char *episode, const char *track)
+{
+  g_autoptr (GHashTable) v = bro_template_values_new ();
+  bro_identity_template_values (id, v, rip);
+  if (episode) bro_template_values_set (v, "episode", episode);
+  if (track) bro_template_values_set (v, "track", track);
+  return bro_template_render_path (BRO_DEFAULT_FILE_TEMPLATE, v);
+}
+
+static void
+test_naming (void)
+{
+  BroIdentity *id = bro_identity_resolve (NULL, "ONE_PIECE_S2_P7_D2", -1, BRO_FORMAT_DVD, FALSE, "", -1, 0);
+  g_autofree char *a = render_default (id, "Rip", "Episode 138", "Title 11 Ch 1-7");
+  g_assert_cmpstr (a, ==, "One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD");
+  id->encrypted = TRUE;
+  {
+    g_autofree char *b = render_default (id, "Backup", NULL, NULL);
+    g_assert_cmpstr (b, ==, "One Piece - Season 2 Part 7 Disc 2 - Backup - DVDe");
+  }
+  bro_identity_free (id);
+  id = bro_identity_resolve (NULL, "INCEPTION", -1, BRO_FORMAT_UHD, FALSE, "Inception", -1, 0);
+  {
+    g_autofree char *c = render_default (id, "Rip", NULL, "Playlist 00800");
+    g_autoptr (GHashTable) v = bro_template_values_new ();
+    g_autofree char *folder = NULL;
+    g_assert_cmpstr (c, ==, "Inception - Rip - Playlist 00800 - 4K");
+    bro_identity_template_values (id, v, "Rip");
+    folder = bro_template_render_path (BRO_DEFAULT_FOLDER_TEMPLATE, v);
+    g_assert_cmpstr (folder, ==, "Inception");
+  }
+  bro_identity_free (id);
+  {
+    g_autofree char *e = bro_episode_label (7, 3);
+    g_assert_cmpstr (e, ==, "Episode 007");
+  }
+}
+
+static void
+test_plugins (void)
+{
+  BroPostStep *s = bro_post_step_new ();
+  g_autofree char *err = NULL;
+  g_assert_true (bro_plugin_matches (s, "Anything", "X", "BR"));
+  g_free (s->match_name);
+  s->match_name = g_strdup ("^one piece$");
+  g_assert_true (bro_plugin_matches (s, "One Piece", "ONE_PIECE_S2", "DVD"));
+  g_assert_false (bro_plugin_matches (s, "Naruto", "NARUTO", "DVD"));
+  g_free (s->match_name);
+  s->match_name = g_strdup ("S2_P7");
+  g_assert_true (bro_plugin_matches (s, "One Piece", "ONE_PIECE_S2_P7_D2", "DVD"));
+  g_free (s->match_name);
+  s->match_name = g_strdup ("");
+  g_ptr_array_add (s->match_formats, g_strdup ("BR*"));
+  g_ptr_array_add (s->match_formats, g_strdup ("4K"));
+  g_assert_true (bro_plugin_matches (s, "", "", "BRe"));
+  g_assert_true (bro_plugin_matches (s, "", "", "4K"));
+  g_assert_false (bro_plugin_matches (s, "", "", "4Ke"));
+  g_assert_false (bro_plugin_matches (s, "", "", "DVD"));
+  g_free (s->match_name);
+  s->match_name = g_strdup ("(");
+  g_assert_false (bro_plugin_matches (s, "x", "", "BR"));
+  err = bro_plugin_validate ("(");
+  g_assert_nonnull (err);
+  bro_post_step_free (s);
+}
+
+static void
+test_config_upgrade (void)
+{
+  const char *v1 = "{\"version\":1,\"defaultDrive\":{\"output\":{\"folderTemplate\":\"{disc}\",\"fileNameTemplate\":\"\"}},"
+                   "\"drives\":[{\"name\":\"A\",\"output\":{\"folderTemplate\":\"{type}/{disc}\",\"fileNameTemplate\":\"{disc} {n}\"}}],"
+                   "\"plugins\":[{\"name\":\"P\",\"matchName\":\"piece\",\"matchFormats\":[\"DVD\"]}]}";
+  g_autoptr (BroAppConfig) c = bro_app_config_parse (v1, NULL);
+  BroDriveConfig *d;
+  BroPostStep *p;
+  g_assert_cmpint (c->version, ==, 2);
+  g_assert_cmpstr (c->default_drive->output.folder_template, ==, BRO_DEFAULT_FOLDER_TEMPLATE);
+  g_assert_cmpstr (c->default_drive->output.file_name_template, ==, BRO_DEFAULT_FILE_TEMPLATE);
+  d = c->drives->pdata[0];
+  g_assert_cmpstr (d->output.folder_template, ==, "{type}/{disc}");
+  g_assert_cmpstr (d->output.file_name_template, ==, "{disc} {n}");
+  p = c->plugins->pdata[0];
+  g_assert_cmpstr (p->match_name, ==, "piece");
+  g_assert_cmpstr (p->match_formats->pdata[0], ==, "DVD");
+  g_assert_true (c->default_drive->archive.checksums);
+  g_assert_true (c->default_drive->episodes.split_play_all);
+  {
+    g_autoptr (BroAppConfig) v2 = bro_app_config_parse ("{\"version\":2,\"defaultDrive\":{\"output\":{\"fileNameTemplate\":\"\"}}}", NULL);
+    g_autofree char *json = bro_app_config_serialize (c);
+    g_autoptr (BroAppConfig) back = bro_app_config_parse (json, NULL);
+    g_assert_cmpstr (v2->default_drive->output.file_name_template, ==, "");
+    g_assert_cmpuint (back->plugins->len, ==, 1);
+    g_assert_cmpstr (((BroPostStep *) back->plugins->pdata[0])->match_formats->pdata[0], ==, "DVD");
+  }
+}
+
+static void
+test_checksums (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-sums-XXXXXX", NULL);
+  g_autofree char *vts = g_build_filename (dir, "backup", "VIDEO_TS", NULL);
+  g_autofree char *a = g_build_filename (dir, "a.mkv", NULL);
+  g_autofree char *ifo = g_build_filename (vts, "VIDEO_TS.IFO", NULL);
+  g_autofree char *backup = g_build_filename (dir, "backup", NULL);
+  g_autoptr (GPtrArray) items = g_ptr_array_new ();
+  g_autoptr (GPtrArray) files = NULL;
+  g_autoptr (GPtrArray) bad = NULL;
+  g_autofree char *sums = NULL;
+  g_mkdir_with_parents (vts, 0755);
+  g_file_set_contents (a, "abc", -1, NULL);
+  g_file_set_contents (ifo, "", 0, NULL);
+  g_ptr_array_add (items, a);
+  g_ptr_array_add (items, backup);
+  files = bro_checksum_list_files (items, dir);
+  g_assert_cmpuint (files->len, ==, 2);
+  g_assert_cmpstr (((BroChecksum *) files->pdata[0])->path, ==, "a.mkv");
+  g_assert_cmpstr (((BroChecksum *) files->pdata[1])->path, ==, "backup/VIDEO_TS/VIDEO_TS.IFO");
+  for (guint i = 0; i < files->len; i++)
+    {
+      BroChecksum *c = files->pdata[i];
+      g_autofree char *full = g_build_filename (dir, c->path, NULL);
+      c->sha256 = bro_sha256_file (full, NULL, NULL, NULL);
+    }
+  g_assert_cmpstr (((BroChecksum *) files->pdata[0])->sha256, ==, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  sums = bro_checksums_write_merged (dir, files, NULL);
+  g_assert_nonnull (sums);
+  bad = bro_checksums_verify (dir, NULL);
+  g_assert_cmpuint (bad->len, ==, 0);
+  g_file_set_contents (a, "abd", -1, NULL);
+  g_ptr_array_unref (bad);
+  bad = bro_checksums_verify (dir, NULL);
+  g_assert_cmpuint (bad->len, ==, 1);
+  g_assert_cmpstr (bad->pdata[0], ==, "a.mkv");
+  {
+    const char *argv[] = { "/bin/rm", "-rf", dir, NULL };
+    bro_process_run (argv, NULL, NULL, 60, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+  }
+}
+
+static int
+int_at (GArray *a, guint i)
+{
+  return g_array_index (a, int, i);
+}
+
+static void
+test_dvd_navigation (void)
+{
+  const char *fx = g_getenv ("BROMELIA_FIXTURES");
+  g_autofree char *dir = g_build_filename (fx ? fx : "../../shared/fixtures", "dvd-play-all", NULL);
+  g_autoptr (BroVideoTS) r = bro_videots_open_folder (dir, "ONE_PIECE_S2_P7_D2");
+  g_autoptr (BroDvdAnalysis) a = NULL;
+  g_autoptr (GPtrArray) plans = NULL;
+  g_autoptr (GArray) split = NULL;
+  BroEpisodePlan *p;
+  static const int starts[] = { 1, 8, 15, 22, 29, 36 };
+  static const int splits[] = { 8, 15, 22, 29, 36, 43 };
+  g_autofree char *dur = NULL, *at8 = NULL;
+  int f, l;
+
+  g_assert_nonnull (r);
+  a = bro_dvd_analyse (r);
+  g_assert_nonnull (a);
+  plans = bro_dvd_plans (a);
+  g_assert_cmpuint (plans->len, >, 0);
+  p = plans->pdata[0];
+  g_assert_cmpint (p->title, ==, 11);
+  g_assert_cmpuint (p->starts->len, ==, 6);
+  for (guint i = 0; i < 6; i++)
+    g_assert_cmpint (int_at (p->starts, i), ==, starts[i]);
+  g_assert_cmpint (p->last_end, ==, 42);
+  g_assert_cmpstr (p->end_rule, ==, "VOB boundary");
+  g_assert_cmpuint (p->tail->len, ==, 1);
+  g_assert_cmpint (int_at (p->tail, 0), ==, 43);
+  split = bro_episode_plan_split_chapters (p);
+  for (guint i = 0; i < 6; i++)
+    g_assert_cmpint (int_at (split, i), ==, splits[i]);
+  dur = bro_dvd_hms (p->duration);
+  at8 = bro_dvd_hms (g_array_index (p->chapter_starts, double, 7));
+  g_assert_cmpstr (dur, ==, "2:21:51.370");
+  g_assert_cmpstr (at8, ==, "0:23:36.815");
+  bro_episode_plan_range (p, 5, &f, &l);
+  g_assert_cmpint (f, ==, 36);
+  g_assert_cmpint (l, ==, 42);
+  g_assert_true (bro_episode_plan_plausible (p, TRUE));
+  g_assert_true (bro_episode_plan_matches_chapters (p, 43));
+  g_assert_cmpstr (p->reasons->pdata[1], ==, "if GPRM7 == 21: LinkPTTN 8");
+
+  {
+    g_autoptr (GArray) shifted = g_array_new (FALSE, FALSE, sizeof (double));
+    g_autoptr (GArray) mapped = NULL;
+    double zero = 0;
+    g_array_append_val (shifted, zero);
+    for (guint i = 0; i < p->chapter_starts->len; i++)
+      {
+        double v = g_array_index (p->chapter_starts, double, i) + 0.02;
+        g_array_append_val (shifted, v);
+      }
+    mapped = bro_dvd_mkv_chapters (split, p, shifted);
+    g_assert_nonnull (mapped);
+    for (guint i = 0; i < 6; i++)
+      g_assert_cmpint (int_at (mapped, i), ==, splits[i] + 1);
+  }
+  {
+    g_autoptr (GArray) ch = bro_parse_simple_chapters ("CHAPTER01=00:00:00.000\nCHAPTER01NAME=x\nCHAPTER02=00:23:36.815\n");
+    g_assert_cmpuint (ch->len, ==, 2);
+    g_assert_cmpfloat_with_epsilon (g_array_index (ch, double, 1), 1416.815, 1e-9);
+  }
+}
+
+static void
+test_dvd_jumps_and_numbers (void)
+{
+  static const guint8 jvts[] = { 0x30, 0x05, 0x00, 0x05, 0x00, 0x03, 0x00, 0x00 };
+  static const guint8 link[] = { 0x20, 0xA5, 0x00, 0x07, 0x00, 0x15, 0x00, 0x08 };
+  static const guint8 jtt[] = { 0x30, 0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00 };
+  static const guint8 none[8] = { 0 };
+  BroDvdJump j;
+  g_autoptr (GArray) numbers = bro_dvd_episode_numbers ("EPISODE 138\nEpis0de #12 foo episode9");
+  g_autoptr (GArray) ocr = g_array_new (FALSE, FALSE, sizeof (int));
+  static const int seen[] = { 138, 139, 140, 142, 143 };
+
+  g_assert_true (bro_dvd_decode_jump (jvts, &j));
+  g_assert_true (j.chapter);
+  g_assert_cmpint (j.title_number, ==, 3);
+  g_assert_cmpint (j.target, ==, 5);
+  g_free (j.condition);
+  g_assert_true (bro_dvd_decode_jump (link, &j));
+  g_assert_cmpint (j.title_number, ==, -1);
+  g_assert_cmpint (j.target, ==, 8);
+  g_assert_cmpstr (j.condition, ==, "if GPRM7 == 21: ");
+  g_free (j.condition);
+  g_assert_true (bro_dvd_decode_jump (jtt, &j));
+  g_assert_false (j.chapter);
+  g_assert_cmpint (j.target, ==, 4);
+  g_free (j.condition);
+  g_assert_false (bro_dvd_decode_jump (none, &j));
+
+  g_assert_cmpuint (numbers->len, ==, 3);
+  g_assert_cmpint (int_at (numbers, 0), ==, 138);
+  g_assert_cmpint (int_at (numbers, 1), ==, 12);
+  g_assert_cmpint (int_at (numbers, 2), ==, 9);
+  g_array_append_vals (ocr, seen, G_N_ELEMENTS (seen));
+  g_assert_cmpint (bro_dvd_first_episode (ocr, 6), ==, 138);
+  g_array_set_size (ocr, 0);
+  {
+    int five = 5;
+    g_array_append_val (ocr, five);
+  }
+  g_assert_cmpint (bro_dvd_first_episode (ocr, 6), ==, -1);
+}
+
+/* Reads the same disc from its ISO (BROMELIA_TEST_DVD_ISO=/path/One_Piece_S2_P7_D2.iso). */
+static void
+test_dvd_iso (void)
+{
+  const char *iso = g_getenv ("BROMELIA_TEST_DVD_ISO");
+  g_autoptr (BroVideoTS) r = NULL;
+  g_autoptr (BroDvdAnalysis) a = NULL;
+  g_autoptr (GPtrArray) plans = NULL;
+  g_autoptr (GPtrArray) stills = NULL;
+  if (!iso)
+    {
+      g_test_skip ("set BROMELIA_TEST_DVD_ISO to run");
+      return;
+    }
+  r = bro_videots_open_iso (iso);
+  g_assert_nonnull (r);
+  g_assert_cmpstr (bro_videots_label (r), ==, "ONE_PIECE_S2_P7_D2");
+  a = bro_dvd_analyse (r);
+  plans = bro_dvd_plans (a);
+  g_assert_cmpint (((BroEpisodePlan *) plans->pdata[0])->title, ==, 11);
+  g_assert_cmpuint (((BroEpisodePlan *) plans->pdata[0])->starts->len, ==, 6);
+  stills = bro_dvd_menu_stills (r);
+  g_assert_cmpuint (stills->len, >, 0);
+}
+
+/* Rips title 11 of One_Piece_S2_P7_D2 and checks the split into named episodes (BROMELIA_TEST_PLAYALL_ISO). */
+static void
+test_split_integration (void)
+{
+  const char *iso = g_getenv ("BROMELIA_TEST_PLAYALL_ISO");
+  g_autofree char *exe = bro_find_tool ("", "makemkvcon");
+  g_autofree char *mkvmerge = bro_find_tool ("", "mkvmerge");
+  g_autofree char *out = NULL, *plugin_out = NULL;
+  BroRunRequest *req;
+  BroRunResult *res;
+  BroPostStep *plugin, *other;
+
+  if (!iso || !exe || !mkvmerge)
+    {
+      g_test_skip ("set BROMELIA_TEST_PLAYALL_ISO and install makemkvcon + mkvmerge to run");
+      return;
+    }
+  out = g_dir_make_tmp ("bromelia-split-XXXXXX", NULL);
+  req = bro_run_request_new ();
+  req->job_id = g_uuid_string_random ();
+  req->job_dir = g_build_filename (out, ".job", NULL);
+  req->config = bro_app_config_new ();
+  g_free (req->config->output_root);
+  req->config->output_root = g_strdup (out);
+  req->drive = bro_drive_config_new ();
+  req->drive->rip.titles.strategy = BRO_STRATEGY_INDICES;
+  req->drive->rip.titles.index_base = BRO_INDEX_SOURCE;
+  g_free (req->drive->rip.titles.index_pattern);
+  req->drive->rip.titles.index_pattern = g_strdup ("11");
+  req->drive->episodes.keep_play_all = FALSE;
+  plugin = bro_post_step_new ();
+  g_free (plugin->executable);
+  plugin->executable = g_strdup ("/bin/sh");
+  g_free (plugin->arguments);
+  plugin->arguments = g_strdup ("-c 'echo \"$BROMELIA_NAME|$BROMELIA_FORMAT|$BROMELIA_FILE_COUNT\" > plugin.txt'");
+  g_free (plugin->match_name);
+  plugin->match_name = g_strdup ("one piece");
+  g_ptr_array_add (plugin->match_formats, g_strdup ("DVD"));
+  other = bro_post_step_copy (plugin);
+  g_ptr_array_set_size (other->match_formats, 0);
+  g_ptr_array_add (other->match_formats, g_strdup ("BR*"));
+  g_free (other->arguments);
+  other->arguments = g_strdup ("-c 'touch wrong.txt'");
+  g_ptr_array_add (req->config->plugins, plugin);
+  g_ptr_array_add (req->config->plugins, other);
+  req->source = bro_source_new_path (BRO_SOURCE_ISO, iso);
+  req->mode = BRO_MODE_MKV;
+  req->makemkvcon = g_strdup (exe);
+  req->mkvmerge = g_strdup (mkvmerge);
+  res = bro_run_job (req);
+  if (res->status != BRO_JOB_SUCCEEDED)
+    g_printerr ("job failed: %s\n", res->error);
+  g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+  {
+    g_autofree char *folder = g_path_get_basename (res->output_dir);
+    g_assert_cmpstr (folder, ==, "One Piece - Season 2 Part 7 Disc 2");
+  }
+  g_assert_cmpuint (res->files->len, ==, 7);
+  for (guint i = 0; i < 7; i++)
+    {
+      g_autofree char *base = g_path_get_basename (res->files->pdata[i]);
+      g_autofree char *want = i < 6 ? g_strdup_printf ("One Piece - Episode %u - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch %u-%u - DVD.mkv",
+                                                       138 + i, 1 + 7 * i, 7 + 7 * i)
+                                    : g_strdup ("One Piece - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 43 - DVD.mkv");
+      g_assert_cmpstr (base, ==, want);
+    }
+  {
+    g_autoptr (GPtrArray) bad = bro_checksums_verify (res->output_dir, NULL);
+    g_autofree char *record = g_build_filename (res->output_dir, "bromelia.json", NULL);
+    g_autofree char *text = NULL;
+    g_autofree char *wrong = g_build_filename (res->output_dir, "wrong.txt", NULL);
+    plugin_out = g_build_filename (res->output_dir, "plugin.txt", NULL);
+    g_assert_nonnull (bad);
+    g_assert_cmpuint (bad->len, ==, 0);
+    g_assert_true (g_file_test (record, G_FILE_TEST_EXISTS));
+    g_assert_true (g_file_get_contents (plugin_out, &text, NULL, NULL));
+    g_assert_cmpstr (text, ==, "One Piece|DVD|7\n");
+    g_assert_false (g_file_test (wrong, G_FILE_TEST_EXISTS));
+  }
+  bro_run_result_free (res);
+  bro_run_request_free (req);
+  {
+    const char *argv[] = { "/bin/rm", "-rf", out, NULL };
+    bro_process_run (argv, NULL, NULL, 60, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+  }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -637,5 +1107,15 @@ main (int argc, char **argv)
   g_test_add_func ("/runner/remux-args", test_remux_args);
   g_test_add_func ("/state/auto-rip", test_auto_rip);
   g_test_add_func ("/runner/integration", test_integration);
+  g_test_add_func ("/identity/labels", test_labels);
+  g_test_add_func ("/identity/resolve", test_identity);
+  g_test_add_func ("/identity/naming", test_naming);
+  g_test_add_func ("/identity/plugins", test_plugins);
+  g_test_add_func ("/config/upgrade", test_config_upgrade);
+  g_test_add_func ("/archive/checksums", test_checksums);
+  g_test_add_func ("/dvd/navigation", test_dvd_navigation);
+  g_test_add_func ("/dvd/jumps-and-numbers", test_dvd_jumps_and_numbers);
+  g_test_add_func ("/dvd/iso", test_dvd_iso);
+  g_test_add_func ("/runner/split-integration", test_split_integration);
   return g_test_run ();
 }

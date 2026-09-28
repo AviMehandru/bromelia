@@ -10,6 +10,9 @@ matches across platforms:
 | Title rules, templates, argument splitting | `Core/TitleSelector.swift`, `Core/Templates.swift` | `Bromelia.Core/Logic` | `bro-logic.c` |
 | settings.conf, profiles, per-drive environment | `Core/MakeMKVFiles.swift`, `Engine/MakeMKV.swift` | `Logic/MakeMKVFiles.cs`, `Engine/MakeMKV.cs` | `bro-makemkv.c` |
 | Job pipeline, post-processing, mkvmerge | `Engine/JobRunner.swift`, `Engine/PostProcessor.swift` | `Engine/JobRunner.cs`, `Engine/PostProcessor.cs` | `bro-runner.c` |
+| Disc identity, naming, plugin matching | `Core/MediaIdentity.swift` | `Logic/MediaIdentity.cs` | `bro-identity.c` |
+| DVD navigation (episodes in “play all” titles) | `Core/DVDNavigation.swift` | `Logic/DvdNavigation.cs` | `bro-dvd.c` |
+| Checksums, archive record, episode splitting tools | `Engine/Archive.swift`, `Engine/EpisodeSplitter.swift` | `Engine/Archive.cs` | `bro-identity.c`, `bro-runner.c` |
 | App state: drives, sessions, queue, history | `App/AppModel.swift` | `Engine/AppState.cs` | `bro-state.c` |
 | UI | SwiftUI views | WinUI 3 pages | GTK 4 / libadwaita widgets |
 
@@ -64,3 +67,30 @@ A title whose tracks were customised is ripped with a second environment whose s
 `+sel:all`, so the MKV contains every stream in `SINFO` order. `mkvmerge -J` confirms the file has the
 same number and types of tracks, then `mkvmerge --video-tracks/--audio-tracks/--subtitle-tracks` keeps
 the chosen ones. If the layout doesn't match, the file is kept unchanged and a warning is logged.
+
+## Identity, episodes and archiving
+
+After the disc listing is read (for backups too, where a failed listing is only a warning), the job
+resolves a *media identity*: name, movie / TV, format (DVD / Blu-ray / 4K UHD) and the place in a set
+parsed from the label. It names the output folder and, through the file name template, every file and
+backup.
+
+For DVDs of TV shows, `ripTitles` first opens the disc's `VIDEO_TS` — the ISO or folder being ripped, the
+backup in *backup then MKV* mode, or the mounted disc — and analyses its navigation:
+
+1. `VIDEO_TS.IFO` maps disc titles to title sets; each `VTS_nn_0.IFO` gives, per title, the chapter
+   (PTT) list, each chapter's cells and playback time (×1.001 for NTSC) and the VOB of its first cell.
+2. Jump commands are collected from the VMG menu program chains, the menu buttons in the NAV packs of
+   `VIDEO_TS.VOB` and `VTS_nn_0.VOB` (`JumpTT`, `JumpVTS_PTT`), and the pre-commands of each title's
+   first program chain (`LinkPTTN`, typically “if GPRM7 == 21: LinkPTTN 8” for episode 2).
+3. A title entered at several chapters gives an *episode plan*: starts, the end of the last episode (VOB
+   boundary), trailing chapters and durations. Plausibility checks keep scene-selection menus of movies
+   from being treated as episodes.
+4. Menu stills (one per VOB cell) are decoded with `ffmpeg` and read with `tesseract` to find episode
+   numbers; the first episode is the start that covers the most numbers read.
+
+After ripping, the MKV of the planned title is checked (`mkvmerge -J` duration, `mkvextract` chapter
+times) and split with `mkvmerge --split chapters:…` into hidden temporary files, which are then renamed
+with the episode number and chapter range. Finally every produced file is hashed (SHA-256, streamed,
+with progress) and `SHA256SUMS` and `bromelia.json` are written before post-processing, so scripts and
+plugins can use them.

@@ -53,6 +53,12 @@ public sealed class JobRunner
     RunSummary _summary = new();
     (int Index, string Device)? _expectedDrive;
     string _lastTotalTitle = "";
+    // Episodes (see PrepareEpisodesAsync)
+    IVideoTsReader? _videoTs;
+    DvdNavigation.EpisodePlan? _episodePlan;
+    Dictionary<int, int> _separateEpisodes = new();   // MakeMKV title → episode offset
+    int _firstEpisode = 1, _episodeWidth = 2;
+    readonly Dictionary<string, int> _fileTitles = new(StringComparer.Ordinal);
 
     public event Action<RipJob>? Finished;
     public bool CancelRequested { get; private set; }
@@ -106,7 +112,7 @@ public sealed class JobRunner
         if (CancelRequested && status == JobState.Succeeded) status = JobState.Cancelled;
 
         WriteManifest(status);
-        var steps = _job.Drive.PostProcess.Where(s => PostProcessor.ShouldRun(s, status)).ToList();
+        var steps = ApplicableSteps(status);
         if (steps.Count > 0 && !CancelRequested)
         {
             _job.Phase = "Post-processing";
@@ -144,6 +150,11 @@ public sealed class JobRunner
         WriteManifest(status);
         _job.AppendLog($"Finished: {status.Label()} in {FormatElapsed(_job.Elapsed)}");
         _job.CloseLogFile();
+        _videoTs?.Dispose();
+        if (_job.Drive.Archive.ArchiveRecord && _job.OutputDirectory is { } archiveDir && _job.ProducedFiles.Count > 0)
+        {
+            try { File.Copy(_job.LogFile, Paths.UniquePath(Path.Combine(archiveDir, "bromelia-log.txt"))); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
 
         if (_job.Drive.Automation.Notify)
         {
@@ -179,10 +190,19 @@ public sealed class JobRunner
         if (_env.ProfilePath != null) _job.AppendLog($"Profile: {_env.ProfilePath}");
 
         var info = _job.PreloadedInfo;
-        bool needInfo = _job.Mode.MakesMkv() || _job.Mode == RipMode.InfoOnly || _job.DiscLabel.Length == 0;
-        if (info == null && needInfo) info = await ScanDiscAsync(_job.Source);
+        if (info == null)
+        {
+            if (_job.Mode.MakesMkv() || _job.Mode == RipMode.InfoOnly) info = await ScanDiscAsync(_job.Source);
+            else
+            {
+                // Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title.
+                try { info = await ScanDiscAsync(_job.Source); }
+                catch (JobException e) { _job.AppendLog($"Continuing without the disc listing: {e.Message}", Severity.Warning); }
+            }
+        }
         _job.DiscInfo = info;
         if (info is { Name.Length: > 0 }) _job.DiscLabel = info.Name;
+        ResolveIdentity(info);
 
         var outDir = ResolveOutputDirectory();
         _job.OutputDirectory = outDir;
@@ -220,6 +240,259 @@ public sealed class JobRunner
                 }
                 break;
         }
+        await ArchiveAsync(outDir);
+    }
+
+    // --- identity ----------------------------------------------------------------------------------
+
+    void ResolveIdentity(DiscInfo? info, int playAllEpisodes = 0, DiscFormat? format = null)
+    {
+        var id = MediaIdentity.Resolve(info, _job.DiscLabel, _job.Mode == RipMode.Backup, _job.DiscFlags, format ?? _job.Identity?.Format,
+            _job.MediaName, _job.MediaKind, playAllEpisodes);
+        if (id != _job.Identity)
+        {
+            var set = id.Label.SetDescription;
+            _job.AppendLog($"Identified as {(id.Kind == MediaKind.Tv ? "TV show" : "movie")} “{id.Name}”{(set.Length > 0 ? $" ({set})" : "")}, {id.Format.Label()}, format code {id.FormatCode} — {id.Reason}");
+        }
+        _job.Identity = id;
+    }
+
+    // --- episodes ----------------------------------------------------------------------------------
+
+    static IVideoTsReader? OpenVideoTs(DiscSource source, string label) => source switch
+    {
+        DiscSource.Iso iso => IsoVideoTs.Open(iso.Path),
+        DiscSource.Folder f => FolderVideoTs.Open(f.Path, label),
+        DiscSource.Drive d when EpisodeSplitter.MountPoint(d.DevicePath) is { } mp => FolderVideoTs.Open(mp, label),
+        _ => null,
+    };
+
+    /// <summary>Decides, before ripping, which titles are episodes: a DVD "play all" title that will be split, or
+    /// separate episode-length titles. Also settles movie vs. TV and the first episode number.</summary>
+    async Task PrepareEpisodesAsync(DiscSource source, DiscInfo info, List<int> indices)
+    {
+        _episodePlan = null;
+        _separateEpisodes = new();
+        var ripped = indices.Select(info.Title).OfType<TitleInfo>().ToList();
+        var plans = new List<DvdNavigation.EpisodePlan>();
+        if (_job.Identity?.Format == DiscFormat.Dvd && _job.Drive.Episodes.SplitPlayAll)
+        {
+            _job.Phase = "Reading the disc menus";
+            _videoTs?.Dispose();
+            _videoTs = await Task.Run(() => OpenVideoTs(source, _job.DiscLabel));
+            var analysis = _videoTs == null ? null : await Task.Run(() => DvdNavigation.Analyse(_videoTs));
+            if (analysis != null)
+            {
+                var sources = ripped.Select(t => t.SourceTitleId).OfType<int>().ToHashSet();
+                plans = DvdNavigation.Plans(analysis).Where(p => sources.Contains(p.Title)).ToList();
+                foreach (var p in plans)
+                {
+                    var eps = string.Join(", ", p.Starts.Select((c, i) => $"{c} ({DvdNavigation.Hms(p.ChapterStarts[c - 1])}, {p.Reasons[i]})"));
+                    _job.AppendLog($"Disc title {p.Title}: menus start {p.EpisodeCount} episodes at chapters {eps}; last episode ends at chapter {p.LastEnd} ({p.EndRule})" +
+                                   (p.Tail.Count > 0 ? $"; chapter(s) {string.Join(",", p.Tail)} follow it" : ""));
+                }
+            }
+            else if (_videoTs == null) _job.AppendLog("Could not open the disc's VIDEO_TS to look for episodes", Severity.Warning);
+        }
+        ResolveIdentity(info, plans.FirstOrDefault(p => p.IsPlausible(true))?.EpisodeCount ?? 0);
+        if (_job.Identity?.Kind != MediaKind.Tv) return;
+
+        if (plans.FirstOrDefault(p => p.IsPlausible(false)) is { } plan)
+        {
+            if (ripped.FirstOrDefault(t => t.SourceTitleId == plan.Title) is { } t && plan.MatchesChapterCount(t.ChapterCount)) _episodePlan = plan;
+            else _job.AppendLog($"MakeMKV's title {plan.Title} has a different chapter count than the disc's navigation; not splitting it", Severity.Warning);
+        }
+        else if (plans.Count > 0)
+            _job.AppendLog($"The menu jumps don't look like episodes (lengths {string.Join(", ", plans[0].EpisodeDurations.Select(DvdNavigation.Hms))}); not splitting");
+        if (_episodePlan == null)
+        {
+            int k = 0;
+            foreach (var t in MediaIdentity.EpisodeLikeTitles(ripped).OrderBy(t => t.Index)) _separateEpisodes[t.Index] = k++;
+        }
+        int count = _episodePlan?.EpisodeCount ?? _separateEpisodes.Count;
+        if (count == 0) return;
+
+        int? first = _job.FirstEpisode;
+        var how = "entered for this disc";
+        if (first == null && _job.Drive.Episodes.ReadMenuNumbers && _videoTs != null)
+        {
+            _job.Phase = "Reading episode numbers from the menus";
+            var (numbers, why) = await EpisodeSplitter.OcrEpisodeNumbersAsync(_videoTs, _cts.Token);
+            if (numbers != null && DvdNavigation.FirstEpisode(numbers, count) is { } f) { first = f; how = $"menu text [{string.Join(", ", numbers.OrderBy(n => n))}]"; }
+            else how = why ?? $"menus read [{string.Join(", ", (numbers ?? new HashSet<int>()).OrderBy(n => n))}], no clear numbering";
+        }
+        if (first == null) how = $"numbered from 1 ({how})";
+        _firstEpisode = first ?? 1;
+        _episodeWidth = Math.Max(2, (_firstEpisode + count - 1).ToString(CultureInfo.InvariantCulture).Length);
+        _job.AppendLog($"Episodes {_firstEpisode}–{_firstEpisode + count - 1} ({how})");
+    }
+
+    /// <summary>Splits the ripped "play all" title into episode files named with the file name template.</summary>
+    async Task SplitEpisodesAsync(string outDir, DiscInfo info)
+    {
+        if (_episodePlan is not { } plan) return;
+        var entry = _fileTitles.FirstOrDefault(kv => info.Title(kv.Value)?.SourceTitleId == plan.Title);
+        if (entry.Key == null || info.Title(entry.Value) is not { } title) return;
+        var file = entry.Key;
+        var baseName = Path.GetFileName(file);
+        if (_mkvmerge == null)
+        {
+            _job.AppendLog($"Splitting episodes needs mkvmerge (MKVToolNix); kept {baseName} as one file", Severity.Warning);
+            return;
+        }
+        _job.Phase = "Splitting episodes";
+        if (await EpisodeSplitter.DurationAsync(file, _mkvmerge) is { } d && Math.Abs(d - plan.Duration) > 2)
+        {
+            _job.AppendLog($"{baseName} lasts {DvdNavigation.Hms(d)}, the disc title {DvdNavigation.Hms(plan.Duration)}; not splitting", Severity.Warning);
+            return;
+        }
+        var starts = await EpisodeSplitter.ChapterStartsAsync(file, EpisodeSplitter.FindTool("mkvextract", _mkvmerge));
+        var split = DvdNavigation.MkvChapters(plan.SplitChapters, plan, starts);
+        if (split == null)
+        {
+            _job.AppendLog($"The chapters of {baseName} don't line up with the disc's episodes; not splitting", Severity.Warning);
+            return;
+        }
+        var parts = await EpisodeSplitter.SplitAsync(file, split, _mkvmerge, r => _active = r, l => _ui.Post(() => _job.AppendLog(l)));
+        await _ui.Barrier();
+        if (parts == null)
+        {
+            if (CancelRequested) throw new OperationCanceledException();
+            _job.AppendLog($"mkvmerge could not split {baseName}; kept it as one file", Severity.Warning);
+            return;
+        }
+        var outputs = new List<string>();
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var values = TemplateValues(JobState.Running);
+            foreach (var kv in TitleValues(title, i + 1, info, parts[i])) values[kv.Key] = kv.Value;
+            int firstCh, lastCh;
+            if (i < plan.EpisodeCount)
+            {
+                (firstCh, lastCh) = plan.ChapterRange(i);
+                values["episode"] = MediaIdentity.EpisodeLabel(_firstEpisode + i, _episodeWidth);
+                values["episodeNumber"] = (_firstEpisode + i).ToString(CultureInfo.InvariantCulture);
+            }
+            else (firstCh, lastCh) = (plan.Tail[0], plan.Tail[^1]);
+            values["track"] = $"{MediaIdentity.TrackLabel(title)} Ch {(firstCh == lastCh ? $"{firstCh}" : $"{firstCh}-{lastCh}")}";
+            var fallback = $"{Path.GetFileNameWithoutExtension(file)} - {(i < plan.EpisodeCount ? $"Episode {_firstEpisode + i}" : "after last episode")}";
+            var final = RenameTo(parts[i], values, _job.Drive.Output.FileNameTemplate, fallback, outDir);
+            outputs.Add(final);
+            if (i < plan.EpisodeCount)
+                _job.Episodes.Add(new ArchiveRecord.EpisodeEntry { File = RelativePath(final, outDir), Episode = _firstEpisode + i, SourceTitleId = plan.Title, FirstChapter = firstCh, LastChapter = lastCh });
+        }
+        _job.AppendLog($"Split {baseName} into {plan.EpisodeCount} episode(s){(parts.Count > plan.EpisodeCount ? " and a closing clip" : "")}");
+        int at = _job.ProducedFiles.IndexOf(file);
+        if (at < 0) at = _job.ProducedFiles.Count;
+        if (!_job.Drive.Episodes.KeepPlayAll)
+        {
+            _job.ProducedFiles.Remove(file);
+            try { File.Delete(file); } catch (IOException) { }
+            _job.AppendLog($"Removed the unsplit title {baseName}");
+        }
+        else at++;
+        foreach (var o in outputs) _job.ProducedFiles.Insert(Math.Min(at++, _job.ProducedFiles.Count), o);
+    }
+
+    static string RelativePath(string path, string baseDir)
+    {
+        var rel = Path.GetRelativePath(baseDir, path);
+        return (rel.StartsWith("..", StringComparison.Ordinal) ? Path.GetFileName(path) : rel).Replace('\\', '/');
+    }
+
+    // --- archive -----------------------------------------------------------------------------------
+
+    /// <summary>Hashes every produced file and writes SHA256SUMS and bromelia.json into the output folder.</summary>
+    async Task ArchiveAsync(string outDir)
+    {
+        var cfg = _job.Drive.Archive;
+        if (!(cfg.Checksums || cfg.ArchiveRecord) || _job.ProducedFiles.Count == 0) return;
+        var files = Checksums.Files(_job.ProducedFiles, outDir);
+        var sizes = files.Select(f => new FileInfo(f.Full).Length).ToList();
+        long total = Math.Max(1, sizes.Sum()), done = 0;
+        _job.Phase = "Computing checksums";
+        _job.StepIndex = _job.StepCount;
+        _job.TotalProgress = 0;
+        var entries = new List<Checksums.Entry>();
+        for (int i = 0; i < files.Count; i++)
+        {
+            if (CancelRequested) throw new OperationCanceledException();
+            _job.CurrentOperation = files[i].Relative;
+            long before = done, size = Math.Max(1, sizes[i]);
+            long lastTick = 0;
+            string hash;
+            try
+            {
+                hash = await Task.Run(() => Checksums.Sha256(files[i].Full, n =>
+                {
+                    var now = Environment.TickCount64;
+                    if (now - Interlocked.Read(ref lastTick) < 100) return;
+                    Interlocked.Exchange(ref lastTick, now);
+                    _ui.Post(() => { _job.CurrentProgress = (double)n / size; _job.TotalProgress = (double)(before + n) / total; });
+                }, _cts.Token));
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                throw new JobException($"Could not read {files[i].Relative} to compute its checksum: {e.Message}");
+            }
+            await _ui.Barrier();
+            done += sizes[i];
+            entries.Add(new Checksums.Entry(files[i].Relative, sizes[i], hash));
+        }
+        _job.CurrentOperation = "";
+        _job.Checksums = entries;
+        if (cfg.Checksums)
+        {
+            try
+            {
+                _job.ChecksumFile = Checksums.WriteMerged(outDir, entries);
+                _job.AppendLog($"Wrote SHA-256 checksums of {entries.Count} file(s) to {Checksums.FileName}");
+            }
+            catch (IOException e) { throw new JobException($"Could not write {Path.Combine(outDir, Checksums.FileName)}: {e.Message}"); }
+        }
+        if (cfg.ArchiveRecord) WriteArchiveRecord(outDir);
+    }
+
+    void WriteArchiveRecord(string outDir)
+    {
+        if (_job.Identity is not { } id) return;
+        var info = _job.DiscInfo;
+        var record = new ArchiveRecord
+        {
+            Name = id.Name,
+            Kind = id.Kind.Token(),
+            Disc = new ArchiveRecord.DiscEntry
+            {
+                Label = _job.DiscLabel, VolumeName = info?.VolumeName ?? "", Type = info?.TypeName ?? "", Format = id.Format.Token(),
+                FormatCode = id.FormatCode, Encrypted = id.Encrypted, Season = id.Label.Season, Part = id.Label.Part, Volume = id.Label.Volume, Disc = id.Label.Disc,
+            },
+            Rip = _job.Mode.MakesMkv() ? "Rip" : "Backup",
+            Mode = JsonNamingPolicy.CamelCase.ConvertName(_job.Mode.ToString()),
+            Source = _job.Source.InfoArgument,
+            DriveName = _job.Drive.Name,
+            Makemkv = _job.MakemkvVersion,
+            JobId = _job.Id.ToString(),
+            StartedAt = _job.StartedAt,
+            FinishedAt = DateTime.Now,
+            Titles = _job.RipTitles.Select(i => info?.Title(i)).OfType<TitleInfo>().Select(t => new ArchiveRecord.TitleEntry
+            {
+                Index = t.Index, SourceTitleId = t.SourceTitleId, SourceFile = t.SourceFileName, Duration = t.DurationText,
+                Chapters = t.ChapterCount, SizeBytes = t.SizeBytes, SegmentMap = t.SegmentMap,
+            }).ToList(),
+            Episodes = _job.Episodes.ToList(),
+            Files = _job.Checksums,
+            Warnings = _job.WarningCount,
+            Errors = _job.ErrorCount,
+            ErrorMessages = _job.ErrorMessages.ToList(),
+        };
+        var path = Paths.UniquePath(Path.Combine(outDir, "bromelia.json"));
+        try
+        {
+            File.WriteAllText(path, record.ToJson());
+            _job.AppendLog($"Wrote the archive record {Path.GetFileName(path)}");
+        }
+        catch (IOException e) { _job.AppendLog($"Could not write {path}: {e.Message}", Severity.Warning); }
     }
 
     async Task<RunSummary> RunMakeMkvAsync(List<string> args)
@@ -268,7 +541,8 @@ public sealed class JobRunner
                 var sev = m.Severity;
                 if (sev == Severity.Debug && !showDebug) return;
                 _job.AppendLog(m.Text, sev);
-                if (sev == Severity.Error) s.ErrorMessages.Add(m.Text);
+                if (sev == Severity.Error) { s.ErrorMessages.Add(m.Text); _job.ErrorMessages.Add(m.Text); }
+                if (m.Code == 1005 && _job.MakemkvVersion.Length == 0) _job.MakemkvVersion = m.Parameters.Count > 0 ? m.Parameters[0] : m.Text;
                 if (m.Code is 5036 or 5005 && m.Parameters.Count > 0 && int.TryParse(m.Parameters[0], out var saved)) s.Saved = saved;
                 if (m.Code == 5037 && m.Parameters.Count > 1)
                 {
@@ -340,6 +614,8 @@ public sealed class JobRunner
     {
         var indices = ChooseTitles(info);
         _job.RipTitles = indices;
+        _fileTitles.Clear();
+        await PrepareEpisodesAsync(source, info, indices);
         bool everyTitle = indices.ToHashSet().SetEquals(info.Titles.Select(t => t.Index));
         bool single = everyTitle && _job.TrackSelections.Count == 0;
         var invocations = single ? new List<string> { "all" } : indices.Select(i => i.ToString(CultureInfo.InvariantCulture)).ToList();
@@ -376,6 +652,7 @@ public sealed class JobRunner
                 {
                     if (_job.TrackSelections.TryGetValue(ti, out var keep)) final = await RemuxAsync(final, title, keep);
                     final = Rename(final, title, indices.IndexOf(ti) + 1, info, outDir);
+                    _fileTitles[final] = ti;
                 }
                 _job.ProducedFiles.Add(final);
             }
@@ -383,6 +660,7 @@ public sealed class JobRunner
         _job.StepIndex = _job.StepCount;
         if (failures.Count > 0)
             throw new JobException(failures.Count == 1 ? $"Rip failed: {failures[0]}" : $"{failures.Count} titles failed: {string.Join("; ", failures)}");
+        await SplitEpisodesAsync(outDir, info);
     }
 
     async Task<string> BackupAsync(bool decrypt, string outDir, bool inSubfolder)
@@ -395,8 +673,14 @@ public sealed class JobRunner
             dest = Path.Combine(outDir, sub.Length == 0 ? "backup" : sub);
         }
         Directory.CreateDirectory(dest);
+        var name = BackupName(decrypt);
         if (_job.Drive.Rip.BackupFormat == BackupFormat.Iso)
-            dest = Paths.UniquePath(Path.Combine(dest, TemplateRenderer.SanitizeComponent(_job.DiscLabel.Length == 0 ? "disc" : _job.DiscLabel) + ".iso"));
+            dest = Paths.UniquePath(Path.Combine(dest, (name.Length > 0 ? name : TemplateRenderer.SanitizeComponent(_job.DiscLabel.Length == 0 ? "disc" : _job.DiscLabel)) + ".iso"));
+        else if (name.Length > 0)
+        {
+            dest = Paths.UniquePath(Path.Combine(dest, name));
+            Directory.CreateDirectory(dest);
+        }
         _job.Phase = decrypt ? "Backing up disc (decrypted)" : "Backing up disc";
         _job.TotalProgress = 0;
         _expectedDrive = (drive.Index, drive.DevicePath);
@@ -410,7 +694,36 @@ public sealed class JobRunner
         }
         finally { _expectedDrive = null; }
         _job.AppendLog($"Backup saved to {dest}");
+        // Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart.
+        if (_job.Drive.Rip.BackupFormat == BackupFormat.Folder && DiscFormatExtensions.DetectBackupFolder(dest) is { } found && found != _job.Identity?.Format)
+        {
+            ResolveIdentity(_job.DiscInfo, 0, found);
+            var renamed = BackupName(decrypt);
+            if (renamed.Length > 0 && renamed != Path.GetFileName(dest))
+            {
+                var target = Paths.UniquePath(Path.Combine(Path.GetDirectoryName(dest)!, renamed));
+                try
+                {
+                    Directory.Move(dest, target);
+                    _job.AppendLog($"Renamed the backup to {Path.GetFileName(target)}");
+                    return target;
+                }
+                catch (IOException) { }
+            }
+        }
         return dest;
+    }
+
+    /// <summary>File / folder name of a backup from the file name template (rip = Backup, no episode or track).</summary>
+    string BackupName(bool decrypt)
+    {
+        var template = _job.Drive.Output.FileNameTemplate.Trim();
+        if (template.Length == 0) return "";
+        var values = TemplateValues(JobState.Running);
+        values["rip"] = "Backup";
+        if (_job.Identity is { } id) values["format"] = id.Format.Code(!decrypt);
+        foreach (var k in new[] { "title", "index", "n", "source", "duration", "chapters", "original", "comment" }) values[k] = "";
+        return TemplateRenderer.RenderPath(template, values).Replace(Path.DirectorySeparatorChar.ToString(), " - ");
     }
 
     async Task<string> RemuxAsync(string file, TitleInfo title, HashSet<int> keep)
@@ -455,10 +768,28 @@ public sealed class JobRunner
     {
         var explicitName = _job.TitleNameOverrides.TryGetValue(title.Index, out var o) ? o.Trim() : "";
         var template = explicitName.Length > 0 ? explicitName : _job.Drive.Output.FileNameTemplate.Trim();
-        if (template.Length == 0) return file;
         var values = TemplateValues(JobState.Running);
         foreach (var kv in TitleValues(title, ordinal, info, file)) values[kv.Key] = kv.Value;
-        var rel = TemplateRenderer.RenderPath(template, values);
+        values["track"] = MediaIdentity.TrackLabel(title);
+        bool episode = _separateEpisodes.TryGetValue(title.Index, out var k);
+        if (episode)
+        {
+            values["episode"] = MediaIdentity.EpisodeLabel(_firstEpisode + k, _episodeWidth);
+            values["episodeNumber"] = (_firstEpisode + k).ToString(CultureInfo.InvariantCulture);
+        }
+        var final = RenameTo(file, values, template, null, outDir);
+        if (episode)
+            _job.Episodes.Add(new ArchiveRecord.EpisodeEntry { File = RelativePath(final, outDir), Episode = _firstEpisode + k,
+                SourceTitleId = title.SourceTitleId ?? title.Index, FirstChapter = 1, LastChapter = Math.Max(1, title.ChapterCount) });
+        return final;
+    }
+
+    /// <summary>Moves <paramref name="file"/> to the name rendered from <paramref name="template"/>. With an empty
+    /// template the file keeps its name, or gets <paramref name="fallbackName"/> (split episodes).</summary>
+    string RenameTo(string file, Dictionary<string, string> values, string template, string? fallbackName, string outDir)
+    {
+        var rel = template.Trim().Length == 0 ? "" : TemplateRenderer.RenderPath(template, values);
+        if (rel.Length == 0 && fallbackName != null) rel = TemplateRenderer.SanitizeComponent(fallbackName);
         if (rel.Length == 0) return file;
         if (!rel.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase)) rel += ".mkv";
         var target = Path.Combine(outDir, rel);
@@ -561,7 +892,19 @@ public sealed class JobRunner
         v["manifest"] = _job.ManifestFile;
         v["file"] = _job.ProducedFiles.FirstOrDefault() ?? "";
         v["files"] = string.Join(" ", _job.ProducedFiles);
+        var id = _job.Identity ?? MediaIdentity.Resolve(info, _job.DiscLabel, _job.Mode == RipMode.Backup, _job.DiscFlags, null, _job.MediaName, _job.MediaKind);
+        foreach (var kv in id.TemplateValues(_job.Mode.MakesMkv() ? "Rip" : "Backup")) v[kv.Key] = kv.Value;
+        v["checksums"] = _job.ChecksumFile ?? "";
         return v;
+    }
+
+    /// <summary>The drive's steps followed by the global plugins that apply to this status and disc.</summary>
+    List<PostProcessStep> ApplicableSteps(JobState status)
+    {
+        var id = _job.Identity;
+        return _job.Drive.PostProcess.Concat(_config.Plugins)
+            .Where(s => PostProcessor.ShouldRun(s, status) && PluginMatcher.Matches(s, id?.Name ?? _job.DiscLabel, _job.DiscLabel, id?.FormatCode ?? ""))
+            .ToList();
     }
 
     Dictionary<string, string> ScriptEnvironment(JobState status)
@@ -584,6 +927,17 @@ public sealed class JobRunner
         };
         if (_job.Source is DiscSource.Drive d) e["BROMELIA_DEVICE"] = d.DevicePath;
         if (_job.ErrorMessage != null) e["BROMELIA_ERROR"] = _job.ErrorMessage;
+        if (_job.Identity is { } id)
+        {
+            e["BROMELIA_NAME"] = id.Name;
+            e["BROMELIA_KIND"] = id.Kind.Token();
+            e["BROMELIA_FORMAT"] = id.FormatCode;
+            e["BROMELIA_ENCRYPTED"] = id.Encrypted ? "1" : "0";
+            e["BROMELIA_SEASON"] = id.Label.Season?.ToString(CultureInfo.InvariantCulture) ?? "";
+            e["BROMELIA_DISC_NUMBER"] = id.Label.Disc?.ToString(CultureInfo.InvariantCulture) ?? "";
+            e["BROMELIA_DISC_SET"] = id.Label.SetDescription;
+        }
+        if (_job.ChecksumFile != null) e["BROMELIA_CHECKSUMS"] = _job.ChecksumFile;
         return e;
     }
 
@@ -607,6 +961,16 @@ public sealed class JobRunner
             {
                 Index = t!.Index, Name = t.Name, Duration = t.DurationText, Chapters = t.ChapterCount, SourceTitleId = t.SourceTitleId,
             }).ToList(),
+            Name = _job.Identity?.Name ?? "",
+            Kind = _job.Identity?.Kind.Token() ?? "",
+            Format = _job.Identity?.Format.Token() ?? "",
+            FormatCode = _job.Identity?.FormatCode ?? "",
+            Encrypted = _job.Identity?.Encrypted ?? false,
+            Season = _job.Identity?.Label.Season,
+            DiscNumber = _job.Identity?.Label.Disc,
+            Episodes = _job.Episodes.ToList(),
+            ChecksumFile = _job.ChecksumFile,
+            Checksums = _job.Checksums,
             StartedAt = _job.StartedAt,
             FinishedAt = _job.FinishedAt,
             Error = _job.ErrorMessage,

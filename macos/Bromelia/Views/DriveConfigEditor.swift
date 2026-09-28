@@ -149,7 +149,7 @@ private struct GeneralTab: View {
 
 // MARK: - Ripping
 
-private struct RipTab: View {
+struct RipTab: View {
     @Binding var config: DriveConfig
     let previewInfo: DiscInfo?
 
@@ -168,6 +168,17 @@ private struct RipTab: View {
                     Toggle("Keep the backup after the MKV files are made", isOn: $config.rip.keepBackupAfterMKV)
                 }
                 Text(modeHelp).font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Split “play all” titles of TV shows into episodes", isOn: $config.episodes.splitPlayAll)
+                Toggle("Keep the unsplit title as well", isOn: $config.episodes.keepPlayAll)
+                    .disabled(!config.episodes.splitPlayAll)
+                Toggle("Read episode numbers from the disc menus", isOn: $config.episodes.readMenuNumbers)
+            } header: {
+                Text("TV episodes")
+            } footer: {
+                Text("DVDs often store several episodes in one title. Bromelia reads the disc's menu navigation to find where each episode starts and splits the MKV with mkvmerge, without re-encoding. Episode numbers are read from the menu screens with ffmpeg and tesseract when installed; otherwise enter the first episode number when opening the disc, or episodes are numbered from 1.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             TitleRuleEditor(rule: $config.rip.titleSelection, previewInfo: previewInfo)
             Section("makemkvcon options") {
@@ -298,7 +309,7 @@ struct DurationField: View {
 
 // MARK: - Output
 
-private struct OutputTab: View {
+struct OutputTab: View {
     @Environment(AppModel.self) private var model
     @Binding var config: DriveConfig
 
@@ -307,7 +318,7 @@ private struct OutputTab: View {
             Section("Location") {
                 PathField(title: "Output folder", path: $config.output.rootOverride, kind: .directory,
                           placeholder: "Global default: \(model.config.outputRoot)")
-                TextField("Folder name", text: $config.output.folderTemplate, prompt: Text("{disc}"))
+                TextField("Folder name", text: $config.output.folderTemplate, prompt: Text(OutputConfig.defaultFolderTemplate))
                 Text("Preview: \(preview(config.output.folderTemplate, file: false))")
                     .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 Picker("If the folder already exists", selection: $config.output.conflictPolicy) {
@@ -315,23 +326,47 @@ private struct OutputTab: View {
                 }
             }
             Section("File names") {
-                TextField("Rename MKV files to", text: $config.output.fileNameTemplate, prompt: Text("Empty keeps MakeMKV's names, e.g. {disc} - {n:2}"))
+                TextField("Name files and backups", text: $config.output.fileNameTemplate, prompt: Text("Empty keeps MakeMKV's names"))
                 if !config.output.fileNameTemplate.isEmpty {
-                    Text("Preview: \(preview(config.output.fileNameTemplate, file: true)).mkv")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Movie: \(preview(config.output.fileNameTemplate, file: true, tv: false)).mkv")
+                        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text("TV: \(preview(config.output.fileNameTemplate, file: true, tv: true)).mkv")
+                        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                HStack {
+                    Button("Use the Standard Naming") { config.output.fileNameTemplate = OutputConfig.defaultFileNameTemplate; config.output.folderTemplate = OutputConfig.defaultFolderTemplate }
+                        .disabled(config.output.fileNameTemplate == OutputConfig.defaultFileNameTemplate && config.output.folderTemplate == OutputConfig.defaultFolderTemplate)
+                    Spacer()
                 }
                 TextField("Backup subfolder (backup + MKV mode)", text: $config.output.backupSubfolder)
+                Text("Standard naming: {name} - {episode} - {discLabel} - {rip} - {track} - {format}, leaving out parts that don't apply. Format codes: DVD, BR (Blu-ray), 4K (Ultra HD Blu-ray); DVDe, BRe, 4Ke for backups that are not decrypted.")
+                    .font(.caption).foregroundStyle(.secondary)
                 TokenReference(tokens: TemplateRenderer.fileTokens)
+            }
+            Section {
+                Toggle("Write SHA-256 checksums (SHA256SUMS)", isOn: $config.archive.checksums)
+                Toggle("Write an archive record (bromelia.json) and the job log", isOn: $config.archive.archiveRecord)
+            } header: {
+                Text("Archiving")
+            } footer: {
+                Text("Checksums of every file (including backup folders) are saved in the output folder in the standard format; check a copy later with “shasum -a 256 -c SHA256SUMS”. The archive record describes the disc, titles, episodes and files with their sizes and hashes.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
     }
 
-    private func preview(_ template: String, file: Bool) -> String {
+    private func preview(_ template: String, file: Bool, tv: Bool = false) -> String {
         var v = TemplateRenderer.dateValues()
-        v["disc"] = "MOVIE_TITLE"; v["volume"] = "MOVIE_TITLE"; v["type"] = "bd"; v["drive"] = config.name; v["job"] = "1a2b3c4d"
-        v["title"] = "Movie Title"; v["index"] = "3"; v["n"] = "1"; v["source"] = "800"; v["duration"] = "1-58-02"
-        v["chapters"] = "24"; v["original"] = "MOVIE_TITLE_t03"; v["comment"] = ""
+        let label = tv ? "SHOW_NAME_S2_D3" : "MOVIE_TITLE"
+        let id = MediaIdentity(name: tv ? "Show Name" : "Movie Title", kind: tv ? .tv : .movie, format: tv ? .dvd : .bluray, encrypted: false,
+                               label: LabelParser.parse(label), reason: "")
+        for (k, x) in id.templateValues(rip: "Rip") { v[k] = x }
+        v["disc"] = label; v["volume"] = label; v["type"] = tv ? "dvd" : "bd"; v["drive"] = config.name; v["job"] = "1a2b3c4d"
+        v["title"] = id.name; v["index"] = "3"; v["n"] = "1"; v["source"] = tv ? "4" : "800"; v["duration"] = tv ? "0-23-40" : "1-58-02"
+        v["chapters"] = "24"; v["original"] = "\(label)_t03"; v["comment"] = ""
+        v["track"] = tv ? "Title 4" : "Playlist 00800"
+        if tv { v["episode"] = "Episode 07"; v["episodeNumber"] = "7" }
         let rel = TemplateRenderer.renderPath(template, values: v)
         if file { return rel }
         let root = config.output.rootOverride.isEmpty ? model.config.outputRoot : config.output.rootOverride

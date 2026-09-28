@@ -16,6 +16,8 @@ GtkWidget *bro_tools_page_new (void);
 void       bro_config_dialog_present (GtkWidget *parent, const char *config_id);
 void       bro_preferences_present (GtkWidget *parent);
 GtkWidget *bro_catalog_page_new (GHashTable *settings, GHashTable *global, gboolean drive_mode, BroChangedFunc changed, gpointer data);
+/* Post-processing steps for every drive (config->plugins), with name / format conditions. */
+GtkWidget *bro_plugins_page_new (GPtrArray *steps, BroChangedFunc changed, gpointer data);
 GtkWidget *bro_drive_config_pages_add (AdwPreferencesDialog *dialog, BroDriveConfig *config, gboolean is_default,
                                        BroChangedFunc changed, gpointer data);
 

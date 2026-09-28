@@ -54,6 +54,8 @@ struct DiscBrowser: View {
                     .frame(minWidth: 260, idealWidth: 320)
             }
             Divider()
+            identityBar
+            Divider()
             actionBar
             if showLog {
                 Divider()
@@ -123,6 +125,63 @@ struct DiscBrowser: View {
         .padding(.vertical, 8)
     }
 
+    /// What the disc is, as used for file names: editable name, movie / TV and first episode number.
+    private var identity: MediaIdentity {
+        MediaIdentity.resolve(info: info, discLabel: info.name, flags: session.discFlags, encrypted: false,
+                              nameOverride: session.mediaName, kindOverride: session.mediaKind)
+    }
+
+    private var identityBar: some View {
+        @Bindable var session = session
+        let auto = MediaIdentity.resolve(info: info, discLabel: info.name, flags: session.discFlags, encrypted: false)
+        let id = identity
+        return HStack(spacing: 10) {
+            Image(systemName: id.kind == .tv ? "tv" : "film")
+                .foregroundStyle(.secondary)
+            TextField("Name", text: $session.mediaName, prompt: Text(auto.name))
+                .frame(minWidth: 160, maxWidth: 260)
+                .help("Movie or show name used for folder and file names. Empty = “\(auto.name)”, read from the disc.")
+            Picker("", selection: $session.mediaKind) {
+                Text("Auto (\(auto.kind.label))").tag(MediaKind?.none)
+                ForEach(MediaKind.allCases) { Text($0.label).tag(MediaKind?.some($0)) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .help(session.mediaKind == nil ? "Detected: \(auto.reason)" : "Chosen for this disc")
+            if id.kind == .tv {
+                TextField("First episode", value: $session.firstEpisode, format: .number, prompt: Text("First ep."))
+                    .frame(width: 70)
+                    .help("Number of the first episode on this disc. Empty = read from the disc menus, or 1.")
+            }
+            StatusBadge(text: id.formatCode, color: id.format == .uhd ? .orange : id.format == .bluray ? .blue : .secondary)
+                .help(id.format.label)
+            Text(sampleFileName(id))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private func sampleFileName(_ id: MediaIdentity) -> String {
+        let template = config.output.fileNameTemplate.trimmingCharacters(in: .whitespaces)
+        guard !template.isEmpty else { return "MakeMKV's file names" }
+        let title = info.titles.first { session.selectedTitles.contains($0.index) } ?? info.titles.first
+        var v = TemplateRenderer.dateValues()
+        for (k, x) in id.templateValues(rip: "Rip") { v[k] = x }
+        v["disc"] = info.name; v["volume"] = info.volumeName; v["type"] = info.typeToken; v["drive"] = config.name; v["job"] = "xxxxxxxx"
+        if let title {
+            for (k, x) in JobRunner.titleValues(title, ordinal: 1, disc: info, originalFile: nil) { v[k] = x }
+            v["track"] = MediaIdentity.trackLabel(title)
+        }
+        if id.kind == .tv {
+            v["episode"] = MediaIdentity.episodeLabel(session.firstEpisode ?? 1, width: 2)
+            v["episodeNumber"] = String(session.firstEpisode ?? 1)
+        }
+        return "e.g. " + TemplateRenderer.renderPath(template, values: v) + ".mkv"
+    }
+
     private func chooseOutputFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -141,6 +200,7 @@ struct DiscBrowser: View {
         v["type"] = info.typeToken
         v["drive"] = config.name
         v["job"] = "xxxxxxxx"
+        for (k, x) in identity.templateValues(rip: "Rip") { v[k] = x }
         let root = Paths.expandTilde(model.config.outputRoot(for: config))
         let rel = TemplateRenderer.renderPath(config.output.folderTemplate, values: v)
         return "→ " + (rel.isEmpty ? root : (root as NSString).appendingPathComponent(rel))

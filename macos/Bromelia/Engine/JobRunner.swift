@@ -85,9 +85,17 @@ final class JobRunner {
     private var allTracksEnv: MakeMKVEnvironment?
     private var activeRunner: ProcessRunner?
     private(set) var cancelRequested = false
+    private let cancelFlag = CancelFlag()
     private var summary = RunSummary()
     private var expectedDrive: (index: Int, device: String)?
     private var lastTotalTitle = ""
+    // Episodes (see prepareEpisodes)
+    private var videoTS: VideoTSReader?
+    private var episodePlan: DVDNavigation.EpisodePlan?
+    private var separateEpisodes: [Int: Int] = [:]   // MakeMKV title → episode offset
+    private var firstEpisodeNumber = 1
+    private var episodeWidth = 2
+    private var fileTitles: [URL: Int] = [:]
 
     init(job: RipJob, config: AppConfig, makemkvcon: URL, mkvmerge: URL?) {
         self.job = job
@@ -98,6 +106,7 @@ final class JobRunner {
 
     func cancel() {
         cancelRequested = true
+        cancelFlag.set()
         job.phase = "Cancelling…"
         activeRunner?.cancel()
     }
@@ -132,7 +141,7 @@ final class JobRunner {
 
         // Post-processing.
         writeManifest(status: status)
-        let steps = job.drive.postProcess.filter { PostProcessor.shouldRun($0, status: status) }
+        let steps = applicableSteps(status: status)
         if !steps.isEmpty && !cancelRequested {
             job.phase = "Post-processing"
             job.currentOperation = ""
@@ -146,7 +155,7 @@ final class JobRunner {
             })
             await flushMainQueue()
             for r in results where r.exitCode != 0 || r.timedOut {
-                if let step = steps.first(where: { $0.name == r.name }), step.failJobOnError, status == .succeeded {
+                if let step = steps.first(where: { $0.id == r.stepId }), step.failJobOnError, status == .succeeded {
                     status = .failed
                     job.errorMessage = "Post-processing step “\(r.name)” failed"
                 }
@@ -171,6 +180,9 @@ final class JobRunner {
         job.appendLog("Finished: \(status.label) in \(Formatters.duration(job.elapsed))")
         try? job.logHandle?.close()
         job.logHandle = nil
+        if job.drive.archive.archiveRecord, let dir = job.outputDirectory, !job.producedFiles.isEmpty {
+            try? FileManager.default.copyItem(at: job.logFile, to: Paths.uniqueURL(dir.appendingPathComponent("bromelia-log.txt")))
+        }
 
         if job.drive.automation.notify {
             let body: String
@@ -209,12 +221,20 @@ final class JobRunner {
         if let p = env.profilePath { job.appendLog("Profile: \(p)") }
 
         var info = job.preloadedInfo
-        let needInfo = job.mode.makesMKV || job.mode == .infoOnly || job.discLabel.isEmpty
-        if info == nil && needInfo {
-            info = try await scanDisc(job.source)
+        if info == nil {
+            if job.mode.makesMKV || job.mode == .infoOnly {
+                info = try await scanDisc(job.source)
+            } else {
+                // Backups don't need the listing, but it tells DVD, Blu-ray and 4K UHD apart and gives the title.
+                do { info = try await scanDisc(job.source) } catch {
+                    if cancelRequested || error is CancellationError { throw error }
+                    job.appendLog("Continuing without the disc listing: \(error.localizedDescription)", severity: .warning)
+                }
+            }
         }
         job.discInfo = info
         if let n = info?.name, !n.isEmpty { job.discLabel = n }
+        resolveIdentity(info: info)
 
         let outDir = try resolveOutputDirectory()
         job.outputDirectory = outDir
@@ -248,6 +268,235 @@ final class JobRunner {
                 job.appendLog("Removing backup \(dest.path)")
                 try? FileManager.default.removeItem(at: dest)
             }
+        }
+        try await archive(outDir: outDir)
+    }
+
+    // MARK: - Identity
+
+    private func resolveIdentity(info: DiscInfo?, playAllEpisodes: Int = 0, format: DiscFormat? = nil) {
+        let id = MediaIdentity.resolve(info: info, discLabel: job.discLabel, flags: job.discFlags, format: format ?? job.identity?.format,
+                                       encrypted: job.mode == .backup, nameOverride: job.mediaName, kindOverride: job.mediaKind,
+                                       playAllEpisodes: playAllEpisodes)
+        if id != job.identity {
+            let set = id.label.setDescription
+            job.appendLog("Identified as \(id.kind == .tv ? "TV show" : "movie") “\(id.name)”\(set.isEmpty ? "" : " (\(set))"), \(id.format.label), format code \(id.formatCode) — \(id.reason)")
+        }
+        job.identity = id
+    }
+
+    // MARK: - Episodes
+
+    /// Opens the disc's VIDEO_TS: the ISO or folder being ripped, or the mounted disc.
+    private func openVideoTS(_ source: DiscSource) async -> VideoTSReader? {
+        switch source {
+        case .iso(let p): return ISOVideoTS(path: p)
+        case .folder(let p): return FolderVideoTS(path: p, label: job.discLabel)
+        case let .drive(_, dev):
+            guard let mp = await EpisodeSplitter.mountPoint(device: dev) else { return nil }
+            return FolderVideoTS(path: mp, label: job.discLabel)
+        }
+    }
+
+    /// Decides, before ripping, which titles are episodes: a DVD "play all" title that will be split, or
+    /// separate episode-length titles. Also settles movie vs. TV and the first episode number.
+    private func prepareEpisodes(source: DiscSource, info: DiscInfo, indices: [Int]) async {
+        episodePlan = nil
+        separateEpisodes = [:]
+        let ripped = indices.compactMap { info.title(at: $0) }
+        var plans: [DVDNavigation.EpisodePlan] = []
+        if job.identity?.format == .dvd && job.drive.episodes.splitPlayAll {
+            job.phase = "Reading the disc menus"
+            videoTS = await openVideoTS(source)
+            if let r = videoTS, let a = DVDNavigation.analyse(r) {
+                let sources = Set(ripped.compactMap(\.sourceTitleId))
+                plans = DVDNavigation.plans(a).filter { sources.contains($0.title) }
+                for p in plans {
+                    let eps = p.starts.enumerated().map { i, c in "\(c) (\(DVDNavigation.hms(p.chapterStarts[c - 1])), \(p.reasons[i]))" }
+                    job.appendLog("Disc title \(p.title): menus start \(p.episodeCount) episodes at chapters \(eps.joined(separator: ", ")); last episode ends at chapter \(p.lastEnd) (\(p.endRule))\(p.tail.isEmpty ? "" : "; chapter(s) \(p.tail.map(String.init).joined(separator: ",")) follow it"))")
+                }
+            } else if videoTS == nil {
+                job.appendLog("Could not open the disc's VIDEO_TS to look for episodes", severity: .warning)
+            }
+        }
+        let strict = plans.first { $0.isPlausible(strict: true) }?.episodeCount ?? 0
+        resolveIdentity(info: info, playAllEpisodes: strict)
+        guard job.identity?.kind == .tv else { return }
+
+        if let p = plans.first(where: { $0.isPlausible(strict: false) }) {
+            if let t = ripped.first(where: { $0.sourceTitleId == p.title }), p.matchesChapterCount(t.chapterCount) {
+                episodePlan = p
+            } else {
+                job.appendLog("MakeMKV's title \(p.title) has a different chapter count than the disc's navigation; not splitting it", severity: .warning)
+            }
+        } else if !plans.isEmpty {
+            job.appendLog("The menu jumps don't look like episodes (lengths \(plans[0].episodeDurations.map { DVDNavigation.hms($0) }.joined(separator: ", "))); not splitting")
+        }
+        if episodePlan == nil {
+            for (k, t) in MediaIdentity.episodeLikeTitles(ripped).sorted(by: { $0.index < $1.index }).enumerated() { separateEpisodes[t.index] = k }
+        }
+        let count = episodePlan?.episodeCount ?? separateEpisodes.count
+        guard count > 0 else { return }
+
+        var first = job.firstEpisode
+        var how = "entered for this disc"
+        if first == nil, job.drive.episodes.readMenuNumbers, let r = videoTS {
+            job.phase = "Reading episode numbers from the menus"
+            let flag = cancelFlag
+            let (numbers, why) = await EpisodeSplitter.ocrEpisodeNumbers(r, isCancelled: flag.isSet)
+            if let numbers, let f = DVDNavigation.firstEpisode(from: numbers, count: count) {
+                first = f; how = "menu text \(numbers.sorted())"
+            } else {
+                how = why ?? "menus read \(numbers.map { $0.sorted().description } ?? "[]"), no clear numbering"
+            }
+        }
+        if first == nil { how = "numbered from 1 (\(how.isEmpty ? "no number given" : how))" }
+        firstEpisodeNumber = first ?? 1
+        episodeWidth = max(2, String(firstEpisodeNumber + count - 1).count)
+        job.appendLog("Episodes \(firstEpisodeNumber)–\(firstEpisodeNumber + count - 1) (\(how))")
+    }
+
+    /// Splits the ripped "play all" title into episode files named with the file name template.
+    private func splitEpisodes(outDir: URL, info: DiscInfo) async throws {
+        guard let plan = episodePlan,
+              let (file, titleIndex) = fileTitles.first(where: { info.title(at: $0.value)?.sourceTitleId == plan.title }).map({ ($0.key, $0.value) }),
+              let title = info.title(at: titleIndex) else { return }
+        guard let mkvmerge else {
+            job.appendLog("Splitting episodes needs mkvmerge (MKVToolNix); kept \(file.lastPathComponent) as one file", severity: .warning)
+            return
+        }
+        job.phase = "Splitting episodes"
+        if let d = await EpisodeSplitter.duration(of: file, mkvmerge: mkvmerge), abs(d - plan.duration) > 2 {
+            job.appendLog("\(file.lastPathComponent) lasts \(DVDNavigation.hms(d)), the disc title \(DVDNavigation.hms(plan.duration)); not splitting", severity: .warning)
+            return
+        }
+        let starts = await EpisodeSplitter.chapterStarts(of: file, mkvextract: EpisodeSplitter.findTool("mkvextract", near: mkvmerge))
+        guard let split = DVDNavigation.mkvChapters(for: plan.splitChapters, plan: plan, mkvStarts: starts) else {
+            job.appendLog("The chapters of \(file.lastPathComponent) don't line up with the disc's episodes; not splitting", severity: .warning)
+            return
+        }
+        guard let parts = await EpisodeSplitter.split(file, atChapters: split, mkvmerge: mkvmerge,
+                                                      register: { [weak self] r in self?.activeRunner = r },
+                                                      log: { [weak self] l in DispatchQueue.main.async { MainActor.assumeIsolated { self?.job.appendLog(l) } } }) else {
+            if cancelRequested { throw CancellationError() }
+            job.appendLog("mkvmerge could not split \(file.lastPathComponent); kept it as one file", severity: .warning)
+            return
+        }
+        var outputs: [URL] = []
+        for (i, part) in parts.enumerated() {
+            var values = templateValues(status: .running)
+            for (k, v) in Self.titleValues(title, ordinal: i + 1, disc: info, originalFile: part) { values[k] = v }
+            let range: ClosedRange<Int>
+            if i < plan.episodeCount {
+                range = plan.chapterRange(i)
+                values["episode"] = MediaIdentity.episodeLabel(firstEpisodeNumber + i, width: episodeWidth)
+                values["episodeNumber"] = String(firstEpisodeNumber + i)
+            } else {
+                range = plan.tail.first!...plan.tail.last!
+            }
+            values["track"] = "\(MediaIdentity.trackLabel(title)) Ch \(range.lowerBound == range.upperBound ? "\(range.lowerBound)" : "\(range.lowerBound)-\(range.upperBound)")"
+            let fallback = "\(file.deletingPathExtension().lastPathComponent) - \(i < plan.episodeCount ? "Episode \(firstEpisodeNumber + i)" : "after last episode")"
+            let final = rename(part, values: values, template: job.drive.output.fileNameTemplate, fallbackName: fallback, outDir: outDir)
+            outputs.append(final)
+            if i < plan.episodeCount {
+                job.episodes.append(.init(file: relativePath(final, outDir), episode: firstEpisodeNumber + i, sourceTitleId: plan.title,
+                                          firstChapter: range.lowerBound, lastChapter: range.upperBound))
+            }
+        }
+        job.appendLog("Split \(file.lastPathComponent) into \(plan.episodeCount) episode(s)\(parts.count > plan.episodeCount ? " and a closing clip" : "")")
+        let at = job.producedFiles.firstIndex(of: file) ?? job.producedFiles.count
+        if !job.drive.episodes.keepPlayAll {
+            job.producedFiles.removeAll { $0 == file }
+            try? FileManager.default.removeItem(at: file)
+            job.appendLog("Removed the unsplit title \(file.lastPathComponent)")
+        }
+        job.producedFiles.insert(contentsOf: outputs, at: min(at + (job.drive.episodes.keepPlayAll ? 1 : 0), job.producedFiles.count))
+    }
+
+    private func relativePath(_ url: URL, _ base: URL) -> String {
+        let b = base.standardizedFileURL.path, p = url.standardizedFileURL.path
+        return p.hasPrefix(b + "/") ? String(p.dropFirst(b.count + 1)) : url.lastPathComponent
+    }
+
+    // MARK: - Archive
+
+    /// Hashes every produced file and writes SHA256SUMS and bromelia.json into the output folder.
+    private func archive(outDir: URL) async throws {
+        let cfg = job.drive.archive
+        guard cfg.checksums || cfg.archiveRecord, !job.producedFiles.isEmpty else { return }
+        let files = Checksums.files(job.producedFiles, base: outDir)
+        let sizes = files.map { (try? FileManager.default.attributesOfItem(atPath: $0.url.path)[.size] as? Int64) ?? 0 }
+        let total = max(sizes.reduce(0, +), 1)
+        job.phase = "Computing checksums"
+        job.stepIndex = job.stepCount
+        job.totalProgress = 0
+        var entries: [Checksums.Entry] = []
+        var done: Int64 = 0
+        for (i, f) in files.enumerated() {
+            if cancelRequested { throw CancellationError() }
+            job.currentOperation = f.relative
+            let base = done
+            let progress = ProgressRelay { [weak self] n in
+                self?.job.currentProgress = Double(n) / Double(max(sizes[i], 1))
+                self?.job.totalProgress = Double(base + n) / Double(total)
+            }
+            let url = f.url
+            let flag = cancelFlag
+            let hash: String
+            do {
+                hash = try await Task.detached { try Checksums.sha256(of: url, progress: progress.report, isCancelled: flag.isSet) }.value
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw JobError.message("Could not read \(f.relative) to compute its checksum: \(error.localizedDescription)")
+            }
+            done += sizes[i]
+            entries.append(.init(path: f.relative, size: sizes[i], sha256: hash))
+        }
+        job.currentOperation = ""
+        job.checksums = entries
+        if cfg.checksums {
+            let url = outDir.appendingPathComponent(Checksums.fileName)
+            // Keep entries of earlier jobs that wrote to the same folder.
+            var merged: [String: String] = [:]
+            if let old = try? String(contentsOf: url, encoding: .utf8) { for e in Checksums.parse(old) { merged[e.path] = e.hash } }
+            for e in entries { merged[e.path] = e.sha256 }
+            let text = merged.keys.sorted().map { "\(merged[$0]!)  \($0)\n" }.joined()
+            do {
+                try text.write(to: url, atomically: true, encoding: .utf8)
+                job.checksumFile = url
+                job.appendLog("Wrote SHA-256 checksums of \(entries.count) file(s) to \(Checksums.fileName)")
+            } catch {
+                throw JobError.message("Could not write \(url.path): \(error.localizedDescription)")
+            }
+        }
+        if cfg.archiveRecord { writeArchiveRecord(outDir: outDir) }
+    }
+
+    private func writeArchiveRecord(outDir: URL) {
+        guard let id = job.identity else { return }
+        let info = job.discInfo
+        let titles = job.ripTitles.compactMap { info?.title(at: $0) }.map {
+            ArchiveRecord.Title(index: $0.index, sourceTitleId: $0.sourceTitleId, sourceFile: $0.sourceFileName, duration: $0.durationText,
+                                chapters: $0.chapterCount, sizeBytes: $0.sizeBytes, segmentMap: $0.segmentMap)
+        }
+        let record = ArchiveRecord(
+            name: id.name, kind: id.kind.rawValue,
+            disc: .init(label: job.discLabel, volumeName: info?.volumeName ?? "", type: info?.typeName ?? "", format: id.format.rawValue,
+                        formatCode: id.formatCode, encrypted: id.encrypted, season: id.label.season, part: id.label.part,
+                        volume: id.label.volume, disc: id.label.disc),
+            rip: job.mode.makesMKV ? "Rip" : "Backup", mode: job.mode.rawValue, source: job.source.infoArgument, driveName: job.drive.name,
+            makemkv: job.makemkvVersion, jobId: job.id.uuidString, startedAt: job.startedAt, finishedAt: Date(), titles: titles,
+            episodes: job.episodes, files: job.checksums, warnings: job.warningCount, errors: job.errorCount, errorMessages: job.errorMessages)
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        enc.dateEncodingStrategy = .iso8601
+        let url = Paths.uniqueURL(outDir.appendingPathComponent("bromelia.json"))
+        do {
+            try enc.encode(record).write(to: url)
+            job.appendLog("Wrote the archive record \(url.lastPathComponent)")
+        } catch {
+            job.appendLog("Could not write \(url.path): \(error.localizedDescription)", severity: .warning)
         }
     }
 
@@ -286,8 +535,10 @@ final class JobRunner {
             let sev = m.severity
             if sev == .debug && !showDebug { return }
             job.appendLog(m.text, severity: sev)
-            if sev == .error { summary.errorMessages.append(m.text) }
+            if sev == .error { summary.errorMessages.append(m.text); job.errorMessages.append(m.text) }
             switch m.code {
+            case 1005:
+                if job.makemkvVersion.isEmpty { job.makemkvVersion = m.parameters.first ?? m.text }
             case 5036, 5005:
                 summary.saved = Int(m.parameters.first ?? "")
             case 5037:
@@ -352,6 +603,8 @@ final class JobRunner {
     private func ripTitles(source: DiscSource, info: DiscInfo, outDir: URL, extraSteps: Int) async throws {
         let indices = try chooseTitles(info)
         job.ripTitles = indices
+        fileTitles = [:]
+        await prepareEpisodes(source: source, info: info, indices: indices)
         let everyTitle = Set(indices) == Set(info.titles.map(\.index))
         let single = everyTitle && job.trackSelections.isEmpty
         let invocations = single ? ["all"] : indices.map(String.init)
@@ -383,6 +636,7 @@ final class JobRunner {
                 }
                 if let ti = titleIndex, let title = info.title(at: ti) {
                     final = rename(final, title: title, ordinal: (indices.firstIndex(of: ti) ?? n) + 1, info: info, outDir: outDir)
+                    fileTitles[final] = ti
                 }
                 job.producedFiles.append(final)
             }
@@ -391,6 +645,7 @@ final class JobRunner {
         if !failures.isEmpty {
             throw JobError.message(failures.count == 1 ? "Rip failed: \(failures[0])" : "\(failures.count) titles failed: " + failures.joined(separator: "; "))
         }
+        try await splitEpisodes(outDir: outDir, info: info)
     }
 
     private func backup(decrypt: Bool, outDir: URL, inSubfolder: Bool) async throws -> URL {
@@ -404,9 +659,12 @@ final class JobRunner {
             dest = outDir.appendingPathComponent(sub.isEmpty ? "backup" : sub, isDirectory: true)
         }
         try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+        let name = backupName(decrypt: decrypt)
         if job.drive.rip.backupFormat == .iso {
-            let name = TemplateRenderer.sanitizeComponent(job.discLabel.isEmpty ? "disc" : job.discLabel)
-            dest = Paths.uniqueURL(dest.appendingPathComponent("\(name).iso"))
+            dest = Paths.uniqueURL(dest.appendingPathComponent("\(name.isEmpty ? TemplateRenderer.sanitizeComponent(job.discLabel.isEmpty ? "disc" : job.discLabel) : name).iso"))
+        } else if !name.isEmpty {
+            dest = Paths.uniqueURL(dest.appendingPathComponent(name, isDirectory: true))
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
         }
         job.phase = decrypt ? "Backing up disc (decrypted)" : "Backing up disc"
         job.totalProgress = 0
@@ -421,7 +679,30 @@ final class JobRunner {
             throw JobError.message("Backup failed: \(s.errorMessages.last ?? "makemkvcon exit status \(s.exitCode)")")
         }
         job.appendLog("Backup saved to \(dest.path)")
+        // Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart.
+        if job.drive.rip.backupFormat == .folder, let found = DiscFormat.detect(backupFolder: dest), found != job.identity?.format {
+            resolveIdentity(info: job.discInfo, format: found)
+            let renamed = backupName(decrypt: decrypt)
+            if !renamed.isEmpty, renamed != dest.lastPathComponent {
+                let target = Paths.uniqueURL(dest.deletingLastPathComponent().appendingPathComponent(renamed, isDirectory: true))
+                if (try? fm.moveItem(at: dest, to: target)) != nil {
+                    job.appendLog("Renamed the backup to \(target.lastPathComponent)")
+                    return target
+                }
+            }
+        }
         return dest
+    }
+
+    /// File / folder name of a backup from the file name template (rip = Backup, no episode or track).
+    private func backupName(decrypt: Bool) -> String {
+        let template = job.drive.output.fileNameTemplate.trimmingCharacters(in: .whitespaces)
+        guard !template.isEmpty else { return "" }
+        var values = templateValues(status: .running)
+        values["rip"] = "Backup"
+        if let id = job.identity { values["format"] = id.format.code(encrypted: !decrypt) }
+        for k in ["title", "index", "n", "source", "duration", "chapters", "original", "comment"] { values[k] = "" }
+        return TemplateRenderer.renderPath(template, values: values).replacingOccurrences(of: "/", with: " - ")
     }
 
     private func remux(_ file: URL, title: TitleInfo, keep: Set<Int>) async -> URL {
@@ -461,10 +742,26 @@ final class JobRunner {
     private func rename(_ file: URL, title: TitleInfo, ordinal: Int, info: DiscInfo, outDir: URL) -> URL {
         let explicit = job.titleNameOverrides[title.index]?.trimmingCharacters(in: .whitespaces) ?? ""
         let template = explicit.isEmpty ? job.drive.output.fileNameTemplate.trimmingCharacters(in: .whitespaces) : explicit
-        guard !template.isEmpty else { return file }
         var values = templateValues(status: .running)
         for (k, v) in Self.titleValues(title, ordinal: ordinal, disc: info, originalFile: file) { values[k] = v }
-        var rel = TemplateRenderer.renderPath(template, values: values)
+        values["track"] = MediaIdentity.trackLabel(title)
+        if let k = separateEpisodes[title.index] {
+            values["episode"] = MediaIdentity.episodeLabel(firstEpisodeNumber + k, width: episodeWidth)
+            values["episodeNumber"] = String(firstEpisodeNumber + k)
+        }
+        let final = rename(file, values: values, template: template, fallbackName: nil, outDir: outDir)
+        if let k = separateEpisodes[title.index] {
+            job.episodes.append(.init(file: relativePath(final, outDir), episode: firstEpisodeNumber + k, sourceTitleId: title.sourceTitleId ?? title.index,
+                                      firstChapter: 1, lastChapter: max(1, title.chapterCount)))
+        }
+        return final
+    }
+
+    /// Moves `file` to the name rendered from `template`. With an empty template the file keeps its
+    /// name, or gets `fallbackName` (used for split episodes, whose temporary names are meaningless).
+    private func rename(_ file: URL, values: [String: String], template: String, fallbackName: String?, outDir: URL) -> URL {
+        var rel = template.trimmingCharacters(in: .whitespaces).isEmpty ? "" : TemplateRenderer.renderPath(template, values: values)
+        if rel.isEmpty, let fallbackName { rel = TemplateRenderer.sanitizeComponent(fallbackName) }
         if rel.isEmpty { return file }
         if !rel.lowercased().hasSuffix(".mkv") { rel += ".mkv" }
         let target = Paths.uniqueURL(outDir.appendingPathComponent(rel))
@@ -558,7 +855,20 @@ final class JobRunner {
         v["manifest"] = job.manifestFile.path
         v["file"] = job.producedFiles.first?.path ?? ""
         v["files"] = job.producedFiles.map(\.path).joined(separator: " ")
+        let id = job.identity ?? MediaIdentity.resolve(info: info, discLabel: job.discLabel, flags: job.discFlags, encrypted: job.mode == .backup,
+                                                       nameOverride: job.mediaName, kindOverride: job.mediaKind)
+        for (k, value) in id.templateValues(rip: job.mode.makesMKV ? "Rip" : "Backup") { v[k] = value }
+        v["checksums"] = job.checksumFile?.path ?? ""
         return v
+    }
+
+    /// The drive's steps followed by the global plugins, keeping those that apply to this status and disc.
+    private func applicableSteps(status: JobState) -> [PostProcessStep] {
+        let id = job.identity
+        return (job.drive.postProcess + config.plugins).filter {
+            PostProcessor.shouldRun($0, status: status)
+                && PluginMatcher.matches($0, name: id?.name ?? job.discLabel, discLabel: job.discLabel, formatCode: id?.formatCode ?? "")
+        }
     }
 
     private func scriptEnvironment(status: JobState) -> [String: String] {
@@ -579,6 +889,16 @@ final class JobRunner {
         ]
         if case let .drive(_, dev) = job.source { e["BROMELIA_DEVICE"] = dev }
         if let err = job.errorMessage { e["BROMELIA_ERROR"] = err }
+        if let id = job.identity {
+            e["BROMELIA_NAME"] = id.name
+            e["BROMELIA_KIND"] = id.kind.rawValue
+            e["BROMELIA_FORMAT"] = id.formatCode
+            e["BROMELIA_ENCRYPTED"] = id.encrypted ? "1" : "0"
+            e["BROMELIA_SEASON"] = id.label.season.map(String.init) ?? ""
+            e["BROMELIA_DISC_NUMBER"] = id.label.disc.map(String.init) ?? ""
+            e["BROMELIA_DISC_SET"] = id.label.setDescription
+        }
+        if let c = job.checksumFile { e["BROMELIA_CHECKSUMS"] = c.path }
         return e
     }
 
@@ -596,7 +916,12 @@ final class JobRunner {
                             driveName: job.drive.name, driveId: job.drive.id.uuidString, devicePath: dev,
                             source: job.source.infoArgument, discName: job.discLabel, discType: info?.typeToken ?? "disc",
                             outputDirectory: job.outputDirectory?.path ?? "", files: job.producedFiles.map(\.path),
-                            titles: titles, startedAt: job.startedAt, finishedAt: job.finishedAt, error: job.errorMessage)
+                            titles: titles, name: job.identity?.name ?? "", kind: job.identity?.kind.rawValue ?? "",
+                            format: job.identity?.format.rawValue ?? "", formatCode: job.identity?.formatCode ?? "",
+                            encrypted: job.identity?.encrypted ?? false, season: job.identity?.label.season,
+                            discNumber: job.identity?.label.disc, episodes: job.episodes, checksumFile: job.checksumFile?.path,
+                            checksums: job.checksums.map { .init(path: $0.path, size: $0.size, sha256: $0.sha256) },
+                            startedAt: job.startedAt, finishedAt: job.finishedAt, error: job.errorMessage)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601
@@ -632,5 +957,38 @@ enum Formatters {
         let s = Int(t.rounded())
         if s >= 3600 { return String(format: "%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60) }
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+/// Cancellation flag readable from background work (hashing).
+final class CancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.lock(); value = true; lock.unlock() }
+    func isSet() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+}
+
+/// Delivers progress from a background thread to the main actor, at most ten times per second.
+final class ProgressRelay: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: Int64 = 0
+    private var scheduled = false
+    private let deliver: @MainActor (Int64) -> Void
+
+    init(_ deliver: @escaping @MainActor (Int64) -> Void) { self.deliver = deliver }
+
+    func report(_ value: Int64) {
+        lock.lock()
+        pending = value
+        let schedule = !scheduled
+        scheduled = true
+        lock.unlock()
+        guard schedule else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
+            MainActor.assumeIsolated {
+                lock.lock(); let v = pending; scheduled = false; lock.unlock()
+                deliver(v)
+            }
+        }
     }
 }

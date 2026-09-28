@@ -54,6 +54,14 @@ final class RipJob: Identifiable {
     var trackSelections: [Int: Set<Int>] = [:]
     /// Explicit output file names per title (take precedence over the file name template).
     var titleNameOverrides: [Int: String] = [:]
+    /// Movie / show name typed by the user. Empty = inferred from the disc.
+    var mediaName = ""
+    /// Movie or TV show, as chosen by the user. nil = inferred.
+    var mediaKind: MediaKind?
+    /// Number of the first episode on this disc, as entered by the user. nil = read from the menus or 1.
+    var firstEpisode: Int?
+    /// File system flags from the drive scan (used when the disc listing is unavailable).
+    var discFlags: DiscFlags?
     var isAutomatic = false
     /// Delayed start (automatic rips): the job waits in `.waiting` until this time.
     var startAt: Date?
@@ -78,6 +86,12 @@ final class RipJob: Identifiable {
     var log: [LogEntry] = []
     var commands: [String] = []
     var ripTitles: [Int] = []
+    var identity: MediaIdentity?
+    var episodes: [ArchiveRecord.Episode] = []
+    var checksums: [Checksums.Entry] = []
+    var checksumFile: URL?
+    var makemkvVersion = ""
+    var errorMessages: [String] = []
 
     @ObservationIgnored private var nextLogId = 0
     @ObservationIgnored var logHandle: FileHandle?
@@ -169,6 +183,12 @@ struct JobManifest: Codable, Sendable {
         var file: String?
     }
 
+    struct File: Codable, Sendable {
+        var path: String
+        var size: Int64
+        var sha256: String
+    }
+
     var jobId: String
     var status: String
     var mode: String
@@ -181,6 +201,16 @@ struct JobManifest: Codable, Sendable {
     var outputDirectory: String
     var files: [String]
     var titles: [Title]
+    var name: String = ""
+    var kind: String = ""
+    var format: String = ""
+    var formatCode: String = ""
+    var encrypted: Bool = false
+    var season: Int?
+    var discNumber: Int?
+    var episodes: [ArchiveRecord.Episode] = []
+    var checksumFile: String?
+    var checksums: [File] = []
     var startedAt: Date?
     var finishedAt: Date?
     var error: String?

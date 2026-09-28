@@ -160,11 +160,17 @@ enum ConflictPolicy: String, Codable, CaseIterable, Sendable, Identifiable {
 }
 
 struct OutputConfig: Codable, Hashable, Sendable {
+    /// `{name} - {episode} - {discLabel} - {rip} - {track} - {format}`, leaving out the parts that don't apply.
+    static let defaultFileNameTemplate = "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
+    static let defaultFolderTemplate = "{name}{discLabel? - {discLabel}}"
+    /// Templates of configuration version 1, replaced by the defaults above when a configuration is upgraded.
+    static let legacyFolderTemplate = "{disc}"
+
     /// Empty = use the global output root.
     var rootOverride: String = ""
-    var folderTemplate: String = "{disc}"
-    /// Empty = keep MakeMKV's own file names.
-    var fileNameTemplate: String = ""
+    var folderTemplate: String = OutputConfig.defaultFolderTemplate
+    /// Used for MKV files and backups (without extension). Empty = keep MakeMKV's own file names.
+    var fileNameTemplate: String = OutputConfig.defaultFileNameTemplate
     var backupSubfolder: String = "backup"
     var conflictPolicy: ConflictPolicy = .uniqueSuffix
 
@@ -210,6 +216,49 @@ struct AutomationConfig: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - Archiving
+
+struct ArchiveConfig: Codable, Hashable, Sendable {
+    /// Write SHA256SUMS (sha256sum / shasum -a 256 format) for every produced file into the output folder.
+    var checksums: Bool = true
+    /// Write bromelia.json (disc identity, titles, files with sizes and hashes) and the job log into the output folder.
+    var archiveRecord: Bool = true
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case checksums, archiveRecord }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = ArchiveConfig()
+        checksums = c.value(.checksums, d.checksums)
+        archiveRecord = c.value(.archiveRecord, d.archiveRecord)
+    }
+}
+
+// MARK: - Episodes
+
+struct EpisodeConfig: Codable, Hashable, Sendable {
+    /// Split DVD "play all" titles of TV shows into one file per episode, using the disc's menu navigation.
+    var splitPlayAll: Bool = true
+    /// Keep the unsplit title next to the episode files.
+    var keepPlayAll: Bool = true
+    /// Read episode numbers from the disc's episode menus (needs ffmpeg and tesseract).
+    var readMenuNumbers: Bool = true
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case splitPlayAll, keepPlayAll, readMenuNumbers }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = EpisodeConfig()
+        splitPlayAll = c.value(.splitPlayAll, d.splitPlayAll)
+        keepPlayAll = c.value(.keepPlayAll, d.keepPlayAll)
+        readMenuNumbers = c.value(.readMenuNumbers, d.readMenuNumbers)
+    }
+}
+
 // MARK: - Post-processing
 
 enum RunCondition: String, Codable, CaseIterable, Sendable, Identifiable {
@@ -243,11 +292,16 @@ struct PostProcessStep: Codable, Hashable, Sendable, Identifiable {
     var environment: [String: String] = [:]
     /// Mark the job as failed when this step exits with a non-zero status.
     var failJobOnError: Bool = false
+    /// Run only for discs whose movie / show name or disc label matches this regular expression (empty = all).
+    var matchName: String = ""
+    /// Run only for these format codes (DVD, DVDe, BR, BRe, 4K, 4Ke; `BR*` = any code starting with BR). Empty = all.
+    var matchFormats: [String] = []
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case id, name, enabled, executable, interpreter, arguments, workingDirectory, runOn, perFile, timeoutSeconds, environment, failJobOnError
+        case id, name, enabled, executable, interpreter, arguments, workingDirectory, runOn, perFile, timeoutSeconds, environment, failJobOnError,
+             matchName, matchFormats
     }
 
     init(from decoder: Decoder) throws {
@@ -265,6 +319,8 @@ struct PostProcessStep: Codable, Hashable, Sendable, Identifiable {
         timeoutSeconds = c.value(.timeoutSeconds, d.timeoutSeconds)
         environment = c.value(.environment, d.environment)
         failJobOnError = c.value(.failJobOnError, d.failJobOnError)
+        matchName = c.value(.matchName, d.matchName)
+        matchFormats = c.value(.matchFormats, d.matchFormats)
     }
 }
 
@@ -394,11 +450,13 @@ struct DriveConfig: Codable, Hashable, Sendable, Identifiable {
     var rip = RipConfig()
     var output = OutputConfig()
     var automation = AutomationConfig()
+    var archive = ArchiveConfig()
+    var episodes = EpisodeConfig()
     var postProcess: [PostProcessStep] = []
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case id, name, enabled, match, settings, profile, rip, output, automation, postProcess }
+    enum CodingKeys: String, CodingKey { case id, name, enabled, match, settings, profile, rip, output, automation, archive, episodes, postProcess }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -412,7 +470,17 @@ struct DriveConfig: Codable, Hashable, Sendable, Identifiable {
         rip = c.value(.rip, d.rip)
         output = c.value(.output, d.output)
         automation = c.value(.automation, d.automation)
+        archive = c.value(.archive, d.archive)
+        episodes = c.value(.episodes, d.episodes)
         postProcess = c.value(.postProcess, d.postProcess)
+    }
+
+    /// Version 1 defaults kept MakeMKV's file names and named folders after the disc label; version 2
+    /// names everything `{name} - … - {format}`. Only untouched defaults are replaced.
+    mutating func upgradeNaming(from version: Int) {
+        guard version < 2 else { return }
+        if output.fileNameTemplate.trimmingCharacters(in: .whitespaces).isEmpty { output.fileNameTemplate = OutputConfig.defaultFileNameTemplate }
+        if output.folderTemplate == OutputConfig.legacyFolderTemplate { output.folderTemplate = OutputConfig.defaultFolderTemplate }
     }
 
     /// Returns a copy that keeps identity (id, name, match, enabled) but takes everything else from `other`.
@@ -435,7 +503,7 @@ struct DrivePreset: Codable, Hashable, Sendable, Identifiable {
 // MARK: - App
 
 struct AppConfig: Codable, Hashable, Sendable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     var version: Int = AppConfig.currentVersion
     /// Empty = autodetect.
@@ -458,13 +526,16 @@ struct AppConfig: Codable, Hashable, Sendable {
     }()
     var drives: [DriveConfig] = []
     var presets: [DrivePreset] = []
+    /// Post-processing steps for every drive, usually limited to certain titles or formats with
+    /// `matchName` / `matchFormats` ("plugins"). They run after the drive's own steps.
+    var plugins: [PostProcessStep] = []
     var historyLimit: Int = 500
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
         case version, makemkvconPath, mkvmergePath, outputRoot, pollIntervalSeconds, pollWhileRipping, maxConcurrentJobs,
-             registrationKey, globalSettings, defaultDrive, drives, presets, historyLimit
+             registrationKey, globalSettings, defaultDrive, drives, presets, plugins, historyLimit
     }
 
     init(from decoder: Decoder) throws {
@@ -482,7 +553,16 @@ struct AppConfig: Codable, Hashable, Sendable {
         defaultDrive = c.value(.defaultDrive, d.defaultDrive)
         drives = c.value(.drives, d.drives)
         presets = c.value(.presets, d.presets)
+        plugins = c.value(.plugins, d.plugins)
         historyLimit = c.value(.historyLimit, d.historyLimit)
+        // Files without a version are treated as version 1.
+        let loaded = (try? c.decodeIfPresent(Int.self, forKey: .version)) ?? 1
+        if loaded < 2 {
+            defaultDrive.upgradeNaming(from: loaded)
+            for i in drives.indices { drives[i].upgradeNaming(from: loaded) }
+            for i in presets.indices { presets[i].config.upgradeNaming(from: loaded) }
+        }
+        version = AppConfig.currentVersion
     }
 
     func driveConfig(for entry: DriveScanEntry) -> DriveConfig? {
