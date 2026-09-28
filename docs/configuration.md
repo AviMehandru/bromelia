@@ -29,7 +29,9 @@ between versions and platforms freely. Paths may start with `~`.
   "drives": [ /* DriveConfig */ ],
   "presets": [ { "id": "…", "name": "…", "config": { /* DriveConfig */ } } ],
   "plugins": [ /* PostProcessStep */ ],   // steps for every drive, usually with matchName / matchFormats
-  "historyLimit": 500
+  "historyLimit": 500,
+  "stallTimeoutMinutes": 30,       // stop a rip or backup that prints nothing for this long (stuck drive); 0 = never
+  "preventSleep": true             // keep the computer awake while jobs run
 }
 ```
 
@@ -149,6 +151,24 @@ title is found again by its source title (playlist / VTS title), length and segm
 number changed (for instance because the minimum title length changed). Titles with hand-picked tracks
 must still have the same track list. Otherwise the job fails before ripping. The same matching is used
 to find the chosen titles in the backup in *backup then MKV* mode.
+
+Before ripping MKV files, the job checks that the destination has room for the chosen titles (their sizes
+in the listing, plus a copy of titles with hand-picked tracks and of a "play all" title that will be split,
+plus 2 % or 256 MB). When MakeMKV itself warns that the output may not fit (message 5038, printed before
+it starts writing), the job stops before anything is written. A rip that prints nothing for `stallTimeoutMinutes` is stopped and
+fails; a process that can't be stopped even with SIGKILL (a hung drive) is left behind after 30 s so the
+job can end.
+
+MakeMKV writes an ISO image when a backup's destination ends in `.iso`. If it writes a folder instead
+(which some versions or discs may do), the folder is checked like a folder backup and kept, without the
+`.iso` extension, and the log says so.
+
+**Archive everything.** The drive editor's Presets menu has *Archive everything*: *backup then MKV* with a
+decrypted folder backup kept (every file and title of the disc, including menus and titles shorter than
+the minimum title length), MKV files of every title with every track (selection rule `+sel:all`),
+`disc-info.json`, and all checks on. With MakeMKV's default selection rule, tracks it doesn't select
+(other languages when a preferred language is set, the separate core of lossless audio, 3D video) are not
+in the MKV files; the log says how many of a title's tracks each file has.
 
 Title rules are applied in this order: filters (duration, chapters, size, patterns, angles), then
 duplicate removal (same segment map, length and angle), then the strategy, then `maxTitles`.

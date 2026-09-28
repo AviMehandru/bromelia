@@ -6,6 +6,7 @@
 
 #include <glib/gstdio.h>
 #include <json-glib/json-glib.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -126,7 +127,20 @@ typedef struct {
   BroDiscInfo *info;
   char *drive_mismatch;
   gboolean cancelled;
+  char *first_error;   /* first error other than the "N titles saved, M failed" summary: usually the cause */
+  char *space_warning; /* MakeMKV's warning that the output may not fit (message 5038) */
 } Summary;
+
+/* Why a run failed, for the job's error message. */
+static char *
+summary_reason (Summary *s)
+{
+  if (s->first_error)
+    return g_strdup (s->first_error);
+  if (s->errors->len)
+    return g_strdup (g_ptr_array_index (s->errors, s->errors->len - 1));
+  return g_strdup_printf ("makemkvcon exit status %d", s->exit_status);
+}
 
 typedef struct {
   BroRunRequest *req;
@@ -162,6 +176,7 @@ typedef struct {
   gboolean collect_data_errors; /* errors of the running makemkvcon are read errors (rips, backups) */
   gboolean reported_missing_verifier;
   GPtrArray *data_errors;      /* char*: errors MakeMKV reported while ripping or backing up */
+  GCancellable *run_cancel;    /* stops the running makemkvcon only (drive changed, not enough space) */
 } Ctx;
 
 typedef struct {
@@ -237,6 +252,8 @@ summary_free (Summary *s)
   g_ptr_array_unref (s->errors);
   if (s->info) bro_disc_info_unref (s->info);
   g_free (s->drive_mismatch);
+  g_free (s->first_error);
+  g_free (s->space_warning);
   g_free (s);
 }
 
@@ -259,6 +276,8 @@ on_makemkv_line (const char *line, gpointer data)
         log_line (c, sev, "%s", ev->text);
         if (sev == BRO_SEV_ERROR)
           {
+            if (!s->first_error && ev->code != 5037 && ev->code != 5004)
+              s->first_error = g_strdup (ev->text);
             g_ptr_array_add (s->errors, g_strdup (ev->text));
             g_ptr_array_add (c->error_messages, g_strdup (ev->text));
             if (c->collect_data_errors)
@@ -268,7 +287,15 @@ on_makemkv_line (const char *line, gpointer data)
           c->makemkv_version = g_strdup (ev->params->len ? ev->params->pdata[0] : ev->text);
         if ((ev->code == 5036 || ev->code == 5005) && ev->params->len > 0)
           s->saved = atoi (ev->params->pdata[0]);
-        if (ev->code == 5037 && ev->params->len > 1)
+        if (ev->code == 5038 && !s->space_warning)
+          {
+            /* "The total size of all output files may reach as much as … while there are only … free": stop before
+             * anything is written rather than fail when the disk fills up. */
+            s->space_warning = g_strdup (ev->text);
+            if (c->run_cancel)
+              g_cancellable_cancel (c->run_cancel);
+          }
+        if ((ev->code == 5037 || ev->code == 5004) && ev->params->len > 1)
           {
             s->saved = atoi (ev->params->pdata[0]);
             s->failed = atoi (ev->params->pdata[1]);
@@ -298,7 +325,8 @@ on_makemkv_line (const char *line, gpointer data)
           s->drive_mismatch = g_strdup_printf ("MakeMKV drive %d is now %s, expected %s. The job was stopped to avoid reading "
                                                "the wrong disc; rescan drives and retry.", c->expected_index, ev->drive.device,
                                                c->expected_device);
-          g_cancellable_cancel (c->req->cancellable);
+          if (c->run_cancel)
+            g_cancellable_cancel (c->run_cancel);
         }
       break;
     case BRO_EV_RAW:
@@ -309,6 +337,12 @@ on_makemkv_line (const char *line, gpointer data)
     }
 }
 
+static void
+cancel_run (GCancellable *job, gpointer run)
+{
+  g_cancellable_cancel (run);
+}
+
 /* Runs makemkvcon with the current environment. Returns NULL (with error) when it could not run or was cancelled.
  * With reads_data, error messages count as read errors (rips and backups, not listings). */
 static Summary *
@@ -317,7 +351,12 @@ run_makemkv (Ctx *c, GPtrArray *args, gboolean reads_data, GError **error)
   Summary *s = g_new0 (Summary, 1);
   g_auto (GStrv) envp = bro_makemkv_env_environ (c->env);
   g_autofree char *cmd = NULL;
-  gboolean was_cancelled = FALSE;
+  g_autoptr (GCancellable) run_cancel = g_cancellable_new ();
+  /* makemkvcon ignores SIGINT, so it is stopped with SIGTERM. */
+  BroRunOptions opt = { 0, MAX (0, c->req->config->stall_timeout_minutes) * 60, SIGTERM };
+  BroRunStatus st = { 0 };
+  gulong handler;
+  gboolean ran;
 
   s->saved = s->failed = -1;
   s->errors = g_ptr_array_new_with_free_func (g_free);
@@ -332,25 +371,40 @@ run_makemkv (Ctx *c, GPtrArray *args, gboolean reads_data, GError **error)
 
   c->sum = s;
   c->collect_data_errors = reads_data;
-  if (!bro_process_run ((const char *const *) args->pdata, (const char *const *) envp, c->env->home, 0, c->req->cancellable,
-                        on_makemkv_line, c, &s->exit_status, &was_cancelled, NULL, error))
+  c->run_cancel = run_cancel;
+  /* The job's cancellable stops this run too. */
+  handler = c->req->cancellable ? g_cancellable_connect (c->req->cancellable, G_CALLBACK (cancel_run), run_cancel, NULL) : 0;
+  ran = bro_process_run_ex ((const char *const *) args->pdata, (const char *const *) envp, c->env->home, &opt, run_cancel,
+                            on_makemkv_line, c, &st, error);
+  if (handler)
+    g_cancellable_disconnect (c->req->cancellable, handler);
+  c->run_cancel = NULL;
+  c->collect_data_errors = FALSE;
+  c->sum = NULL;
+  s->exit_status = st.exit_status;
+  if (!ran)
     {
-      c->collect_data_errors = FALSE;
-      c->sum = NULL;
       summary_free (s);
       if (error && *error && !g_error_matches (*error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
         g_prefix_error (error, "Could not start makemkvcon: ");
       return NULL;
     }
-  c->sum = NULL;
-  c->collect_data_errors = FALSE;
-  if (s->drive_mismatch)
+  /* These stop makemkvcon themselves, so they are checked before cancellation. */
+  if (!cancelled (c) && (s->drive_mismatch || s->space_warning || st.stalled))
     {
-      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, s->drive_mismatch);
+      if (s->drive_mismatch)
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, s->drive_mismatch);
+      else if (s->space_warning)
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                     "Not enough free space on the destination, so the rip was stopped before writing. MakeMKV: “%s”", s->space_warning);
+      else
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                     "makemkvcon printed nothing for %d minutes and was stopped%s. The drive or disc may be stuck: eject the disc and retry.",
+                     c->req->config->stall_timeout_minutes, st.abandoned ? " (it did not exit; the drive may need to be reset)" : "");
       summary_free (s);
       return NULL;
     }
-  if (was_cancelled || cancelled (c))
+  if (st.cancelled || st.abandoned || cancelled (c))
     {
       g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
       summary_free (s);
@@ -2041,6 +2095,68 @@ bro_listing_map (GArray *indices, BroDiscInfo *old, BroDiscInfo *now, GHashTable
   return g_steal_pointer (&map);
 }
 
+gint64
+bro_disk_available (const char *path)
+{
+  g_autofree char *dir = g_strdup (path);
+  g_autoptr (GFile) f = NULL;
+  g_autoptr (GFileInfo) fi = NULL;
+  while (!g_file_test (dir, G_FILE_TEST_EXISTS) && strchr (dir, G_DIR_SEPARATOR) && strlen (dir) > 1)
+    {
+      char *parent = g_path_get_dirname (dir);
+      g_free (dir);
+      dir = parent;
+    }
+  f = g_file_new_for_path (dir);
+  fi = g_file_query_filesystem_info (f, G_FILE_ATTRIBUTE_FILESYSTEM_FREE, NULL, NULL);
+  if (!fi || !g_file_info_has_attribute (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+    return -1;
+  return (gint64) g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+}
+
+gint64
+bro_disk_required (gint64 bytes)
+{
+  /* A margin of 2 % or 256 MB, whichever is larger: listing sizes are estimates. */
+  return bytes + MAX ((gint64) 256 << 20, bytes / 50);
+}
+
+/* Fails the job before ripping when the destination can't hold the chosen titles (sizes from the listing), plus a copy
+ * of titles with hand-picked tracks (remuxed) and of a "play all" title (split into episodes). */
+static gboolean
+check_free_space (Ctx *c, BroDiscInfo *info, GArray *indices, const char *out_dir, GError **error)
+{
+  gint64 need = 0, free_bytes, required;
+  g_autofree char *parent = g_path_get_dirname (out_dir);
+  for (guint i = 0; i < indices->len; i++)
+    {
+      int index = g_array_index (indices, int, i);
+      BroTitle *t = bro_disc_info_title (info, index);
+      if (!t)
+        continue;
+      need += bro_title_size (t);
+      if (g_hash_table_contains (c->req->track_selections, GINT_TO_POINTER (index)))
+        need += bro_title_size (t);
+      if (c->plan && bro_title_source_id (t) == c->plan->title)
+        need += bro_title_size (t);
+    }
+  free_bytes = bro_disk_available (out_dir);
+  if (need <= 0 || free_bytes < 0)
+    return TRUE;
+  required = bro_disk_required (need);
+  {
+    g_autofree char *f = g_format_size (free_bytes), *n = g_format_size (need), *r = g_format_size (required);
+    log_line (c, BRO_SEV_INFO, "Free space: %s; the titles need about %s", f, n);
+    if (free_bytes < required)
+      {
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_NO_SPACE,
+                     "Not enough free space in %s: the titles need about %s (with a margin), only %s is free.", parent, r, f);
+        return FALSE;
+      }
+  }
+  return TRUE;
+}
+
 /* Checks a ripped file against its title in the disc listing. Returns why it can't be trusted, or NULL. */
 static char *
 verify_rip (Ctx *c, const char *file, BroTitle *title)
@@ -2086,6 +2202,9 @@ verify_rip (Ctx *c, const char *file, BroTitle *title)
     g_autofree char *len = probe->has_duration ? hms ((int) (probe->duration + 0.5)) : g_strdup ("?");
     log_line (c, BRO_SEV_INFO, "Checked %s: %s, %u track(s), %d chapter(s)", base, len, probe->track_types->len, probe->chapters);
   }
+  if (title->tracks->len > 0 && probe->track_types->len < title->tracks->len)
+    log_line (c, BRO_SEV_INFO, "%s has %u of the %u tracks on the disc; the selection rule left out the rest (use “+sel:all” to keep every track)",
+              base, probe->track_types->len, title->tracks->len);
   return NULL;
 }
 
@@ -2104,6 +2223,8 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
   c->rip_titles = g_array_ref (indices);
   g_hash_table_remove_all (c->file_titles);
   prepare_episodes (c, src, info, indices);
+  if (!check_free_space (c, info, indices, out_dir, error))
+    return FALSE;
   if (indices->len != info->titles->len)
     every = FALSE;
   single = every && g_hash_table_size (c->req->track_selections) == 0;
@@ -2149,8 +2270,7 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
       gboolean failed = s->exit_status != 0 || s->failed > 0 || produced->len == 0;
       if (failed)
         {
-          const char *why = s->errors->len ? g_ptr_array_index (s->errors, s->errors->len - 1) : NULL;
-          g_autofree char *why_s = why ? g_strdup (why) : g_strdup_printf ("makemkvcon exit status %d", s->exit_status);
+          g_autofree char *why_s = summary_reason (s);
           g_ptr_array_add (failures, single ? g_strdup (why_s) : g_strdup_printf ("title %s: %s", tstr, why_s));
           log_line (c, BRO_SEV_ERROR, "Title %s failed: %s", tstr, why_s);
         }
@@ -2282,18 +2402,35 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
     }
   if (s->exit_status != 0 || !exists || s->failed > 0)
     {
-      const char *why = s->errors->len ? g_ptr_array_index (s->errors, s->errors->len - 1) : NULL;
-      if (why)
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Backup failed: %s", why);
-      else
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Backup failed: makemkvcon exit status %d", s->exit_status);
+      g_autofree char *why = summary_reason (s);
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Backup failed: %s", why);
       summary_free (s);
       return NULL;
     }
   summary_free (s);
+  /* MakeMKV writes an ISO image when the destination ends in .iso. If it wrote a folder instead, the backup is
+   * complete but isn't an image: keep it as a folder backup rather than failing the job. */
+  if (c->req->drive->rip.backup_format == BRO_BACKUP_ISO && g_file_test (dest, G_FILE_TEST_IS_DIR))
+    {
+      g_autofree char *problem = bro_backup_problem (dest, FALSE);
+      if (!problem && g_str_has_suffix (dest, ".iso"))
+        {
+          g_autofree char *want = g_strndup (dest, strlen (dest) - 4);
+          char *folder = bro_unique_path (want);
+          if (g_rename (dest, folder) == 0)
+            {
+              g_autofree char *name = g_path_get_basename (folder);
+              log_line (c, BRO_SEV_WARNING, "MakeMKV wrote a folder instead of an ISO image; kept the backup as the folder %s", name);
+              g_free (dest);
+              dest = folder;
+            }
+          else
+            g_free (folder);
+        }
+    }
   if (c->req->drive->archive.verify_rips)
     {
-      g_autofree char *problem = bro_backup_problem (dest, c->req->drive->rip.backup_format == BRO_BACKUP_ISO);
+      g_autofree char *problem = bro_backup_problem (dest, !g_file_test (dest, G_FILE_TEST_IS_DIR));
       if (problem)
         {
           g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Backup failed the check: %s", problem);
@@ -2302,7 +2439,7 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
     }
   log_line (c, BRO_SEV_INFO, "Backup saved to %s", dest);
   /* Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart. */
-  if (c->req->drive->rip.backup_format == BRO_BACKUP_FOLDER)
+  if (g_file_test (dest, G_FILE_TEST_IS_DIR))
     {
       BroDiscFormat found = bro_detect_backup_folder (dest);
       if (found != BRO_FORMAT_UNKNOWN && (!c->identity || found != c->identity->format))
@@ -2574,7 +2711,7 @@ execute (Ctx *c, GError **error)
         if (!dest)
           return FALSE;
         steps (c, 1, 2);
-        bsrc = bro_source_new_path (req->drive->rip.backup_format == BRO_BACKUP_ISO ? BRO_SOURCE_ISO : BRO_SOURCE_FOLDER, dest);
+        bsrc = bro_source_new_path (g_file_test (dest, G_FILE_TEST_IS_DIR) ? BRO_SOURCE_FOLDER : BRO_SOURCE_ISO, dest);
         binfo = scan_disc (c, bsrc, error);
         if (!binfo)
           return FALSE;

@@ -1,0 +1,133 @@
+MSG:1005,0,1,"MakeMKV v2.0.0 darwin(arm64-release) started","%1 started","MakeMKV v2.0.0 darwin(arm64-release)"
+MSG:1004,131072,1,"Debug logging enabled, log will be saved as file:///Users/user/MakeMKV_log.txt","Debug logging enabled, log will be saved as %1","file:///Users/user/MakeMKV_log.txt"
+PRGT:5018,0,"Scanning CD-ROM devices"
+PRGC:5018,0,"Scanning CD-ROM devices"
+PRGV:0,0,65536
+PRGV:0,0,65536
+PRGV:65536,0,65536
+PRGV:65536,65536,65536
+MSG:5042,0,0,"The program can't find any usable optical drives.","The program can't find any usable optical drives."
+DRV:0,256,999,0,"","",""
+DRV:1,256,999,0,"","",""
+DRV:2,256,999,0,"","",""
+DRV:3,256,999,0,"","",""
+DRV:4,256,999,0,"","",""
+DRV:5,256,999,0,"","",""
+DRV:6,256,999,0,"","",""
+DRV:7,256,999,0,"","",""
+DRV:8,256,999,0,"","",""
+DRV:9,256,999,0,"","",""
+DRV:10,256,999,0,"","",""
+DRV:11,256,999,0,"","",""
+DRV:12,256,999,0,"","",""
+DRV:13,256,999,0,"","",""
+DRV:14,256,999,0,"","",""
+DRV:15,256,999,0,"","",""
+PRGV:0,65536,65536
+PRGV:0,0,65536
+PRGT:3100,0,"Opening DVD disc"
+MSG:3007,0,0,"Using direct disc access mode","Using direct disc access mode"
+PRGC:3102,0,"Processing title sets"
+PRGV:0,0,65536
+PRGV:0,0,65536
+PRGV:5957,0,65536
+PRGV:5957,356,65536
+PRGV:11915,356,65536
+PRGV:11915,712,65536
+PRGV:17873,712,65536
+PRGV:17873,1068,65536
+PRGV:23831,1068,65536
+PRGV:23831,1424,65536
+PRGV:29789,1424,65536
+PRGV:29789,1780,65536
+PRGV:35746,1780,65536
+PRGV:35746,2137,65536
+PRGV:41704,2137,65536
+PRGV:41704,2493,65536
+PRGV:47662,2493,65536
+PRGV:47662,2849,65536
+PRGV:53620,2849,65536
+PRGV:53620,3205,65536
+PRGV:59578,3205,65536
+PRGV:59578,3561,65536
+PRGC:3120,1,"Scanning contents"
+PRGV:0,3561,65536
+PRGV:655,3561,65536
+PRGV:655,3917,65536
+PRGV:2621,3917,65536
+PRGV:2621,4986,65536
+PRGV:8519,4986,65536
+PRGV:8519,8192,65536
+PRGC:3103,0,"Processing titles"
+PRGV:0,8192,65536
+MSG:3025,16777216,3,"Title #1 has length of 6 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","1","6","120"
+MSG:3025,16777216,3,"Title #3 has length of 24 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","3","24","120"
+MSG:3025,0,3,"Title #4 has length of 62 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","4","62","120"
+PRGV:3171,8192,65536
+PRGV:3171,9260,65536
+MSG:3038,16777216,2,"Cells 44-44 were removed from title end","Cells %1-%2 were removed from title end","44","44"
+MSG:3028,0,3,"Title #11 was added (43 cell(s), 2:21:13)","Title #%1 was added (%2 cell(s), %3)","11","43","2:21:13"
+PRGV:4228,9260,65536
+PRGV:4228,9616,65536
+MSG:3038,16777216,2,"Cells 8-8 were removed from title end","Cells %1-%2 were removed from title end","8","8"
+MSG:3028,16777216,3,"Title #12 was added (7 cell(s), 0:23:31)","Title #%1 was added (%2 cell(s), %3)","12","7","0:23:31"
+MSG:3038,16777216,2,"Cells 26-26 were removed from title end","Cells %1-%2 were removed from title end","26","26"
+MSG:3028,0,3,"Title #13 was added (25 cell(s), 2:01:53)","Title #%1 was added (%2 cell(s), %3)","13","25","2:01:53"
+PRGV:6342,9616,65536
+PRGV:6342,10329,65536
+MSG:3025,16777216,3,"Title #21 has length of 91 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","21","91","120"
+MSG:3025,16777216,3,"Title #22 has length of 62 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","22","62","120"
+MSG:3025,16777216,3,"Title #23 has length of 62 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","23","62","120"
+MSG:3025,16777216,3,"Title #24 has length of 32 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","24","32","120"
+MSG:3025,0,3,"Title #31 has length of 62 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","31","62","120"
+PRGV:11627,10329,65536
+PRGV:11627,12109,65536
+MSG:3025,16777216,3,"Title #32 has length of 62 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","32","62","120"
+MSG:3025,16777216,3,"Title #33 has length of 62 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","33","62","120"
+MSG:3025,0,3,"Title #34 has length of 62 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","34","62","120"
+PRGV:14798,12109,65536
+PRGV:14798,13178,65536
+MSG:3025,16777216,3,"Title #41 has length of 112 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","41","112","120"
+MSG:3025,0,3,"Title #42 has length of 73 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","42","73","120"
+PRGC:3104,0,"Decrypting data"
+PRGV:0,13178,65536
+PRGV:29789,13178,65536
+PRGV:29789,14959,65536
+PRGV:59578,14959,65536
+PRGV:59578,16740,65536
+PRGV:65536,16740,65536
+PRGV:65536,17096,65536
+MSG:1003,32,3,"DEBUG: Code 233 at r+m5CETu743VRHS9O93xt+sH:0","DEBUG: Code %1 at %2:%3","233","r+m5CETu743VRHS9O93xt+sH","0"
+MSG:5011,0,0,"Operation successfully completed","Operation successfully completed"
+PRGV:0,17096,65536
+PRGV:0,0,65536
+PRGT:5024,0,"Saving all titles to MKV files"
+MSG:5014,131072,2,"Saving 1 titles into directory file:///Users/user/Movies/Rips/Disc","Saving %1 titles into directory %2","1","file:///Users/user/Movies/Rips/Disc"
+PRGC:5057,0,"Analyzing seamless segments"
+PRGV:0,0,65536
+PRGV:0,0,65536
+PRGV:15123,0,65536
+PRGV:50412,0,65536
+PRGV:60494,0,65536
+PRGC:5017,0,"Saving to MKV file"
+PRGV:0,0,65536
+PRGV:5423,0,65536
+PRGV:5423,5424,65536
+PRGV:5675,5424,65536
+PRGV:5675,5676,65536
+PRGV:6018,5676,65536
+PRGV:6018,6019,65536
+PRGV:6192,6019,65536
+PRGV:6192,6192,65536
+PRGV:6527,6192,65536
+PRGV:6527,6527,65536
+PRGV:7012,6527,65536
+PRGV:7012,7012,65536
+PRGV:7110,7012,65536
+PRGV:7110,7110,65536
+PRGV:7271,7110,65536
+PRGV:7271,7271,65536
+PRGV:7367,7271,65536
+PRGV:7367,7368,65536
+PRGV:7535,7368,65536
+PRGV:7535,7535,65536

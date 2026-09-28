@@ -53,6 +53,8 @@ public sealed partial class SettingsPage : Page
         f.Section("Jobs");
         f.Number("Maximum simultaneous jobs (0 = one per drive, no global limit)", () => c.MaxConcurrentJobs, v => c.MaxConcurrentJobs = v, 0, 64);
         f.Number("Keep history for", () => c.HistoryLimit, v => c.HistoryLimit = v, 10, 100000, suffix: "jobs");
+        f.Number("Stop a stuck rip after (0 = never)", () => c.StallTimeoutMinutes, v => c.StallTimeoutMinutes = v, 0, 1440, suffix: "minutes without output");
+        f.Toggle("Keep the computer awake while jobs run", () => c.PreventSleep, v => { c.PreventSleep = v; State.UpdateKeepAwake(); });
         f.Section("MakeMKV");
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttons.Children.Add(PageHelpers.Button("Import settings from MakeMKV", () => State.ImportSettings(MakeMKVEnvironment.InstalledSettings())));

@@ -357,6 +357,34 @@ bro_drive_config_new (void)
 }
 
 void
+bro_drive_config_apply_archive_everything (BroDriveConfig *c)
+{
+  BroTitleSelection *t = &c->rip.titles;
+  c->rip.mode = BRO_MODE_BACKUP_THEN_MKV;
+  c->rip.backup_format = BRO_BACKUP_FOLDER;
+  c->rip.keep_backup_after_mkv = TRUE;
+  c->rip.write_disc_info_json = TRUE;
+  /* Every title: the defaults of a new configuration. */
+  g_free (t->index_pattern);
+  g_free (t->include_pattern);
+  g_free (t->exclude_pattern);
+  memset (t, 0, sizeof *t);
+  t->strategy = BRO_STRATEGY_ALL;
+  t->longest_count = 1;
+  t->index_pattern = g_strdup ("");
+  t->include_pattern = g_strdup ("");
+  t->exclude_pattern = g_strdup ("");
+  t->skip_duplicates = TRUE;
+  c->profile.mode = BRO_PROFILE_GENERATED;
+  g_free (c->profile.generated.selection_rule);
+  c->profile.generated.selection_rule = g_strdup ("+sel:all");
+  c->archive.checksums = TRUE;
+  c->archive.archive_record = TRUE;
+  c->archive.verify_rips = TRUE;
+  c->episodes.keep_play_all = TRUE;
+}
+
+void
 bro_drive_config_free (BroDriveConfig *c)
 {
   if (!c)
@@ -720,6 +748,8 @@ bro_app_config_new (void)
   c->presets = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_preset_free);
   c->plugins = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_post_step_free);
   c->history_limit = 500;
+  c->stall_timeout_minutes = 30;
+  c->prevent_sleep = TRUE;
   return c;
 }
 
@@ -780,6 +810,9 @@ bro_app_config_to_json (const BroAppConfig *c)
     post_step_to_json (b, c->plugins->pdata[i]);
   json_builder_end_array (b);
   I ("historyLimit", c->history_limit);
+  I ("stallTimeoutMinutes", c->stall_timeout_minutes);
+  json_builder_set_member_name (b, "preventSleep");
+  json_builder_add_boolean_value (b, c->prevent_sleep);
   json_builder_end_object (b);
   return json_builder_get_root (b);
 }
@@ -829,6 +862,8 @@ bro_app_config_from_json (JsonNode *node)
       if (JSON_NODE_HOLDS_OBJECT (json_array_get_element (arr, i)))
         g_ptr_array_add (c->plugins, post_step_from_json (json_array_get_object_element (arr, i)));
   c->history_limit = get_int (o, "historyLimit", 500);
+  c->stall_timeout_minutes = get_int (o, "stallTimeoutMinutes", 30);
+  c->prevent_sleep = get_bool (o, "preventSleep", TRUE);
   /* Version 1 kept MakeMKV's file names and named folders after the disc label; version 2 names
    * everything "{name} - … - {format}". Only untouched defaults are replaced. */
   if (c->version < 2)

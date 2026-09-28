@@ -72,6 +72,13 @@ final class JobRunner {
         var errorMessages: [String] = []
         var info = DiscInfoBuilder()
         var driveMismatch: String?
+        /// First error of the run other than the "N titles saved, M failed" summary: usually the cause.
+        var firstError: String?
+        /// MakeMKV's warning that the output may not fit on the destination (message 5038).
+        var spaceWarning: String?
+
+        /// Why the run failed, for the job's error message.
+        var reason: String { firstError ?? errorMessages.last ?? "makemkvcon exit status \(exitCode)" }
     }
 
     let job: RipJob
@@ -294,7 +301,7 @@ final class JobRunner {
             job.stepCount = 2
             let dest = try await backup(decrypt: true, outDir: work, inSubfolder: true)
             job.stepIndex = 1
-            let backupSource: DiscSource = job.drive.rip.backupFormat == .iso ? .iso(path: dest.path) : .folder(path: dest.path)
+            let backupSource: DiscSource = Self.isDirectory(dest) ? .folder(path: dest.path) : .iso(path: dest.path)
             let backupInfo = try await scanDisc(backupSource)
             if let info { try applyTitleMap(from: info, to: backupInfo) }
             if job.drive.rip.writeDiscInfoJSON { _ = try? writeDiscInfo(backupInfo, to: work) }
@@ -702,8 +709,9 @@ final class JobRunner {
         collectDataErrors = readsData
         defer { collectDataErrors = false }
         lastTotalTitle = ""
+        // makemkvcon ignores SIGINT, so it is stopped with SIGTERM.
         let runner = ProcessRunner(executable: env.executable, arguments: args, environment: env.processEnvironment,
-                                   workingDirectory: env.homeDirectory)
+                                   workingDirectory: env.homeDirectory, stopSignal: SIGTERM)
         job.commands.append(runner.commandLine)
         job.appendLog("$ " + runner.commandLine)
         activeRunner = runner
@@ -712,14 +720,23 @@ final class JobRunner {
         defer { activeRunner = nil }
         let out: ProcessRunner.Output
         do {
-            out = try await runner.run { line in sink.receive(line) }
+            out = try await runner.run(stallTimeout: TimeInterval(max(0, config.stallTimeoutMinutes) * 60)) { line in sink.receive(line) }
         } catch {
             throw JobError.message("Could not start makemkvcon: \(error.localizedDescription)")
         }
         await sink.drain()
         summary.exitCode = out.exitCode
-        if cancelRequested || out.wasCancelled { throw CancellationError() }
-        if let m = summary.driveMismatch { throw JobError.message(m) }
+        // These stop makemkvcon themselves, so they are checked before cancellation.
+        if !cancelRequested {
+            if let m = summary.driveMismatch { throw JobError.message(m) }
+            if let w = summary.spaceWarning {
+                throw JobError.message("Not enough free space on the destination, so the rip was stopped before writing. MakeMKV: “\(w)”")
+            }
+            if out.stalled {
+                throw JobError.message("makemkvcon printed nothing for \(config.stallTimeoutMinutes) minutes and was stopped\(out.abandoned ? " (it did not exit; the drive may need to be reset)" : ""). The drive or disc may be stuck: eject the disc and retry.")
+            }
+        }
+        if cancelRequested || out.wasCancelled || out.abandoned { throw CancellationError() }
         return summary
     }
 
@@ -731,6 +748,7 @@ final class JobRunner {
             if sev == .debug && !showDebug { return }
             job.appendLog(m.text, severity: sev)
             if sev == .error {
+                if summary.firstError == nil && m.code != 5037 && m.code != 5004 { summary.firstError = m.text }
                 summary.errorMessages.append(m.text)
                 job.errorMessages.append(m.text)
                 if collectDataErrors { job.dataErrors.append(m.text) }
@@ -740,9 +758,16 @@ final class JobRunner {
                 if job.makemkvVersion.isEmpty { job.makemkvVersion = m.parameters.first ?? m.text }
             case 5036, 5005:
                 summary.saved = Int(m.parameters.first ?? "")
-            case 5037:
+            case 5037, 5004:
                 summary.saved = Int(m.parameters.first ?? "")
                 summary.failed = m.parameters.count > 1 ? Int(m.parameters[1]) : nil
+            case 5038:
+                // "The total size of all output files may reach as much as … while there are only … free":
+                // stop before anything is written rather than fail when the disk fills up.
+                if summary.spaceWarning == nil {
+                    summary.spaceWarning = m.text
+                    activeRunner?.cancel()
+                }
             default: break
             }
         case let .progressTotalTitle(_, _, name):
@@ -804,6 +829,7 @@ final class JobRunner {
         job.ripTitles = indices
         fileTitles = [:]
         await prepareEpisodes(source: source, info: info, indices: indices)
+        try checkFreeSpace(titles: indices.compactMap { info.title(at: $0) }, outDir: outDir)
         let everyTitle = Set(indices) == Set(info.titles.map(\.index))
         let single = everyTitle && job.trackSelections.isEmpty
         let invocations = single ? ["all"] : indices.map(String.init)
@@ -823,7 +849,7 @@ final class JobRunner {
             let produced = Self.mkvFiles(in: outDir).subtracting(before).sorted { $0.path < $1.path }
             let failed = s.exitCode != 0 || (s.failed ?? 0) > 0 || produced.isEmpty
             if failed {
-                let why = s.errorMessages.last ?? "makemkvcon exit status \(s.exitCode)"
+                let why = s.reason
                 failures.append(single ? why : "title \(t): \(why)")
                 job.appendLog("Title \(t) failed: \(why)", severity: .error)
                 if single && produced.isEmpty { break }
@@ -888,14 +914,25 @@ final class JobRunner {
         let s = try await runMakeMKV(args, readsData: true)
         let exists = fm.fileExists(atPath: dest.path) && ((try? fm.contentsOfDirectory(atPath: dest.path).isEmpty == false) ?? true)
         if s.exitCode != 0 || !exists || (s.failed ?? 0) > 0 {
-            throw JobError.message("Backup failed: \(s.errorMessages.last ?? "makemkvcon exit status \(s.exitCode)")")
+            throw JobError.message("Backup failed: \(s.reason)")
         }
-        if job.drive.archive.verifyRips, let problem = BackupVerifier.problem(dest, iso: job.drive.rip.backupFormat == .iso) {
+        // MakeMKV writes an ISO image when the destination ends in .iso. If it wrote a folder instead, the
+        // backup is complete but isn't an image: keep it as a folder backup rather than failing the job.
+        var isDir: ObjCBool = false
+        if job.drive.rip.backupFormat == .iso, fm.fileExists(atPath: dest.path, isDirectory: &isDir), isDir.boolValue,
+           BackupVerifier.problem(dest, iso: false) == nil {
+            let folder = Paths.uniqueURL(dest.deletingPathExtension())
+            if (try? fm.moveItem(at: dest, to: folder)) != nil {
+                job.appendLog("MakeMKV wrote a folder instead of an ISO image; kept the backup as the folder \(folder.lastPathComponent)", severity: .warning)
+                dest = folder
+            }
+        }
+        if job.drive.archive.verifyRips, let problem = BackupVerifier.problem(dest, iso: !Self.isDirectory(dest)) {
             throw JobError.message("Backup failed the check: \(problem)")
         }
         job.appendLog("Backup saved to \(dest.path)")
         // Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart.
-        if job.drive.rip.backupFormat == .folder, let found = DiscFormat.detect(backupFolder: dest), found != job.identity?.format {
+        if Self.isDirectory(dest), let found = DiscFormat.detect(backupFolder: dest), found != job.identity?.format {
             resolveIdentity(info: job.discInfo, format: found)
             let renamed = backupName(decrypt: decrypt)
             if !renamed.isEmpty, renamed != dest.lastPathComponent {
@@ -920,6 +957,21 @@ final class JobRunner {
         return TemplateRenderer.renderPath(template, values: values).replacingOccurrences(of: "/", with: " - ")
     }
 
+    /// Fails the job before ripping when the destination can't hold the chosen titles (sizes from the listing),
+    /// plus a copy of titles with hand-picked tracks (remuxed) and of a "play all" title (split into episodes).
+    private func checkFreeSpace(titles: [TitleInfo], outDir: URL) throws {
+        var need = titles.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        need += titles.filter { job.trackSelections[$0.index] != nil }.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        if let plan = episodePlan, let t = titles.first(where: { $0.sourceTitleId == plan.title }) { need += t.sizeBytes }
+        guard need > 0, let free = DiskSpace.available(at: outDir) else { return }
+        let required = DiskSpace.required(need)
+        let fmt = { (b: Int64) in ByteCountFormatter.string(fromByteCount: b, countStyle: .file) }
+        job.appendLog("Free space: \(fmt(free)); the titles need about \(fmt(need))")
+        if free < required {
+            throw JobError.message("Not enough free space in \(outDir.deletingLastPathComponent().path): the titles need about \(fmt(required)) (with a margin), only \(fmt(free)) is free.")
+        }
+    }
+
     /// Checks a ripped file against its title in the disc listing. Returns why it can't be trusted, or nil.
     private func verify(_ file: URL, title: TitleInfo) async -> String? {
         guard job.drive.archive.verifyRips else { return nil }
@@ -942,6 +994,9 @@ final class JobRunner {
         }
         let length = probe.durationSeconds.map { TitleInfo.formatDuration(Int($0.rounded())) } ?? "?"
         job.appendLog("Checked \(file.lastPathComponent): \(length), \(probe.trackTypes.count) track(s), \(probe.chapterCount) chapter(s)")
+        if !title.tracks.isEmpty && probe.trackTypes.count < title.tracks.count {
+            job.appendLog("\(file.lastPathComponent) has \(probe.trackTypes.count) of the \(title.tracks.count) tracks on the disc; the selection rule left out the rest (use “+sel:all” to keep every track)")
+        }
         return nil
     }
 
@@ -1046,6 +1101,11 @@ final class JobRunner {
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         try enc.encode(DiscInfoExport(info)).write(to: url)
         return url
+    }
+
+    static func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 
     static func mkvFiles(in dir: URL) -> Set<URL> {

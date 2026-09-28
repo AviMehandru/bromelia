@@ -17,6 +17,8 @@ public interface IPlatformServices
 {
     Task<bool> EjectAsync(string devicePath);
     void Notify(string title, string body, bool sound);
+    /// <summary>Keeps the computer from sleeping while <paramref name="on"/> (called on the UI thread).</summary>
+    void KeepAwake(bool on) { }
 }
 
 public sealed class NullPlatformServices : IPlatformServices
@@ -36,6 +38,13 @@ public sealed class JobRunner
         public readonly List<string> ErrorMessages = new();
         public readonly DiscInfoBuilder Info = new();
         public string? DriveMismatch;
+        /// <summary>First error of the run other than the "N titles saved, M failed" summary: usually the cause.</summary>
+        public string? FirstError;
+        /// <summary>MakeMKV's warning that the output may not fit on the destination (message 5038).</summary>
+        public string? SpaceWarning;
+
+        /// <summary>Why the run failed, for the job's error message.</summary>
+        public string Reason => FirstError ?? ErrorMessages.LastOrDefault() ?? $"makemkvcon exit status {ExitCode}";
     }
 
     readonly RipJob _job;
@@ -271,7 +280,7 @@ public sealed class JobRunner
                 _job.StepCount = 2;
                 var dest = await BackupAsync(true, outDir, true);
                 _job.StepIndex = 1;
-                DiscSource backupSource = _job.Drive.Rip.BackupFormat == BackupFormat.Iso ? new DiscSource.Iso(dest) : new DiscSource.Folder(dest);
+                DiscSource backupSource = Directory.Exists(dest) ? new DiscSource.Folder(dest) : new DiscSource.Iso(dest);
                 var backupInfo = await ScanDiscAsync(backupSource);
                 if (info != null) ApplyTitleMap(info, backupInfo);
                 if (_job.Drive.Rip.WriteDiscInfoJson) TryWriteDiscInfo(backupInfo, outDir);
@@ -748,7 +757,7 @@ public sealed class JobRunner
                     _active = r;
                     _job.Commands.Add(r.CommandLine);
                     _job.AppendLog("$ " + r.CommandLine);
-                }, default, _cts.Token);
+                }, default, _cts.Token, TimeSpan.FromMinutes(Math.Max(0, _config.StallTimeoutMinutes)));
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or FileNotFoundException)
         {
@@ -761,8 +770,16 @@ public sealed class JobRunner
         await _ui.Barrier();
         _collectDataErrors = false;
         summary.ExitCode = result.ExitCode;
-        if (CancelRequested || result.Cancelled) throw new OperationCanceledException();
-        if (summary.DriveMismatch != null) throw new JobException(summary.DriveMismatch);
+        // These stop makemkvcon themselves, so they are checked before cancellation.
+        if (!CancelRequested)
+        {
+            if (summary.DriveMismatch != null) throw new JobException(summary.DriveMismatch);
+            if (summary.SpaceWarning != null)
+                throw new JobException($"Not enough free space on the destination, so the rip was stopped before writing. MakeMKV: “{summary.SpaceWarning}”");
+            if (result.Stalled)
+                throw new JobException($"makemkvcon printed nothing for {_config.StallTimeoutMinutes} minutes and was stopped{(result.Abandoned ? " (it did not exit; the drive may need to be reset)" : "")}. The drive or disc may be stuck: eject the disc and retry.");
+        }
+        if (CancelRequested || result.Cancelled || result.Abandoned) throw new OperationCanceledException();
         return summary;
     }
 
@@ -777,13 +794,21 @@ public sealed class JobRunner
                 _job.AppendLog(m.Text, sev);
                 if (sev == Severity.Error)
                 {
+                    if (s.FirstError == null && m.Code is not (5037 or 5004)) s.FirstError = m.Text;
                     s.ErrorMessages.Add(m.Text);
                     _job.ErrorMessages.Add(m.Text);
                     if (_collectDataErrors) _job.DataErrors.Add(m.Text);
                 }
                 if (m.Code == 1005 && _job.MakemkvVersion.Length == 0) _job.MakemkvVersion = m.Parameters.Count > 0 ? m.Parameters[0] : m.Text;
                 if (m.Code is 5036 or 5005 && m.Parameters.Count > 0 && int.TryParse(m.Parameters[0], out var saved)) s.Saved = saved;
-                if (m.Code == 5037 && m.Parameters.Count > 1)
+                if (m.Code == 5038 && s.SpaceWarning == null)
+                {
+                    // "The total size of all output files may reach as much as … while there are only … free":
+                    // stop before anything is written rather than fail when the disk fills up.
+                    s.SpaceWarning = m.Text;
+                    _active?.Cancel();
+                }
+                if (m.Code is 5037 or 5004 && m.Parameters.Count > 1)
                 {
                     if (int.TryParse(m.Parameters[0], out var sv)) s.Saved = sv;
                     if (int.TryParse(m.Parameters[1], out var fl)) s.Failed = fl;
@@ -855,6 +880,7 @@ public sealed class JobRunner
         _job.RipTitles = indices;
         _fileTitles.Clear();
         await PrepareEpisodesAsync(source, info, indices);
+        CheckFreeSpace(indices.Select(info.Title).OfType<TitleInfo>().ToList(), outDir);
         bool everyTitle = indices.ToHashSet().SetEquals(info.Titles.Select(t => t.Index));
         bool single = everyTitle && _job.TrackSelections.Count == 0;
         var invocations = single ? new List<string> { "all" } : indices.Select(i => i.ToString(CultureInfo.InvariantCulture)).ToList();
@@ -879,7 +905,7 @@ public sealed class JobRunner
             bool failed = s.ExitCode != 0 || (s.Failed ?? 0) > 0 || produced.Count == 0;
             if (failed)
             {
-                var why = s.ErrorMessages.LastOrDefault() ?? $"makemkvcon exit status {s.ExitCode}";
+                var why = s.Reason;
                 failures.Add(single ? why : $"title {t}: {why}");
                 _job.AppendLog($"Title {t} failed: {why}", Severity.Error);
                 if (single && produced.Count == 0) break;
@@ -944,14 +970,27 @@ public sealed class JobRunner
             var s = await RunMakeMkvAsync(args, readsData: true);
             bool exists = File.Exists(dest) || (Directory.Exists(dest) && Directory.EnumerateFileSystemEntries(dest).Any());
             if (s.ExitCode != 0 || !exists || (s.Failed ?? 0) > 0)
-                throw new JobException($"Backup failed: {s.ErrorMessages.LastOrDefault() ?? $"makemkvcon exit status {s.ExitCode}"}");
-            if (_job.Drive.Archive.VerifyRips && BackupVerifier.Problem(dest, _job.Drive.Rip.BackupFormat == BackupFormat.Iso) is { } problem)
+                throw new JobException($"Backup failed: {s.Reason}");
+            // MakeMKV writes an ISO image when the destination ends in .iso. If it wrote a folder instead, the backup is
+            // complete but isn't an image: keep it as a folder backup rather than failing the job.
+            if (_job.Drive.Rip.BackupFormat == BackupFormat.Iso && Directory.Exists(dest) && BackupVerifier.Problem(dest, false) == null)
+            {
+                var folder = Paths.UniquePath(Path.Combine(Path.GetDirectoryName(dest)!, Path.GetFileNameWithoutExtension(dest)));
+                try
+                {
+                    Directory.Move(dest, folder);
+                    _job.AppendLog($"MakeMKV wrote a folder instead of an ISO image; kept the backup as the folder {Path.GetFileName(folder)}", Severity.Warning);
+                    dest = folder;
+                }
+                catch (IOException) { }
+            }
+            if (_job.Drive.Archive.VerifyRips && BackupVerifier.Problem(dest, !Directory.Exists(dest)) is { } problem)
                 throw new JobException($"Backup failed the check: {problem}");
         }
         finally { _expectedDrive = null; }
         _job.AppendLog($"Backup saved to {dest}");
         // Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart.
-        if (_job.Drive.Rip.BackupFormat == BackupFormat.Folder && DiscFormatExtensions.DetectBackupFolder(dest) is { } found && found != _job.Identity?.Format)
+        if (Directory.Exists(dest) && DiscFormatExtensions.DetectBackupFolder(dest) is { } found && found != _job.Identity?.Format)
         {
             ResolveIdentity(_job.DiscInfo, 0, found);
             var renamed = BackupName(decrypt);
@@ -982,6 +1021,19 @@ public sealed class JobRunner
         return TemplateRenderer.RenderPath(template, values).Replace(Path.DirectorySeparatorChar.ToString(), " - ");
     }
 
+    /// <summary>Fails the job before ripping when the destination can't hold the chosen titles (sizes from the listing),
+    /// plus a copy of titles with hand-picked tracks (remuxed) and of a "play all" title (split into episodes).</summary>
+    void CheckFreeSpace(List<TitleInfo> titles, string outDir)
+    {
+        long need = titles.Sum(t => t.SizeBytes) + titles.Where(t => _job.TrackSelections.ContainsKey(t.Index)).Sum(t => t.SizeBytes);
+        if (_episodePlan is { } plan && titles.FirstOrDefault(t => t.SourceTitleId == plan.Title) is { } playAll) need += playAll.SizeBytes;
+        if (need <= 0 || DiskSpace.Available(outDir) is not { } free) return;
+        long required = DiskSpace.Required(need);
+        _job.AppendLog($"Free space: {TitleInfo.FormatBytes(free)}; the titles need about {TitleInfo.FormatBytes(need)}");
+        if (free < required)
+            throw new JobException($"Not enough free space in {Path.GetDirectoryName(outDir)}: the titles need about {TitleInfo.FormatBytes(required)} (with a margin), only {TitleInfo.FormatBytes(free)} is free.");
+    }
+
     /// <summary>Checks a ripped file against its title in the disc listing. Returns why it can't be trusted, or null.</summary>
     async Task<string?> VerifyAsync(string file, TitleInfo title)
     {
@@ -1004,6 +1056,8 @@ public sealed class JobRunner
         if (result.Problems.Count > 0) return $"{name} doesn't match the disc listing: {string.Join("; ", result.Problems)}";
         var length = probe.DurationSeconds is { } d ? TitleInfo.FormatDuration((int)Math.Round(d)) : "?";
         _job.AppendLog($"Checked {name}: {length}, {probe.TrackTypes.Count} track(s), {probe.ChapterCount} chapter(s)");
+        if (title.Tracks.Count > 0 && probe.TrackTypes.Count < title.Tracks.Count)
+            _job.AppendLog($"{name} has {probe.TrackTypes.Count} of the {title.Tracks.Count} tracks on the disc; the selection rule left out the rest (use “+sel:all” to keep every track)");
         return null;
     }
 

@@ -174,11 +174,11 @@ public sealed class MakeMKVEnvironment
 
     /// <summary>Creates the runner and starts it with this environment's settings in effect.</summary>
     public async Task<ProcessRunner.Result> RunAsync(IEnumerable<string> args, Action<string> onLine, Action<ProcessRunner>? register = null,
-        TimeSpan timeout = default, CancellationToken ct = default)
+        TimeSpan timeout = default, CancellationToken ct = default, TimeSpan stallTimeout = default)
     {
         var runner = new ProcessRunner(Executable, args, ProcessEnvironment, HomeDirectory);
         register?.Invoke(runner);
-        if (!UsesRegistry) return await runner.RunAsync(onLine, timeout, ct).ConfigureAwait(false);
+        if (!UsesRegistry) return await runner.RunAsync(onLine, timeout, ct, stallTimeout).ConfigureAwait(false);
 
         await RegistrySettings.LaunchLock.WaitAsync(ct).ConfigureAwait(false);
         Dictionary<string, string?>? snapshot = null;
@@ -193,7 +193,7 @@ public sealed class MakeMKVEnvironment
         try
         {
             snapshot = RegistrySettings.Apply(Settings, ManagedKeys);
-            var run = runner.RunAsync(line => { settingsRead.TrySetResult(); onLine(line); }, timeout, ct);
+            var run = runner.RunAsync(line => { settingsRead.TrySetResult(); onLine(line); }, timeout, ct, stallTimeout);
             // Restore as soon as makemkvcon has read its settings (first output), exits, or after 15 s.
             await Task.WhenAny(settingsRead.Task, run, Task.Delay(TimeSpan.FromSeconds(15), CancellationToken.None)).ConfigureAwait(false);
             Release();

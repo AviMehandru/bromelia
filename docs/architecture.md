@@ -108,3 +108,26 @@ with read errors*. When the job ends, files are hashed in the staging folder and
 output folder on success, or into a folder marked `[READ ERRORS]` / `[INCOMPLETE]` with a note file
 otherwise. Paths recorded during the job (files, episodes, checksums) are rewritten to the final location
 before the manifest, archive record and post-processing see them.
+
+## Stopping processes
+
+`makemkvcon` ignores SIGINT, so it is stopped with SIGTERM (other tools get SIGINT first), then SIGKILL
+after 5 s (Windows kills the process tree at once). A watchdog stops a `makemkvcon` run that prints
+nothing for the stall timeout. Once a process has ended, its output is read for at most 5 more seconds (a
+child it left behind may keep the pipe open), and a process that is still there 30 s after SIGKILL — stuck
+in the kernel on a hung drive — is abandoned so the job can end. On Linux all of this runs on a watchdog
+thread per process, so it doesn't depend on a main loop.
+
+The robot messages that decide a job's outcome were checked against real `makemkvcon` 2.0 output recorded
+in `shared/fixtures`: a full disk (`rip-disk-full`: exit status 0, message 5038, write error 2018, the
+partial file deleted by MakeMKV), a process killed while writing (`rip-killed`: exit 143, partial file
+left), a missing source (`rip-missing-source`: exit 11, message 5006) and a missing title
+(`rip-missing-title`: exit 12). `makemkvcon` exits with 0 when a title fails, so the saved / failed counts
+(5036, 5037, 5004) and the output files decide. The job's error message is the first error of the run
+other than the saved / failed summary. `rip-outcomes.json` lists the expected result of each recorded run;
+the tests of all three platforms replay it through the job pipeline with a stand-in `makemkvcon`.
+
+## Sleep
+
+While jobs run, macOS gets a `ProcessInfo` activity (no idle sleep, no App Nap), Windows
+`SetThreadExecutionState(ES_SYSTEM_REQUIRED)`, and Linux a GTK inhibitor (suspend and idle).

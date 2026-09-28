@@ -1,0 +1,12 @@
+{
+  "comment": "How a job must end when makemkvcon's mkv command prints each fixture, exits with exitCode and (writesFile) leaves an output file behind. Every platform's tests replay these through the job pipeline with a stand-in makemkvcon. rip-disk-full, rip-killed (SIGTERM mid-write), rip-missing-source and rip-missing-title are real makemkvcon 2.0 output; rip-failure and rip-read-errors add read-error messages (as a scratched disc produces) to real output.",
+  "cases": [
+    { "fixture": "mkv-rip", "exitCode": 0, "writesFile": true, "status": "success", "keptApart": false },
+    { "fixture": "rip-read-errors", "exitCode": 0, "writesFile": true, "status": "errors", "error": "read error", "keptApart": true },
+    { "fixture": "rip-failure", "exitCode": 0, "writesFile": false, "status": "failed", "error": "MEDIUM ERROR", "keptApart": false },
+    { "fixture": "rip-disk-full", "exitCode": 0, "writesFile": false, "status": "failed", "error": "free space", "keptApart": false },
+    { "fixture": "rip-killed", "exitCode": 143, "writesFile": true, "status": "failed", "error": "exit status 143", "keptApart": true },
+    { "fixture": "rip-missing-source", "exitCode": 11, "writesFile": false, "status": "failed", "error": "does not exist", "keptApart": false },
+    { "fixture": "rip-missing-title", "exitCode": 12, "writesFile": false, "status": "failed", "error": "Input parameter is incorrect", "keptApart": false }
+  ]
+}

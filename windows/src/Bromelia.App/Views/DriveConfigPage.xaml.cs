@@ -77,6 +77,14 @@ public sealed partial class DriveConfigPage : Page
             menu.Items.Add(item);
         }
         menu.Items.Add(new MenuFlyoutSeparator());
+        var everything = new MenuFlyoutItem { Text = "Archive everything (backup then MKV, every track, all checks)" };
+        everything.Click += (_, _) =>
+        {
+            var c = _draft!.Clone();
+            c.ApplyArchiveEverything();
+            Reload(c);
+        };
+        menu.Items.Add(everything);
         var fromDefault = new MenuFlyoutItem { Text = "Copy settings from the default configuration" };
         fromDefault.Click += (_, _) => Reload(_draft!.ApplyingBody(App.State.Config.DefaultDrive));
         menu.Items.Add(fromDefault);

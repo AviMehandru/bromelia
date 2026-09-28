@@ -215,7 +215,8 @@ struct RobotMessage: Equatable, Sendable, Codable {
     var parameters: [String]
 
     /// Codes that always indicate a failure even when no error box flag is set.
-    static let errorCodes: Set<Int> = [2003, 2004, 2023, 5003, 5010, 5021, 5037, 5055, 5069, 5077]
+    /// 2018: write error (e.g. "No space left on device"); 5006: source file does not exist.
+    static let errorCodes: Set<Int> = [2003, 2004, 2018, 2023, 5003, 5006, 5010, 5021, 5037, 5055, 5069, 5077]
     static let warningCodes: Set<Int> = [3038, 3041, 5042]
 
     var severity: Severity {

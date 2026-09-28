@@ -1,0 +1,171 @@
+MSG:1005,0,1,"MakeMKV v2.0.0 darwin(arm64-release) started","%1 started","MakeMKV v2.0.0 darwin(arm64-release)"
+MSG:1004,131072,1,"Debug logging enabled, log will be saved as file:///Users/user/MakeMKV_log.txt","Debug logging enabled, log will be saved as %1","file:///Users/user/MakeMKV_log.txt"
+PRGT:5018,0,"Scanning CD-ROM devices"
+PRGC:5018,0,"Scanning CD-ROM devices"
+PRGV:0,0,65536
+PRGV:0,0,65536
+PRGV:65536,0,65536
+PRGV:65536,65536,65536
+MSG:5042,0,0,"The program can't find any usable optical drives.","The program can't find any usable optical drives."
+DRV:0,256,999,0,"","",""
+DRV:1,256,999,0,"","",""
+DRV:2,256,999,0,"","",""
+DRV:3,256,999,0,"","",""
+DRV:4,256,999,0,"","",""
+DRV:5,256,999,0,"","",""
+DRV:6,256,999,0,"","",""
+DRV:7,256,999,0,"","",""
+DRV:8,256,999,0,"","",""
+DRV:9,256,999,0,"","",""
+DRV:10,256,999,0,"","",""
+DRV:11,256,999,0,"","",""
+DRV:12,256,999,0,"","",""
+DRV:13,256,999,0,"","",""
+DRV:14,256,999,0,"","",""
+DRV:15,256,999,0,"","",""
+PRGV:0,65536,65536
+PRGV:0,0,65536
+PRGT:3100,0,"Opening DVD disc"
+MSG:3007,0,0,"Using direct disc access mode","Using direct disc access mode"
+PRGC:3102,0,"Processing title sets"
+PRGV:0,0,65536
+PRGV:0,0,65536
+PRGV:5957,0,65536
+PRGV:5957,356,65536
+PRGV:11915,356,65536
+PRGV:11915,712,65536
+PRGV:17873,712,65536
+PRGV:17873,1068,65536
+PRGV:23831,1068,65536
+PRGV:23831,1424,65536
+PRGV:29789,1424,65536
+PRGV:29789,1780,65536
+PRGV:35746,1780,65536
+PRGV:35746,2137,65536
+PRGV:41704,2137,65536
+PRGV:41704,2493,65536
+PRGV:47662,2493,65536
+PRGV:47662,2849,65536
+PRGV:53620,2849,65536
+PRGV:53620,3205,65536
+PRGV:59578,3205,65536
+PRGV:59578,3561,65536
+PRGC:3120,1,"Scanning contents"
+PRGV:0,3561,65536
+PRGV:655,3561,65536
+PRGV:655,3917,65536
+PRGC:3103,0,"Processing titles"
+PRGV:0,3917,65536
+MSG:3025,0,3,"Title #1 has length of 6 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","1","6","120"
+PRGV:1057,3917,65536
+PRGV:1057,4274,65536
+MSG:3025,16777216,3,"Title #3 has length of 24 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","3","24","120"
+MSG:3025,0,3,"Title #4 has length of 61 seconds which is less than minimum title length of 120 seconds and was therefore skipped","Title #%1 has length of %2 seconds which is less than minimum title length of %3 seconds and was therefore skipped","4","61","120"
+PRGV:3171,4274,65536
+PRGV:3171,4986,65536
+MSG:3038,16777216,2,"Cells 51-51 were removed from title end","Cells %1-%2 were removed from title end","51","51"
+MSG:3028,16777216,3,"Title #11 was added (50 cell(s), 2:44:48)","Title #%1 was added (%2 cell(s), %3)","11","50","2:44:48"
+MSG:3038,16777216,2,"Cells 8-8 were removed from title end","Cells %1-%2 were removed from title end","8","8"
+MSG:3028,0,3,"Title #12 was added (7 cell(s), 0:23:32)","Title #%1 was added (%2 cell(s), %3)","12","7","0:23:32"
+PRGV:5285,4986,65536
+PRGV:5285,5698,65536
+MSG:3038,16777216,2,"Cells 30-30 were removed from title end","Cells %1-%2 were removed from title end","30","30"
+MSG:3028,0,3,"Title #13 was added (29 cell(s), 2:21:58)","Title #%1 was added (%2 cell(s), %3)","13","29","2:21:58"
+PRGC:3104,0,"Decrypting data"
+PRGV:0,5698,65536
+PRGV:29789,5698,65536
+PRGV:29789,7479,65536
+PRGV:59578,7479,65536
+PRGV:59578,9260,65536
+PRGV:65536,9260,65536
+PRGV:65536,9616,65536
+MSG:1003,32,3,"DEBUG: Code 233 at aTIkZeqGWCrInPbYF7J3P4O0:0","DEBUG: Code %1 at %2:%3","233","aTIkZeqGWCrInPbYF7J3P4O0","0"
+MSG:5011,0,0,"Operation successfully completed","Operation successfully completed"
+PRGV:0,9616,65536
+PRGV:0,0,65536
+PRGT:5024,0,"Saving all titles to MKV files"
+MSG:5014,131072,2,"Saving 1 titles into directory file:///Users/user/Movies/Rips/Disc","Saving %1 titles into directory %2","1","file:///Users/user/Movies/Rips/Disc"
+PRGC:5057,0,"Analyzing seamless segments"
+PRGV:0,0,65536
+PRGV:0,0,65536
+PRGV:16384,0,65536
+PRGV:49152,0,65536
+PRGC:5017,0,"Saving to MKV file"
+PRGV:0,0,65536
+PRGV:346,0,65536
+PRGV:346,346,65536
+PRGV:3690,346,65536
+PRGV:3690,3690,65536
+PRGV:6062,3690,65536
+PRGV:6062,6062,65536
+PRGV:8594,6062,65536
+PRGV:8594,8595,65536
+PRGV:9741,8595,65536
+PRGV:9741,9741,65536
+PRGV:11750,9741,65536
+PRGV:11750,11751,65536
+PRGV:14272,11751,65536
+PRGV:14272,14273,65536
+PRGV:16446,14273,65536
+PRGV:16446,16447,65536
+PRGV:17630,16447,65536
+PRGV:17630,17630,65536
+PRGV:18523,17630,65536
+PRGV:18523,18523,65536
+PRGV:20447,18523,65536
+PRGV:20447,20447,65536
+PRGV:20962,20447,65536
+PRGV:20962,20962,65536
+PRGV:21932,20962,65536
+PRGV:21932,21932,65536
+PRGV:23256,21932,65536
+PRGV:23256,23257,65536
+PRGV:24315,23257,65536
+PRGV:24315,24316,65536
+PRGV:26740,24316,65536
+PRGV:26740,26740,65536
+PRGV:28748,26740,65536
+PRGV:28748,28748,65536
+PRGV:31833,28748,65536
+PRGV:31833,31833,65536
+PRGV:34730,31833,65536
+PRGV:34730,34731,65536
+PRGV:37411,34731,65536
+PRGV:37411,37411,65536
+PRGV:39815,37411,65536
+PRGV:39815,39815,65536
+PRGV:41897,39815,65536
+PRGV:41897,41897,65536
+PRGV:44656,41897,65536
+PRGV:44656,44656,65536
+PRGV:45771,44656,65536
+PRGV:45771,45771,65536
+PRGV:47326,45771,65536
+PRGV:47326,47326,65536
+PRGV:49539,47326,65536
+PRGV:49539,49539,65536
+PRGV:50667,49539,65536
+PRGV:50667,50667,65536
+PRGV:53128,50667,65536
+PRGV:53128,53128,65536
+PRGV:54412,53128,65536
+PRGV:54412,54412,65536
+PRGV:56322,54412,65536
+PRGV:56322,56322,65536
+PRGV:58139,56322,65536
+PRGV:58139,58139,65536
+PRGV:60169,58139,65536
+PRGV:60169,60169,65536
+PRGV:61075,60169,65536
+PRGV:61075,61075,65536
+PRGV:62525,61075,65536
+PRGV:62525,62525,65536
+PRGV:65148,62525,65536
+PRGV:65148,65148,65536
+PRGV:65536,65148,65536
+PRGV:65536,65535,65536
+PRGV:65536,65536,65536
+MSG:2003,0,3,"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/VIDEO_TS/VTS_01_1.VOB' at offset '1048576'","Error '%1' occurred while reading '%2' at offset '%3'","Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR","/VIDEO_TS/VTS_01_1.VOB","1048576"
+MSG:2003,0,3,"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/VIDEO_TS/VTS_01_1.VOB' at offset '2097152'","Error '%1' occurred while reading '%2' at offset '%3'","Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR","/VIDEO_TS/VTS_01_1.VOB","2097152"
+MSG:5005,128,1,"1 titles saved","%1 titles saved","1"
+MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"

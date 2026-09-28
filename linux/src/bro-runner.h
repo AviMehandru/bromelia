@@ -120,6 +120,10 @@ void         bro_rip_check (const BroMkvProbe *p, BroTitle *title, GPtrArray *pr
 double       bro_rip_duration_tolerance (double expected);
 /* Why a backup doesn't look like a disc (BDMV / VIDEO_TS / HVDVD_TS folder, or ISO 9660 / UDF image), or NULL. */
 char        *bro_backup_problem (const char *path, gboolean iso);
+/* Bytes free on the volume holding path (or its nearest existing parent), or -1 when unknown. */
+gint64       bro_disk_available (const char *path);
+/* bytes plus a margin (2 % or 256 MB, whichever is larger). */
+gint64       bro_disk_required (gint64 bytes);
 /* Why `now` looks like a different disc than `old` (the listing it was opened with), or NULL. */
 char        *bro_listing_different_disc (BroDiscInfo *old, BroDiscInfo *now);
 /* Maps titles of `old` (indices) to titles of `now` by source title, duration and segment map. Returns

@@ -47,8 +47,8 @@ private struct FakeMakeMKV {
     var executable: URL { dir.appendingPathComponent("makemkvcon") }
     var calls: String { (try? String(contentsOf: dir.appendingPathComponent("calls.txt"), encoding: .utf8)) ?? "" }
 
-    /// `mkv` is shell code run with `$title` and `$dest` set.
-    init(listing: String, mkv: String) throws {
+    /// `mkv` is shell code run with `$title` and `$dest` set; `backup` with `$dest` set.
+    init(listing: String, mkv: String, backup: String = "") throws {
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-fake-\(UUID().uuidString.prefix(8))", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try listing.write(to: dir.appendingPathComponent("listing.txt"), atomically: true, encoding: .utf8)
@@ -64,6 +64,9 @@ private struct FakeMakeMKV {
           info) cat '\(dir.path)/listing.txt' ;;
           mkv) title="$2"; dest="$3"
         \(mkv)
+          ;;
+          backup) for a in "$@"; do dest="$a"; done
+        \(backup)
           ;;
         esac
         exit 0
@@ -380,5 +383,205 @@ struct RipCheckTests {
         #expect(PostProcessor.shouldRun(step, status: .completedWithErrors))
         #expect(JobState.completedWithErrors.statusWord == "errors")
         #expect(JobState.completedWithErrors.isFinished)
+    }
+}
+
+// MARK: - Real makemkvcon failures, stalls, free space, ISO backups, presets
+
+private let fixturesDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().appendingPathComponent("shared/fixtures")
+
+/// shared/fixtures/rip-outcomes.json: how a job must end for each recorded makemkvcon run. The same file is
+/// replayed by the Windows and Linux tests, so the three implementations can't drift apart.
+private struct Outcomes: Decodable {
+    struct Case: Decodable {
+        var fixture: String
+        var exitCode: Int
+        var writesFile: Bool
+        var status: String
+        var error: String?
+        var keptApart: Bool
+    }
+    var cases: [Case]
+}
+
+@Suite("Recorded makemkvcon runs", .serialized)
+@MainActor
+struct RecordedRunTests {
+    init() {
+        Paths.dataOverride = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-test-data", isDirectory: true)
+    }
+
+    @Test func everyRecordedRunEndsAsExpected() async throws {
+        let outcomes = try JSONDecoder().decode(Outcomes.self, from: Data(contentsOf: fixturesDir.appendingPathComponent("rip-outcomes.json")))
+        #expect(outcomes.cases.count >= 7)
+        for c in outcomes.cases {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-rec-\(UUID().uuidString.prefix(8))", isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let fixture = fixturesDir.appendingPathComponent("\(c.fixture).txt").path
+            let mkv = """
+                \(c.writesFile ? #"printf 'mkv data' > "$dest/title_t0$title.mkv""# : ":")
+                cat '\(fixture)'
+                exit \(c.exitCode)
+            """
+            let fake = try FakeMakeMKV(listing: listing(titles: [("0:00:10", 1), ("0:00:20", 2)]), mkv: mkv)
+            var config = AppConfig()
+            config.outputRoot = root.path
+            var drive = DriveConfig()
+            drive.automation.notify = false
+            let job = RipJob(source: .iso(path: "/nonexistent/test.iso"), drive: drive, laneKey: "iso:rec", sourceLabel: "test", discLabel: "", mode: .mkv)
+            job.manualTitles = [0]
+            await JobRunner(job: job, config: config, makemkvcon: fake.executable, mkvmerge: nil).run()
+
+            #expect(job.state.statusWord == c.status, "\(c.fixture): \(job.state) \(job.errorMessage ?? "")")
+            if let e = c.error {
+                #expect(job.errorMessage?.localizedCaseInsensitiveContains(e) == true, "\(c.fixture): \(job.errorMessage ?? "no error")")
+            }
+            let items = JobRunner.visibleItems(root)
+            if c.status == "success" {
+                #expect(items == ["Sample Movie"], "\(c.fixture): \(items)")
+            } else if c.keptApart {
+                #expect(items.count == 1 && items[0].hasSuffix("]"), "\(c.fixture): \(items)")
+                let kept = JobRunner.visibleItems(root.appendingPathComponent(items.first ?? ""))
+                #expect(kept.contains { $0.hasSuffix(".mkv") }, "\(c.fixture): \(kept)")
+            } else {
+                #expect(items.isEmpty, "\(c.fixture): nothing should be left, found \(items)")
+            }
+        }
+    }
+
+    @Test func failuresNameTheirCause() throws {
+        // The first specific error of a run explains it better than the "0 titles saved, 1 failed" summary.
+        func reason(_ fixture: String) throws -> String? {
+            let text = try String(contentsOf: fixturesDir.appendingPathComponent("\(fixture).txt"), encoding: .utf8)
+            var first: String?
+            text.enumerateLines { line, stop in
+                if case .message(let m)? = RobotParser.parse(line: line), m.severity == .error, m.code != 5037, m.code != 5004 { first = m.text; stop = true }
+            }
+            return first
+        }
+        #expect(try reason("rip-disk-full")?.contains("megabytes free on the destination") == true)
+        #expect(try reason("rip-missing-source")?.contains("does not exist") == true)
+        #expect(try reason("rip-failure")?.contains("MEDIUM ERROR") == true)
+    }
+}
+
+@Suite("Stuck processes, free space, ISO backups, presets", .serialized)
+@MainActor
+struct ReliabilityTests {
+    let root: URL
+
+    init() throws {
+        Paths.dataOverride = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-test-data", isDirectory: true)
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-rel-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    @Test func stuckProcessIsStopped() async throws {
+        let start = Date()
+        let runner = ProcessRunner(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo started; sleep 60"], stopSignal: SIGTERM)
+        let lines = LineCollector()
+        let out = try await runner.run(stallTimeout: 2) { lines.append($0) }
+        #expect(out.stalled)
+        #expect(out.exitCode != 0)
+        #expect(Date().timeIntervalSince(start) < 15)
+        #expect(lines.all == ["started"])
+    }
+
+    @Test func busyProcessIsNotStopped() async throws {
+        let runner = ProcessRunner(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "for i in 1 2 3 4 5 6; do echo $i; sleep 0.5; done"])
+        let out = try await runner.run(stallTimeout: 2) { _ in }
+        #expect(!out.stalled)
+        #expect(out.exitCode == 0)
+    }
+
+    @Test func notEnoughFreeSpaceStopsBeforeRipping() async throws {
+        var text = listing(titles: [("0:00:10", 1)])
+        text += "TINFO:0,11,0,\"\(Int64(1) << 60)\"\n"   // an exabyte
+        let fake = try FakeMakeMKV(listing: text, mkv: writesFile(saved))
+        var config = AppConfig()
+        config.outputRoot = root.path
+        var drive = DriveConfig()
+        drive.automation.notify = false
+        let job = RipJob(source: .iso(path: "/nonexistent/test.iso"), drive: drive, laneKey: "iso:space", sourceLabel: "test", discLabel: "", mode: .mkv)
+        job.manualTitles = [0]
+        await JobRunner(job: job, config: config, makemkvcon: fake.executable, mkvmerge: nil).run()
+        #expect(job.state == .failed)
+        #expect(job.errorMessage?.contains("Not enough free space") == true, "\(job.errorMessage ?? "")")
+        #expect(!fake.calls.contains(" mkv "))
+        #expect(JobRunner.visibleItems(root).isEmpty)
+    }
+
+    @Test func requiredSpaceHasAMargin() {
+        #expect(DiskSpace.required(1_000) == 1_000 + (256 << 20))
+        #expect(DiskSpace.required(100 << 30) == (100 << 30) + (2 << 30))
+        #expect(DiskSpace.available(at: root) ?? 0 > 0)
+    }
+
+    private func backupJob(_ fake: FakeMakeMKV, mode: RipMode) async -> RipJob {
+        var config = AppConfig()
+        config.outputRoot = root.path
+        var drive = DriveConfig()
+        drive.automation.notify = false
+        drive.automation.ejectWhenDone = false
+        drive.rip.backupFormat = .iso
+        let job = RipJob(source: .drive(index: 0, devicePath: ""), drive: drive, laneKey: "drive:test", sourceLabel: "test", discLabel: "", mode: mode)
+        await JobRunner(job: job, config: config, makemkvcon: fake.executable, mkvmerge: nil).run()
+        return job
+    }
+
+    @Test func isoBackupIsKept() async throws {
+        let backup = #"""
+            head -c 40000 /dev/zero > "$dest"
+            printf 'BEA01' | dd of="$dest" bs=1 seek=32769 conv=notrunc 2>/dev/null
+            echo 'MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"'
+        """#
+        let fake = try FakeMakeMKV(listing: listing(titles: [("0:00:10", 1)]), mkv: ":", backup: backup)
+        let job = await backupJob(fake, mode: .backupDecrypted)
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "")")
+        #expect(job.producedFiles.first?.pathExtension == "iso")
+    }
+
+    @Test func folderWrittenInsteadOfAnISOIsKeptAsAFolder() async throws {
+        let backup = #"""
+            mkdir -p "$dest/BDMV" && printf x > "$dest/BDMV/index.bdmv"
+            echo 'MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"'
+        """#
+        let fake = try FakeMakeMKV(listing: listing(titles: [("0:00:10", 1)]), mkv: writesFile(saved), backup: backup)
+        let job = await backupJob(fake, mode: .backupThenMkv)
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "")")
+        let backupFolder = try #require(job.producedFiles.first { JobRunner.isDirectory($0) })
+        #expect(backupFolder.pathExtension.isEmpty, "\(backupFolder.lastPathComponent)")
+        #expect(job.log.contains { $0.text.contains("instead of an ISO image") })
+        #expect(fake.calls.contains("mkv file:"), "the MKV step must read the folder: \(fake.calls)")
+    }
+
+    @Test func folderWithoutADiscIsNotAcceptedAsAnISO() async throws {
+        let backup = #"""
+            mkdir -p "$dest/junk" && printf x > "$dest/junk/file"
+            echo 'MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"'
+        """#
+        let fake = try FakeMakeMKV(listing: listing(titles: [("0:00:10", 1)]), mkv: ":", backup: backup)
+        let job = await backupJob(fake, mode: .backupDecrypted)
+        #expect(job.state == .failed)
+        #expect(job.errorMessage?.contains("Backup failed the check") == true, "\(job.errorMessage ?? "")")
+    }
+
+    @Test func archiveEverythingPreset() {
+        var d = DriveConfig()
+        d.name = "Left"
+        d.rip.titleSelection.strategy = .longest
+        d.applyArchiveEverything()
+        #expect(d.name == "Left")
+        #expect(d.rip.mode == .backupThenMkv && d.rip.keepBackupAfterMKV && d.rip.backupFormat == .folder)
+        #expect(d.rip.titleSelection.strategy == .all)
+        #expect(d.profile.mode == .generated && d.profile.generated.selectionRule == "+sel:all")
+        #expect(d.archive.verifyRips && d.archive.checksums && d.rip.writeDiscInfoJSON)
+    }
+
+    @Test func settingsHaveSafeDefaults() throws {
+        let c = try ConfigStore.decoder().decode(AppConfig.self, from: Data("{}".utf8))
+        #expect(c.stallTimeoutMinutes == 30)
+        #expect(c.preventSleep)
     }
 }

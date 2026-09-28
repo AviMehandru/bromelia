@@ -48,7 +48,8 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
   cancel, retry, start now) and a persistent history with logs.
 - **Rip modes per drive**: MKV; encrypted backup; decrypted backup; backup then MKV from the backup (one
   fast sequential read, safest for damaged discs); or scan only. Backups can be folders or ISO images
-  (ISO output relies on MakeMKV's own support for `.iso` destinations).
+  (MakeMKV writes an ISO when the destination ends in `.iso`; if it writes a folder instead, the checked
+  folder is kept). The *Archive everything* preset sets up backup then MKV with every track and all checks.
 - **Title rules** for unattended rips: all titles, the longest *N* (main feature), or an index pattern
   such as `0,2-4,7-` or `last`, matching MakeMKV title numbers or source playlist/VTS numbers. Filters
   cover duration, chapter count and size ranges, include/exclude regular expressions (title name, source
@@ -98,6 +99,10 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **Checks against the disc listing.** Every MKV is compared with its title (length, tracks) using
   `mkvmerge -J`, and backups must contain a disc structure. Every job reads the disc listing again, finds
   the chosen titles even if MakeMKV renumbered them, and stops if the disc was changed.
+- **Unattended safeguards.** The computer is kept awake while jobs run; a rip that stops producing output
+  (a stuck drive) is stopped after a configurable time; a job that wouldn't fit on the destination stops
+  before writing (from the titles' sizes, or MakeMKV's own warning); error messages name the actual cause
+  (e.g. “No space left on device”).
 - Safety check: if MakeMKV's drive numbering changes during a backup (backups must use `disc:N`), the job
   stops instead of reading the wrong disc.
 
@@ -150,7 +155,9 @@ sudo ninja -C builddir install   # optional: desktop file, icon, AppStream metad
 ## Testing
 
 Unit tests on all three platforms run against the shared fixtures, including the navigation files
-(IFOs only, no video) of a TV DVD with a six-episode “play all” title. Each suite also contains
+(IFOs only, no video) of a TV DVD with a six-episode “play all” title, and recorded `makemkvcon` failures
+(full disk, killed process, missing source or title) whose expected outcomes are listed in
+[`shared/fixtures/rip-outcomes.json`](shared/fixtures/rip-outcomes.json) and replayed by every platform. Each suite also contains
 end-to-end tests that run a real disc image through the complete pipeline when pointed at one:
 
 | Variable | Test |
@@ -189,6 +196,8 @@ See [docs/architecture.md](docs/architecture.md) for how the pieces fit together
 
 ## Limitations
 - MakeMKV 2.0 removed the streaming server, so Bromelia has no streaming feature.
+- A laptop with its lid closed still sleeps (unless it is connected to power and a display), whatever
+  Bromelia asks for.
 - Firmware flashing isn't offered. Only read-only commands of MakeMKV's firmware tool are exposed.
 - On Windows, per-drive MakeMKV settings rely on applying registry values around each launch. If the
   MakeMKV GUI is open at the same time and saves its preferences, it may write values back.

@@ -1,0 +1,30 @@
+MSG:1005,0,1,"MakeMKV v2.0.0 darwin(arm64-release) started","%1 started","MakeMKV v2.0.0 darwin(arm64-release)"
+MSG:1004,131072,1,"Debug logging enabled, log will be saved as file:///Users/user/MakeMKV_log.txt","Debug logging enabled, log will be saved as %1","file:///Users/user/MakeMKV_log.txt"
+PRGT:5018,0,"Scanning CD-ROM devices"
+PRGC:5018,0,"Scanning CD-ROM devices"
+PRGV:0,0,65536
+PRGV:0,0,65536
+PRGV:65536,0,65536
+PRGV:65536,65536,65536
+MSG:5042,0,0,"The program can't find any usable optical drives.","The program can't find any usable optical drives."
+DRV:0,256,999,0,"","",""
+DRV:1,256,999,0,"","",""
+DRV:2,256,999,0,"","",""
+DRV:3,256,999,0,"","",""
+DRV:4,256,999,0,"","",""
+DRV:5,256,999,0,"","",""
+DRV:6,256,999,0,"","",""
+DRV:7,256,999,0,"","",""
+DRV:8,256,999,0,"","",""
+DRV:9,256,999,0,"","",""
+DRV:10,256,999,0,"","",""
+DRV:11,256,999,0,"","",""
+DRV:12,256,999,0,"","",""
+DRV:13,256,999,0,"","",""
+DRV:14,256,999,0,"","",""
+DRV:15,256,999,0,"","",""
+PRGV:0,65536,65536
+PRGV:0,0,65536
+MSG:5006,0,1,"File /nonexistent/missing.iso does not exist","File %1 does not exist","/nonexistent/missing.iso"
+MSG:1003,32,3,"DEBUG: Code 233 at CNz3hJON1qlo89ZBsBDfDptR:0","DEBUG: Code %1 at %2:%3","233","CNz3hJON1qlo89ZBsBDfDptR","0"
+MSG:5010,0,0,"Failed to open disc","Failed to open disc"

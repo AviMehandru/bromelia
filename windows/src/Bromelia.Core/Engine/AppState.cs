@@ -626,12 +626,25 @@ public sealed class AppState : ObservableObject
         runner.Finished += finished =>
         {
             _runners.Remove(finished.Id);
+            UpdateKeepAwake();
             RecordHistory(finished);
             _ = Task.Delay(3000).ContinueWith(_ => _ui.Post(() => _ = RefreshDrivesAsync(true)), TaskScheduler.Default);
             Pump();
         };
         _runners[job.Id] = runner;
+        UpdateKeepAwake();
         _ = runner.RunAsync();
+    }
+
+    bool _keepingAwake;
+
+    /// <summary>Keeps the computer awake while any job runs (when enabled in the settings).</summary>
+    public void UpdateKeepAwake()
+    {
+        bool busy = _runners.Count > 0 && Config.PreventSleep;
+        if (busy == _keepingAwake) return;
+        _keepingAwake = busy;
+        Platform.KeepAwake(busy);
     }
 
     void RecordHistory(RipJob job)

@@ -197,7 +197,8 @@ bro_event_free (BroEvent *ev)
 BroSeverity
 bro_message_severity (int code, int flags, const char *text)
 {
-  static const int errors[] = { 2003, 2004, 2023, 5003, 5010, 5021, 5037, 5055, 5069, 5077 };
+  /* 2018: write error (e.g. "No space left on device"); 5006: source file does not exist. */
+  static const int errors[] = { 2003, 2004, 2018, 2023, 5003, 5006, 5010, 5021, 5037, 5055, 5069, 5077 };
   static const int warnings[] = { 3038, 3041, 5042 };
 
   if (code == 1003 || ((flags & 0x20) && text && g_str_has_prefix (text, "DEBUG")))

@@ -150,12 +150,17 @@ public static class Paths
 /// <summary>Runs a child process and streams stdout/stderr lines.</summary>
 public sealed class ProcessRunner
 {
-    public sealed record Result(int ExitCode, bool Cancelled, bool TimedOut);
+    /// <param name="Stalled">Stopped because it printed nothing for the stall timeout.</param>
+    /// <param name="Abandoned">It didn't exit even after being killed (e.g. stuck in a drive I/O call); we stopped waiting.</param>
+    public sealed record Result(int ExitCode, bool Cancelled, bool TimedOut, bool Stalled = false, bool Abandoned = false);
 
     readonly ProcessStartInfo _psi;
     Process? _process;
     volatile bool _cancelled;
     volatile bool _timedOut;
+    volatile bool _stalled;
+    long _lastOutput;
+    readonly TaskCompletionSource _killed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public ProcessRunner(string executable, IEnumerable<string> arguments, IDictionary<string, string>? environment = null, string? workingDirectory = null)
     {
@@ -179,27 +184,45 @@ public sealed class ProcessRunner
     /// <summary>Raised on a thread-pool thread once the process has started.</summary>
     public event Action? Started;
 
-    public async Task<Result> RunAsync(Action<string> onLine, TimeSpan timeout = default, CancellationToken ct = default)
+    /// <summary>Runs the process to completion. With <paramref name="stallTimeout"/>, the process is stopped when it prints
+    /// nothing for that long. A process that is still there 30 s after being killed is abandoned so the caller can go on.</summary>
+    public async Task<Result> RunAsync(Action<string> onLine, TimeSpan timeout = default, CancellationToken ct = default, TimeSpan stallTimeout = default)
     {
         var p = new Process { StartInfo = _psi };
         _process = p;
         p.Start();
         p.StandardInput.Close();
+        Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
         Started?.Invoke();
         var readOut = Pump(p.StandardOutput, onLine);
         var readErr = Pump(p.StandardError, onLine);
         using var reg = ct.Register(Cancel);
         using var timer = timeout > TimeSpan.Zero ? new Timer(_ => { _timedOut = true; Kill(); }, null, timeout, Timeout.InfiniteTimeSpan) : null;
-        await p.WaitForExitAsync().ConfigureAwait(false);
-        await Task.WhenAll(readOut, readErr).ConfigureAwait(false);
-        return new Result(p.ExitCode, _cancelled, _timedOut);
+        var check = TimeSpan.FromSeconds(Math.Min(5, Math.Max(0.5, stallTimeout.TotalSeconds)));
+        using var watchdog = stallTimeout > TimeSpan.Zero ? new Timer(_ =>
+        {
+            if (Environment.TickCount64 - Interlocked.Read(ref _lastOutput) < stallTimeout.TotalMilliseconds || _stalled) return;
+            _stalled = true;
+            Kill();
+        }, null, check, check) : null;
+
+        var exited = p.WaitForExitAsync();
+        var abandon = _killed.Task.ContinueWith(_ => Task.Delay(TimeSpan.FromSeconds(30)), TaskScheduler.Default).Unwrap();
+        if (await Task.WhenAny(exited, abandon).ConfigureAwait(false) != exited)
+            return new Result(-1, _cancelled, _timedOut, _stalled, Abandoned: true);
+        // Output normally ends with the process. A child it left behind may keep the pipes open, so don't wait long.
+        await Task.WhenAny(Task.WhenAll(readOut, readErr), Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
+        return new Result(p.ExitCode, _cancelled, _timedOut, _stalled);
     }
 
-    static async Task Pump(StreamReader reader, Action<string> onLine)
+    async Task Pump(StreamReader reader, Action<string> onLine)
     {
         string? line;
         while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
+        {
+            Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
             if (line.Length > 0) onLine(line);
+        }
     }
 
     public void Cancel()
@@ -212,7 +235,11 @@ public sealed class ProcessRunner
     {
         try
         {
-            if (_process is { HasExited: false } p) p.Kill(entireProcessTree: true);
+            if (_process is { HasExited: false } p)
+            {
+                p.Kill(entireProcessTree: true);
+                _killed.TrySetResult();
+            }
         }
         catch (InvalidOperationException) { }
         catch (System.ComponentModel.Win32Exception) { }

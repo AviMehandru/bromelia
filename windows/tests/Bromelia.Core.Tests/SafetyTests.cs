@@ -49,7 +49,7 @@ sealed class FakeMakeMkv
     public string Executable => Path.Combine(Dir, "makemkvcon");
     public string Calls => File.Exists(Path.Combine(Dir, "calls.txt")) ? File.ReadAllText(Path.Combine(Dir, "calls.txt")) : "";
 
-    public FakeMakeMkv(string listing, string mkv)
+    public FakeMakeMkv(string listing, string mkv, string backup = "")
     {
         Directory.CreateDirectory(Dir);
         var listingPath = Path.Combine(Dir, "listing.txt");
@@ -61,7 +61,8 @@ sealed class FakeMakeMkv
             "while [ $# -gt 0 ]; do\n  case \"$1\" in info|mkv|backup) cmd=\"$1\"; shift; break;; esac\n  shift\ndone\n" +
             "case \"$cmd\" in\n" +
             $"  info) cat '{listingPath}' ;;\n" +
-            "  mkv) title=\"$2\"; dest=\"$3\"\n" + mkv + "\n  ;;\nesac\nexit 0\n");
+            "  mkv) title=\"$2\"; dest=\"$3\"\n" + mkv + "\n  ;;\n" +
+            "  backup) for a in \"$@\"; do dest=\"$a\"; done\n" + backup + "\n  ;;\nesac\nexit 0\n");
         File.SetUnixFileMode(Executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
@@ -354,5 +355,198 @@ public class RipCheckTests
         Assert.True(PostProcessor.ShouldRun(step, JobState.CompletedWithErrors));
         Assert.Equal("errors", JobState.CompletedWithErrors.StatusWord());
         Assert.True(JobState.CompletedWithErrors.IsFinished());
+    }
+}
+
+/// <summary>shared/fixtures/rip-outcomes.json: how a job must end for each recorded makemkvcon run. The same file is
+/// replayed by the macOS and Linux tests, so the three implementations can't drift apart.</summary>
+public class RecordedRunTests
+{
+    sealed class Outcomes
+    {
+        public List<Case> Cases { get; set; } = new();
+    }
+
+    sealed class Case
+    {
+        public string Fixture { get; set; } = "";
+        public int ExitCode { get; set; }
+        public bool WritesFile { get; set; }
+        public string Status { get; set; } = "";
+        public string? Error { get; set; }
+        public bool KeptApart { get; set; }
+    }
+
+    static string FixturePath(string name) => Path.Combine(AppContext.BaseDirectory, "fixtures", name);
+
+    [Fact]
+    public void EveryRecordedRunEndsAsExpected()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var outcomes = JsonSerializer.Deserialize<Outcomes>(File.ReadAllText(FixturePath("rip-outcomes.json")),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        Assert.True(outcomes.Cases.Count >= 7);
+        foreach (var c in outcomes.Cases)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "bromelia-rec-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(root);
+            Paths.DataOverride = Path.Combine(Path.GetTempPath(), "bromelia-test-data");
+            var mkv = (c.WritesFile ? "printf 'mkv data' > \"$dest/title_t0$title.mkv\"\n" : "") +
+                      $"cat '{FixturePath(c.Fixture + ".txt")}'\nexit {c.ExitCode}";
+            var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1), ("0:00:20", 2)), mkv);
+            var config = new AppConfig { OutputRoot = root };
+            var drive = new DriveConfig();
+            drive.Automation.Notify = false;
+            var job = new RipJob(new DiscSource.Iso("/nonexistent/test.iso"), drive, "iso:rec", "test", "", RipMode.Mkv) { ManualTitles = new List<int> { 0 } };
+            SingleThreadContext.Run(async () =>
+                await new JobRunner(job, config, fake.Executable, null, new UiDispatcher(), new NullPlatformServices(), new[] { "dvd_MinimumTitleLength" }).RunAsync());
+
+            Assert.True(job.State.StatusWord() == c.Status, $"{c.Fixture}: {job.State} {job.ErrorMessage}");
+            if (c.Error != null)
+                Assert.True(job.ErrorMessage?.Contains(c.Error, StringComparison.OrdinalIgnoreCase) == true, $"{c.Fixture}: {job.ErrorMessage}");
+            var items = JobRunner.VisibleItems(root);
+            if (c.Status == "success") Assert.Equal(new[] { "Sample Movie" }, items);
+            else if (c.KeptApart)
+            {
+                var kept = Assert.Single(items);
+                Assert.EndsWith("]", kept);
+                Assert.Contains(JobRunner.VisibleItems(Path.Combine(root, kept)), n => n.EndsWith(".mkv", StringComparison.Ordinal));
+            }
+            else Assert.True(items.Count == 0, $"{c.Fixture}: nothing should be left, found {string.Join(", ", items)}");
+        }
+    }
+}
+
+public class ReliabilityTests
+{
+    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-rel-" + Guid.NewGuid().ToString("N")[..8]);
+
+    [Fact]
+    public void StuckProcessIsStopped()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var lines = new LineCollector();
+        var r = new ProcessRunner("/bin/sh", new[] { "-c", "echo started; sleep 60" }).RunAsync(lines.Add, stallTimeout: TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+        Assert.True(r.Stalled);
+        Assert.NotEqual(0, r.ExitCode);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), watch.Elapsed.ToString());
+        Assert.Equal(new[] { "started" }, lines.All);
+    }
+
+    [Fact]
+    public void BusyProcessIsNotStopped()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var r = new ProcessRunner("/bin/sh", new[] { "-c", "for i in 1 2 3 4 5 6; do echo $i; sleep 0.5; done" })
+            .RunAsync(_ => { }, stallTimeout: TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+        Assert.False(r.Stalled);
+        Assert.Equal(0, r.ExitCode);
+    }
+
+    RipJob Run(FakeMakeMkv fake, RipMode mode, DiscSource source, List<int>? titles = null)
+    {
+        Directory.CreateDirectory(_root);
+        Paths.DataOverride = Path.Combine(Path.GetTempPath(), "bromelia-test-data");
+        var config = new AppConfig { OutputRoot = _root };
+        var drive = new DriveConfig();
+        drive.Automation.Notify = false;
+        drive.Automation.EjectWhenDone = false;
+        drive.Rip.BackupFormat = BackupFormat.Iso;
+        var job = new RipJob(source, drive, "lane", "test", "", mode) { ManualTitles = titles };
+        SingleThreadContext.Run(async () =>
+            await new JobRunner(job, config, fake.Executable, null, new UiDispatcher(), new NullPlatformServices(), new[] { "dvd_MinimumTitleLength" }).RunAsync());
+        return job;
+    }
+
+    [Fact]
+    public void NotEnoughFreeSpaceStopsBeforeRipping()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1)) + $"TINFO:0,11,0,\"{1L << 60}\"\n", FakeMakeMkv.WritesFile(Listing.Saved));
+        var job = Run(fake, RipMode.Mkv, new DiscSource.Iso("/nonexistent/test.iso"), new List<int> { 0 });
+        Assert.Equal(JobState.Failed, job.State);
+        Assert.Contains("Not enough free space", job.ErrorMessage);
+        Assert.DoesNotContain(" mkv ", fake.Calls);
+        Assert.Empty(JobRunner.VisibleItems(_root));
+    }
+
+    [Fact]
+    public void RequiredSpaceHasAMargin()
+    {
+        Assert.Equal(1_000 + (256L << 20), DiskSpace.Required(1_000));
+        Assert.Equal((100L << 30) + (2L << 30), DiskSpace.Required(100L << 30));
+        Assert.True(DiskSpace.Available(Path.GetTempPath()) > 0);
+    }
+
+    const string SavedLine = "echo 'MSG:5036,260,1,\"Copy complete. 1 titles saved.\",\"Copy complete. %1 titles saved.\",\"1\"'";
+
+    [Fact]
+    public void IsoBackupIsKept()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1)), ":",
+            "head -c 40000 /dev/zero > \"$dest\"\nprintf 'BEA01' | dd of=\"$dest\" bs=1 seek=32769 conv=notrunc 2>/dev/null\n" + SavedLine);
+        var job = Run(fake, RipMode.BackupDecrypted, new DiscSource.Drive(0, ""));
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        Assert.EndsWith(".iso", job.ProducedFiles[0]);
+    }
+
+    [Fact]
+    public void FolderWrittenInsteadOfAnIsoIsKeptAsAFolder()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1)), FakeMakeMkv.WritesFile(Listing.Saved),
+            "mkdir -p \"$dest/BDMV\" && printf x > \"$dest/BDMV/index.bdmv\"\n" + SavedLine);
+        var job = Run(fake, RipMode.BackupThenMkv, new DiscSource.Drive(0, ""));
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        var folder = Assert.Single(job.ProducedFiles, Directory.Exists);
+        Assert.Equal("", Path.GetExtension(folder));
+        Assert.Contains(job.Log, l => l.Text.Contains("instead of an ISO image"));
+        Assert.Contains("mkv file:", fake.Calls);
+    }
+
+    [Fact]
+    public void FolderWithoutADiscIsNotAcceptedAsAnIso()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1)), ":", "mkdir -p \"$dest/junk\" && printf x > \"$dest/junk/file\"\n" + SavedLine);
+        var job = Run(fake, RipMode.BackupDecrypted, new DiscSource.Drive(0, ""));
+        Assert.Equal(JobState.Failed, job.State);
+        Assert.Contains("Backup failed the check", job.ErrorMessage);
+    }
+
+    [Fact]
+    public void ArchiveEverythingPreset()
+    {
+        var d = new DriveConfig { Name = "Left" };
+        d.Rip.TitleSelection.Strategy = TitleStrategy.Longest;
+        d.ApplyArchiveEverything();
+        Assert.Equal("Left", d.Name);
+        Assert.Equal(RipMode.BackupThenMkv, d.Rip.Mode);
+        Assert.True(d.Rip.KeepBackupAfterMkv);
+        Assert.Equal(TitleStrategy.All, d.Rip.TitleSelection.Strategy);
+        Assert.Equal(ProfileMode.Generated, d.Profile.Mode);
+        Assert.Equal("+sel:all", d.Profile.Generated.SelectionRule);
+        Assert.True(d.Archive.VerifyRips && d.Rip.WriteDiscInfoJson);
+    }
+
+    [Fact]
+    public void SettingsHaveSafeDefaults()
+    {
+        var c = JsonSerializer.Deserialize<AppConfig>("{}", ConfigJson.Options)!;
+        Assert.Equal(30, c.StallTimeoutMinutes);
+        Assert.True(c.PreventSleep);
+    }
+
+    [Fact]
+    public void FailuresNameTheirCause()
+    {
+        string? First(string fixture) => File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "fixtures", fixture + ".txt"))
+            .Select(RobotParser.Parse).OfType<RobotEvent.Message>().Select(m => m.Value)
+            .FirstOrDefault(m => m.Severity == Severity.Error && m.Code is not (5037 or 5004))?.Text;
+        Assert.Contains("megabytes free on the destination", First("rip-disk-full"));
+        Assert.Contains("does not exist", First("rip-missing-source"));
+        Assert.Contains("MEDIUM ERROR", First("rip-failure"));
     }
 }

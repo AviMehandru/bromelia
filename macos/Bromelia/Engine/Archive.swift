@@ -237,3 +237,18 @@ enum BackupVerifier {
         return "it contains no BDMV, VIDEO_TS or HVDVD_TS folder"
     }
 }
+
+/// Free space on the destination volume.
+enum DiskSpace {
+    /// Bytes available to the user on the volume holding `url` (or its nearest existing parent).
+    static func available(at url: URL) -> Int64? {
+        var u = url
+        while !FileManager.default.fileExists(atPath: u.path) && u.pathComponents.count > 1 { u = u.deletingLastPathComponent() }
+        let v = try? u.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        if let important = v?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
+        return v?.volumeAvailableCapacity.map(Int64.init)
+    }
+
+    /// `bytes` plus a margin: 2 % or 256 MB, whichever is larger (listing sizes are estimates).
+    static func required(_ bytes: Int64) -> Int64 { bytes + max(256 << 20, bytes / 50) }
+}

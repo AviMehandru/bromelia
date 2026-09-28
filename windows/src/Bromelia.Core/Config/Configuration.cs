@@ -274,6 +274,24 @@ public sealed class DriveConfig
 
     public DriveConfig Clone() => JsonSerializer.Deserialize<DriveConfig>(JsonSerializer.Serialize(this, ConfigJson.Options), ConfigJson.Options)!;
 
+    /// <summary>Settings for archiving everything on a disc: a decrypted backup (every file, every title, menus) kept
+    /// next to MKV files of every title with every track, the full disc listing, and all checks on. MakeMKV's minimum
+    /// title length still applies to the MKV files; the backup contains every title.</summary>
+    public void ApplyArchiveEverything()
+    {
+        Rip.Mode = RipMode.BackupThenMkv;
+        Rip.BackupFormat = BackupFormat.Folder;
+        Rip.KeepBackupAfterMkv = true;
+        Rip.TitleSelection = new TitleSelection();
+        Rip.WriteDiscInfoJson = true;
+        Profile.Mode = ProfileMode.Generated;
+        Profile.Generated.SelectionRule = "+sel:all";
+        Archive.Checksums = true;
+        Archive.ArchiveRecord = true;
+        Archive.VerifyRips = true;
+        Episodes.KeepPlayAll = true;
+    }
+
     /// <summary>Copy of <paramref name="other"/> keeping this drive's identity (id, name, match, enabled).</summary>
     public DriveConfig ApplyingBody(DriveConfig other)
     {
@@ -314,6 +332,10 @@ public sealed class AppConfig
     /// They run after the drive's own steps.</summary>
     public List<PostProcessStep> Plugins { get; set; } = new();
     public int HistoryLimit { get; set; } = 500;
+    /// <summary>A rip or backup that prints nothing for this long is stopped and fails (a stuck drive). 0 = never.</summary>
+    public int StallTimeoutMinutes { get; set; } = 30;
+    /// <summary>Keep the computer from going to sleep while jobs run.</summary>
+    public bool PreventSleep { get; set; } = true;
 
     /// <summary>Upgrades a configuration loaded from a file of version <paramref name="loaded"/>.</summary>
     public AppConfig Upgrade(int loaded)

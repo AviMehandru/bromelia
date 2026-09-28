@@ -2,6 +2,7 @@
  * Set BROMELIA_TEST_ISO to additionally run an end-to-end rip against a real disc image. */
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <signal.h>
 #include <string.h>
 #include <json-glib/json-glib.h>
 
@@ -1125,7 +1126,7 @@ typedef struct {
 
 /* A stand-in for makemkvcon: info prints the listing, mkv runs the shell code with $title and $dest set. */
 static Fake *
-fake_new (const char *listing_text, const char *mkv)
+fake_new_full (const char *listing_text, const char *mkv, const char *backup)
 {
   Fake *f = g_new0 (Fake, 1);
   g_autofree char *list = NULL, *script = NULL, *body = NULL;
@@ -1139,11 +1140,18 @@ fake_new (const char *listing_text, const char *mkv)
   body = g_strjoinv (list, pieces);
   script = g_strdup_printf ("#!/bin/sh\necho \"$@\" >> '%s/calls.txt'\n"
                             "while [ $# -gt 0 ]; do\n  case \"$1\" in info|mkv|backup) cmd=\"$1\"; shift; break;; esac\n  shift\ndone\n"
-                            "case \"$cmd\" in\n  info) cat '%s' ;;\n  mkv) title=\"$2\"; dest=\"$3\"\n%s\n  ;;\nesac\nexit 0\n",
-                            f->dir, list, body);
+                            "case \"$cmd\" in\n  info) cat '%s' ;;\n  mkv) title=\"$2\"; dest=\"$3\"\n%s\n  ;;\n"
+                            "  backup) for a in \"$@\"; do dest=\"$a\"; done\n%s\n  ;;\nesac\nexit 0\n",
+                            f->dir, list, body, backup ? backup : ":");
   g_assert_true (g_file_set_contents (f->exe, script, -1, NULL));
   g_chmod (f->exe, 0755);
   return f;
+}
+
+static Fake *
+fake_new (const char *listing_text, const char *mkv)
+{
+  return fake_new_full (listing_text, mkv, NULL);
 }
 
 static char *
@@ -1582,6 +1590,241 @@ test_errors_state (void)
   bro_post_step_free (step);
 }
 
+/* ---- recorded makemkvcon runs, stalls, free space, ISO backups, presets ---- */
+
+static char *
+fixture_path (const char *name)
+{
+  const char *dir = g_getenv ("BROMELIA_FIXTURES");
+  g_autofree char *rel = g_build_filename (dir ? dir : "../../shared/fixtures", name, NULL);
+  GFile *f = g_file_new_for_path (rel);
+  char *abs = g_file_get_path (f);
+  g_object_unref (f);
+  return abs;
+}
+
+/* Runs a job of any mode against the fake. */
+static BroRunResult *
+run_job (Fake *f, BroRipMode mode, BroSource *source, const char *titles, gboolean iso_backup)
+{
+  BroRunRequest *req = bro_run_request_new ();
+  BroRunResult *res;
+  req->job_id = g_uuid_string_random ();
+  req->job_dir = g_build_filename (f->dir, "job", NULL);
+  req->config = bro_app_config_new ();
+  g_free (req->config->output_root);
+  req->config->output_root = g_strdup (f->root);
+  req->drive = bro_drive_config_new ();
+  req->drive->automation.notify = FALSE;
+  req->drive->rip.backup_format = iso_backup ? BRO_BACKUP_ISO : BRO_BACKUP_FOLDER;
+  req->source = source;
+  req->mode = mode;
+  if (titles)
+    {
+      int v = atoi (titles);
+      req->manual_titles = g_array_new (FALSE, FALSE, sizeof (int));
+      g_array_append_val (req->manual_titles, v);
+    }
+  req->makemkvcon = g_strdup (f->exe);
+  req->skip_eject = TRUE;
+  res = bro_run_job (req);
+  bro_run_request_free (req);
+  return res;
+}
+
+/* shared/fixtures/rip-outcomes.json: how a job must end for each recorded makemkvcon run. The same file is replayed
+ * by the macOS and Windows tests, so the three implementations can't drift apart. */
+static void
+test_recorded_runs (void)
+{
+  g_autofree char *path = fixture_path ("rip-outcomes.json");
+  g_autoptr (JsonParser) p = json_parser_new ();
+  JsonArray *cases;
+  g_assert_true (json_parser_load_from_file (p, path, NULL));
+  cases = json_object_get_array_member (json_node_get_object (json_parser_get_root (p)), "cases");
+  g_assert_cmpuint (json_array_get_length (cases), >=, 7);
+  for (guint i = 0; i < json_array_get_length (cases); i++)
+    {
+      JsonObject *c = json_array_get_object_element (cases, i);
+      const char *name = json_object_get_string_member (c, "fixture");
+      const char *status = json_object_get_string_member (c, "status");
+      const char *error = json_object_has_member (c, "error") ? json_object_get_string_member (c, "error") : NULL;
+      gboolean kept = json_object_get_boolean_member (c, "keptApart");
+      g_autofree char *file = g_strconcat (name, ".txt", NULL);
+      g_autofree char *fx = fixture_path (file);
+      g_autofree char *l = listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2");
+      g_autofree char *mkv = g_strdup_printf ("%scat '%s'\nexit %d",
+                                              json_object_get_boolean_member (c, "writesFile") ? "printf 'mkv data' > \"$dest/title_t0$title.mkv\"\n" : "",
+                                              fx, (int) json_object_get_int_member (c, "exitCode"));
+      Fake *f = fake_new (l, mkv);
+      g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
+      g_autoptr (GPtrArray) root = names_in (f->root, FALSE);
+      g_autofree char *got = g_ascii_strdown (res->error ? res->error : "", -1);
+      g_autofree char *want = g_ascii_strdown (error ? error : "", -1);
+      if (g_strcmp0 (bro_job_state_word (res->status), status) != 0 || (error && !strstr (got, want)))
+        g_error ("%s: expected %s (%s), got %s: %s", name, status, error ? error : "", bro_job_state_word (res->status), res->error);
+      if (g_str_equal (status, "success"))
+        {
+          g_assert_cmpuint (root->len, ==, 1);
+          g_assert_cmpstr (root->pdata[0], ==, "Sample Movie");
+        }
+      else if (kept)
+        {
+          g_autofree char *dir = NULL;
+          g_autoptr (GPtrArray) inside = NULL;
+          gboolean mkv_found = FALSE;
+          g_assert_cmpuint (root->len, ==, 1);
+          g_assert_true (g_str_has_suffix (root->pdata[0], "]"));
+          dir = g_build_filename (f->root, root->pdata[0], NULL);
+          inside = names_in (dir, FALSE);
+          for (guint k = 0; k < inside->len; k++)
+            mkv_found |= g_str_has_suffix (inside->pdata[k], ".mkv");
+          g_assert_true (mkv_found);
+        }
+      else if (root->len)
+        g_error ("%s: nothing should be left, found %s", name, (char *) root->pdata[0]);
+      fake_free (f);
+    }
+}
+
+static void
+test_stuck_process (void)
+{
+  const char *argv[] = { "/bin/sh", "-c", "echo started; sleep 60", NULL };
+  const char *busy[] = { "/bin/sh", "-c", "for i in 1 2 3 4 5 6; do echo $i; sleep 0.5; done", NULL };
+  BroRunOptions opt = { 0, 2, SIGTERM };
+  BroRunStatus st = { 0 };
+  GString *out = g_string_new (NULL);
+  gint64 start = g_get_monotonic_time ();
+  g_assert_true (bro_process_run_ex (argv, NULL, NULL, &opt, NULL, collect, out, &st, NULL));
+  g_assert_true (st.stalled);
+  g_assert_cmpint (st.exit_status, !=, 0);
+  g_assert_cmpint (g_get_monotonic_time () - start, <, 15 * G_USEC_PER_SEC);
+  g_assert_cmpstr (out->str, ==, "started\n");
+  g_string_free (out, TRUE);
+  memset (&st, 0, sizeof st);
+  g_assert_true (bro_process_run_ex (busy, NULL, NULL, &opt, NULL, NULL, NULL, &st, NULL));
+  g_assert_false (st.stalled);
+  g_assert_cmpint (st.exit_status, ==, 0);
+}
+
+typedef struct {
+  GCancellable *cancel;
+  BroRunStatus st;
+} CancelRun;
+
+static gpointer
+cancel_worker (gpointer data)
+{
+  CancelRun *r = data;
+  /* Ignores SIGINT like makemkvcon; exec keeps that for sleep. */
+  const char *argv[] = { "/bin/sh", "-c", "trap '' INT; exec sleep 60", NULL };
+  BroRunOptions opt = { 0, 0, 0 };
+  bro_process_run_ex (argv, NULL, NULL, &opt, r->cancel, NULL, NULL, &r->st, NULL);
+  return NULL;
+}
+
+static void
+test_cancel_without_main_loop (void)
+{
+  /* A cancelled run must end (SIGKILL 5 s after the ignored SIGINT) even though no main loop is running. */
+  CancelRun r = { g_cancellable_new (), { 0 } };
+  GThread *t = g_thread_new ("run", cancel_worker, &r);
+  gint64 start;
+  g_usleep (G_USEC_PER_SEC / 2);
+  start = g_get_monotonic_time ();
+  g_cancellable_cancel (r.cancel);
+  g_thread_join (t);
+  g_assert_true (r.st.cancelled);
+  g_assert_cmpint (g_get_monotonic_time () - start, <, 12 * G_USEC_PER_SEC);
+  g_object_unref (r.cancel);
+}
+
+static void
+test_free_space (void)
+{
+  g_autofree char *l0 = listing ("SAMPLE_MOVIE", "0:00:10,1");
+  g_autofree char *l = g_strdup_printf ("%sTINFO:0,11,0,\"%" G_GINT64_FORMAT "\"\n", l0, (gint64) 1 << 60);
+  g_autofree char *m = writes_file (SAVED);
+  Fake *f = fake_new (l, m);
+  g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
+  g_autofree char *calls = fake_calls (f);
+  g_autoptr (GPtrArray) root = names_in (f->root, FALSE);
+  g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+  g_assert_nonnull (strstr (res->error, "Not enough free space"));
+  g_assert_null (strstr (calls, " mkv "));
+  g_assert_cmpuint (root->len, ==, 0);
+  g_assert_cmpint (bro_disk_required (1000), ==, 1000 + ((gint64) 256 << 20));
+  g_assert_cmpint (bro_disk_required ((gint64) 100 << 30), ==, ((gint64) 100 << 30) + ((gint64) 2 << 30));
+  g_assert_cmpint (bro_disk_available (f->root), >, 0);
+  fake_free (f);
+}
+
+#define SAVED_LINE "echo 'MSG:5036,260,1,\"Copy complete. 1 titles saved.\",\"Copy complete. %1 titles saved.\",\"1\"'"
+
+static void
+test_iso_backups (void)
+{
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:00:10,1");
+  g_autofree char *m = writes_file (SAVED);
+  {
+    Fake *f = fake_new_full (l, ":", "head -c 40000 /dev/zero > \"$dest\"\nprintf 'BEA01' | dd of=\"$dest\" bs=1 seek=32769 conv=notrunc 2>/dev/null\n" SAVED_LINE);
+    g_autoptr (BroRunResult) res = run_job (f, BRO_MODE_BACKUP_DECRYPTED, bro_source_new_drive (0, ""), NULL, TRUE);
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("ISO backup: %s", res->error);
+    g_assert_true (g_str_has_suffix (res->files->pdata[0], ".iso"));
+    fake_free (f);
+  }
+  {
+    Fake *f = fake_new_full (l, m, "mkdir -p \"$dest/BDMV\" && printf x > \"$dest/BDMV/index.bdmv\"\n" SAVED_LINE);
+    g_autoptr (BroRunResult) res = run_job (f, BRO_MODE_BACKUP_THEN_MKV, bro_source_new_drive (0, ""), NULL, TRUE);
+    g_autofree char *calls = fake_calls (f);
+    gboolean folder = FALSE;
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("folder instead of ISO: %s", res->error);
+    for (guint i = 0; i < res->files->len; i++)
+      if (g_file_test (res->files->pdata[i], G_FILE_TEST_IS_DIR))
+        {
+          folder = TRUE;
+          g_assert_false (g_str_has_suffix (res->files->pdata[i], ".iso"));
+        }
+    g_assert_true (folder);
+    g_assert_nonnull (strstr (calls, "mkv file:"));
+    fake_free (f);
+  }
+  {
+    Fake *f = fake_new_full (l, ":", "mkdir -p \"$dest/junk\" && printf x > \"$dest/junk/file\"\n" SAVED_LINE);
+    g_autoptr (BroRunResult) res = run_job (f, BRO_MODE_BACKUP_DECRYPTED, bro_source_new_drive (0, ""), NULL, TRUE);
+    g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+    g_assert_nonnull (strstr (res->error, "Backup failed the check"));
+    fake_free (f);
+  }
+}
+
+static void
+test_archive_everything (void)
+{
+  BroDriveConfig *d = bro_drive_config_new ();
+  g_autoptr (BroAppConfig) empty = NULL;
+  g_autoptr (JsonParser) p = json_parser_new ();
+  g_free (d->name);
+  d->name = g_strdup ("Left");
+  d->rip.titles.strategy = BRO_STRATEGY_LONGEST;
+  bro_drive_config_apply_archive_everything (d);
+  g_assert_cmpstr (d->name, ==, "Left");
+  g_assert_cmpint (d->rip.mode, ==, BRO_MODE_BACKUP_THEN_MKV);
+  g_assert_true (d->rip.keep_backup_after_mkv);
+  g_assert_cmpint (d->rip.titles.strategy, ==, BRO_STRATEGY_ALL);
+  g_assert_cmpint (d->profile.mode, ==, BRO_PROFILE_GENERATED);
+  g_assert_cmpstr (d->profile.generated.selection_rule, ==, "+sel:all");
+  g_assert_true (d->archive.verify_rips && d->rip.write_disc_info_json);
+  bro_drive_config_free (d);
+  g_assert_true (json_parser_load_from_data (p, "{}", -1, NULL));
+  empty = bro_app_config_from_json (json_parser_get_root (p));
+  g_assert_cmpint (empty->stall_timeout_minutes, ==, 30);
+  g_assert_true (empty->prevent_sleep);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1632,5 +1875,11 @@ main (int argc, char **argv)
   g_test_add_func ("/safety/listing-matcher", test_listing_matcher);
   g_test_add_func ("/safety/backup-checks", test_backup_checks);
   g_test_add_func ("/safety/errors-state", test_errors_state);
+  g_test_add_func ("/reliability/recorded-runs", test_recorded_runs);
+  g_test_add_func ("/reliability/stuck-process", test_stuck_process);
+  g_test_add_func ("/reliability/cancel-without-main-loop", test_cancel_without_main_loop);
+  g_test_add_func ("/reliability/free-space", test_free_space);
+  g_test_add_func ("/reliability/iso-backups", test_iso_backups);
+  g_test_add_func ("/reliability/archive-everything", test_archive_everything);
   return g_test_run ();
 }

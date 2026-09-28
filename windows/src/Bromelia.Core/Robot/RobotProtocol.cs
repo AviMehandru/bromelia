@@ -136,7 +136,8 @@ public enum Severity { Debug, Info, Warning, Error }
 
 public sealed record RobotMessage(int Code, int Flags, string Text, string Format, IReadOnlyList<string> Parameters)
 {
-    static readonly HashSet<int> ErrorCodes = new() { 2003, 2004, 2023, 5003, 5010, 5021, 5037, 5055, 5069, 5077 };
+    /// <summary>2018: write error (e.g. "No space left on device"); 5006: source file does not exist.</summary>
+    static readonly HashSet<int> ErrorCodes = new() { 2003, 2004, 2018, 2023, 5003, 5006, 5010, 5021, 5037, 5055, 5069, 5077 };
     static readonly HashSet<int> WarningCodes = new() { 3038, 3041, 5042 };
 
     public Severity Severity

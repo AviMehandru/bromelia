@@ -32,6 +32,9 @@ struct DriveConfigSheet: View {
                         }
                     }
                     Divider()
+                    Button("Archive Everything") { draft.applyArchiveEverything() }
+                    Text("Backup then MKV, every track, all checks on")
+                    Divider()
                     Button("Copy Settings from Default Configuration") { draft = model.applyPreset(DrivePreset(name: "", config: model.config.defaultDrive), to: draft) }
                 }
                 .fixedSize()

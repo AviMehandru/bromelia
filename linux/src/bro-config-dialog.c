@@ -882,6 +882,26 @@ on_apply_preset (GtkButton *b, AdwDialog *dialog)
   }
 }
 
+static void
+on_archive_everything (GtkButton *b, AdwDialog *dialog)
+{
+  BroState *st = bro_app_state ();
+  const char *id = g_object_get_data (G_OBJECT (dialog), "config-id");
+  GtkWidget *anchor = GTK_WIDGET (adw_dialog_get_child (dialog));
+  BroDriveConfig *cfg = bro_app_config_drive_by_id (st->config, id);
+  if (!cfg)
+    return;
+  bro_drive_config_apply_archive_everything (cfg);
+  bro_state_config_changed (st);
+  /* The open pages show the old values: reopen the dialog. */
+  {
+    GtkWidget *parent = gtk_widget_get_parent (anchor);
+    g_autofree char *cid = g_strdup (id);
+    adw_dialog_force_close (dialog);
+    bro_config_dialog_present (parent ? parent : anchor, cid);
+  }
+}
+
 void
 bro_config_dialog_present (GtkWidget *parent, const char *config_id)
 {
@@ -921,6 +941,16 @@ bro_config_dialog_present (GtkWidget *parent, const char *config_id)
       adw_action_row_add_suffix (ADW_ACTION_ROW (row), save);
       adw_action_row_add_suffix (ADW_ACTION_ROW (row), del);
       adw_preferences_group_add (g, row);
+      {
+        GtkWidget *erow = adw_action_row_new ();
+        GtkWidget *apply = gtk_button_new_with_label ("Apply");
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (erow), "Archive everything");
+        adw_action_row_set_subtitle (ADW_ACTION_ROW (erow), "Backup then MKV, every track, all checks on");
+        gtk_widget_set_valign (apply, GTK_ALIGN_CENTER);
+        g_signal_connect (apply, "clicked", G_CALLBACK (on_archive_everything), dialog);
+        adw_action_row_add_suffix (ADW_ACTION_ROW (erow), apply);
+        adw_preferences_group_add (g, erow);
+      }
       for (guint i = 0; i < st->config->presets->len; i++)
         {
           BroPreset *p = st->config->presets->pdata[i];

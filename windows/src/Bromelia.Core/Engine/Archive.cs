@@ -407,3 +407,32 @@ public static class BackupVerifier
         return "it contains no BDMV, VIDEO_TS or HVDVD_TS folder";
     }
 }
+
+/// <summary>Free space on the destination volume.</summary>
+public static class DiskSpace
+{
+    /// <summary>Bytes available to the user on the volume holding <paramref name="path"/>, or null when unknown.</summary>
+    public static long? Available(string path)
+    {
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch (Exception e) when (e is ArgumentException or IOException or NotSupportedException) { return null; }
+        var cmp = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        DriveInfo? best = null;
+        foreach (var d in DriveInfo.GetDrives())
+        {
+            try
+            {
+                var root = d.RootDirectory.FullName;
+                if (!d.IsReady || !full.StartsWith(root, cmp)) continue;
+                if (best == null || root.Length > best.RootDirectory.FullName.Length) best = d;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        try { return best?.AvailableFreeSpace; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary><paramref name="bytes"/> plus a margin: 2 % or 256 MB, whichever is larger (listing sizes are estimates).</summary>
+    public static long Required(long bytes) => bytes + Math.Max(256L << 20, bytes / 50);
+}

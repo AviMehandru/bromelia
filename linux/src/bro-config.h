@@ -151,6 +151,8 @@ typedef struct {
   GPtrArray *presets; /* BroPreset* */
   GPtrArray *plugins; /* BroPostStep*: steps for every drive, usually limited by match_name / match_formats */
   int history_limit;
+  int stall_timeout_minutes; /* stop a rip or backup that prints nothing for this long; 0 = never */
+  gboolean prevent_sleep;    /* keep the computer awake while jobs run */
 } BroAppConfig;
 
 /* Enum <-> JSON string helpers (also used by labels in the UI). */
@@ -171,6 +173,9 @@ void            bro_post_step_free (BroPostStep *s);
 BroPostStep    *bro_post_step_copy (const BroPostStep *s);
 
 BroDriveConfig *bro_drive_config_new (void);
+/* Settings for archiving everything on a disc: a decrypted backup kept next to MKV files of every title with every
+ * track, the full disc listing, and all checks on. */
+void            bro_drive_config_apply_archive_everything (BroDriveConfig *c);
 void            bro_drive_config_free (BroDriveConfig *c);
 BroDriveConfig *bro_drive_config_copy (const BroDriveConfig *c);
 BroDriveConfig *bro_drive_config_apply_body (const BroDriveConfig *identity, const BroDriveConfig *body);

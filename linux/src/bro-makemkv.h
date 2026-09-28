@@ -92,6 +92,23 @@ gboolean bro_process_run (const char *const *argv, const char *const *envp, cons
                           GCancellable *cancellable, BroLineFunc func, gpointer user_data,
                           int *exit_status, gboolean *was_cancelled, gboolean *timed_out, GError **error);
 
+typedef struct {
+  int timeout_seconds; /* 0 = none */
+  int stall_seconds;   /* stop the process when it prints nothing for this long; 0 = never */
+  int stop_signal;     /* sent first when stopping (SIGKILL follows after 5 s); 0 = SIGINT */
+} BroRunOptions;
+
+typedef struct {
+  int exit_status;     /* -1 when it didn't exit normally */
+  gboolean cancelled, timed_out;
+  gboolean stalled;    /* stopped because it printed nothing for stall_seconds */
+  gboolean abandoned;  /* didn't exit even after SIGKILL; no longer waited for */
+} BroRunStatus;
+
+/* Like bro_process_run, with a stall watchdog and a configurable stop signal. */
+gboolean bro_process_run_ex (const char *const *argv, const char *const *envp, const char *cwd, const BroRunOptions *opt,
+                             GCancellable *cancellable, BroLineFunc func, gpointer user_data, BroRunStatus *out, GError **error);
+
 void bro_ptr_array_add_all (GPtrArray *a, const char *first, ...) G_GNUC_NULL_TERMINATED;
 char **bro_ptr_array_to_strv (GPtrArray *a);
 

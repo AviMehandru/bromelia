@@ -486,6 +486,23 @@ struct DriveConfig: Codable, Hashable, Sendable, Identifiable {
         if output.folderTemplate == OutputConfig.legacyFolderTemplate { output.folderTemplate = OutputConfig.defaultFolderTemplate }
     }
 
+    /// Settings for archiving everything on a disc: a decrypted backup (every file, every title, menus) kept
+    /// next to MKV files of every title with every track, the full disc listing, and all checks on.
+    /// MakeMKV's minimum title length still applies to the MKV files; the backup contains every title.
+    mutating func applyArchiveEverything() {
+        rip.mode = .backupThenMkv
+        rip.backupFormat = .folder
+        rip.keepBackupAfterMKV = true
+        rip.titleSelection = TitleSelection()
+        rip.writeDiscInfoJSON = true
+        profile.mode = .generated
+        profile.generated.selectionRule = "+sel:all"
+        archive.checksums = true
+        archive.archiveRecord = true
+        archive.verifyRips = true
+        episodes.keepPlayAll = true
+    }
+
     /// Returns a copy that keeps identity (id, name, match, enabled) but takes everything else from `other`.
     func applyingBody(of other: DriveConfig) -> DriveConfig {
         var c = other
@@ -533,12 +550,16 @@ struct AppConfig: Codable, Hashable, Sendable {
     /// `matchName` / `matchFormats` ("plugins"). They run after the drive's own steps.
     var plugins: [PostProcessStep] = []
     var historyLimit: Int = 500
+    /// A rip or backup that prints nothing for this long is stopped and fails (a stuck drive). 0 = never.
+    var stallTimeoutMinutes: Int = 30
+    /// Keep the computer from going to sleep while jobs run.
+    var preventSleep: Bool = true
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
         case version, makemkvconPath, mkvmergePath, outputRoot, pollIntervalSeconds, pollWhileRipping, maxConcurrentJobs,
-             registrationKey, globalSettings, defaultDrive, drives, presets, plugins, historyLimit
+             registrationKey, globalSettings, defaultDrive, drives, presets, plugins, historyLimit, stallTimeoutMinutes, preventSleep
     }
 
     init(from decoder: Decoder) throws {
@@ -558,6 +579,8 @@ struct AppConfig: Codable, Hashable, Sendable {
         presets = c.value(.presets, d.presets)
         plugins = c.value(.plugins, d.plugins)
         historyLimit = c.value(.historyLimit, d.historyLimit)
+        stallTimeoutMinutes = c.value(.stallTimeoutMinutes, d.stallTimeoutMinutes)
+        preventSleep = c.value(.preventSleep, d.preventSleep)
         // Files without a version are treated as version 1.
         let loaded = (try? c.decodeIfPresent(Int.self, forKey: .version)) ?? 1
         if loaded < 2 {

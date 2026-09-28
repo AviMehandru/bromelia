@@ -2,6 +2,7 @@
 #include "bro-makemkv.h"
 #include "bro-logic.h"
 
+#include <errno.h>
 #include <json-glib/json-glib.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -594,38 +595,81 @@ bro_catalog_keys (BroCatalog *c)
 
 typedef struct {
   GSubprocess *proc;
+  GPid pid;
   GMutex lock;
   GCond cond;
-  gboolean finished;
-  gboolean cancelled;
-  gboolean timed_out;
-  int timeout;
+  gboolean finished;       /* the reading thread is done */
+  gboolean cancelled;      /* the caller's cancellable fired */
+  gboolean timed_out, stalled, abandoned;
+  BroRunOptions opt;
+  gint64 last_output;      /* monotonic */
+  GCancellable *read_cancel;  /* stops reading output */
+  GCancellable *wait_cancel;  /* stops waiting for the process (abandoned) */
 } RunState;
 
+static gboolean
+process_gone (RunState *st)
+{
+#ifdef G_OS_UNIX
+  return st->pid > 0 && kill (st->pid, 0) != 0 && errno == ESRCH;
+#else
+  return FALSE;
+#endif
+}
+
+/* Watches one process: the overall timeout, output stalls, cancellation (stop signal, then SIGKILL after 5 s), a
+ * process that ended but whose output pipe stays open (a child it left behind: stop reading after 5 s), and a
+ * process that doesn't die even after SIGKILL (stuck in the kernel on a hung drive: abandoned after 30 s). */
 static gpointer
 watchdog_thread (gpointer data)
 {
   RunState *st = data;
-  gint64 deadline = g_get_monotonic_time () + (gint64) st->timeout * G_USEC_PER_SEC;
+  gint64 start = g_get_monotonic_time (), stop_at = 0, killed_at = 0, gone_at = 0;
   g_mutex_lock (&st->lock);
   while (!st->finished)
-    if (!g_cond_wait_until (&st->cond, &st->lock, deadline))
-      {
-        st->timed_out = TRUE;
-        g_subprocess_force_exit (st->proc);
-        break;
-      }
+    {
+      gint64 now = g_get_monotonic_time ();
+      gboolean stop = FALSE;
+      if (!stop_at && st->opt.timeout_seconds > 0 && now - start >= (gint64) st->opt.timeout_seconds * G_USEC_PER_SEC)
+        {
+          st->timed_out = TRUE;
+          g_subprocess_force_exit (st->proc);
+          stop_at = killed_at = now;
+        }
+      if (!stop_at && st->opt.stall_seconds > 0 && now - st->last_output >= (gint64) st->opt.stall_seconds * G_USEC_PER_SEC)
+        st->stalled = stop = TRUE;
+      if (!stop_at && st->cancelled)
+        stop = TRUE;
+      if (stop)
+        {
+#ifdef G_OS_UNIX
+          g_subprocess_send_signal (st->proc, st->opt.stop_signal > 0 ? st->opt.stop_signal : SIGINT);
+#else
+          g_subprocess_force_exit (st->proc);
+          killed_at = now;
+#endif
+          stop_at = now;
+        }
+      if (stop_at && !killed_at && now - stop_at >= 5 * G_USEC_PER_SEC)
+        {
+          g_subprocess_force_exit (st->proc);
+          killed_at = now;
+        }
+      if (killed_at && !process_gone (st) && now - killed_at >= 30 * G_USEC_PER_SEC)
+        {
+          st->abandoned = TRUE;
+          g_cancellable_cancel (st->read_cancel);
+          g_cancellable_cancel (st->wait_cancel);
+          break;
+        }
+      if (!gone_at && process_gone (st))
+        gone_at = now;
+      if (gone_at && now - gone_at >= 5 * G_USEC_PER_SEC)
+        g_cancellable_cancel (st->read_cancel);
+      g_cond_wait_until (&st->cond, &st->lock, now + G_USEC_PER_SEC / 4);
+    }
   g_mutex_unlock (&st->lock);
   return NULL;
-}
-
-static gboolean
-force_kill_later (gpointer data)
-{
-  GSubprocess *p = data;
-  if (!g_subprocess_get_if_exited (p) && !g_subprocess_get_if_signaled (p))
-    g_subprocess_force_exit (p);
-  return G_SOURCE_REMOVE;
 }
 
 static void
@@ -634,16 +678,7 @@ on_cancelled (GCancellable *c, gpointer data)
   RunState *st = data;
   g_mutex_lock (&st->lock);
   st->cancelled = TRUE;
-  if (!st->finished)
-    {
-#ifdef G_OS_UNIX
-      g_subprocess_send_signal (st->proc, SIGINT);
-      /* Escalate if it does not stop within 5 s (runs on the thread that cancelled, usually the UI thread). */
-      g_timeout_add_seconds_full (G_PRIORITY_DEFAULT, 5, force_kill_later, g_object_ref (st->proc), g_object_unref);
-#else
-      g_subprocess_force_exit (st->proc);
-#endif
-    }
+  g_cond_signal (&st->cond);
   g_mutex_unlock (&st->lock);
 }
 
@@ -652,22 +687,41 @@ bro_process_run (const char *const *argv, const char *const *envp, const char *c
                  GCancellable *cancellable, BroLineFunc func, gpointer user_data,
                  int *exit_status, gboolean *was_cancelled, gboolean *timed_out, GError **error)
 {
+  BroRunOptions opt = { timeout_seconds, 0, 0 };
+  BroRunStatus st = { 0 };
+  gboolean ok = bro_process_run_ex (argv, envp, cwd, &opt, cancellable, func, user_data, &st, error);
+  if (exit_status)
+    *exit_status = st.exit_status;
+  if (was_cancelled)
+    *was_cancelled = st.cancelled;
+  if (timed_out)
+    *timed_out = st.timed_out;
+  return ok;
+}
+
+gboolean
+bro_process_run_ex (const char *const *argv, const char *const *envp, const char *cwd, const BroRunOptions *opt,
+                    GCancellable *cancellable, BroLineFunc func, gpointer user_data, BroRunStatus *out, GError **error)
+{
   g_autoptr (GSubprocessLauncher) launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_MERGE |
                                                                         G_SUBPROCESS_FLAGS_STDIN_INHERIT);
   g_autoptr (GDataInputStream) data = NULL;
   RunState st = { 0 };
-  GThread *watchdog = NULL;
+  GThread *watchdog;
   gulong handler = 0;
+  gboolean waited;
   char *line;
 
+  if (out)
+    memset (out, 0, sizeof *out);
   if (envp)
     g_subprocess_launcher_set_environ (launcher, (char **) envp);
   if (cwd && g_file_test (cwd, G_FILE_TEST_IS_DIR))
     g_subprocess_launcher_set_cwd (launcher, cwd);
   if (g_cancellable_is_cancelled (cancellable))
     {
-      if (was_cancelled)
-        *was_cancelled = TRUE;
+      if (out)
+        out->cancelled = TRUE;
       g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
       return FALSE;
     }
@@ -675,41 +729,53 @@ bro_process_run (const char *const *argv, const char *const *envp, const char *c
   st.proc = g_subprocess_launcher_spawnv (launcher, argv, error);
   if (!st.proc)
     return FALSE;
+  if (g_subprocess_get_identifier (st.proc))
+    st.pid = (GPid) atoi (g_subprocess_get_identifier (st.proc));
   g_mutex_init (&st.lock);
   g_cond_init (&st.cond);
-  st.timeout = timeout_seconds;
+  if (opt)
+    st.opt = *opt;
+  st.last_output = g_get_monotonic_time ();
+  st.read_cancel = g_cancellable_new ();
+  st.wait_cancel = g_cancellable_new ();
   if (cancellable)
     handler = g_cancellable_connect (cancellable, G_CALLBACK (on_cancelled), &st, NULL);
-  if (timeout_seconds > 0)
-    watchdog = g_thread_new ("bro-watchdog", watchdog_thread, &st);
+  watchdog = g_thread_new ("bro-watchdog", watchdog_thread, &st);
 
   data = g_data_input_stream_new (g_subprocess_get_stdout_pipe (st.proc));
   g_data_input_stream_set_newline_type (data, G_DATA_STREAM_NEWLINE_TYPE_ANY);
-  while ((line = g_data_input_stream_read_line (data, NULL, NULL, NULL)) != NULL)
+  while ((line = g_data_input_stream_read_line (data, NULL, st.read_cancel, NULL)) != NULL)
     {
       g_autofree char *valid = g_utf8_make_valid (line, -1);
+      g_mutex_lock (&st.lock);
+      st.last_output = g_get_monotonic_time ();
+      g_mutex_unlock (&st.lock);
       if (*valid && func)
         func (valid, user_data);
       g_free (line);
     }
-  g_subprocess_wait (st.proc, NULL, NULL);
+  waited = g_subprocess_wait (st.proc, st.wait_cancel, NULL);
 
   g_mutex_lock (&st.lock);
   st.finished = TRUE;
   g_cond_signal (&st.cond);
   g_mutex_unlock (&st.lock);
-  if (watchdog)
-    g_thread_join (watchdog);
+  g_thread_join (watchdog);
   if (handler)
     g_cancellable_disconnect (cancellable, handler);
 
-  if (exit_status)
-    *exit_status = g_subprocess_get_if_exited (st.proc) ? g_subprocess_get_exit_status (st.proc) : -1;
-  if (was_cancelled)
-    *was_cancelled = st.cancelled;
-  if (timed_out)
-    *timed_out = st.timed_out;
+  if (out)
+    {
+      out->exit_status = waited && g_subprocess_get_if_exited (st.proc) ? g_subprocess_get_exit_status (st.proc) : -1;
+      out->cancelled = st.cancelled;
+      out->timed_out = st.timed_out;
+      out->stalled = st.stalled;
+      out->abandoned = st.abandoned;
+    }
+  /* An abandoned process is still running; GSubprocess keeps watching it and reaps it if it ever ends. */
   g_object_unref (st.proc);
+  g_object_unref (st.read_cancel);
+  g_object_unref (st.wait_cancel);
   g_mutex_clear (&st.lock);
   g_cond_clear (&st.cond);
   return TRUE;

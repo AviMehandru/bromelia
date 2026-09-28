@@ -12,11 +12,31 @@ struct _BroWindow {
   GtkLabel *status_label;
   char *current_tag;
   gboolean rebuilding;
+  guint inhibit_cookie;
 };
 
 G_DEFINE_FINAL_TYPE (BroWindow, bro_window, ADW_TYPE_APPLICATION_WINDOW)
 
 static void rebuild_sidebar (BroWindow *self);
+
+/* Keeps the computer from suspending (and the session from going idle) while jobs run. */
+static void
+update_inhibit (BroWindow *self)
+{
+  BroState *st = bro_app_state ();
+  GtkApplication *app = gtk_window_get_application (GTK_WINDOW (self));
+  gboolean busy = bro_state_active_count (st) > 0 && st->config->prevent_sleep;
+  if (!app)
+    return;
+  if (busy && !self->inhibit_cookie)
+    self->inhibit_cookie = gtk_application_inhibit (app, GTK_WINDOW (self), GTK_APPLICATION_INHIBIT_SUSPEND | GTK_APPLICATION_INHIBIT_IDLE,
+                                                    "Ripping discs");
+  else if (!busy && self->inhibit_cookie)
+    {
+      gtk_application_uninhibit (app, self->inhibit_cookie);
+      self->inhibit_cookie = 0;
+    }
+}
 
 static GtkWidget *
 sidebar_row (const char *tag, const char *icon, const char *title, const char *subtitle, gboolean dim)
@@ -457,6 +477,8 @@ bro_window_init (BroWindow *self)
   g_signal_connect_object (bro_app_state (), "drives-changed", G_CALLBACK (rebuild_sidebar), self, G_CONNECT_SWAPPED);
   g_signal_connect_object (bro_app_state (), "jobs-changed", G_CALLBACK (rebuild_sidebar), self, G_CONNECT_SWAPPED);
   g_signal_connect_object (bro_app_state (), "tick", G_CALLBACK (rebuild_sidebar), self, G_CONNECT_SWAPPED);
+  g_signal_connect_object (bro_app_state (), "jobs-changed", G_CALLBACK (update_inhibit), self, G_CONNECT_SWAPPED);
+  g_signal_connect_object (bro_app_state (), "tick", G_CALLBACK (update_inhibit), self, G_CONNECT_SWAPPED);
   g_signal_connect_object (bro_app_state (), "status-changed", G_CALLBACK (on_status_changed), self, 0);
   bro_window_navigate (self, "queue");
   on_status_changed (bro_app_state (), self);

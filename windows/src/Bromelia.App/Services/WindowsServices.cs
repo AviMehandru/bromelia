@@ -42,6 +42,15 @@ public sealed class WindowsPlatformServices : IPlatformServices
 
     public Task<bool> EjectAsync(string devicePath) => Task.Run(() => Eject(devicePath));
 
+    /// <summary>Keeps the system (not the display) awake while jobs run. Called on the UI thread, which lives as long as the app.</summary>
+    public void KeepAwake(bool on) =>
+        SetThreadExecutionState(on ? ES_CONTINUOUS | ES_SYSTEM_REQUIRED : ES_CONTINUOUS);
+
+    const uint ES_CONTINUOUS = 0x80000000, ES_SYSTEM_REQUIRED = 0x00000001;
+
+    [DllImport("kernel32.dll")]
+    static extern uint SetThreadExecutionState(uint flags);
+
     /// <summary>Maps MakeMKV's device name ("E:", "E:\", "\Device\CdRom0") to a Win32 device path.</summary>
     public static string? Win32DevicePath(string device)
     {

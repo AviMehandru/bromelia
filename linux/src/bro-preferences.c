@@ -78,6 +78,8 @@ general_page (void)
   g = group (ADW_PREFERENCES_PAGE (page), "Jobs", NULL);
   adw_preferences_group_add (g, bro_spin_row ("Maximum simultaneous jobs", "0 = one per drive, no global limit", &c->max_concurrent_jobs, 0, 64, changed_cb, NULL));
   adw_preferences_group_add (g, bro_spin_row ("Keep history for", "jobs", &c->history_limit, 10, 100000, changed_cb, NULL));
+  adw_preferences_group_add (g, bro_spin_row ("Stop a stuck rip after", "minutes without output (0 = never)", &c->stall_timeout_minutes, 0, 1440, changed_cb, NULL));
+  adw_preferences_group_add (g, bro_switch_row ("Keep the computer awake while jobs run", NULL, &c->prevent_sleep, changed_cb, NULL));
   g = group (ADW_PREFERENCES_PAGE (page), "MakeMKV", st->makemkv_version && *st->makemkv_version ? st->makemkv_version : NULL);
   adw_preferences_group_add (g, button_row ("Import settings from MakeMKV", "Copies ~/.MakeMKV/settings.conf into the global settings", "Import", G_CALLBACK (on_import), NULL));
   adw_preferences_group_add (g, button_row ("Bromelia data folder", "Job logs, manifests and history", "Open", G_CALLBACK (on_open_data), NULL));

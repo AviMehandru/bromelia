@@ -49,6 +49,7 @@ final class AppModel {
     var selection: SidebarSelection? = .queue
 
     @ObservationIgnored private var runners: [UUID: JobRunner] = [:]
+    @ObservationIgnored private var keepAwake: NSObjectProtocol?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
@@ -532,12 +533,25 @@ final class AppModel {
         runner.onFinished = { [weak self] finished in
             guard let self else { return }
             self.runners[finished.id] = nil
+            self.updateKeepAwake()
             self.recordHistory(finished)
             self.scheduleRescan(after: 3)
             self.pump()
         }
         runners[job.id] = runner
+        updateKeepAwake()
         Task { await runner.run() }
+    }
+
+    /// Keeps the Mac awake (no idle sleep, no App Nap) while any job runs.
+    func updateKeepAwake() {
+        let busy = !runners.isEmpty && config.preventSleep
+        if busy, keepAwake == nil {
+            keepAwake = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Ripping discs")
+        } else if !busy, let a = keepAwake {
+            ProcessInfo.processInfo.endActivity(a)
+            keepAwake = nil
+        }
     }
 
     private func recordHistory(_ job: RipJob) {
