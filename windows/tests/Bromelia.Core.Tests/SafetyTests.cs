@@ -64,7 +64,9 @@ sealed class FakeMakeMkv
             $"  info) cat '{listingPath}' ;;\n" +
             "  mkv) title=\"$2\"; dest=\"$3\"\n" + mkv + "\n  ;;\n" +
             "  backup) for a in \"$@\"; do dest=\"$a\"; done\n" + backup + "\n  ;;\nesac\nexit 0\n");
-        File.SetUnixFileMode(Executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        // Tests that never start makemkvcon (data discs) also run on Windows, which has no Unix file modes.
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(Executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
     /// <summary>Writes a small file as MakeMKV's output for the title (for <c>all</c>: titles 0-4 in the listing), then prints <paramref name="messages"/>.</summary>

@@ -1963,6 +1963,7 @@ fake_one_pass (const char *titles, const char *extra_info)
     g_auto (GStrv) b = g_strsplit (s1, old_info, 2);
     g_autofree char *s2 = g_strjoinv ("info) cat \"$LISTING\" ;;", b);
     g_assert_true (g_file_set_contents (f->exe, s2, -1, NULL));
+    g_chmod (f->exe, 0755); /* g_file_set_contents replaces the file, dropping the execute bit */
   }
   return f;
 }
