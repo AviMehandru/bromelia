@@ -28,16 +28,20 @@ public sealed class BackgroundQueue
     public ObservableCollection<Item> Items { get; } = new();
     public int Limit { get; set; } = 1;
     public bool IsBusy => Items.Any(i => i.State is "queued" or "running");
+    /// <summary>Raised on the UI thread when an item is added, finishes or is cleared.</summary>
+    public event Action? Changed;
 
     public void Enqueue(BackgroundWork work)
     {
         Items.Add(new Item(work));
         Pump();
+        Changed?.Invoke();
     }
 
     public void ClearFinished()
     {
         foreach (var i in Items.Where(i => i.State is "done" or "failed").ToList()) Items.Remove(i);
+        Changed?.Invoke();
     }
 
     void Pump()
@@ -60,6 +64,7 @@ public sealed class BackgroundQueue
             item.State = failed.Count == 0 ? "done" : "failed";
             item.Message = failed.Count == 0 ? $"{results.Count} step(s) finished" : $"“{failed[0].Name}” failed; see {item.Work.LogFile}";
             Pump();
+            Changed?.Invoke();
         });
     }
 }

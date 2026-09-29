@@ -30,6 +30,8 @@ public sealed partial class MainWindow : Window
         State.FileSessions.CollectionChanged += (_, _) => RebuildMenu();
         State.Jobs.CollectionChanged += OnJobsChanged;
         State.PropertyChanged += OnStateChanged;
+        // A message from startup (jobs interrupted when Bromelia last stopped) was set before this window existed.
+        OnStateChanged(State, new PropertyChangedEventArgs(nameof(AppState.LastError)));
         RebuildMenu();
         Navigate("queue");
     }

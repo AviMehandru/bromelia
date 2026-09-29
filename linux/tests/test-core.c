@@ -3,6 +3,8 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <string.h>
 #include <json-glib/json-glib.h>
 
@@ -2657,6 +2659,248 @@ test_data_discs (void)
   fake_free (f);
 }
 
+/* ---- keeping the computer awake ---- */
+
+typedef struct {
+  BroSleepInhibitor base;
+  gboolean on;
+  int turned_on, turned_off;
+} FakeInhibitor;
+
+static void
+fake_inhibitor_set (BroSleepInhibitor *base, gboolean on)
+{
+  FakeInhibitor *f = (FakeInhibitor *) base;
+  g_assert_true (on != f->on);
+  f->on = on;
+  if (on)
+    f->turned_on++;
+  else
+    f->turned_off++;
+}
+
+static void
+fake_inhibitor_free (BroSleepInhibitor *base)
+{
+}
+
+static void
+test_keep_awake (void)
+{
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  FakeInhibitor f = { { fake_inhibitor_set, fake_inhibitor_free, NULL, NULL }, FALSE, 0, 0 };
+  BroJob *job = g_object_new (BRO_TYPE_JOB, NULL);
+  BroBackgroundWork *work = g_new0 (BroBackgroundWork, 1);
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-awake-XXXXXX", NULL);
+  BroPostStep *step = bro_post_step_new ();
+  gint64 until;
+
+  bro_state_set_sleep_inhibitor (st, &f.base);
+  g_assert_false (f.on);
+
+  /* A job starts: the computer is kept awake; it ends: released. */
+  job->state = BRO_JOB_RUNNING;
+  g_ptr_array_add (st->jobs, job);
+  g_signal_emit_by_name (st, "jobs-changed");
+  g_assert_true (f.on);
+  g_signal_emit_by_name (st, "jobs-changed");
+  g_assert_cmpint (f.turned_on, ==, 1);
+
+  /* Turning preventSleep off releases it at once. */
+  st->config->prevent_sleep = FALSE;
+  bro_state_config_changed (st);
+  g_assert_false (f.on);
+  st->config->prevent_sleep = TRUE;
+  bro_state_config_changed (st);
+  g_assert_true (f.on);
+
+  /* A background step keeps it awake after the last job has ended, until the step finishes. */
+  g_free (step->executable);
+  step->executable = g_strdup ("/bin/sh");
+  g_free (step->arguments);
+  step->arguments = g_strdup ("-c 'sleep 0.3'");
+  step->background = TRUE;
+  work->job_id = g_strdup ("awake");
+  work->title = g_strdup ("awake");
+  work->steps = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_post_step_free);
+  g_ptr_array_add (work->steps, step);
+  work->values = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  work->files = g_ptr_array_new_with_free_func (g_free);
+  work->output_dir = g_strdup (dir);
+  work->log_file = g_build_filename (dir, "background.log", NULL);
+  bro_state_enqueue_background (st, work);
+  job->state = BRO_JOB_SUCCEEDED;
+  g_signal_emit_by_name (st, "jobs-changed");
+  g_assert_true (f.on);
+  until = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+  while (bro_state_background_busy (st) && g_get_monotonic_time () < until)
+    g_main_context_iteration (NULL, TRUE);
+  g_assert_false (bro_state_background_busy (st));
+  g_assert_false (f.on);
+  g_assert_cmpint (f.turned_off, ==, 2);
+
+  /* Replacing the inhibitor while it is on releases the old one first. */
+  job->state = BRO_JOB_RUNNING;
+  g_signal_emit_by_name (st, "jobs-changed");
+  g_assert_true (f.on);
+  bro_state_set_sleep_inhibitor (st, NULL);
+  g_assert_false (f.on);
+  job->state = BRO_JOB_SUCCEEDED;
+  g_signal_emit_by_name (st, "jobs-changed");
+}
+
+static void
+count_problem (const char *message, gpointer data)
+{
+  g_assert_nonnull (strstr (message, "systemd-logind"));
+  (*(int *) data)++;
+}
+
+/* Without a system bus (containers, other systems) logind's inhibitor says so once and doesn't retry. */
+static void
+test_keep_awake_without_logind (void)
+{
+  g_autofree char *saved = g_strdup (g_getenv ("DBUS_SYSTEM_BUS_ADDRESS"));
+  BroSleepInhibitor *logind;
+  int problems = 0;
+  gint64 until;
+  g_setenv ("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=/nonexistent/bromelia-test-bus", TRUE);
+  logind = bro_sleep_inhibitor_logind_new ();
+  logind->problem = count_problem;
+  logind->problem_data = &problems;
+  logind->set (logind, TRUE);
+  until = g_get_monotonic_time () + 5 * G_USEC_PER_SEC;
+  while (problems == 0 && g_get_monotonic_time () < until)
+    g_main_context_iteration (NULL, FALSE);
+  g_assert_cmpint (problems, ==, 1);
+  logind->set (logind, FALSE);
+  logind->set (logind, TRUE);
+  while (g_main_context_iteration (NULL, FALSE))
+    ;
+  g_assert_cmpint (problems, ==, 1);
+  bro_sleep_inhibitor_free (logind);
+  if (saved)
+    g_setenv ("DBUS_SYSTEM_BUS_ADDRESS", saved, TRUE);
+  else
+    g_unsetenv ("DBUS_SYSTEM_BUS_ADDRESS");
+}
+
+/* ---- jobs that were unfinished when Bromelia stopped ---- */
+
+static int
+dead_pid (void)
+{
+  const char *argv[] = { "/bin/sh", "-c", "exit 0", NULL };
+  GPid pid;
+  int status;
+  g_assert_true (g_spawn_async (NULL, (char **) argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &pid, NULL));
+  waitpid (pid, &status, 0);
+  return pid;
+}
+
+static void
+write_unfinished (int pid, const char *instance, const char *jobs)
+{
+  g_autofree char *dir = bro_data_dir ();
+  g_autofree char *name = g_strdup_printf ("unfinished-%d.json", pid);
+  g_autofree char *path = g_build_filename (dir, name, NULL);
+  g_autofree char *text = g_strdup_printf ("{\"pid\": %d, \"instance\": \"%s\", \"jobs\": [%s]}", pid, instance, jobs);
+  g_mkdir_with_parents (dir, 0700);
+  g_assert_true (g_file_set_contents (path, text, -1, NULL));
+}
+
+static BroHistoryRecord *
+history_record (BroState *st, const char *id)
+{
+  for (guint i = 0; i < st->history->len; i++)
+    if (g_str_equal (((BroHistoryRecord *) st->history->pdata[i])->id, id))
+      return st->history->pdata[i];
+  return NULL;
+}
+
+static void
+test_unfinished_jobs (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("bromelia-unfinished-XXXXXX", NULL);
+  g_autofree char *movie = g_build_filename (root, "Movie", NULL);
+  g_autofree char *stage = g_build_filename (movie, ".bromelia-incomplete-aaaa1111", NULL);
+  g_autofree char *partial = g_build_filename (stage, "title_t00.mkv", NULL);
+  g_autofree char *empty = g_build_filename (root, "Empty", NULL);
+  g_autofree char *empty_stage = g_build_filename (empty, ".bromelia-incomplete-bbbb2222", NULL);
+  g_autofree char *hidden = g_build_filename (empty_stage, ".tmp-split", NULL);
+  g_autofree char *kept = g_build_filename (movie, "INCOMPLETE - aaaa1111", NULL);
+  g_autofree char *kept_mkv = g_build_filename (kept, "title_t00.mkv", NULL);
+  g_autofree char *note = g_build_filename (kept, "INCOMPLETE.txt", NULL);
+  g_autofree char *jobs = NULL, *live_path = NULL, *mine = NULL, *text = NULL, *data = bro_data_dir ();
+  g_autofree char *live_name = g_strdup_printf ("unfinished-%d.json", (int) getppid ());
+  BroHistoryRecord *r;
+  g_mkdir_with_parents (stage, 0755);
+  g_mkdir_with_parents (empty_stage, 0755);
+  g_assert_true (g_file_set_contents (partial, "partial", -1, NULL));
+  g_assert_true (g_file_set_contents (hidden, "tmp", -1, NULL));
+  jobs = g_strdup_printf ("{\"id\": \"aaaa1111-0000-4000-8000-000000000001\", \"title\": \"Movie\", \"state\": \"running\", \"mode\": \"mkv\", "
+                          "\"outputDirectory\": \"%s\", \"startedAt\": 100},"
+                          "{\"id\": \"bbbb2222-0000-4000-8000-000000000002\", \"title\": \"Empty\", \"state\": \"running\", \"mode\": \"mkv\", "
+                          "\"outputDirectory\": \"%s\"},"
+                          "{\"id\": \"cccc3333-0000-4000-8000-000000000003\", \"title\": \"Next\", \"state\": \"queued\", \"mode\": \"mkv\"}",
+                          movie, empty);
+  write_unfinished (dead_pid (), "gone", jobs);
+  /* Another Bromelia that is still running (the app next to the daemon): left alone. */
+  write_unfinished (getppid (), "other", "{\"id\": \"dddd4444-0000-4000-8000-000000000004\", \"state\": \"running\"}");
+  live_path = g_build_filename (data, live_name, NULL);
+
+  {
+    g_autoptr (BroState) st = bro_state_new (NULL);
+    r = history_record (st, "aaaa1111-0000-4000-8000-000000000001");
+    g_assert_nonnull (r);
+    g_assert_cmpstr (r->state, ==, "failed");
+    g_assert_nonnull (strstr (r->error, "Interrupted"));
+    g_assert_cmpstr (r->output_dir, ==, kept);
+    g_assert_true (g_file_test (kept_mkv, G_FILE_TEST_EXISTS));
+    g_assert_true (g_file_get_contents (note, &text, NULL, NULL));
+    g_assert_nonnull (strstr (text, "NOT a finished archive"));
+    g_assert_false (g_file_test (stage, G_FILE_TEST_EXISTS));
+
+    r = history_record (st, "bbbb2222-0000-4000-8000-000000000002");
+    g_assert_nonnull (r);
+    g_assert_null (r->output_dir);
+    g_assert_false (g_file_test (empty, G_FILE_TEST_EXISTS)); /* nothing was saved: its folders are removed */
+
+    r = history_record (st, "cccc3333-0000-4000-8000-000000000003");
+    g_assert_nonnull (r);
+    g_assert_cmpstr (r->state, ==, "cancelled");
+    g_assert_nonnull (strstr (r->error, "Not started"));
+
+    g_assert_null (history_record (st, "dddd4444-0000-4000-8000-000000000004"));
+    g_assert_true (g_file_test (live_path, G_FILE_TEST_EXISTS));
+    g_assert_nonnull (strstr (st->last_error, "3 unfinished job(s)"));
+
+    /* This process's own jobs are written down while they wait, and taken out once finished. */
+    {
+      g_autofree char *own = g_strdup_printf ("unfinished-%d.json", (int) getpid ());
+      mine = g_build_filename (data, own, NULL);
+    }
+    {
+      BroDriveConfig *d = bro_drive_config_new ();
+      g_free (d->match_drive_name);
+      d->match_drive_name = g_strdup ("DVD UNFINISHED");
+      d->automation.auto_rip_on_insert = TRUE;
+      d->automation.auto_rip_delay_seconds = 60;
+      g_ptr_array_add (st->config->drives, d);
+    }
+    scan (st, entry (0, BRO_DRIVE_EMPTY_CLOSED, "DVD UNFINISHED", "/dev/sr7", ""), NULL);
+    scan (st, entry (0, BRO_DRIVE_INSERTED, "DVD UNFINISHED", "/dev/sr7", "DISC"), NULL);
+    g_assert_cmpuint (st->jobs->len, ==, 1);
+    g_clear_pointer (&text, g_free);
+    g_assert_true (g_file_get_contents (mine, &text, NULL, NULL));
+    g_assert_nonnull (strstr (text, ((BroJob *) st->jobs->pdata[0])->id));
+    g_assert_nonnull (strstr (text, "\"waiting\""));
+    bro_state_cancel_job (st, st->jobs->pdata[0]);
+    g_assert_false (g_file_test (mine, G_FILE_TEST_EXISTS));
+  }
+  g_unlink (live_path);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -2730,5 +2974,8 @@ main (int argc, char **argv)
   g_test_add_func ("/integrations/format-modes", test_format_modes);
   g_test_add_func ("/integrations/audio-cds", test_audio_cds);
   g_test_add_func ("/integrations/data-discs", test_data_discs);
+  g_test_add_func ("/reliability/keep-awake", test_keep_awake);
+  g_test_add_func ("/reliability/keep-awake-without-logind", test_keep_awake_without_logind);
+  g_test_add_func ("/reliability/unfinished-jobs", test_unfinished_jobs);
   return g_test_run ();
 }

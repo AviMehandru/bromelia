@@ -11,7 +11,7 @@ gnome = import('gnome')
 
 glib_dep = dependency('glib-2.0', version: '>= 2.76')
 gio_dep = dependency('gio-2.0', version: '>= 2.76')
-gio_unix_dep = dependency('gio-unix-2.0', required: false)
+gio_unix_dep = dependency('gio-unix-2.0', version: '>= 2.76')
 json_dep = dependency('json-glib-1.0', version: '>= 1.6')
 build_ui = get_option('ui')
 gtk_dep = dependency('gtk4', version: '>= 4.12', required: build_ui)

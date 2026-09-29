@@ -584,6 +584,96 @@ struct ReliabilityTests {
         #expect(c.stallTimeoutMinutes == 30)
         #expect(c.preventSleep)
     }
+
+    @Test func backgroundStepsKeepTheMacAwake() async throws {
+        let model = AppModel(persistent: false)
+        var switches: [Bool] = []
+        model.keepAwakeSwitch = { switches.append($0) }
+        var step = PostProcessStep()
+        step.executable = "/bin/sh"
+        step.arguments = "-c 'sleep 0.3'"
+        step.runOn = .always
+        step.background = true
+        let context = PostProcessor.Context(status: .succeeded, values: [:], outputDirectory: root, files: [], manifestPath: "", environment: [:])
+        model.background.enqueue(BackgroundWork(jobId: UUID(), title: "awake", steps: [step], context: context,
+                                                logFile: root.appendingPathComponent("background.log")))
+        #expect(switches == [true])
+        model.config.preventSleep = false
+        #expect(switches == [true, false], "turning the setting off releases it at once")
+        model.config.preventSleep = true
+        #expect(switches == [true, false, true])
+        for _ in 0..<100 where model.background.isBusy { try await Task.sleep(nanoseconds: 100_000_000) }
+        #expect(!model.background.isBusy)
+        #expect(switches == [true, false, true, false], "released when the last step has finished")
+    }
+
+    private func writeUnfinished(_ dir: URL, pid: Int32, instance: String, jobs: String) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("{\"pid\": \(pid), \"instance\": \"\(instance)\", \"jobs\": [\(jobs)]}".utf8)
+            .write(to: dir.appendingPathComponent("unfinished-\(pid).json"))
+    }
+
+    private func entry(_ id: String, _ state: String, output: URL? = nil) -> String {
+        let out = output.map { ", \"outputDirectory\": \"\($0.path)\"" } ?? ""
+        return #"{"id": "\#(id)", "title": "T", "driveName": "", "discName": "", "mode": "mkv", "state": "\#(state)", "logPath": ""\#(out)}"#
+    }
+
+    @Test func unfinishedJobsAreRecordedAfterAStop() throws {
+        let fm = FileManager.default
+        let data = root.appendingPathComponent("data", isDirectory: true)
+        let saved = Paths.dataOverride
+        Paths.dataOverride = data
+        defer { Paths.dataOverride = saved }
+        let movie = root.appendingPathComponent("Movie", isDirectory: true)
+        let stage = movie.appendingPathComponent(".bromelia-incomplete-aaaa1111", isDirectory: true)
+        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+        try Data("partial".utf8).write(to: stage.appendingPathComponent("title_t00.mkv"))
+        let empty = root.appendingPathComponent("Empty", isDirectory: true)
+        let emptyStage = empty.appendingPathComponent(".bromelia-incomplete-bbbb2222", isDirectory: true)
+        try fm.createDirectory(at: emptyStage, withIntermediateDirectories: true)
+        try Data("tmp".utf8).write(to: emptyStage.appendingPathComponent(".tmp-split"))
+
+        let gone = Process()
+        gone.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try gone.run()
+        gone.waitUntilExit()
+        let running = "AAAA1111-0000-4000-8000-000000000001", nothing = "BBBB2222-0000-4000-8000-000000000002"
+        let queued = "CCCC3333-0000-4000-8000-000000000003", other = "DDDD4444-0000-4000-8000-000000000004"
+        try writeUnfinished(data, pid: gone.processIdentifier, instance: "gone",
+                            jobs: [entry(running, "running", output: movie), entry(nothing, "running", output: empty), entry(queued, "queued")].joined(separator: ","))
+        // Another Bromelia that is still running: left alone.
+        try writeUnfinished(data, pid: getppid(), instance: "other", jobs: entry(other, "running"))
+
+        let model = AppModel(persistent: true)
+        let kept = movie.appendingPathComponent("INCOMPLETE - aaaa1111", isDirectory: true)
+        let r1 = try #require(model.history.first { $0.id.uuidString == running })
+        #expect(r1.state == .failed && r1.errorMessage?.hasPrefix("Interrupted") == true)
+        #expect(r1.outputDirectory == kept.path)
+        #expect(fm.fileExists(atPath: kept.appendingPathComponent("title_t00.mkv").path))
+        let note = try String(contentsOf: kept.appendingPathComponent("INCOMPLETE.txt"), encoding: .utf8)
+        #expect(note.contains("NOT a finished archive"))
+        #expect(!fm.fileExists(atPath: stage.path))
+        let r2 = try #require(model.history.first { $0.id.uuidString == nothing })
+        #expect(r2.outputDirectory == nil)
+        #expect(!fm.fileExists(atPath: empty.path), "nothing was saved: its folders are removed")
+        let r3 = try #require(model.history.first { $0.id.uuidString == queued })
+        #expect(r3.state == .cancelled && r3.errorMessage?.hasPrefix("Not started") == true)
+        #expect(!model.history.contains { $0.id.uuidString == other })
+        #expect(fm.fileExists(atPath: data.appendingPathComponent("unfinished-\(getppid()).json").path))
+        #expect(model.lastError?.contains("3 unfinished job(s)") == true)
+
+        // This process's own jobs are written down while they wait, and taken out once finished.
+        let job = RipJob(source: .iso(path: "/nonexistent/test.iso"), drive: DriveConfig(), laneKey: "iso:unfinished", sourceLabel: "test", discLabel: "", mode: .mkv)
+        job.state = .waiting
+        job.startAt = Date().addingTimeInterval(3600)
+        model.enqueue(job)
+        let mine = UnfinishedJobs.file()
+        let text = try String(contentsOf: mine, encoding: .utf8)
+        #expect(text.contains(job.id.uuidString) && text.contains("\"waiting\""))
+        model.cancel(job)
+        #expect(!fm.fileExists(atPath: mine.path))
+        try? fm.removeItem(at: data.appendingPathComponent("unfinished-\(getppid()).json"))
+    }
 }
 
 // MARK: - MakeMKV notices, beta key, single files, one-pass rips

@@ -107,7 +107,12 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **Checks against the disc listing.** Every MKV is compared with its title (length, tracks) using
   `mkvmerge -J`, and backups must contain a disc structure. Every job reads the disc listing again, finds
   the chosen titles even if MakeMKV renumbered them, and stops if the disc was changed.
-- **Unattended safeguards.** The computer is kept awake while jobs run; a rip that stops producing output
+- **Nothing lost on a crash.** Queued and running jobs are written down as they change. If Bromelia stops
+  unexpectedly (a crash, a power cut, a forced quit), the next start lists them in the history as interrupted
+  or not started, and turns an interrupted job's hidden staging folder into a visible `INCOMPLETE - <id>` folder
+  with a note.
+- **Unattended safeguards.** The computer is kept awake while jobs or background steps run (also by
+  `bromelia-daemon`, through systemd-logind); a rip that stops producing output
   (a stuck drive) is stopped after a configurable time; a job that wouldn't fit on the destination stops
   before writing (from the titles' sizes, or MakeMKV's own warning); error messages name the actual cause
   (e.g. “No space left on device”).

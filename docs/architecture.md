@@ -116,6 +116,21 @@ output folder on success, or into a folder marked `[READ ERRORS]` / `[INCOMPLETE
 otherwise. Paths recorded during the job (files, episodes, checksums) are rewritten to the final location
 before the manifest, archive record and post-processing see them.
 
+## Unfinished jobs
+
+The queue lives in memory. So that a crash, a power cut or a forced quit never loses a job silently, the queued,
+waiting and running jobs are also written to `unfinished-<pid>.json` in the data folder (next to `history.json`)
+whenever they change: id, title, drive, disc, mode, state, the output folder once the job has chosen it, and the log
+path. The file is removed when no job is left.
+
+At start, each `unfinished-*.json` whose process has gone (the pid isn't running, or it is this process's pid but a
+different instance token, as for pid 1 in a container) is turned into history records: running jobs as *failed*
+(“Interrupted: …”), queued and waiting ones as *cancelled* (“Not started: …”). A running job's staging folder
+(`<output folder>/.bromelia-incomplete-<id>`) is renamed to `INCOMPLETE - <id>` with an `INCOMPLETE.txt` note, or
+removed (with the output folder, if that is then empty) when nothing visible was saved. The app shows a message and
+the daemon logs it. Files of processes that are still running (the Linux app next to `bromelia-daemon`) are left
+alone. The jobs themselves are not queued again: the disc in the drive may have changed since.
+
 ## Stopping processes
 
 `makemkvcon` ignores SIGINT, so it is stopped with SIGTERM (other tools get SIGINT first), then SIGKILL
@@ -136,8 +151,13 @@ the tests of all three platforms replay it through the job pipeline with a stand
 
 ## Sleep
 
-While jobs run, macOS gets a `ProcessInfo` activity (no idle sleep, no App Nap), Windows
-`SetThreadExecutionState(ES_SYSTEM_REQUIRED)`, and Linux a GTK inhibitor (suspend and idle).
+While jobs or background steps run (and `preventSleep` is on), macOS gets a `ProcessInfo` activity (no idle sleep,
+no App Nap), Windows `SetThreadExecutionState(ES_SYSTEM_REQUIRED)`, and Linux an inhibitor chosen by the front-end:
+the GTK app uses `gtk_application_inhibit` (suspend and idle, through the desktop), and `bromelia-daemon` asks
+systemd-logind over the system bus (`Inhibit("sleep:idle", …, "block")`, `bro-sleep.c`), keeping the returned file
+descriptor open until the work is done. When logind can't be reached (a container without the system bus socket,
+a system without systemd) the daemon logs it once and carries on. The app state decides when; the inhibitor only
+turns on and off.
 
 ## Services
 

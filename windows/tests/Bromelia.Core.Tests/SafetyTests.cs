@@ -542,6 +542,124 @@ public class ReliabilityTests
         Assert.True(c.PreventSleep);
     }
 
+    sealed class AwakePlatform : IPlatformServices
+    {
+        public readonly List<bool> Switches = new();
+        public Task<bool> EjectAsync(string devicePath) => Task.FromResult(false);
+        public void Notify(string title, string body, bool sound) { }
+        public void KeepAwake(bool on) => Switches.Add(on);
+    }
+
+    [Fact]
+    public void BackgroundStepsKeepTheComputerAwake()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = Path.Combine(Path.GetTempPath(), "bromelia-awake-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        Paths.DataOverride = dir;
+        try
+        {
+            SingleThreadContext.Run(async () =>
+            {
+                var platform = new AwakePlatform();
+                var state = new AppState(platform, Path.Combine(dir, "config.json"), new SettingsCatalog());
+                var step = new PostProcessStep { Executable = "/bin/sh", Arguments = "-c 'sleep 0.3'", RunOn = RunCondition.Always, Background = true };
+                var context = new PostProcessor.Context(JobState.Succeeded, new Dictionary<string, string>(), dir, new List<string>(), new Dictionary<string, string>());
+                state.Background.Enqueue(new BackgroundWork(Guid.NewGuid(), "awake", new List<PostProcessStep> { step }, context, Path.Combine(dir, "background.log")));
+                Assert.Equal(new[] { true }, platform.Switches);
+                state.Config.PreventSleep = false;
+                state.UpdateKeepAwake();
+                Assert.Equal(new[] { true, false }, platform.Switches);
+                state.Config.PreventSleep = true;
+                state.UpdateKeepAwake();
+                for (int i = 0; i < 200 && state.Background.IsBusy; i++) await Task.Delay(20);
+                Assert.False(state.Background.IsBusy);
+                Assert.Equal(new[] { true, false, true, false }, platform.Switches);
+            });
+        }
+        finally
+        {
+            Paths.DataOverride = null;
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
+    static void WriteUnfinished(string dir, int pid, string instance, string jobs)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, $"unfinished-{pid}.json"), $"{{\"pid\": {pid}, \"instance\": \"{instance}\", \"jobs\": [{jobs}]}}");
+    }
+
+    static string Entry(string id, string state, string? output = null) =>
+        $"{{\"id\": \"{id}\", \"title\": \"T\", \"mode\": \"mkv\", \"state\": \"{state}\", \"logPath\": \"\"" +
+        (output != null ? $", \"outputDirectory\": {JsonSerializer.Serialize(output)}" : "") + "}";
+
+    [Fact]
+    public void UnfinishedJobsAreRecordedAfterAStop()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "bromelia-unfinished-" + Guid.NewGuid().ToString("N")[..8]);
+        var data = Path.Combine(root, "data");
+        Paths.DataOverride = data;
+        try
+        {
+            var movie = Path.Combine(root, "Movie");
+            var stage = Path.Combine(movie, ".bromelia-incomplete-aaaa1111");
+            Directory.CreateDirectory(stage);
+            File.WriteAllText(Path.Combine(stage, "title_t00.mkv"), "partial");
+            var empty = Path.Combine(root, "Empty");
+            var emptyStage = Path.Combine(empty, ".bromelia-incomplete-bbbb2222");
+            Directory.CreateDirectory(emptyStage);
+            File.WriteAllText(Path.Combine(emptyStage, ".tmp-split"), "tmp");
+
+            using var gone = System.Diagnostics.Process.Start(OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh", OperatingSystem.IsWindows() ? "/c exit 0" : "-c true");
+            gone.WaitForExit();
+            const string running = "aaaa1111-0000-4000-8000-000000000001", nothing = "bbbb2222-0000-4000-8000-000000000002";
+            const string queued = "cccc3333-0000-4000-8000-000000000003", other = "dddd4444-0000-4000-8000-000000000004";
+            WriteUnfinished(data, gone.Id, "gone", string.Join(",", Entry(running, "running", movie), Entry(nothing, "running", empty), Entry(queued, "queued")));
+            // Another Bromelia that is still running: left alone.
+            using var alive = System.Diagnostics.Process.Start(OperatingSystem.IsWindows() ? "ping.exe" : "/bin/sleep", OperatingSystem.IsWindows() ? "-n 30 127.0.0.1" : "30");
+            var live = alive.Id;
+            WriteUnfinished(data, live, "other", Entry(other, "running"));
+
+            var state = new AppState(new NullPlatformServices(), Path.Combine(data, "config.json"), new SettingsCatalog());
+            var kept = Path.Combine(movie, "INCOMPLETE - aaaa1111");
+            var r1 = state.History.Single(h => h.Id == Guid.Parse(running));
+            Assert.Equal(JobState.Failed, r1.State);
+            Assert.StartsWith("Interrupted", r1.ErrorMessage);
+            Assert.Equal(kept, r1.OutputDirectory);
+            Assert.True(File.Exists(Path.Combine(kept, "title_t00.mkv")));
+            Assert.Contains("NOT a finished archive", File.ReadAllText(Path.Combine(kept, "INCOMPLETE.txt")));
+            Assert.False(Directory.Exists(stage));
+            Assert.Null(state.History.Single(h => h.Id == Guid.Parse(nothing)).OutputDirectory);
+            Assert.False(Directory.Exists(empty), "nothing was saved: its folders are removed");
+            var r3 = state.History.Single(h => h.Id == Guid.Parse(queued));
+            Assert.Equal(JobState.Cancelled, r3.State);
+            Assert.StartsWith("Not started", r3.ErrorMessage);
+            Assert.DoesNotContain(state.History, h => h.Id == Guid.Parse(other));
+            Assert.True(File.Exists(Path.Combine(data, $"unfinished-{live}.json")));
+            Assert.Contains("3 unfinished job(s)", state.LastError);
+
+            // This process's own jobs are written down while they wait, and taken out once finished.
+            var job = new RipJob(new DiscSource.Iso("/nonexistent/test.iso"), new DriveConfig(), "iso:unfinished", "test", "", RipMode.Mkv)
+            {
+                State = JobState.Waiting, StartAt = DateTime.Now.AddHours(1),
+            };
+            state.Enqueue(job);
+            var mine = UnfinishedJobs.FileFor(Environment.ProcessId);
+            var text = File.ReadAllText(mine);
+            Assert.Contains(job.Id.ToString(), text);
+            Assert.Contains("\"waiting\"", text);
+            state.Cancel(job);
+            Assert.False(File.Exists(mine));
+            alive.Kill();
+        }
+        finally
+        {
+            Paths.DataOverride = null;
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
     [Fact]
     public void FailuresNameTheirCause()
     {

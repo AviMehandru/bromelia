@@ -37,6 +37,7 @@ final class AppModel {
             if config != oldValue { scheduleSave() }
             if config.webUI != oldValue.webUI { web.apply(config.webUI) }
             background.limit = config.backgroundJobs
+            if config.preventSleep != oldValue.preventSleep { updateKeepAwake() }
         }
     }
     private(set) var scannedDrives: [DriveScanEntry] = []
@@ -59,6 +60,9 @@ final class AppModel {
     @ObservationIgnored private(set) lazy var web = WebServer(model: self)
     @ObservationIgnored private var betaKeyTried = false
     @ObservationIgnored private var keepAwake: NSObjectProtocol?
+    /// Turns sleep prevention on and off (replaced in tests).
+    @ObservationIgnored var keepAwakeSwitch: (Bool) -> Void = { _ in }
+    @ObservationIgnored private(set) var isKeepingAwake = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
@@ -76,6 +80,9 @@ final class AppModel {
         self.persistent = persistent
         config = persistent ? ConfigStore.load() : AppConfig()
         history = persistent ? ConfigStore.loadHistory() : []
+        keepAwakeSwitch = { [weak self] on in self?.setProcessActivity(on) }
+        background.onChange = { [weak self] in self?.updateKeepAwake() }
+        if persistent { recoverUnfinishedJobs() }
     }
 
     // MARK: - Startup
@@ -514,6 +521,7 @@ final class AppModel {
     func enqueue(_ job: RipJob) {
         jobs.append(job)
         pump()
+        saveUnfinishedJobs()
     }
 
     func cancel(_ job: RipJob) {
@@ -578,6 +586,7 @@ final class AppModel {
             if let s = sessions[job.laneKey], s.isLoading { continue }
             start(job)
         }
+        saveUnfinishedJobs() // also picks up output folders chosen by running jobs
     }
 
     private func start(_ job: RipJob) {
@@ -614,23 +623,62 @@ final class AppModel {
         Task { await runner.run() }
     }
 
-    /// Keeps the Mac awake (no idle sleep, no App Nap) while any job runs.
+    /// Whether the Mac should be kept awake: jobs or background steps are running and `preventSleep` is on.
+    var wantsAwake: Bool { config.preventSleep && (!runners.isEmpty || background.isBusy) }
+
+    /// Keeps the Mac awake (no idle sleep, no App Nap) while jobs or background steps run.
     func updateKeepAwake() {
-        let busy = !runners.isEmpty && config.preventSleep
-        if busy, keepAwake == nil {
+        let busy = wantsAwake
+        guard busy != isKeepingAwake else { return }
+        isKeepingAwake = busy
+        keepAwakeSwitch(busy)
+    }
+
+    private func setProcessActivity(_ on: Bool) {
+        if on, keepAwake == nil {
             keepAwake = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Ripping discs")
-        } else if !busy, let a = keepAwake {
+        } else if !on, let a = keepAwake {
             ProcessInfo.processInfo.endActivity(a)
             keepAwake = nil
         }
     }
 
     private func recordHistory(_ job: RipJob) {
-        let rec = HistoryRecord(id: job.id, title: job.title, driveName: job.drive.name, discName: job.discLabel, mode: job.mode,
-                                state: job.state, startedAt: job.startedAt, finishedAt: job.finishedAt,
-                                outputDirectory: job.outputDirectory?.path, files: job.producedFiles.map(\.path),
-                                errorMessage: job.errorMessage, logPath: job.logFile.path,
-                                warnings: job.warningCount, errors: job.errorCount)
+        addHistory(HistoryRecord(id: job.id, title: job.title, driveName: job.drive.name, discName: job.discLabel, mode: job.mode,
+                                 state: job.state, startedAt: job.startedAt, finishedAt: job.finishedAt,
+                                 outputDirectory: job.outputDirectory?.path, files: job.producedFiles.map(\.path),
+                                 errorMessage: job.errorMessage, logPath: job.logFile.path,
+                                 warnings: job.warningCount, errors: job.errorCount))
+        saveUnfinishedJobs()
+    }
+
+    // MARK: - Unfinished jobs
+
+    @ObservationIgnored private var savedUnfinished: [UnfinishedJobs.Entry] = []
+
+    /// Writes the queued, waiting and running jobs to unfinished-<pid>.json (only when they changed).
+    func saveUnfinishedJobs() {
+        guard persistent else { return }
+        let entries = jobs.filter { !$0.state.isFinished }.map {
+            UnfinishedJobs.Entry(id: $0.id, title: $0.title, driveName: $0.drive.name, discName: $0.discLabel, mode: $0.mode,
+                                 state: $0.state, outputDirectory: $0.outputDirectory?.path, logPath: $0.logFile.path, startedAt: $0.startedAt)
+        }
+        guard entries != savedUnfinished else { return }
+        savedUnfinished = entries
+        UnfinishedJobs.save(entries)
+    }
+
+    /// Records the jobs a Bromelia that has gone left unfinished (see UnfinishedJobs) and says so.
+    @discardableResult
+    func recoverUnfinishedJobs() -> Int {
+        let records = UnfinishedJobs.recover()
+        guard !records.isEmpty else { return 0 }
+        for r in records { addHistory(r) }
+        lastError = "Bromelia stopped last time with \(records.count) unfinished job(s); they are in the history, marked as interrupted or not started"
+        return records.count
+    }
+
+    private func addHistory(_ rec: HistoryRecord) {
         history.removeAll { $0.id == rec.id }
         history.insert(rec, at: 0)
         guard persistent else { return }

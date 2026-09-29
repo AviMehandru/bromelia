@@ -166,7 +166,9 @@ public sealed class AppState : ObservableObject
         Config = ConfigStore.Load(ConfigPath);
         if (Config.OutputRoot.Length == 0) Config.OutputRoot = Paths.DefaultOutputRoot;
         foreach (var h in ConfigStore.LoadHistory()) History.Add(h);
+        RecoverUnfinishedJobs();
         Background = new BackgroundQueue(_ui) { Limit = Config.BackgroundJobs };
+        Background.Changed += UpdateKeepAwake;
         Web = new WebServer(this, _ui);
     }
 
@@ -674,6 +676,7 @@ public sealed class AppState : ObservableObject
     {
         Jobs.Add(job);
         Pump();
+        SaveUnfinishedJobs();
     }
 
     public void Cancel(RipJob job)
@@ -742,6 +745,7 @@ public sealed class AppState : ObservableObject
             if (Sessions.GetValueOrDefault(job.LaneKey) is { IsLoading: true }) continue;
             Start(job);
         }
+        SaveUnfinishedJobs(); // also picks up output folders chosen by running jobs
     }
 
     void Start(RipJob job)
@@ -783,10 +787,13 @@ public sealed class AppState : ObservableObject
 
     bool _keepingAwake;
 
-    /// <summary>Keeps the computer awake while any job runs (when enabled in the settings).</summary>
+    /// <summary>Whether the computer should be kept awake: jobs or background steps are running and PreventSleep is on.</summary>
+    public bool WantsAwake => Config.PreventSleep && (_runners.Count > 0 || Background.IsBusy);
+
+    /// <summary>Keeps the computer awake while jobs or background steps run (when enabled in the settings).</summary>
     public void UpdateKeepAwake()
     {
-        bool busy = _runners.Count > 0 && Config.PreventSleep;
+        bool busy = WantsAwake;
         if (busy == _keepingAwake) return;
         _keepingAwake = busy;
         Platform.KeepAwake(busy);
@@ -794,12 +801,43 @@ public sealed class AppState : ObservableObject
 
     void RecordHistory(RipJob job)
     {
-        var rec = new HistoryRecord
+        AddHistory(new HistoryRecord
         {
             Id = job.Id, Title = job.Title, DriveName = job.Drive.Name, DiscName = job.DiscLabel, Mode = job.Mode, State = job.State,
             StartedAt = job.StartedAt, FinishedAt = job.FinishedAt, OutputDirectory = job.OutputDirectory, Files = job.ProducedFiles.ToList(),
             ErrorMessage = job.ErrorMessage, LogPath = job.LogFile, Warnings = job.WarningCount, Errors = job.ErrorCount,
-        };
+        });
+        SaveUnfinishedJobs();
+    }
+
+    string? _savedUnfinished;
+
+    /// <summary>Writes the queued, waiting and running jobs to unfinished-&lt;pid&gt;.json (only when they changed).</summary>
+    public void SaveUnfinishedJobs()
+    {
+        var entries = Jobs.Where(j => !j.State.IsFinished()).Select(j => new UnfinishedJobs.Entry
+        {
+            Id = j.Id, Title = j.Title, DriveName = j.Drive.Name, DiscName = j.DiscLabel, Mode = j.Mode, State = j.State,
+            OutputDirectory = j.OutputDirectory, LogPath = j.LogFile, StartedAt = j.StartedAt,
+        }).ToList();
+        var json = entries.Count == 0 ? null : ConfigJson.Serialize(entries);
+        if (json == _savedUnfinished) return;
+        _savedUnfinished = json;
+        UnfinishedJobs.Save(entries);
+    }
+
+    /// <summary>Records the jobs a Bromelia that has gone left unfinished (see <see cref="UnfinishedJobs"/>) and says so.</summary>
+    public int RecoverUnfinishedJobs()
+    {
+        var records = UnfinishedJobs.Recover();
+        if (records.Count == 0) return 0;
+        foreach (var r in records) AddHistory(r);
+        LastError = $"Bromelia stopped last time with {records.Count} unfinished job(s); they are in the history, marked as interrupted or not started";
+        return records.Count;
+    }
+
+    void AddHistory(HistoryRecord rec)
+    {
         foreach (var old in History.Where(h => h.Id == rec.Id).ToList()) History.Remove(old);
         History.Insert(0, rec);
         while (History.Count > Config.HistoryLimit)

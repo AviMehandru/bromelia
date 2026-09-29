@@ -148,6 +148,7 @@ main (int argc, char **argv)
   say ("Bromelia %s; configuration %s", PACKAGE_VERSION, st->config_path);
   say ("makemkvcon: %s", exe ? exe : "not found — install MakeMKV or set makemkvconPath");
   say ("Output folder: %s", st->config->output_root);
+  on_status_changed (st); /* e.g. jobs that were interrupted when it last stopped */
   bro_state_start (st);
   if (st->config->web_ui.enabled)
     {

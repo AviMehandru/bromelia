@@ -25,6 +25,7 @@ the distribution has it) for audio CDs, `eject` and `curl`.
 docker run -d --name bromelia \
   --device /dev/sr0 --device /dev/sg0 \
   -v /run/udev:/run/udev:ro \
+  -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket \
   -v /srv/bromelia/config:/config \
   -v /srv/media/rips:/output \
   -e BROMELIA_WEB_TOKEN=change-me \
@@ -35,6 +36,9 @@ docker run -d --name bromelia \
 - **Drives:** MakeMKV needs both the block device (`/dev/srN`) and the matching SCSI generic device
   (`/dev/sgN`; `lsscsi -g` shows which). Pass every drive you want to use.
 - **`/run/udev`** lets Bromelia tell audio CDs and data discs apart. Without it every disc is treated as a video disc.
+- **`/run/dbus/system_bus_socket`** lets the daemon keep the host awake while jobs and background steps run (it asks
+  systemd-logind to block sleep and idle; `preventSleep` turns this off). Without it the log says once that it can't,
+  and the host may suspend in the middle of a rip.
 - **`/config`** holds Bromelia's `bromelia/config.json`, its history and job logs (`data/`), and MakeMKV's own
   settings and key (`.MakeMKV/`). On the first start a configuration is written that saves to `/output` and serves
   the web page on port 51280.
@@ -48,7 +52,9 @@ docker run -d --name bromelia \
   events). The tray can be closed from the web page.
 
 `docker stop` cancels running jobs (their files are kept in an `[INCOMPLETE]` folder) and exits; a second
-signal exits at once.
+signal exits at once. If the container is killed instead (or the host loses power), the next start logs the jobs
+that were unfinished, records them in the history and makes an interrupted job's files visible as
+`INCOMPLETE - <id>`.
 
 ## Without Docker
 
@@ -60,6 +66,8 @@ meson setup build -Dui=false
 ninja -C build
 ./build/src/bromelia-daemon --listen 127.0.0.1 --port 51280
 ```
+
+While jobs run it holds a systemd-logind sleep inhibitor (`systemd-inhibit --list` shows it as “Bromelia”).
 
 Options: `--config PATH` (default `~/.config/bromelia/config.json`), `--listen ADDRESS`, `--port PORT` and
 `--token TOKEN` (or `BROMELIA_WEB_TOKEN`) turn the web page on for this run without saving them.

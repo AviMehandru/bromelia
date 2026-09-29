@@ -136,6 +136,34 @@ on_open (GApplication *app, GFile **files, int n, const char *hint, gpointer dat
     }
 }
 
+/* Keeps the computer from suspending (and the session from going idle) through the desktop, which also works in a
+ * sandbox; the state decides when (jobs or background steps running, preventSleep on). */
+typedef struct {
+  BroSleepInhibitor base;
+  GtkApplication *app;
+  guint cookie;
+} GtkInhibitor;
+
+static void
+gtk_inhibitor_set (BroSleepInhibitor *base, gboolean on)
+{
+  GtkInhibitor *self = (GtkInhibitor *) base;
+  if (on && !self->cookie)
+    self->cookie = gtk_application_inhibit (self->app, gtk_application_get_active_window (self->app),
+                                            GTK_APPLICATION_INHIBIT_SUSPEND | GTK_APPLICATION_INHIBIT_IDLE, "Ripping discs");
+  else if (!on && self->cookie)
+    {
+      gtk_application_uninhibit (self->app, self->cookie);
+      self->cookie = 0;
+    }
+}
+
+static void
+gtk_inhibitor_free (BroSleepInhibitor *base)
+{
+  g_free (base);
+}
+
 static void
 on_startup (GApplication *app, gpointer data)
 {
@@ -147,6 +175,13 @@ on_startup (GApplication *app, gpointer data)
   load_css ();
   state = bro_state_new (app);
   bro_app_set_state (state);
+  {
+    GtkInhibitor *inhibitor = g_new0 (GtkInhibitor, 1);
+    inhibitor->base.set = gtk_inhibitor_set;
+    inhibitor->base.free = gtk_inhibitor_free;
+    inhibitor->app = GTK_APPLICATION (app);
+    bro_state_set_sleep_inhibitor (state, &inhibitor->base);
+  }
   gtk_application_set_accels_for_action (GTK_APPLICATION (app), "app.quit", quit_accels);
   gtk_application_set_accels_for_action (GTK_APPLICATION (app), "win.open", open_accels);
   gtk_application_set_accels_for_action (GTK_APPLICATION (app), "win.rescan", rescan_accels);
@@ -169,6 +204,8 @@ on_shutdown (GApplication *app, gpointer data)
   bro_state_save_now (st);
 }
 
+static AdwDialog *quit_dialog; /* the open "still running" alert, so a second Ctrl+Q or close doesn't stack another */
+
 static void
 quit_response (AdwAlertDialog *d, const char *response, GApplication *app)
 {
@@ -177,24 +214,47 @@ quit_response (AdwAlertDialog *d, const char *response, GApplication *app)
 }
 
 static void
+quit_dialog_closed (AdwDialog *d, gpointer data)
+{
+  quit_dialog = NULL;
+}
+
+/* app.quit — Ctrl+Q, and closing the main window while something is running (bro-window.c). */
+static void
 action_quit (GSimpleAction *a, GVariant *p, gpointer app)
 {
   BroState *st = bro_app_state ();
-  int running = bro_state_active_count (st);
+  int running = st ? bro_state_active_count (st) : 0;
+  gboolean background = st && bro_state_background_busy (st);
   GtkWindow *win = gtk_application_get_active_window (GTK_APPLICATION (app));
-  AdwDialog *d;
   g_autofree char *title = NULL;
-  if (running == 0 || !win)
+  const char *body;
+  if ((running == 0 && !background) || !win)
     {
       g_application_quit (app);
       return;
     }
-  title = g_strdup_printf ("%d job(s) are still running", running);
-  d = adw_alert_dialog_new (title, "Quitting cancels them. Partially written files are left in place.");
-  adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (d), "keep", "Keep Running", "quit", "Cancel Jobs and Quit", NULL);
-  adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (d), "quit", ADW_RESPONSE_DESTRUCTIVE);
-  g_signal_connect (d, "response", G_CALLBACK (quit_response), app);
-  adw_dialog_present (d, GTK_WIDGET (win));
+  if (quit_dialog)
+    return;
+  if (running > 0)
+    {
+      title = g_strdup_printf ("%d job(s) are still running", running);
+      body = background ? "Quitting cancels them and abandons post-processing that hasn't finished. Partially written files are left in place."
+                        : "Quitting cancels them. Partially written files are left in place.";
+    }
+  else
+    {
+      title = g_strdup ("Post-processing is still running");
+      body = "Quitting abandons the steps that haven't finished; they are not resumed at the next start.";
+    }
+  quit_dialog = adw_alert_dialog_new (title, body);
+  adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (quit_dialog), "keep", "Keep Running", "quit", "Cancel Jobs and Quit", NULL);
+  adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (quit_dialog), "quit", ADW_RESPONSE_DESTRUCTIVE);
+  adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (quit_dialog), "keep");
+  adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (quit_dialog), "keep");
+  g_signal_connect (quit_dialog, "response", G_CALLBACK (quit_response), app);
+  g_signal_connect (quit_dialog, "closed", G_CALLBACK (quit_dialog_closed), NULL);
+  adw_dialog_present (quit_dialog, GTK_WIDGET (win));
 }
 
 int

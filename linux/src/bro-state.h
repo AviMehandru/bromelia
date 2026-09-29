@@ -7,6 +7,7 @@
 #include "bro-config.h"
 #include "bro-makemkv.h"
 #include "bro-runner.h"
+#include "bro-sleep.h"
 #include "bro-web.h"
 
 G_BEGIN_DECLS
@@ -160,6 +161,9 @@ struct _BroState {
   GPtrArray *background;     /* BroBackgroundItem* */
   BroWebServer *web;
   gboolean beta_key_tried;   /* the automatic update after an expired key runs once per session */
+  BroSleepInhibitor *inhibitor; /* owned; NULL = none */
+  gboolean keeping_awake;
+  char *unfinished_saved;    /* what unfinished-<pid>.json holds, to write it only when it changes */
 };
 
 BroState       *bro_state_new (GApplication *app);
@@ -207,6 +211,11 @@ void            bro_state_save_preset (BroState *self, const char *name, const B
 void            bro_state_register_key (BroState *self, const char *key, GAsyncReadyCallback cb, gpointer data);
 char           *bro_state_register_key_finish (BroState *self, GAsyncResult *res);
 
+/* Keeping the computer awake: wanted while jobs or background steps run and preventSleep is on. The state turns the
+ * inhibitor on and off as that changes (takes inhibitor; NULL = none). A headless state starts with logind's. */
+gboolean        bro_state_wants_awake (BroState *self);
+void            bro_state_set_sleep_inhibitor (BroState *self, BroSleepInhibitor *inhibitor);
+
 /* Background post-processing (signal "jobs-changed" when it changes). */
 void            bro_state_enqueue_background (BroState *self, BroBackgroundWork *work); /* takes work */
 gboolean        bro_state_background_busy (BroState *self);
@@ -227,5 +236,11 @@ const char     *bro_state_web_error (BroState *self);
 BroState       *bro_state_new_headless (const char *config_path);
 
 char           *bro_data_dir (void);
+
+/* Queued, waiting and running jobs are also kept in <data dir>/unfinished-<pid>.json. At start, jobs left there by a
+ * process that has gone (a crash, a power cut, a quit) are recorded in the history as interrupted (running) or not
+ * started (queued, waiting); a running job's staging folder is made visible as "INCOMPLETE - <id>" with a note.
+ * Returns how many were recovered. Called by bro_state_new*; public for the tests. */
+int             bro_state_recover_unfinished (BroState *self);
 
 G_END_DECLS

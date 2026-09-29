@@ -65,7 +65,6 @@ private struct GeneralPreferences: View {
                     IntField(title: "Minutes", value: $model.config.stallTimeoutMinutes, suffix: "minutes without output (0 = never)")
                 }
                 Toggle("Keep the Mac awake while jobs run", isOn: $model.config.preventSleep)
-                    .onChange(of: model.config.preventSleep) { model.updateKeepAwake() }
                 Text("A Mac with its lid closed still sleeps unless it is connected to a display and power.")
                     .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Background post-processing") {

@@ -15,8 +15,12 @@ final class BackgroundQueue {
         var message = ""
     }
 
-    private(set) var items: [Item] = []
+    private(set) var items: [Item] = [] {
+        didSet { onChange?() }
+    }
     var limit = 1
+    /// Called whenever an item is added, starts, finishes or is cleared.
+    @ObservationIgnored var onChange: (() -> Void)?
 
     func enqueue(_ work: BackgroundWork) {
         items.append(Item(work: work))

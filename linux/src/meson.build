@@ -9,9 +9,10 @@ core_sources = files(
   'bro-dvd.c',
   'bro-integrations.c',
   'bro-web.c',
+  'bro-sleep.c',
 )
 
-core_deps = [glib_dep, gio_dep, json_dep]
+core_deps = [glib_dep, gio_dep, gio_unix_dep, json_dep]
 
 bromelia_core = static_library('bromelia-core', core_sources, resources,
   dependencies: core_deps,

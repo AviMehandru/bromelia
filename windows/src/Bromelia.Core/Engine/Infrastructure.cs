@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
+using Bromelia.Core.Config;
 using Bromelia.Core.Logic;
 
 namespace Bromelia.Core.Engine;
@@ -253,4 +255,125 @@ public sealed class LineCollector
     public void Add(string l) { lock (_lines) _lines.Add(l); }
     public List<string> All { get { lock (_lines) return new List<string>(_lines); } }
     public string Joined => string.Join("\n", All);
+}
+
+/// <summary>Queued, waiting and running jobs live only in memory. So that a crash, a power cut or a forced quit never
+/// loses one silently, they are also kept in unfinished-&lt;pid&gt;.json. At start, jobs left there by a process that
+/// has gone are recorded in the history as interrupted (running: failed) or not started (queued, waiting: cancelled),
+/// and a running job's staging folder is made visible as "INCOMPLETE - &lt;id&gt;" with a note.</summary>
+public static class UnfinishedJobs
+{
+    public sealed class Entry
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = "";
+        public string DriveName { get; set; } = "";
+        public string DiscName { get; set; } = "";
+        public RipMode Mode { get; set; }
+        public JobState State { get; set; }
+        public string? OutputDirectory { get; set; }
+        public string LogPath { get; set; } = "";
+        public DateTime? StartedAt { get; set; }
+    }
+
+    public sealed class Contents
+    {
+        public int Pid { get; set; }
+        /// <summary>Identifies the process, so a file left by an earlier process with the same pid is still recognised as stale.</summary>
+        public string Instance { get; set; } = "";
+        public List<Entry> Jobs { get; set; } = new();
+    }
+
+    public static readonly string Instance = Guid.NewGuid().ToString();
+
+    public static string FileFor(int pid) => Path.Combine(Paths.AppData, $"unfinished-{pid}.json");
+
+    public static void Save(List<Entry> jobs)
+    {
+        var path = FileFor(Environment.ProcessId);
+        if (jobs.Count == 0)
+        {
+            try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            return;
+        }
+        ConfigStore.SaveRaw(path, JsonSerializer.Serialize(new Contents { Pid = Environment.ProcessId, Instance = Instance, Jobs = jobs }, ConfigJson.Options));
+    }
+
+    /// <summary>History records for the jobs left by processes that have gone; their files are removed.</summary>
+    public static List<HistoryRecord> Recover()
+    {
+        var records = new List<HistoryRecord>();
+        if (!Directory.Exists(Paths.AppData)) return records;
+        foreach (var path in Directory.EnumerateFiles(Paths.AppData, "unfinished-*.json").OrderBy(p => p, StringComparer.Ordinal))
+        {
+            Contents? c;
+            try { c = JsonSerializer.Deserialize<Contents>(File.ReadAllText(path), ConfigJson.Options); }
+            catch (Exception) { c = null; }
+            if (c != null)
+            {
+                // Still in use by another Bromelia.
+                if (c.Instance == Instance || (c.Pid != Environment.ProcessId && IsAlive(c.Pid))) continue;
+                records.AddRange(c.Jobs.Select(Record));
+            }
+            try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        return records;
+    }
+
+    public static bool IsAlive(int pid)
+    {
+        if (pid <= 0) return false;
+        try
+        {
+            using var p = System.Diagnostics.Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    static HistoryRecord Record(Entry e)
+    {
+        bool running = e.State == JobState.Running;
+        var kept = running && !string.IsNullOrEmpty(e.OutputDirectory) ? RecoverStaging(e.OutputDirectory, e.Id, e.LogPath) : null;
+        return new HistoryRecord
+        {
+            Id = e.Id, Title = e.Title, DriveName = e.DriveName, DiscName = e.DiscName, Mode = e.Mode,
+            State = running ? JobState.Failed : JobState.Cancelled, StartedAt = e.StartedAt, FinishedAt = DateTime.Now,
+            OutputDirectory = kept, LogPath = e.LogPath, Errors = running ? 1 : 0,
+            ErrorMessage = !running ? "Not started: Bromelia stopped while this job was waiting"
+                : kept != null ? $"Interrupted: Bromelia stopped while this job was running; its files were kept in {kept}"
+                : "Interrupted: Bromelia stopped while this job was running; nothing was saved",
+        };
+    }
+
+    /// <summary>The staging folder of a job that was running: made visible with a note, or removed when nothing was saved.
+    /// Returns where its files are now.</summary>
+    public static string? RecoverStaging(string outputDir, Guid id, string logPath)
+    {
+        var shortId = id.ToString("N")[..8];
+        var stage = Path.Combine(outputDir, JobRunner.StagingPrefix + shortId);
+        if (!Directory.Exists(stage)) return null;
+        try
+        {
+            if (JobRunner.VisibleItems(stage).Count == 0)
+            {
+                Directory.Delete(stage, true); // only temporary (hidden) files
+                // The folder made for the job, if nothing else is in it.
+                if (!Directory.EnumerateFileSystemEntries(outputDir).Any()) Directory.Delete(outputDir);
+                return null;
+            }
+            var dest = Paths.UniquePath(Path.Combine(outputDir, $"INCOMPLETE - {shortId}"));
+            Directory.Move(stage, dest);
+            try { new DirectoryInfo(dest).Attributes &= ~FileAttributes.Hidden; } catch (IOException) { }
+            File.WriteAllText(Path.Combine(dest, "INCOMPLETE.txt"),
+                $"Bromelia job {id}: interrupted.\n" +
+                "Bromelia stopped (it quit, crashed or lost power) while this job was running.\n" +
+                "These files are NOT a finished archive. Rip the disc again.\n\n" +
+                $"Log up to the interruption: {logPath}\n");
+            return dest;
+        }
+        catch (IOException) { return Directory.Exists(stage) ? stage : null; }
+        catch (UnauthorizedAccessException) { return Directory.Exists(stage) ? stage : null; }
+    }
 }

@@ -3,8 +3,12 @@
 #include "bro-integrations.h"
 #include "bro-logic.h"
 
+#include <errno.h>
+#include <glib/gstdio.h>
 #include <json-glib/json-glib.h>
+#include <signal.h>
 #include <string.h>
+#include <unistd.h>
 
 void
 bro_log_entry_free (BroLogEntry *e)
@@ -461,6 +465,8 @@ bro_state_finalize (GObject *obj)
   g_ptr_array_unref (self->scan_messages);
   g_ptr_array_unref (self->background);
   bro_web_server_free (self->web);
+  bro_state_set_sleep_inhibitor (self, NULL);
+  g_free (self->unfinished_saved);
   G_OBJECT_CLASS (bro_state_parent_class)->finalize (obj);
 }
 
@@ -476,6 +482,11 @@ bro_state_class_init (BroStateClass *klass)
   state_signals[STATE_TICK] = g_signal_new ("tick", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
+static void update_keep_awake (BroState *self);
+static void save_unfinished (BroState *self);
+static void delete_recursive (GFile *f);
+static void add_history (BroState *self, BroHistoryRecord *r);
+
 static void
 bro_state_init (BroState *self)
 {
@@ -488,6 +499,8 @@ bro_state_init (BroState *self)
   self->makemkv_version = g_strdup ("");
   self->scan_messages = g_ptr_array_new_with_free_func (g_free);
   self->background = g_ptr_array_new_with_free_func ((GDestroyNotify) background_item_free);
+  g_signal_connect (self, "jobs-changed", G_CALLBACK (update_keep_awake), NULL);
+  g_signal_connect (self, "jobs-changed", G_CALLBACK (save_unfinished), NULL);
 }
 
 static void emit (BroState *self, guint sig) { g_signal_emit (self, state_signals[sig], 0); }
@@ -582,6 +595,211 @@ save_history (BroState *self)
   bro_write_file_atomic (path, text, NULL);
 }
 
+/* ---- unfinished jobs ---- */
+
+/* Identifies this process in unfinished-<pid>.json, so a file left by an earlier process with the same pid (pid 1 in
+ * a container) is still recognised as stale. */
+static const char *
+instance_token (void)
+{
+  static char *token;
+  if (!token)
+    token = g_uuid_string_random ();
+  return token;
+}
+
+static char *
+unfinished_path (int pid)
+{
+  g_autofree char *dir = bro_data_dir ();
+  g_autofree char *name = g_strdup_printf ("unfinished-%d.json", pid);
+  return g_build_filename (dir, name, NULL);
+}
+
+static void
+save_unfinished (BroState *self)
+{
+  g_autoptr (JsonBuilder) b = json_builder_new ();
+  g_autoptr (JsonNode) root = NULL;
+  g_autofree char *text = NULL, *path = unfinished_path (getpid ());
+  int n = 0;
+  json_builder_begin_object (b);
+  json_builder_set_member_name (b, "pid");
+  json_builder_add_int_value (b, getpid ());
+  json_builder_set_member_name (b, "instance");
+  json_builder_add_string_value (b, instance_token ());
+  json_builder_set_member_name (b, "jobs");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < self->jobs->len; i++)
+    {
+      BroJob *j = self->jobs->pdata[i];
+      g_autofree char *title = NULL, *log = NULL;
+      if (bro_job_state_finished (j->state))
+        continue;
+      n++;
+      title = bro_job_title (j);
+      log = bro_job_log_path (j);
+      json_builder_begin_object (b);
+#define PS(k, v) do { json_builder_set_member_name (b, k); json_builder_add_string_value (b, (v) ? (v) : ""); } while (0)
+      PS ("id", j->id);
+      PS ("title", title);
+      PS ("driveName", j->drive ? j->drive->name : NULL);
+      PS ("discName", j->disc_label);
+      PS ("mode", bro_rip_mode_to_string (j->mode));
+      PS ("state", j->state == BRO_JOB_RUNNING ? "running" : j->state == BRO_JOB_WAITING ? "waiting" : "queued");
+      PS ("outputDirectory", j->output_dir);
+      PS ("logPath", log);
+#undef PS
+      json_builder_set_member_name (b, "startedAt");
+      json_builder_add_int_value (b, j->started_at);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  json_builder_end_object (b);
+  root = json_builder_get_root (b);
+  text = n ? bro_json_to_string (root, TRUE) : NULL;
+  if (g_strcmp0 (text, self->unfinished_saved) == 0)
+    return;
+  if (text)
+    {
+      g_autofree char *dir = g_path_get_dirname (path);
+      g_mkdir_with_parents (dir, 0700);
+      bro_write_file_atomic (path, text, NULL);
+    }
+  else
+    g_unlink (path);
+  g_free (self->unfinished_saved);
+  self->unfinished_saved = g_steal_pointer (&text);
+}
+
+static gboolean
+process_alive (int pid)
+{
+  return pid > 0 && (kill (pid, 0) == 0 || errno == EPERM);
+}
+
+static gboolean
+has_visible_items (const char *dir)
+{
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  const char *n;
+  while (d && (n = g_dir_read_name (d)))
+    if (n[0] != '.')
+      return TRUE;
+  return FALSE;
+}
+
+/* The staging folder of a job that was running: made visible with a note, or removed when nothing was saved. Returns
+ * where its files are now, or NULL. */
+static char *
+recover_staging (const char *output_dir, const char *id, const char *log_path)
+{
+  g_autofree char *short_id = g_ascii_strdown (id, MIN (strlen (id), 8));
+  g_autofree char *stage_name = g_strconcat (BRO_STAGING_PREFIX, short_id, NULL);
+  g_autofree char *stage = g_build_filename (output_dir, stage_name, NULL);
+  g_autofree char *want = NULL, *note = NULL, *text = NULL;
+  char *dest;
+  if (!g_file_test (stage, G_FILE_TEST_IS_DIR))
+    return NULL;
+  if (!has_visible_items (stage))
+    {
+      g_autoptr (GFile) f = g_file_new_for_path (stage);
+      delete_recursive (f); /* only temporary (hidden) files */
+      g_rmdir (output_dir); /* the folder made for the job, if nothing else is in it */
+      return NULL;
+    }
+  want = g_strdup_printf ("%s/INCOMPLETE - %s", output_dir, short_id);
+  dest = bro_unique_path (want);
+  if (g_rename (stage, dest) != 0)
+    {
+      g_free (dest);
+      return g_steal_pointer (&stage);
+    }
+  note = g_build_filename (dest, "INCOMPLETE.txt", NULL);
+  text = g_strdup_printf ("Bromelia job %s: interrupted.\n"
+                          "Bromelia stopped (it quit, crashed or lost power) while this job was running.\n"
+                          "These files are NOT a finished archive. Rip the disc again.\n\n"
+                          "Log up to the interruption: %s\n", id, log_path ? log_path : "");
+  g_file_set_contents (note, text, -1, NULL);
+  return dest;
+}
+
+int
+bro_state_recover_unfinished (BroState *self)
+{
+  g_autofree char *dir = bro_data_dir ();
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  g_autoptr (GPtrArray) files = g_ptr_array_new_with_free_func (g_free);
+  const char *name;
+  int recovered = 0;
+  while (d && (name = g_dir_read_name (d)))
+    if (g_str_has_prefix (name, "unfinished-") && g_str_has_suffix (name, ".json"))
+      g_ptr_array_add (files, g_build_filename (dir, name, NULL));
+  for (guint f = 0; f < files->len; f++)
+    {
+      const char *path = files->pdata[f];
+      g_autoptr (JsonParser) p = json_parser_new ();
+      JsonObject *o;
+      JsonArray *jobs;
+      if (!json_parser_load_from_file (p, path, NULL) || !JSON_NODE_HOLDS_OBJECT (json_parser_get_root (p)))
+        {
+          g_unlink (path);
+          continue;
+        }
+      o = json_node_get_object (json_parser_get_root (p));
+      /* Still in use by another Bromelia (the app and the daemon can run side by side). */
+      if (g_strcmp0 (json_object_get_string_member_with_default (o, "instance", ""), instance_token ()) == 0)
+        continue;
+      if ((int) json_object_get_int_member_with_default (o, "pid", 0) != getpid ()
+          && process_alive ((int) json_object_get_int_member_with_default (o, "pid", 0)))
+        continue;
+      jobs = json_object_has_member (o, "jobs") ? json_object_get_array_member (o, "jobs") : NULL;
+      for (guint i = 0; jobs && i < json_array_get_length (jobs); i++)
+        {
+          JsonObject *jo = json_array_get_object_element (jobs, i);
+          BroHistoryRecord *r = g_new0 (BroHistoryRecord, 1);
+          gboolean running = g_str_equal (json_object_get_string_member_with_default (jo, "state", ""), "running");
+          const char *out = json_object_get_string_member_with_default (jo, "outputDirectory", "");
+          g_autofree char *kept = NULL;
+#define GS(k) g_strdup (json_object_get_string_member_with_default (jo, k, ""))
+          r->id = GS ("id");
+          r->title = GS ("title");
+          r->drive_name = GS ("driveName");
+          r->disc_name = GS ("discName");
+          r->mode = GS ("mode");
+          r->log_path = GS ("logPath");
+#undef GS
+          r->started_at = json_object_get_int_member_with_default (jo, "startedAt", 0);
+          r->finished_at = g_get_real_time () / G_USEC_PER_SEC;
+          r->files = g_ptr_array_new_with_free_func (g_free);
+          r->errors = running;
+          if (running)
+            {
+              kept = *out ? recover_staging (out, r->id, r->log_path) : NULL;
+              r->state = g_strdup ("failed");
+              r->output_dir = g_strdup (kept);
+              r->error = kept ? g_strdup_printf ("Interrupted: Bromelia stopped while this job was running; its files were kept in %s", kept)
+                              : g_strdup ("Interrupted: Bromelia stopped while this job was running; nothing was saved");
+            }
+          else
+            {
+              r->state = g_strdup ("cancelled");
+              r->error = g_strdup ("Not started: Bromelia stopped while this job was waiting");
+            }
+          add_history (self, r);
+          recovered++;
+        }
+      g_unlink (path);
+    }
+  if (recovered)
+    {
+      g_autofree char *msg = g_strdup_printf ("Bromelia stopped last time with %d unfinished job(s); they are in the history, "
+                                              "marked as interrupted or not started", recovered);
+      bro_state_set_error (self, msg);
+    }
+  return recovered;
+}
+
 /* ---- config ---- */
 
 static gboolean
@@ -605,6 +823,7 @@ bro_state_config_changed (BroState *self)
   if (self->web)
     bro_web_server_apply (self->web, &self->config->web_ui);
   pump_background (self);
+  update_keep_awake (self);
   emit (self, STATE_DRIVES_CHANGED);
 }
 
@@ -686,6 +905,7 @@ state_new_at (GApplication *app, const char *config_path)
       bro_app_config_save (self->config, self->config_path, NULL);
     }
   load_history (self);
+  bro_state_recover_unfinished (self);
   return self;
 }
 
@@ -695,10 +915,21 @@ bro_state_new (GApplication *app)
   return state_new_at (app, NULL);
 }
 
+static void
+inhibitor_problem (const char *message, gpointer data)
+{
+  bro_state_set_error (data, message);
+}
+
 BroState *
 bro_state_new_headless (const char *config_path)
 {
-  return state_new_at (NULL, config_path);
+  BroState *self = state_new_at (NULL, config_path);
+  BroSleepInhibitor *logind = bro_sleep_inhibitor_logind_new ();
+  logind->problem = inhibitor_problem;
+  logind->problem_data = self;
+  bro_state_set_sleep_inhibitor (self, logind);
+  return self;
 }
 
 /* ---- drives ---- */
@@ -1476,6 +1707,8 @@ static void
 enqueue (BroState *self, BroJob *job)
 {
   g_ptr_array_add (self->jobs, job);
+  /* The output folder is only known once the job has started. */
+  g_signal_connect_object (job, "changed", G_CALLBACK (save_unfinished), self, G_CONNECT_SWAPPED);
   emit (self, STATE_JOBS_CHANGED);
   emit (self, STATE_DRIVES_CHANGED);
   pump (self);
@@ -1596,6 +1829,13 @@ record_history (BroState *self, BroJob *j)
   r->files = g_ptr_array_new_with_free_func (g_free);
   for (guint i = 0; i < j->files->len; i++)
     g_ptr_array_add (r->files, g_strdup (j->files->pdata[i]));
+  add_history (self, r);
+}
+
+/* Takes r. */
+static void
+add_history (BroState *self, BroHistoryRecord *r)
+{
   for (guint i = 0; i < self->history->len; i++)
     if (g_str_equal (((BroHistoryRecord *) self->history->pdata[i])->id, r->id))
       {
@@ -1873,6 +2113,7 @@ start_job (BroState *self, BroJob *j)
   g_task_set_task_data (task, req, (GDestroyNotify) bro_run_request_free);
   g_task_run_in_thread (task, job_thread);
   g_object_unref (task);
+  update_keep_awake (self);
   emit (self, STATE_DRIVES_CHANGED);
 }
 
@@ -2175,6 +2416,36 @@ bro_state_start (BroState *self)
   if (self->config->auto_update_beta_key)
     bro_state_update_beta_key_if_needed (self, "at startup");
   bro_state_refresh_drives (self, TRUE);
+}
+
+/* ---- sleep ---- */
+
+gboolean
+bro_state_wants_awake (BroState *self)
+{
+  return self->config && self->config->prevent_sleep && (bro_state_active_count (self) > 0 || bro_state_background_busy (self));
+}
+
+static void
+update_keep_awake (BroState *self)
+{
+  gboolean want = self->inhibitor && bro_state_wants_awake (self);
+  if (want == self->keeping_awake)
+    return;
+  self->keeping_awake = want;
+  self->inhibitor->set (self->inhibitor, want);
+}
+
+void
+bro_state_set_sleep_inhibitor (BroState *self, BroSleepInhibitor *inhibitor)
+{
+  if (self->inhibitor && self->keeping_awake)
+    self->inhibitor->set (self->inhibitor, FALSE);
+  self->keeping_awake = FALSE;
+  bro_sleep_inhibitor_free (self->inhibitor);
+  self->inhibitor = inhibitor;
+  if (inhibitor)
+    update_keep_awake (self);
 }
 
 /* ---- background post-processing ---- */

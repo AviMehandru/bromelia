@@ -31,7 +31,7 @@ between versions and platforms freely. Paths may start with `~`.
   "plugins": [ /* PostProcessStep */ ],   // steps for every drive, usually with matchName / matchFormats
   "historyLimit": 500,
   "stallTimeoutMinutes": 30,       // stop a rip or backup that prints nothing for this long (stuck drive); 0 = never
-  "preventSleep": true,            // keep the computer awake while jobs run
+  "preventSleep": true,            // keep the computer awake while jobs or background steps run
   "metadata": {                    // online lookup of the movie / show (see "Online lookup")
     "provider": "none",            // none | tmdb | omdb
     "apiKey": "",                  // TMDb: API key (v3) or read access token; OMDb: API key
