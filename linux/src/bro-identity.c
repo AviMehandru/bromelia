@@ -600,9 +600,8 @@ bro_checksums_render (GPtrArray *entries)
   return g_string_free (s, FALSE);
 }
 
-/* Parses "hash  path" / "hash *path" lines into path → hash. */
-static GHashTable *
-parse_sums (const char *text)
+GHashTable *
+bro_checksums_parse (const char *text)
 {
   GHashTable *t = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   g_auto (GStrv) lines = g_strsplit (text ? text : "", "\n", -1);
@@ -630,7 +629,7 @@ bro_checksums_write_merged (const char *base, GPtrArray *entries, GError **error
   g_autoptr (GPtrArray) keys = NULL;
   GString *s = g_string_new (NULL);
   g_file_get_contents (path, &old, NULL, NULL);
-  t = parse_sums (old);
+  t = bro_checksums_parse (old);
   for (guint i = 0; i < entries->len; i++)
     {
       BroChecksum *c = entries->pdata[i];
@@ -660,7 +659,7 @@ bro_checksums_verify (const char *base, GError **error)
   GPtrArray *bad;
   if (!g_file_get_contents (path, &text, NULL, error))
     return NULL;
-  t = parse_sums (text);
+  t = bro_checksums_parse (text);
   keys = g_hash_table_get_keys_as_ptr_array (t);
   g_ptr_array_sort_values (keys, (GCompareFunc) g_strcmp0);
   bad = g_ptr_array_new_with_free_func (g_free);

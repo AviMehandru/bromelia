@@ -13,6 +13,7 @@ matches across platforms:
 | Disc identity, naming, plugin matching | `Core/MediaIdentity.swift` | `Logic/MediaIdentity.cs` | `bro-identity.c` |
 | DVD navigation (episodes in “play all” titles) | `Core/DVDNavigation.swift` | `Logic/DvdNavigation.cs` | `bro-dvd.c` |
 | Checksums, archive record, episode splitting tools | `Engine/Archive.swift`, `Engine/EpisodeSplitter.swift` | `Engine/Archive.cs` | `bro-identity.c`, `bro-runner.c` |
+| Disc fingerprints, earlier archives, verifying archives | `Engine/Archive.swift` | `Engine/Archive.cs` | `bro-archive.c` |
 | Notifications, online lookup, media server names, other discs | `Engine/Integrations.swift` | `Engine/Integrations.cs` | `bro-integrations.c` |
 | App state: drives, sessions, queue, history | `App/AppModel.swift` | `Engine/AppState.cs` | `bro-state.c` |
 | Background queue, web page | `App/BackgroundQueue.swift`, `App/WebServer.swift` | `Engine/Services.cs` | `bro-state.c`, `bro-web.c` |
@@ -115,6 +116,23 @@ with read errors*. When the job ends, files are hashed in the staging folder and
 output folder on success, or into a folder marked `[READ ERRORS]` / `[INCOMPLETE]` with a note file
 otherwise. Paths recorded during the job (files, episodes, checksums) are rewritten to the final location
 before the manifest, archive record and post-processing see them.
+
+## Archive checks
+
+- **Disc fingerprints** (`DiscFingerprint` / `bro_disc_fingerprint`) hash the listing's volume name, title count and,
+  sorted, every title's source id, length, segment map and size (the exact text is in configuration.md), so the value
+  is the same on every platform; `shared/fixtures/fingerprints.json` pins it for the tests. The job computes it after
+  reading the listing, stores it in `bromelia.json` and hands it back for the history.
+- **Earlier archives** (`ArchiveLookup` / `bro_find_archived`): the app state passes the history's successful jobs
+  (fingerprint, folder, date) to the job when it starts; the job looks there first, then walks the output root (four
+  levels, hidden folders skipped) for `bromelia*.json` records with status `success` — on the job's thread (a task off
+  the main actor on macOS, `Task.Run` on Windows). The disc page uses the history only, so it stays instant.
+- **Verifying** (`ArchiveVerifier` / `bro_verify_folders`) collects the folders with a `SHA256SUMS`, sums up the listed
+  files' sizes for the progress, re-hashes each file with the streaming hasher and lists the folder's other files.
+  The app state runs one check at a time on a worker thread; progress is copied to the UI four times a second, and
+  the results are recorded in `archive-checks.json` per folder and for the checked root. The scheduled check
+  (`archiveCheck.intervalDays`) is started by the one-second tick when the root's record is old enough and no job
+  runs; its notifications are sent from the worker thread.
 
 ## Unfinished jobs
 

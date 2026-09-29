@@ -77,6 +77,8 @@ GPtrArray *bro_checksum_list_files (GPtrArray *items, const char *base);
 typedef gboolean (*BroHashProgress) (gint64 done, gpointer user_data); /* return FALSE to cancel */
 char      *bro_sha256_file (const char *path, BroHashProgress progress, gpointer user_data, GError **error);
 char      *bro_checksums_render (GPtrArray *entries); /* "hash  path\n"… */
+/* Parses "hash  path" / "hash *path" lines into path -> lower-case hash. */
+GHashTable *bro_checksums_parse (const char *text);
 /* Writes base/SHA256SUMS keeping entries of earlier jobs; returns the path. */
 char      *bro_checksums_write_merged (const char *base, GPtrArray *entries, GError **error);
 /* Re-hashes base/SHA256SUMS; returns the paths (char*) that are missing or differ, or NULL on error. */

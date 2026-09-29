@@ -106,6 +106,7 @@ struct BromeliaCommands: Commands {
                 .keyboardShortcut("1", modifiers: [.command, .option])
             Button("Show History") { model.selection = .history }
                 .keyboardShortcut("2", modifiers: [.command, .option])
+            Button("Verify Archive…") { model.selection = .archiveCheck }
             Divider()
             Button("Clear Finished Jobs") { model.clearFinishedJobs() }
         }

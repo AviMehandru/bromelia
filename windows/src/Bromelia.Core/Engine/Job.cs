@@ -64,6 +64,10 @@ public sealed class RipJob : ObservableObject
     /// <summary>File system flags from the drive scan (used when the listing is unavailable).</summary>
     public DiscFlags? DiscFlags { get; set; }
     public bool IsAutomatic { get; set; }
+    /// <summary>The history's successful jobs with their disc fingerprints, to recognise a disc archived before (set when it starts).</summary>
+    public List<ArchivedCandidate> ArchivedCandidates { get; set; } = new();
+    /// <summary>The disc's fingerprint (<see cref="DiscFingerprint"/>), once the job has read the listing.</summary>
+    public string? Fingerprint { get; set; }
     public DateTime? StartAt { get; set; }
 
     JobState _state = JobState.Queued;
@@ -203,6 +207,8 @@ public sealed class HistoryRecord
     public string LogPath { get; set; } = "";
     public int Warnings { get; set; }
     public int Errors { get; set; }
+    /// <summary>The disc's fingerprint (see "already archived"), or null.</summary>
+    public string? Fingerprint { get; set; }
 }
 
 public sealed class JobManifest

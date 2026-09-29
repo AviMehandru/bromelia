@@ -1117,3 +1117,215 @@ public class IntegrationJobTests
         Assert.Equal(Checksums.Sha256(source), Assert.Single(job.Checksums).Sha256);
     }
 }
+
+/// <summary>Archive checks and discs archived before: fingerprints, finding earlier archives, verifying SHA256SUMS folders.</summary>
+public class ArchiveCheckTests : IDisposable
+{
+    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-arch-" + Guid.NewGuid().ToString("N")[..8]);
+
+    public ArchiveCheckTests() => Directory.CreateDirectory(_root);
+
+    public void Dispose()
+    {
+        Paths.DataOverride = null;
+        try { Directory.Delete(_root, true); } catch (IOException) { }
+    }
+
+    static DiscInfo Info(string text) => DiscInfoBuilder.Build(text);
+
+    [Fact]
+    public void FingerprintsMatchEveryPlatform()
+    {
+        var shared = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "fingerprints.json")));
+        Assert.Equal(shared.RootElement.GetProperty("info-dvd").GetString(), DiscFingerprint.Of(Info(Fixtures.Read("info-dvd"))));
+        var a = Info(Listing.Make("SHOW_S1_D1", ("0:22:10", 1), ("0:22:40", 2), ("0:23:05", 3)));
+        var renumbered = Info(Listing.Make("SHOW_S1_D1", ("0:23:05", 3), ("0:22:10", 1), ("0:22:40", 2)));
+        var otherDisc = Info(Listing.Make("SHOW_S1_D1", ("0:22:12", 1), ("0:22:40", 2), ("0:23:05", 3)));
+        Assert.Equal(DiscFingerprint.Of(a), DiscFingerprint.Of(renumbered));   // MakeMKV's title numbers don't matter
+        Assert.NotEqual(DiscFingerprint.Of(a), DiscFingerprint.Of(otherDisc)); // another disc of the set, same label
+        Assert.Null(DiscFingerprint.Of(new DiscInfo()));
+    }
+
+    static void WriteRecord(string dir, string name, string status, string fingerprint)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, name),
+            $"{{\"format\": \"bromelia-archive\", \"status\": \"{status}\", \"finishedAt\": \"2024-05-01T10:00:00Z\", \"disc\": {{\"label\": \"X\", \"fingerprint\": \"{fingerprint}\"}}}}");
+    }
+
+    [Fact]
+    public void FindsEarlierArchives()
+    {
+        var movie = Path.Combine(_root, "Movies", "Movie (2001)");
+        WriteRecord(movie, "bromelia (2).json", "success", "v1:aaaa");
+        WriteRecord(Path.Combine(_root, "Other [READ ERRORS]"), "bromelia.json", "errors", "v1:bbbb");
+        var when = new DateTime(2023, 11, 14, 22, 13, 20, DateTimeKind.Utc);
+        var candidates = new[]
+        {
+            new ArchivedCandidate("v1:cccc", Path.Combine(_root, "gone"), JobState.Succeeded, when),
+            new ArchivedCandidate("v1:dddd", _root, JobState.CompletedWithErrors, when),
+            new ArchivedCandidate("v1:eeee", _root, JobState.Succeeded, when),
+        };
+        Assert.Equal(new ArchivedMatch(_root, when), ArchiveLookup.Find("v1:eeee", candidates, null));
+        var found = ArchiveLookup.Find("v1:aaaa", candidates, _root);
+        Assert.Equal(movie, found?.Folder);
+        Assert.Equal(new DateTime(2024, 5, 1, 10, 0, 0, DateTimeKind.Utc), found?.ArchivedAt?.ToUniversalTime());
+        Assert.Null(ArchiveLookup.Find("v1:aaaa", candidates, null));
+        foreach (var fp in new[] { "v1:bbbb", "v1:cccc", "v1:dddd" }) Assert.Null(ArchiveLookup.Find(fp, candidates, _root));
+        Assert.Null(ArchiveLookup.Find(null, candidates, _root));
+    }
+
+    /// <summary>An archive folder: files with a SHA256SUMS listing them.</summary>
+    static void MakeArchive(string dir, params string[] names)
+    {
+        var entries = new List<Checksums.Entry>();
+        foreach (var name in names)
+        {
+            var path = Path.Combine(dir, name.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, $"contents of {name}, long enough to hash");
+            entries.Add(new Checksums.Entry(name, new FileInfo(path).Length, Checksums.Sha256(path)));
+        }
+        Checksums.WriteMerged(dir, entries);
+    }
+
+    [Fact]
+    public void VerifiesArchives()
+    {
+        var good = Path.Combine(_root, "Good");
+        var bad = Path.Combine(_root, "TV Shows", "Bad");
+        MakeArchive(good, "Good.mkv", "Backup/BDMV/index.bdmv");
+        MakeArchive(bad, "Season 01/E01.mkv", "Season 01/E02.mkv", "Season 01/E03.mkv");
+        MakeArchive(Path.Combine(_root, ".bromelia-incomplete-1234"), "Good.mkv");
+        // One byte changed, one file gone, one file added; Bromelia's own files are not "extra".
+        var e1 = Path.Combine(bad, "Season 01", "E01.mkv");
+        var bytes = File.ReadAllBytes(e1);
+        bytes[3] ^= 1;
+        File.WriteAllBytes(e1, bytes);
+        File.Delete(Path.Combine(bad, "Season 01", "E02.mkv"));
+        File.WriteAllText(Path.Combine(bad, "Season 01", "E01.nfo"), "<episodedetails/>");
+        File.WriteAllText(Path.Combine(bad, "bromelia.json"), "{}");
+        File.WriteAllText(Path.Combine(bad, "bromelia-log.txt"), "log");
+
+        var folders = ArchiveVerifier.Folders(_root);
+        Assert.Equal(new[] { good, bad }, folders); // hidden (staging) folders are left out
+        var (results, stopped) = ArchiveVerifier.Verify(folders);
+        Assert.False(stopped);
+        Assert.Equal(2, results.Count);
+        var g = results.Single(r => r.Folder == good);
+        Assert.True(g.Ok);
+        Assert.Equal(2, g.Files);
+        Assert.Empty(g.Extra);
+        var b = results.Single(r => r.Folder == bad);
+        Assert.False(b.Ok);
+        Assert.Equal(new[] { "Season 01/E01.mkv" }, b.Changed);
+        Assert.Equal(new[] { "Season 01/E02.mkv" }, b.Missing);
+        Assert.Equal(new[] { "Season 01/E01.nfo" }, b.Extra);
+        Assert.Equal("1 changed, 1 missing of 3 file(s); 1 not listed", b.Summary);
+        // Stopping keeps only folders that were finished.
+        var none = ArchiveVerifier.Verify(folders, (_, _, _, _) => false);
+        Assert.True(none.Stopped);
+        Assert.Empty(none.Results);
+        // When each folder was checked, kept across runs.
+        var file = Path.Combine(_root, "checks", "archive-checks.json");
+        Assert.Empty(CheckRecords.Load(file));
+        var when = new DateTime(2023, 11, 14, 22, 13, 20);
+        CheckRecords.Save(results.ToDictionary(r => r.Folder, r => new CheckRecord(when, r.Ok, r.Summary)), file);
+        var again = CheckRecords.Load(file);
+        Assert.Equal(new CheckRecord(when, false, "1 changed, 1 missing of 3 file(s); 1 not listed"), again[bad]);
+        Assert.True(again[good].Ok);
+    }
+
+    [Fact]
+    public void VerifiesFromTheApp()
+    {
+        var good = Path.Combine(_root, "Good");
+        MakeArchive(good, "Good.mkv");
+        Paths.DataOverride = Path.Combine(_root, "data");
+        SingleThreadContext.Run(async () =>
+        {
+            var state = new AppState(new NullPlatformServices(), Path.Combine(_root, "data", "config.json"), new SettingsCatalog());
+            state.Config.OutputRoot = _root;
+            var now = DateTime.Now;
+            Assert.False(state.VerifyDue(now)); // ArchiveCheck is off by default
+            state.Config.ArchiveCheck.IntervalDays = 30;
+            Assert.True(state.VerifyDue(now));
+            Assert.True(state.StartVerify(_root));
+            Assert.False(state.StartVerify(_root)); // one at a time
+            for (int i = 0; i < 200 && state.Verify.Running; i++) await Task.Delay(25);
+            Assert.False(state.Verify.Running);
+            Assert.Single(state.Verify.Results);
+            Assert.True(state.CheckRecords[good].Ok);
+            Assert.True(state.CheckRecords.ContainsKey(state.OutputRootPath)); // the whole tree, for the schedule
+            Assert.False(state.VerifyDue(now.AddDays(1)));
+            Assert.True(state.VerifyDue(now.AddDays(31)));
+            // A damaged file shows in the next run, and the records are kept for the next start.
+            File.WriteAllText(Path.Combine(good, "Good.mkv"), "bit rot");
+            Assert.Null(state.WebAction("verify", "", "start"));
+            for (int i = 0; i < 200 && state.Verify.Running; i++) await Task.Delay(25);
+            Assert.False(state.CheckRecords[good].Ok);
+            Assert.False(CheckRecords.Load()[good].Ok);
+            var damaged = (System.Collections.IList)((Dictionary<string, object>)state.WebStatus()["verify"])["damaged"];
+            Assert.Equal(1, damaged.Count);
+        });
+    }
+
+    RipJob ArchivedJob(FakeMakeMkv fake, bool automatic, AlreadyArchived policy, List<ArchivedCandidate>? candidates = null, string? root = null)
+    {
+        Paths.DataOverride = Path.Combine(Path.GetTempPath(), "bromelia-test-data");
+        var config = new AppConfig { OutputRoot = root ?? _root };
+        var drive = new DriveConfig();
+        drive.Automation.Notify = false;
+        drive.Automation.EjectWhenDone = false;
+        drive.Automation.AlreadyArchived = policy;
+        drive.Automation.WaitForMountSeconds = 0;
+        var job = new RipJob(new DiscSource.Iso("/nonexistent/test.iso"), drive, "iso:archived", "test", "", RipMode.Mkv)
+        {
+            IsAutomatic = automatic, ArchivedCandidates = candidates ?? new(),
+        };
+        SingleThreadContext.Run(async () =>
+            await new JobRunner(job, config, fake.Executable, null, new UiDispatcher(), new NullPlatformServices(), new[] { "dvd_MinimumTitleLength" }).RunAsync());
+        return job;
+    }
+
+    [Fact]
+    public void DiscsArchivedBefore()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:30:00", 1)), FakeMakeMkv.WritesFile(Listing.Saved));
+        var first = ArchivedJob(fake, false, AlreadyArchived.Skip);
+        Assert.True(first.State == JobState.Succeeded, first.ErrorMessage);
+        var fp = Assert.IsType<string>(first.Fingerprint);
+        var folder = Assert.IsType<string>(first.OutputDirectory);
+        Assert.Contains(fp, File.ReadAllText(Path.Combine(folder, "bromelia.json"))); // the fingerprint is in the archive record
+
+        // Automatic rips of the same disc: found through the archive record under the output folder.
+        var skipped = ArchivedJob(fake, true, AlreadyArchived.Skip);
+        Assert.Equal(JobState.Cancelled, skipped.State);
+        Assert.StartsWith("Already archived in ", skipped.ErrorMessage);
+        Assert.Contains(folder, skipped.ErrorMessage);
+        Assert.Null(skipped.OutputDirectory);
+        var asked = ArchivedJob(fake, true, AlreadyArchived.Ask);
+        Assert.Equal(JobState.Cancelled, asked.State);
+        Assert.Contains("Rip it again from the drive page", asked.ErrorMessage);
+        Assert.Equal(JobState.Succeeded, ArchivedJob(fake, true, AlreadyArchived.RipAgain).State);
+        Assert.Equal(JobState.Succeeded, ArchivedJob(fake, false, AlreadyArchived.Skip).State); // manual rips only warn
+
+        // Found through the history too (another output folder), but only while the folder is there.
+        var elsewhere = Directory.CreateDirectory(Path.Combine(_root, "elsewhere")).FullName;
+        var empty = Directory.CreateDirectory(Path.Combine(_root, "empty-root")).FullName;
+        var candidate = new List<ArchivedCandidate> { new(fp, elsewhere, JobState.Succeeded, DateTime.Now) };
+        var viaHistory = ArchivedJob(fake, true, AlreadyArchived.Skip, candidate, empty);
+        Assert.Equal(JobState.Cancelled, viaHistory.State);
+        Assert.Contains(elsewhere, viaHistory.ErrorMessage);
+        Directory.Delete(elsewhere);
+        var empty2 = Directory.CreateDirectory(Path.Combine(_root, "empty-root-2")).FullName;
+        Assert.Equal(JobState.Succeeded, ArchivedJob(fake, true, AlreadyArchived.Skip, candidate, empty2).State);
+
+        // Another disc of the set with the same label is not taken for the archived one.
+        var other = new FakeMakeMkv(Listing.Make(("0:31:00", 1)), FakeMakeMkv.WritesFile(Listing.Saved));
+        var otherJob = ArchivedJob(other, true, AlreadyArchived.Skip, new() { new(fp, _root, JobState.Succeeded, DateTime.Now) });
+        Assert.Equal(JobState.Succeeded, otherJob.State);
+        Assert.NotEqual(fp, otherJob.Fingerprint);
+    }
+}

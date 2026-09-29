@@ -124,6 +124,11 @@ public sealed class JobRunner
         {
             await ExecuteAsync();
         }
+        catch (Exception) when (_alreadyArchived != null)
+        {
+            status = JobState.Cancelled;
+            _job.ErrorMessage = _alreadyArchived;
+        }
         catch (Exception e) when (CancelRequested || e is OperationCanceledException)
         {
             status = JobState.Cancelled;
@@ -156,7 +161,7 @@ public sealed class JobRunner
         var allSteps = ApplicableSteps(status);
         var steps = allSteps.Where(s => !s.Background).ToList();
         var backgroundSteps = allSteps.Where(s => s.Background).ToList();
-        if (steps.Count > 0 && !CancelRequested)
+        if (steps.Count > 0 && !CancelRequested && _alreadyArchived == null)
         {
             _job.Phase = "Post-processing";
             _job.CurrentOperation = "";
@@ -178,7 +183,8 @@ public sealed class JobRunner
         }
 
         if (_job.Source is DiscSource.Drive d &&
-            ((status == JobState.Succeeded && _job.Drive.Automation.EjectWhenDone)
+            (((status == JobState.Succeeded || (_alreadyArchived != null && _job.Drive.Automation.AlreadyArchived == AlreadyArchived.Skip))
+              && _job.Drive.Automation.EjectWhenDone)
              || (status is JobState.Failed or JobState.CompletedWithErrors && _job.Drive.Automation.EjectOnFailure)))
         {
             _job.Phase = "Ejecting";
@@ -192,7 +198,7 @@ public sealed class JobRunner
         _job.CurrentOperation = "";
         if (status == JobState.Succeeded) { _job.TotalProgress = 1; _job.CurrentProgress = 1; }
         WriteManifest(status);
-        if (backgroundSteps.Count > 0 && !CancelRequested)
+        if (backgroundSteps.Count > 0 && !CancelRequested && _alreadyArchived == null)
         {
             _job.Background = new BackgroundWork(_job.Id, _job.Title, backgroundSteps,
                 new PostProcessor.Context(status, TemplateValues(status), _job.OutputDirectory, _job.ProducedFiles.ToList(), ScriptEnvironment(status)),
@@ -224,7 +230,7 @@ public sealed class JobRunner
         {
             JobState.Succeeded => $"{_job.ProducedFiles.Count} item(s) saved to {_job.OutputDirectory}",
             JobState.CompletedWithErrors => $"Read errors: the files were kept in {_job.OutputDirectory}",
-            JobState.Cancelled => "Cancelled",
+            JobState.Cancelled => _job.ErrorMessage ?? "Cancelled",
             _ => _job.ErrorMessage ?? "Failed",
         };
         var what = _job.Identity?.Name ?? (_job.DiscLabel.Length == 0 ? _job.SourceLabel : _job.DiscLabel);
@@ -302,6 +308,8 @@ public sealed class JobRunner
             _job.Mode = m;
             ResolveIdentity(info);
         }
+        _job.Fingerprint = DiscFingerprint.Of(info);
+        if (_job.Fingerprint != null && _job.Mode != RipMode.InfoOnly) await CheckAlreadyArchivedAsync();
         await LookUpMetadataAsync();
 
         var outDir = PrepareOutput();
@@ -344,6 +352,33 @@ public sealed class JobRunner
 
     /// <summary>Reserves the output folder and creates the hidden staging folder inside it, where everything is written
     /// until the job has finished and passed its checks.</summary>
+    /// <summary>Why an automatic rip stopped: the disc was archived before (see CheckAlreadyArchivedAsync).</summary>
+    string? _alreadyArchived;
+
+    /// <summary>A disc archived before (same fingerprint, in the history or a bromelia.json under the output root): automatic rips
+    /// follow Automation.AlreadyArchived, manual ones only warn. Throws (with _alreadyArchived set) to stop the job.</summary>
+    async Task CheckAlreadyArchivedAsync()
+    {
+        _job.Phase = "Looking for earlier archives of this disc";
+        var root = Paths.ExpandUser(_config.OutputRootFor(_job.Drive));
+        var fingerprint = _job.Fingerprint;
+        var candidates = _job.ArchivedCandidates.ToList();
+        var m = await Task.Run(() => ArchiveLookup.Find(fingerprint, candidates, root));
+        if (m == null) return;
+        var when = m.ArchivedAt is { } t ? $" on {t.ToLocalTime():yyyy-MM-dd}" : "";
+        var policy = _job.Drive.Automation.AlreadyArchived;
+        if (!_job.IsAutomatic || policy == AlreadyArchived.RipAgain)
+        {
+            _job.AppendLog($"This disc was archived before, in {m.Folder}{when}; ripping it again", Severity.Warning);
+            return;
+        }
+        _alreadyArchived = policy == AlreadyArchived.Skip
+            ? $"Already archived in {m.Folder}{when}, so it wasn't ripped again. To archive it again, rip it from the drive page."
+            : $"Already archived in {m.Folder}{when}. Rip it again from the drive page, or eject it.";
+        _job.AppendLog(_alreadyArchived, Severity.Warning);
+        throw new JobException(_alreadyArchived);
+    }
+
     string PrepareOutput()
     {
         var finalDir = ResolveOutputDirectory();
@@ -864,6 +899,7 @@ public sealed class JobRunner
             {
                 Label = _job.DiscLabel, VolumeName = info?.VolumeName ?? "", Type = info?.TypeName ?? "", Format = id.Format.Token(),
                 FormatCode = id.FormatCode, Encrypted = id.Encrypted, Season = id.Label.Season, Part = id.Label.Part, Volume = id.Label.Volume, Disc = id.Label.Disc,
+                Fingerprint = _job.Fingerprint,
             },
             Rip = _job.Mode.MakesMkv() ? "Rip" : "Backup",
             Mode = JsonNamingPolicy.CamelCase.ConvertName(_job.Mode.ToString()),

@@ -69,6 +69,8 @@ struct ContentView: View {
             }
         case .history?:
             HistoryView()
+        case .archiveCheck?:
+            ArchiveCheckView()
         case .queue?, nil:
             QueueView()
         }
@@ -182,6 +184,14 @@ struct Sidebar: View {
                 .tag(SidebarSelection.queue)
                 Label("History", systemImage: "clock.arrow.circlepath")
                     .tag(SidebarSelection.history)
+                Label {
+                    HStack {
+                        Text("Archive Check")
+                        Spacer()
+                        if model.verify.running { ProgressView().controlSize(.mini) }
+                    }
+                } icon: { Image(systemName: "checkmark.shield") }
+                .tag(SidebarSelection.archiveCheck)
             }
         }
         .listStyle(.sidebar)

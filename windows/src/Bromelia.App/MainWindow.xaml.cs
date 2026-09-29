@@ -74,6 +74,7 @@ public sealed partial class MainWindow : Window
         _queueItem = new NavigationViewItem { Content = "Queue", Icon = new SymbolIcon(Symbol.List), Tag = "queue" };
         Nav.MenuItems.Add(_queueItem);
         Nav.MenuItems.Add(new NavigationViewItem { Content = "History", Icon = new FontIcon { Glyph = "" }, Tag = "history" });
+        Nav.MenuItems.Add(new NavigationViewItem { Content = "Archive check", Icon = new FontIcon { Glyph = "\uE83D" }, Tag = "verify" });
         UpdateQueueBadge();
 
         Nav.FooterMenuItems.Clear();
@@ -187,6 +188,7 @@ public sealed partial class MainWindow : Window
         if (tag.StartsWith("drive:", StringComparison.Ordinal) || tag.StartsWith("source:", StringComparison.Ordinal))
             ContentFrame.Navigate(typeof(DrivePage), tag);
         else if (tag == "history") ContentFrame.Navigate(typeof(HistoryPage));
+        else if (tag == "verify") ContentFrame.Navigate(typeof(ArchiveCheckPage));
         else if (tag == "settings") ContentFrame.Navigate(typeof(SettingsPage));
         else if (tag == "tools") ContentFrame.Navigate(typeof(DriveToolsPage));
         else ContentFrame.Navigate(typeof(QueuePage));

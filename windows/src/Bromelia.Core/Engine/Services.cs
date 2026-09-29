@@ -196,8 +196,10 @@ public sealed class WebServer
                 return Page() is { } page ? (200, "text/html; charset=utf-8", page) : (404, "text/plain", Encoding.UTF8.GetBytes("The page is missing"));
             case ("GET", 2) when parts[0] == "api" && parts[1] == "status":
                 return (200, "application/json", JsonSerializer.SerializeToUtf8Bytes(_state.WebStatus()));
-            case ("POST", 4) when parts[0] == "api":
-                var message = _state.WebAction(parts[1], parts[2], parts[3]);
+            // /api/<kind>/<id>/<action>, and /api/verify (check the output folder's archives) · /api/verify/cancel.
+            case ("POST", >= 2 and <= 4) when parts[0] == "api" && (parts.Length == 4 || parts[1] == "verify"):
+                var message = _state.WebAction(parts[1], parts.Length == 4 ? parts[2] : "",
+                    parts.Length == 4 ? parts[3] : parts.Length == 3 ? parts[2] : "start");
                 return message == null ? (204, "text/plain", Array.Empty<byte>()) : (400, "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(message));
             default:
                 return (404, "text/plain", Encoding.UTF8.GetBytes("Not found"));

@@ -47,6 +47,12 @@ docker run -d --name bromelia \
   Without a token the page stays off. There is no TLS; use a reverse proxy for access from outside your network.
 - **Registration:** set `registrationKey` in the configuration, or `"autoUpdateBetaKey": true` to register
   MakeMKV's free beta key at startup and whenever it expires (a purchased key is never replaced).
+- **Archive checks:** `"archiveCheck": {"intervalDays": 30}` reads everything under `/output` again every 30 days and
+  compares it with the `SHA256SUMS` files, sending the result to `notifications` (a damaged folder is sent as a
+  failure, so `onlyProblems` targets get it too). *Check output folder* on the web page, or `POST /api/verify`, starts
+  a check now.
+- **Discs archived before:** an automatic rip recognises a disc already in the history or in `/output` (its
+  `bromelia.json`) and skips it (`automation.alreadyArchived`: `skip`, `ask` or `ripAgain`).
 - **Automatic rips:** set `automation.autoRipOnInsert` for the default drive (`defaultDrive`) or for each drive.
   Drives are polled every `pollIntervalSeconds` (keep it above 0 in a container; there are no desktop media
   events). The tray can be closed from the web page.

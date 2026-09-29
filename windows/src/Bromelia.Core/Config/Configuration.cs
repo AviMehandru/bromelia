@@ -14,6 +14,8 @@ public enum RipMode { Mkv, Backup, BackupDecrypted, BackupThenMkv, InfoOnly, Aud
 /// <summary>How output is named: with the templates, or the way Plex / Jellyfin / Emby expect it.</summary>
 public enum LibraryLayout { Templates, MediaServer }
 public enum MetadataProvider { None, Tmdb, Omdb }
+/// <summary>What an automatic rip does with a disc that was archived before (manual rips only warn).</summary>
+public enum AlreadyArchived { Skip, Ask, RipAgain }
 public enum BackupFormat { Folder, Iso }
 public enum ConflictPolicy { UniqueSuffix, Overwrite, Skip }
 public enum RunCondition { Success, Failure, Always }
@@ -190,6 +192,15 @@ public sealed class AutomationConfig
     public bool PlaySound { get; set; } = true;
     /// <summary>Before an automatic rip, wait up to this long for the system to mount the disc. 0 = don't wait.</summary>
     public int WaitForMountSeconds { get; set; } = 30;
+    /// <summary>What an automatic rip does with a disc found in the history or the output folder (same disc fingerprint).</summary>
+    public AlreadyArchived AlreadyArchived { get; set; } = AlreadyArchived.Skip;
+}
+
+public sealed class ArchiveCheckConfig
+{
+    int _intervalDays;
+    /// <summary>Verify every archive folder under the output root again every this many days (SHA256SUMS). 0 = never.</summary>
+    public int IntervalDays { get => _intervalDays; set => _intervalDays = Math.Max(0, value); }
 }
 
 /// <summary>What to do with discs that aren't DVDs or Blu-rays, when they are ripped automatically or with “Rip”.</summary>
@@ -415,6 +426,8 @@ public sealed class AppConfig
     /// <summary>How many background post-processing steps run at the same time.</summary>
     public int BackgroundJobs { get; set; } = 1;
     public WebUIConfig WebUI { get; set; } = new();
+    /// <summary>Verifying the output folder's archives again on a schedule.</summary>
+    public ArchiveCheckConfig ArchiveCheck { get; set; } = new();
 
     /// <summary>Upgrades a configuration loaded from a file of version <paramref name="loaded"/>.</summary>
     public AppConfig Upgrade(int loaded)

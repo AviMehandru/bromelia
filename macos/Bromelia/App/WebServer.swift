@@ -146,8 +146,11 @@ final class WebServer {
         case ("GET", 2) where parts == ["api", "status"]:
             let json = (try? JSONSerialization.data(withJSONObject: model.webStatus(), options: [.sortedKeys])) ?? Data("{}".utf8)
             return (200, "application/json", json)
-        case ("POST", 4) where parts[0] == "api":
-            let message = model.webAction(kind: parts[1], id: parts[2], action: parts[3])
+        case ("POST", 2...4) where parts[0] == "api" && (parts.count == 4 || parts[1] == "verify"):
+            // /api/<kind>/<id>/<action>, and /api/verify (check the output folder's archives) · /api/verify/cancel.
+            let id = parts.count == 4 ? parts[2] : ""
+            let action = parts.count == 4 ? parts[3] : parts.count == 3 ? parts[2] : "start"
+            let message = model.webAction(kind: parts[1], id: id, action: action)
             return message == nil ? (204, "text/plain", Data()) : (400, "text/plain; charset=utf-8", Data(message!.utf8))
         default:
             return (404, "text/plain", Data("Not found".utf8))

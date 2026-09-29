@@ -67,6 +67,10 @@ final class RipJob: Identifiable {
     /// File system flags from the drive scan (used when the disc listing is unavailable).
     var discFlags: DiscFlags?
     var isAutomatic = false
+    /// The history's successful jobs with their disc fingerprints, to recognise a disc archived before (set when it starts).
+    var archivedCandidates: [ArchivedCandidate] = []
+    /// The disc's fingerprint (DiscFingerprint), once the job has read the listing.
+    var fingerprint: String?
     /// Delayed start (automatic rips): the job waits in `.waiting` until this time.
     var startAt: Date?
 
@@ -189,6 +193,8 @@ struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
     var logPath: String
     var warnings: Int
     var errors: Int
+    /// The disc's fingerprint (see "already archived"), or nil.
+    var fingerprint: String?
 }
 
 /// Manifest handed to post-processing scripts (BROMELIA_MANIFEST).

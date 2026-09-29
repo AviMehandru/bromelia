@@ -20,6 +20,7 @@ static const char *const format_mode_labels[] = {
   "Same as the mode above", "Rip titles to MKV", "Backup (encrypted, 1:1)", "Backup (decrypted)", "Decrypted backup, then MKV from backup",
   "Scan only (save disc information)", NULL };
 static const char *const layout_labels[] = { "Folder and file name templates", "Plex / Jellyfin / Emby library", NULL };
+static const char *const already_archived_labels[] = { "Skip it (eject when done)", "Stop and ask (leave it in the drive)", "Rip it again", NULL };
 
 typedef struct {
   BroDriveConfig *config;
@@ -123,6 +124,11 @@ general_page (Ctx *c)
   ADD (g, bro_switch_row ("Rip automatically when a disc is inserted", NULL, &d->automation.auto_rip_on_insert, ctx_changed, c));
   ADD (g, bro_spin_row ("Start automatic rips after", "seconds (gives time to cancel)", &d->automation.auto_rip_delay_seconds, 0, 3600, ctx_changed, c));
   ADD (g, bro_spin_row ("Wait for the disc to be mounted", "seconds, before an automatic rip (0 = don't wait)", &d->automation.wait_for_mount_seconds, 0, 600, ctx_changed, c));
+  {
+    GtkWidget *row = bro_combo_row ("A disc archived before", already_archived_labels, (int *) &d->automation.already_archived, ctx_changed, c);
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (row), "Automatic rips; found by its fingerprint in the history or a bromelia.json in the output folder");
+    ADD (g, row);
+  }
   ADD (g, bro_switch_row ("Eject the disc when the job succeeds", NULL, &d->automation.eject_when_done, ctx_changed, c));
   ADD (g, bro_switch_row ("Eject the disc when the job fails", NULL, &d->automation.eject_on_failure, ctx_changed, c));
   ADD (g, bro_switch_row ("Show a notification when the job finishes", NULL, &d->automation.notify, ctx_changed, c));

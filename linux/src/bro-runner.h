@@ -73,6 +73,7 @@ typedef struct {
   gboolean automatic;            /* started on insert: wait for the disc to be mounted first */
   gboolean uses_configured_mode; /* the drive's mode (automatic and quick rips), so it may follow the disc's format */
   GCancellable *cancellable;     /* owned */
+  GPtrArray *archived;           /* BroArchivedCandidate* from the history (owned), for "already archived" */
   BroUpdateFunc on_update;
   gpointer user_data;
 } BroRunRequest;
@@ -109,6 +110,7 @@ typedef struct {
   BroRipMode mode;                /* the mode the job ran with (may follow the disc's format) */
   char *name;                     /* the movie / show name, or NULL */
   BroBackgroundWork *background;  /* steps for the background queue, or NULL */
+  char *fingerprint;              /* the disc's fingerprint (bro_disc_fingerprint), or NULL */
 } BroRunResult;
 
 BroRunRequest *bro_run_request_new (void);

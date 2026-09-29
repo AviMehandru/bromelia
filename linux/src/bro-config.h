@@ -19,6 +19,8 @@ typedef enum { BRO_RUN_SUCCESS, BRO_RUN_FAILURE, BRO_RUN_ALWAYS } BroRunConditio
 typedef enum { BRO_PROFILE_MAKEMKV_DEFAULT, BRO_PROFILE_GENERATED, BRO_PROFILE_CUSTOM_FILE } BroProfileMode;
 /* How output is named: with the folder and file name templates, or the way Plex / Jellyfin / Emby expect it. */
 typedef enum { BRO_LAYOUT_TEMPLATES, BRO_LAYOUT_MEDIA_SERVER } BroLibraryLayout;
+/* What an automatic rip does with a disc that has been archived before (manual rips only warn). */
+typedef enum { BRO_ARCHIVED_SKIP, BRO_ARCHIVED_ASK, BRO_ARCHIVED_RIP_AGAIN } BroAlreadyArchived;
 typedef enum { BRO_METADATA_NONE, BRO_METADATA_TMDB, BRO_METADATA_OMDB } BroMetadataProvider;
 /* Disc formats with a mode of their own (rip.formatModes). */
 typedef enum { BRO_FORMAT_KEY_DVD, BRO_FORMAT_KEY_BLURAY, BRO_FORMAT_KEY_UHD, BRO_FORMAT_KEY_COUNT } BroFormatKey;
@@ -75,6 +77,7 @@ typedef struct {
   gboolean notify;
   gboolean play_sound;
   int wait_for_mount_seconds; /* before an automatic rip, wait up to this long for the disc to be mounted; 0 = don't */
+  BroAlreadyArchived already_archived;
 } BroAutomation;
 
 /* What to do with discs that aren't DVDs or Blu-rays, when they are ripped automatically or with "Rip". */
@@ -200,6 +203,7 @@ typedef struct {
   gboolean auto_update_beta_key; /* register MakeMKV's current beta key at startup and when it has expired */
   int background_jobs;       /* background post-processing steps that run at the same time */
   BroWebUIConfig web_ui;
+  int archive_check_interval_days; /* verify the output root's archives again every N days; 0 = never */
 } BroAppConfig;
 
 /* Enum <-> JSON string helpers (also used by labels in the UI). */
@@ -215,6 +219,7 @@ const char *bro_lpcm_label (BroLpcmOutput o);
 const char *bro_profile_mode_label (BroProfileMode m);
 const char *bro_conflict_label (BroConflictPolicy p);
 const char *bro_layout_label (BroLibraryLayout l);
+const char *bro_already_archived_label (BroAlreadyArchived a);
 const char *bro_metadata_provider_label (BroMetadataProvider p);
 const char *bro_metadata_provider_to_string (BroMetadataProvider p);
 /* The mode for a disc with format key (BroFormatKey; -1 = unknown) in automatic and quick rips. */

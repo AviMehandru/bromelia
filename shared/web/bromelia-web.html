@@ -42,6 +42,7 @@
   <h2>Jobs</h2><div id="jobs"></div>
   <h2>Background</h2><div id="background"></div>
   <h2>Recent</h2><div id="history"></div>
+  <h2>Archive check</h2><div id="verify"></div>
 </main>
 <script>
 const token = new URLSearchParams(location.search).get("token") || "";
@@ -110,6 +111,29 @@ function render(s) {
     r.append(t, el("span", "state " + h.state, h.stateLabel || h.state));
     c.append(r);
     history.append(c);
+  }
+
+  // Re-reading the output folder's archives against their SHA256SUMS (older Bromelia versions have no "verify").
+  const verify = document.getElementById("verify");
+  verify.replaceChildren();
+  const v = s.verify;
+  if (v) {
+    const c = el("div", "card"), r = el("div", "row"), t = el("div", "grow");
+    if (v.running) {
+      t.append(el("div", null, "Checking " + (v.folder || v.path)), el("div", "muted", Math.round((v.progress || 0) * 100) + " %"));
+      r.append(t, button("Stop", "/api/verify/cancel"));
+      c.append(r);
+      const p = el("progress"); p.max = 1; p.value = v.progress || 0; c.append(p);
+    } else {
+      const when = v.finishedAt ? new Date(v.finishedAt).toLocaleString() : "";
+      const damaged = v.damaged || [];
+      t.append(el("div", null, !when ? "Not checked since Bromelia started." :
+        `${when}${v.stopped ? " (stopped)" : ""}: ${v.folders} folder(s), ${damaged.length ? damaged.length + " damaged" : "all OK"}`));
+      for (const d of damaged) t.append(el("div", "muted", d.folder + ": " + d.summary));
+      r.append(t, button("Check output folder", "/api/verify"));
+      c.append(r);
+    }
+    verify.append(c);
   }
 }
 

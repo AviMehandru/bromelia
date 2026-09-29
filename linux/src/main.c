@@ -25,7 +25,8 @@ ensure_window (AdwApplication *app)
 /* Developer aid: BROMELIA_SNAPSHOT=/path/shot.png renders the window to a PNG after
  * BROMELIA_SNAPSHOT_DELAY seconds (default 6) and quits. BROMELIA_SNAPSHOT_TAG selects a page
  * ("queue", "history", "drive:<id>", "source:<key>"); BROMELIA_SNAPSHOT_DIALOG=preferences|config opens a dialog, and BROMELIA_SNAPSHOT_PAGE=<name> one of its pages
- * ("services"; "general", "ripping", "output"… for config). */
+ * ("services"; "general", "ripping", "output"… for config). BROMELIA_SNAPSHOT_VERIFY=<folder> verifies that folder's
+ * archives first (use with BROMELIA_SNAPSHOT_TAG=verify). */
 static void
 snapshot_after_paint (GdkFrameClock *clock, GtkWidget *win)
 {
@@ -82,6 +83,8 @@ snapshot_prepare (gpointer data)
       bro_session_set_selected (s, 1, TRUE);
       bro_state_rip_session (st, s, BRO_MODE_MKV);
     }
+  if (g_getenv ("BROMELIA_SNAPSHOT_VERIFY"))
+    bro_state_verify_start (st, g_getenv ("BROMELIA_SNAPSHOT_VERIFY"), FALSE);
   if (tag && g_str_equal (tag, "first-source") && st->file_sessions->len)
     {
       g_autofree char *t = g_strdup_printf ("source:%s", ((BroSession *) st->file_sessions->pdata[0])->id);

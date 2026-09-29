@@ -82,7 +82,10 @@ final class AppModel {
         history = persistent ? ConfigStore.loadHistory() : []
         keepAwakeSwitch = { [weak self] on in self?.setProcessActivity(on) }
         background.onChange = { [weak self] in self?.updateKeepAwake() }
-        if persistent { recoverUnfinishedJobs() }
+        if persistent {
+            recoverUnfinishedJobs()
+            checkRecords = CheckRecords.load()
+        }
     }
 
     // MARK: - Startup
@@ -102,10 +105,13 @@ final class AppModel {
                 if self.config.pollIntervalSeconds > 0 { await self.refreshDrives(force: false) }
             }
         }
+        // The first scheduled archive check (archiveCheck.intervalDays) a minute after starting, then hourly.
+        nextScheduleCheck = Date().addingTimeInterval(60)
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 self?.pump()
+                self?.startScheduledCheckIfDue()
             }
         }
         background.limit = config.backgroundJobs
@@ -618,13 +624,14 @@ final class AppModel {
             self.scheduleRescan(after: 3)
             self.pump()
         }
+        job.archivedCandidates = archivedCandidates
         runners[job.id] = runner
         updateKeepAwake()
         Task { await runner.run() }
     }
 
     /// Whether the Mac should be kept awake: jobs or background steps are running and `preventSleep` is on.
-    var wantsAwake: Bool { config.preventSleep && (!runners.isEmpty || background.isBusy) }
+    var wantsAwake: Bool { config.preventSleep && (!runners.isEmpty || background.isBusy || verify.running) }
 
     /// Keeps the Mac awake (no idle sleep, no App Nap) while jobs or background steps run.
     func updateKeepAwake() {
@@ -648,8 +655,159 @@ final class AppModel {
                                  state: job.state, startedAt: job.startedAt, finishedAt: job.finishedAt,
                                  outputDirectory: job.outputDirectory?.path, files: job.producedFiles.map(\.path),
                                  errorMessage: job.errorMessage, logPath: job.logFile.path,
-                                 warnings: job.warningCount, errors: job.errorCount))
+                                 warnings: job.warningCount, errors: job.errorCount, fingerprint: job.fingerprint))
         saveUnfinishedJobs()
+    }
+
+    // MARK: - Archives: already archived, verifying
+
+    /// Verifying archives again (Verify Archive…, the history, the web page, archiveCheck.intervalDays).
+    struct VerifyStatus {
+        var running = false
+        /// Started by archiveCheck.intervalDays.
+        var scheduled = false
+        /// The last run was stopped.
+        var stopped = false
+        var path = ""
+        var done: Int64 = 0
+        var total: Int64 = 0
+        var folder: String?
+        var file: String?
+        /// The folders the last run finished.
+        var results: [ArchiveVerifier.FolderCheck] = []
+        var finishedAt: Date?
+    }
+
+    var verify = VerifyStatus()
+    /// When each folder was last verified (archive-checks.json).
+    var checkRecords: [String: CheckRecord] = [:]
+    @ObservationIgnored private var verifyCancel: CancelFlag?
+    @ObservationIgnored private var nextScheduleCheck = Date.distantFuture
+
+    var outputRootURL: URL { URL(fileURLWithPath: Paths.expandTilde(config.outputRoot), isDirectory: true).standardizedFileURL }
+
+    /// The history's successful jobs with their disc fingerprints.
+    var archivedCandidates: [ArchivedCandidate] {
+        history.compactMap { r in
+            guard let fp = r.fingerprint, !fp.isEmpty, let dir = r.outputDirectory else { return nil }
+            return ArchivedCandidate(fingerprint: fp, folder: dir, state: r.state, finishedAt: r.finishedAt)
+        }
+    }
+
+    /// The earlier archive of the disc with this listing according to the history (quick; for the disc page).
+    func archivedMatch(for info: DiscInfo?) -> ArchivedMatch? {
+        ArchiveLookup.find(fingerprint: DiscFingerprint.of(info), candidates: archivedCandidates, root: nil)
+    }
+
+    /// Whether archiveCheck.intervalDays asks for a check of the output root at `now`.
+    func verifyDue(at now: Date = Date()) -> Bool {
+        let days = config.archiveCheck.intervalDays
+        guard days > 0, !verify.running, JobRunner.isDirectory(outputRootURL) else { return false }
+        guard let last = checkRecords[outputRootURL.path] else { return true }
+        return now.timeIntervalSince(last.checkedAt) >= Double(days) * 86400
+    }
+
+    private func startScheduledCheckIfDue() {
+        let now = Date()
+        guard now >= nextScheduleCheck else { return }
+        nextScheduleCheck = now.addingTimeInterval(3600)
+        if verifyDue(at: now) && activeJobCount == 0 { startVerify(outputRootURL, scheduled: true) }
+    }
+
+    /// Verifies every SHA256SUMS folder under `path` in the background. False when a check is already running.
+    @discardableResult
+    func startVerify(_ path: URL, scheduled: Bool = false) -> Bool {
+        guard !verify.running else { return false }
+        let flag = CancelFlag()
+        verifyCancel = flag
+        verify = VerifyStatus(running: true, scheduled: scheduled, path: path.path)
+        updateKeepAwake()
+        /// Progress written by the worker, read by the main actor.
+        final class Live: @unchecked Sendable {
+            private let lock = NSLock()
+            private var done: Int64 = 0, total: Int64 = 0
+            private var folder: String?, file: String?
+
+            func update(_ d: Int64, _ t: Int64, _ f: String?, _ n: String?) {
+                lock.lock()
+                defer { lock.unlock() }
+                done = d
+                total = t
+                if let f { folder = f }
+                if let n { file = n }
+            }
+
+            func snapshot() -> (Int64, Int64, String?, String?) {
+                lock.lock()
+                defer { lock.unlock() }
+                return (done, total, folder, file)
+            }
+        }
+        let live = Live()
+        let targets = scheduled ? config.notifications : []
+        Task {
+            let poll = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    let (d, t, f, n) = live.snapshot()
+                    guard let self, self.verify.running else { return }
+                    self.verify.done = d
+                    self.verify.total = t
+                    self.verify.folder = f
+                    self.verify.file = n
+                }
+            }
+            let outcome = await Task.detached {
+                ArchiveVerifier.verify(folders: ArchiveVerifier.folders(under: path)) { done, total, folder, file in
+                    live.update(done, total, folder, file)
+                    return !flag.isSet()
+                }
+            }.value
+            poll.cancel()
+            if scheduled && !outcome.stopped && !targets.isEmpty {
+                let report = Self.verifyReport(outcome.results)
+                await NotificationSender.send(targets, title: report.title, body: report.body,
+                                              status: report.damaged ? "failed" : "success") { text in NSLog("Bromelia: %@", text) }
+            }
+            self.finishVerify(path: path, results: outcome.results, stopped: outcome.stopped, scheduled: scheduled)
+        }
+        return true
+    }
+
+    func cancelVerify() { verifyCancel?.set() }
+
+    /// "Archive check: all 12 folder(s) OK" and the damaged folders, for notifications.
+    static func verifyReport(_ results: [ArchiveVerifier.FolderCheck]) -> (title: String, body: String, damaged: Bool) {
+        let bad = results.filter { !$0.ok }
+        let title = bad.isEmpty ? "Archive check: all \(results.count) folder(s) OK" : "Archive check: \(bad.count) of \(results.count) folder(s) damaged"
+        var body = bad.prefix(10).map { "\($0.folder): \($0.summary)\n" }.joined()
+        if bad.count > 10 { body += "… and \(bad.count - 10) more\n" }
+        if bad.isEmpty { body = "Every file matches its checksum." }
+        return (title, body, !bad.isEmpty)
+    }
+
+    private func finishVerify(path: URL, results: [ArchiveVerifier.FolderCheck], stopped: Bool, scheduled: Bool) {
+        let now = Date()
+        for r in results { checkRecords[r.folder] = CheckRecord(checkedAt: now, ok: r.ok, summary: r.summary) }
+        // The whole tree, so a scheduled check knows when it last ran.
+        if !stopped && !results.contains(where: { $0.folder == path.path }) {
+            let bad = results.filter { !$0.ok }.count
+            checkRecords[path.path] = CheckRecord(checkedAt: now, ok: bad == 0,
+                                                  summary: bad > 0 ? "\(bad) of \(results.count) archive folder(s) damaged"
+                                                                   : "\(results.count) archive folder(s), all OK")
+        }
+        if persistent { CheckRecords.save(checkRecords) }
+        verify.running = false
+        verify.stopped = stopped
+        verify.results = results
+        verify.finishedAt = now
+        verifyCancel = nil
+        let report = Self.verifyReport(results)
+        if scheduled && report.damaged {
+            lastError = report.title
+            Notifier.post(title: report.title, body: report.body, sound: true)
+        }
+        updateKeepAwake()
     }
 
     // MARK: - Unfinished jobs
@@ -747,6 +905,7 @@ enum SidebarSelection: Hashable {
     case source(String)
     case queue
     case history
+    case archiveCheck
 }
 
 // MARK: - Web page
@@ -778,8 +937,14 @@ extension AppModel {
             ["title": $0.title, "state": Self.webState($0.state), "stateLabel": $0.state.label, "error": $0.errorMessage ?? "",
              "outputDirectory": $0.outputDirectory ?? "", "finishedAt": $0.finishedAt.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
         }
+        let v = verify
+        let damaged: [[String: Any]] = v.results.filter { !$0.ok }.map { ["folder": $0.folder, "summary": $0.summary] }
+        let verifyStatus: [String: Any] = [
+            "running": v.running, "path": v.path, "progress": v.total > 0 ? Double(v.done) / Double(v.total) : 0, "folder": v.folder ?? "",
+            "stopped": v.stopped, "finishedAt": v.finishedAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
+            "folders": v.results.count, "damaged": damaged]
         return ["app": "Bromelia", "makemkv": makemkvVersion, "problem": makemkvProblem?.explanation ?? "",
-                "drives": drives, "jobs": jobList, "background": bg, "history": hist]
+                "drives": drives, "jobs": jobList, "background": bg, "history": hist, "verify": verifyStatus]
     }
 
     /// Runs an action from the web page: drives/<lane>/rip|eject|close, jobs/<id>/cancel. Returns an error, or nil.
@@ -798,6 +963,15 @@ extension AppModel {
         case ("jobs", "cancel"):
             guard let job = jobs.first(where: { $0.id.uuidString == id }) else { return "No such job" }
             cancel(job)
+            return nil
+        case ("verify", "cancel"):
+            cancelVerify()
+            return nil
+        case ("verify", "start"):
+            if verify.running { return "A check is already running" }
+            let root = outputRootURL
+            guard JobRunner.isDirectory(root) else { return "The output folder \(root.path) doesn't exist" }
+            startVerify(root)
             return nil
         default:
             return "Unknown action"

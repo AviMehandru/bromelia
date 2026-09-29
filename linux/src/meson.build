@@ -10,6 +10,7 @@ core_sources = files(
   'bro-integrations.c',
   'bro-web.c',
   'bro-sleep.c',
+  'bro-archive.c',
 )
 
 core_deps = [glib_dep, gio_dep, gio_unix_dep, json_dep]

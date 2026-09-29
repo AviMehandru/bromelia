@@ -60,14 +60,17 @@ public sealed partial class HistoryPage : Page
         {
             var dur = r.StartedAt is { } s && r.FinishedAt is { } f ? JobRunner.FormatElapsed(f - s) : "";
             var g = new Grid { ColumnSpacing = 12, Tag = r.Id };
-            foreach (var w in new[] { 150, 0, 160, 110, 100, 60, 70 })
+            foreach (var w in new[] { 150, 0, 160, 110, 100, 60, 70, 90 })
                 g.ColumnDefinitions.Add(new ColumnDefinition { Width = w == 0 ? new GridLength(1, GridUnitType.Star) : new GridLength(w) });
-            string[] cols = { r.FinishedAt?.ToString("g") ?? "—", r.DiscName, r.DriveName, r.Mode.ShortLabel(), r.State.Label(), r.Files.Count.ToString(), dur };
+            var check = r.OutputDirectory is { } od && App.State.CheckRecords.TryGetValue(od, out var c) ? c : null;
+            string[] cols = { r.FinishedAt?.ToString("g") ?? "—", r.DiscName, r.DriveName, r.Mode.ShortLabel(), r.State.Label(), r.Files.Count.ToString(), dur,
+                              check == null ? "" : check.Ok ? "Verified" : "Damaged" };
             for (int i = 0; i < cols.Length; i++)
             {
                 var tb = new TextBlock { Text = cols[i], TextTrimming = TextTrimming.CharacterEllipsis };
                 if (i == 4 && r.State != JobState.Succeeded)
                     tb.Foreground = new SolidColorBrush(r.State == JobState.CompletedWithErrors ? Microsoft.UI.Colors.DarkOrange : Microsoft.UI.Colors.IndianRed);
+                if (i == 7 && check is { Ok: false }) tb.Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
                 Grid.SetColumn(tb, i);
                 g.Children.Add(tb);
             }
@@ -81,7 +84,22 @@ public sealed partial class HistoryPage : Page
         if (_list.SelectedItem is not FrameworkElement { Tag: Guid id } || App.State.History.FirstOrDefault(h => h.Id == id) is not { } r) return;
         _details.Children.Add(new TextBlock { Text = r.Title, Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"], TextWrapping = TextWrapping.Wrap });
         if (r.ErrorMessage != null) _details.Children.Add(new TextBlock { Text = r.ErrorMessage, Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed), TextWrapping = TextWrapping.Wrap });
-        if (r.OutputDirectory is { } dir) _details.Children.Add(PageHelpers.Button("Open output folder", () => Shell.Open(dir)));
+        if (r.OutputDirectory is { } dir)
+        {
+            _details.Children.Add(PageHelpers.Button("Open output folder", () => Shell.Open(dir)));
+            if (File.Exists(Path.Combine(dir, Checksums.FileName)))
+            {
+                var verify = PageHelpers.Button("Verify folder", () =>
+                {
+                    if (!App.State.StartVerify(dir)) App.State.LastError = "An archive check is already running";
+                    App.MainWindow.Navigate("verify");
+                });
+                ToolTipService.SetToolTip(verify, "Read the files again and compare them with SHA256SUMS");
+                _details.Children.Add(verify);
+                _details.Children.Add(Form.Help(App.State.CheckRecords.TryGetValue(dir, out var c)
+                    ? $"Last verified {c.CheckedAt:g}: {c.Summary}" : "Not verified since it was archived"));
+            }
+        }
         _details.Children.Add(PageHelpers.Button("Open log file", () => Shell.Open(r.LogPath)));
         foreach (var f in r.Files) _details.Children.Add(Form.Help(f));
         try { _log.Text = File.Exists(r.LogPath) ? File.ReadAllText(r.LogPath) : "Log not available"; }

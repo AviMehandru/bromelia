@@ -58,6 +58,9 @@ public sealed partial class SettingsPage : Page
         f.Number("Background post-processing steps at a time", () => c.BackgroundJobs, v => c.BackgroundJobs = v, 1, 16,
             "Sequential ripping (for hard disks that slow down with parallel writes): set the maximum simultaneous jobs to 1.");
 
+        f.Section("Archive check", "Reads the output folder's archives again and compares every file with SHA256SUMS, to find damaged or missing files. The result is sent to the notifications. The Archive check page checks now.");
+        f.Number("Check archives every (0 = never)", () => c.ArchiveCheck.IntervalDays, v => c.ArchiveCheck.IntervalDays = v, 0, 3650, suffix: "days");
+
         f.Section("Online lookup", "Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for media server names. Get a free key at themoviedb.org or omdbapi.com.");
         f.Choice("Look up movies and shows", new[] { (MetadataProvider.None, "Off"), (MetadataProvider.Tmdb, "The Movie Database (TMDb)"), (MetadataProvider.Omdb, "OMDb (IMDb data)") },
             () => c.Metadata.Provider, v => c.Metadata.Provider = v);

@@ -1,5 +1,6 @@
 /* bro-runner.c — job pipeline, post-processing and mkvmerge remuxing. */
 #include "bro-runner.h"
+#include "bro-archive.h"
 #include "bro-dvd.h"
 #include "bro-identity.h"
 #include "bro-integrations.h"
@@ -84,6 +85,7 @@ bro_run_request_free (BroRunRequest *r)
   g_free (r->makemkvcon);
   g_free (r->mkvmerge);
   g_clear_object (&r->cancellable);
+  if (r->archived) g_ptr_array_unref (r->archived);
   g_free (r);
 }
 
@@ -100,6 +102,7 @@ bro_run_result_free (BroRunResult *r)
   g_free (r->libre_drive);
   g_free (r->name);
   bro_background_work_free (r->background);
+  g_free (r->fingerprint);
   g_free (r);
 }
 
@@ -185,6 +188,8 @@ typedef struct {
   BroDiscInfo *rip_info;       /* the listing the titles were ripped from (disc, backup or one-pass listing) */
   BroMediaMatch *metadata;     /* the movie / show found online */
   int main_title;              /* the main feature of a movie (the longest title ripped), for media server names; -1 */
+  char *fingerprint;           /* of the disc listing (bro_disc_fingerprint), or NULL */
+  char *already_archived;      /* why an automatic rip stopped: the disc was archived before (see check_already_archived) */
 } Ctx;
 
 typedef struct {
@@ -1861,6 +1866,8 @@ write_archive_record (Ctx *c, const char *out_dir, BroJobState status)
   add_optional_int (b, "part", id->label.part);
   add_optional_int (b, "volume", id->label.volume);
   add_optional_int (b, "disc", id->label.disc);
+  if (c->fingerprint)
+    S ("fingerprint", c->fingerprint);
   json_builder_end_object (b);
   S ("rip", bro_rip_mode_makes_mkv (c->req->mode) ? "Rip" : "Backup");
   S ("mode", bro_rip_mode_to_string (c->req->mode));
@@ -3002,6 +3009,37 @@ execute_other_disc (Ctx *c, GError **error)
   }
 }
 
+/* A disc archived before (same fingerprint, in the history or a bromelia.json under the output root): automatic rips
+ * follow automation.alreadyArchived, manual ones only warn. FALSE (with c->already_archived set) stops the job. */
+static gboolean
+check_already_archived (Ctx *c)
+{
+  g_autofree char *root = output_root (c);
+  g_autofree char *when = NULL, *where = NULL;
+  g_autoptr (BroArchivedMatch) m = NULL;
+  BroAlreadyArchived policy = c->req->drive->automation.already_archived;
+  phase (c, "Looking for earlier archives of this disc");
+  m = bro_find_archived (c->fingerprint, c->req->archived, root);
+  if (!m)
+    return TRUE;
+  if (m->archived_at)
+    {
+      g_autoptr (GDateTime) d = g_date_time_new_from_unix_local (m->archived_at);
+      when = g_date_time_format (d, "%Y-%m-%d");
+    }
+  where = g_strdup_printf ("%s%s%s", m->folder, when ? " on " : "", when ? when : "");
+  if (!c->req->automatic || policy == BRO_ARCHIVED_RIP_AGAIN)
+    {
+      log_line (c, BRO_SEV_WARNING, "This disc was archived before, in %s; ripping it again", where);
+      return TRUE;
+    }
+  c->already_archived = policy == BRO_ARCHIVED_SKIP
+    ? g_strdup_printf ("Already archived in %s, so it wasn't ripped again. To archive it again, rip it from the drive page.", where)
+    : g_strdup_printf ("Already archived in %s. Rip it again from the drive page, or eject it.", where);
+  log_line (c, BRO_SEV_WARNING, "%s", c->already_archived);
+  return FALSE;
+}
+
 static gboolean
 execute (Ctx *c, GError **error)
 {
@@ -3118,6 +3156,10 @@ execute (Ctx *c, GError **error)
           resolve_identity (c, info, 0, -1);
         }
     }
+  c->fingerprint = bro_disc_fingerprint (info);
+  c->res->fingerprint = g_strdup (c->fingerprint);
+  if (c->fingerprint && req->mode != BRO_MODE_INFO_ONLY && !check_already_archived (c))
+    return FALSE;
   look_up_metadata (c, info);
 
   if (!(out_dir = prepare_output (c, error)))
@@ -3664,7 +3706,7 @@ bro_notification_text (BroJobState status, BroRipMode mode, const char *what, gu
       *body = g_strdup_printf ("Read errors: the files were kept in %s", output_dir ? output_dir : "");
       break;
     case BRO_JOB_CANCELLED:
-      *body = g_strdup ("Cancelled");
+      *body = g_strdup (error && *error ? error : "Cancelled");
       break;
     default:
       *body = g_strdup (error && *error ? error : "Failed");
@@ -3685,6 +3727,7 @@ bro_run_job (BroRunRequest *req)
   g_autoptr (GError) error = NULL;
   g_autofree char *logpath = NULL;
   BroJobState status = BRO_JOB_SUCCEEDED;
+  gboolean executed;
 
   res->files = g_ptr_array_new_with_free_func (g_free);
   res->disc_label = g_strdup (req->disc_label ? req->disc_label : "");
@@ -3712,7 +3755,13 @@ bro_run_job (BroRunRequest *req)
     log_line (&c, BRO_SEV_INFO, "%s from %s using configuration “%s”", bro_rip_mode_label (req->mode), src, req->drive->name);
   }
 
-  if (!execute (&c, &error))
+  executed = execute (&c, &error);
+  if (!executed && c.already_archived)
+    {
+      status = BRO_JOB_CANCELLED;
+      res->error = g_strdup (c.already_archived);
+    }
+  else if (!executed)
     {
       if (g_cancellable_is_cancelled (req->cancellable) && (!error || g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)))
         {
@@ -3748,7 +3797,8 @@ bro_run_job (BroRunRequest *req)
   status = finish_output (&c, status);
 
   write_manifest (&c, status);
-  if (!g_cancellable_is_cancelled (req->cancellable) && run_post_processing (&c, status) && status == BRO_JOB_SUCCEEDED)
+  if (!g_cancellable_is_cancelled (req->cancellable) && !c.already_archived && run_post_processing (&c, status)
+      && status == BRO_JOB_SUCCEEDED)
     {
       status = BRO_JOB_FAILED;
       g_free (res->error);
@@ -3756,7 +3806,8 @@ bro_run_job (BroRunRequest *req)
     }
 
   if (!req->skip_eject && req->source->kind == BRO_SOURCE_DRIVE &&
-      ((status == BRO_JOB_SUCCEEDED && req->drive->automation.eject_when_done) ||
+      (((status == BRO_JOB_SUCCEEDED || (c.already_archived && req->drive->automation.already_archived == BRO_ARCHIVED_SKIP))
+        && req->drive->automation.eject_when_done) ||
        ((status == BRO_JOB_FAILED || status == BRO_JOB_COMPLETED_WITH_ERRORS) && req->drive->automation.eject_on_failure)))
     {
       phase (&c, "Ejecting");
@@ -3812,5 +3863,7 @@ bro_run_job (BroRunRequest *req)
   g_free (c.work_dir);
   if (c.rip_info) bro_disc_info_unref (c.rip_info);
   bro_media_match_free (c.metadata);
+  g_free (c.fingerprint);
+  g_free (c.already_archived);
   return res;
 }

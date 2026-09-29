@@ -82,6 +82,10 @@ general_page (void)
   adw_preferences_group_add (g, bro_spin_row ("Stop a stuck rip after", "minutes without output (0 = never)", &c->stall_timeout_minutes, 0, 1440, changed_cb, NULL));
   adw_preferences_group_add (g, bro_switch_row ("Keep the computer awake while jobs run", NULL, &c->prevent_sleep, changed_cb, NULL));
   adw_preferences_group_add (g, bro_spin_row ("Background post-processing", "steps at a time (encoding, uploads)", &c->background_jobs, 1, 16, changed_cb, NULL));
+  g = group (ADW_PREFERENCES_PAGE (page), "Archive check",
+             "Reads the output folder's archives again and compares every file with SHA256SUMS, to find damaged or missing files. "
+             "The result is sent to the notifications. Verify Archive… in the menu checks now.");
+  adw_preferences_group_add (g, bro_spin_row ("Check archives every", "days (0 = never)", &c->archive_check_interval_days, 0, 3650, changed_cb, NULL));
   g = group (ADW_PREFERENCES_PAGE (page), "MakeMKV", st->makemkv_version && *st->makemkv_version ? st->makemkv_version : NULL);
   adw_preferences_group_add (g, button_row ("Import settings from MakeMKV", "Copies ~/.MakeMKV/settings.conf into the global settings", "Import", G_CALLBACK (on_import), NULL));
   adw_preferences_group_add (g, button_row ("Bromelia data folder", "Job logs, manifests and history", "Open", G_CALLBACK (on_open_data), NULL));

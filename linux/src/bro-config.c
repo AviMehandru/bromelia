@@ -21,6 +21,11 @@ static const EnumEntry layouts[] = {
   { BRO_LAYOUT_TEMPLATES, "templates", "Folder and file name templates" },
   { BRO_LAYOUT_MEDIA_SERVER, "mediaServer", "Plex / Jellyfin / Emby library" },
   { 0, NULL, NULL } };
+static const EnumEntry already_archived[] = {
+  { BRO_ARCHIVED_SKIP, "skip", "Skip it (eject when done)" },
+  { BRO_ARCHIVED_ASK, "ask", "Stop and ask (leave it in the drive)" },
+  { BRO_ARCHIVED_RIP_AGAIN, "ripAgain", "Rip it again" },
+  { 0, NULL, NULL } };
 static const EnumEntry metadata_providers[] = {
   { BRO_METADATA_NONE, "none", "Off" },
   { BRO_METADATA_TMDB, "tmdb", "The Movie Database (TMDb)" },
@@ -93,6 +98,7 @@ const char *bro_lpcm_label (BroLpcmOutput o) { return enum_find (lpcm_outputs, o
 const char *bro_profile_mode_label (BroProfileMode m) { return enum_find (profile_modes, m)->label; }
 const char *bro_conflict_label (BroConflictPolicy p) { return enum_find (conflicts, p)->label; }
 const char *bro_layout_label (BroLibraryLayout l) { return enum_find (layouts, l)->label; }
+const char *bro_already_archived_label (BroAlreadyArchived a) { return enum_find (already_archived, a)->label; }
 const char *bro_metadata_provider_label (BroMetadataProvider p) { return enum_find (metadata_providers, p)->label; }
 const char *bro_metadata_provider_to_string (BroMetadataProvider p) { return enum_find (metadata_providers, p)->json; }
 const char *bro_format_key_name (BroFormatKey k) { return k >= 0 && k < BRO_FORMAT_KEY_COUNT ? format_key_names[k] : ""; }
@@ -537,6 +543,7 @@ drive_config_build (JsonBuilder *b, const BroDriveConfig *c)
   B ("notify", c->automation.notify);
   B ("playSound", c->automation.play_sound);
   I ("waitForMountSeconds", c->automation.wait_for_mount_seconds);
+  S ("alreadyArchived", enum_find (already_archived, c->automation.already_archived)->json);
   json_builder_end_object (b);
 
   json_builder_set_member_name (b, "archive");
@@ -661,6 +668,7 @@ drive_config_from_object (JsonObject *o)
   c->automation.notify = get_bool (a, "notify", TRUE);
   c->automation.play_sound = get_bool (a, "playSound", TRUE);
   c->automation.wait_for_mount_seconds = get_int (a, "waitForMountSeconds", 30);
+  c->automation.already_archived = enum_parse (already_archived, get_str (a, "alreadyArchived", NULL), BRO_ARCHIVED_SKIP);
 
   a = get_obj (o, "archive");
   c->archive.checksums = get_bool (a, "checksums", TRUE);
@@ -927,6 +935,10 @@ bro_app_config_to_json (const BroAppConfig *c)
   json_builder_end_array (b);
   B ("autoUpdateBetaKey", c->auto_update_beta_key);
   I ("backgroundJobs", c->background_jobs);
+  json_builder_set_member_name (b, "archiveCheck");
+  json_builder_begin_object (b);
+  I ("intervalDays", c->archive_check_interval_days);
+  json_builder_end_object (b);
   json_builder_set_member_name (b, "webUI");
   json_builder_begin_object (b);
   B ("enabled", c->web_ui.enabled);
@@ -1006,6 +1018,7 @@ bro_app_config_from_json (JsonNode *node)
           }
     c->auto_update_beta_key = get_bool (o, "autoUpdateBetaKey", FALSE);
     c->background_jobs = get_int (o, "backgroundJobs", 1);
+    c->archive_check_interval_days = MAX (0, get_int (get_obj (o, "archiveCheck"), "intervalDays", 0));
     c->web_ui.enabled = get_bool (w, "enabled", FALSE);
     REPLACE (c->web_ui.address, dup_str (w, "address", "127.0.0.1"));
     c->web_ui.port = get_int (w, "port", 51280);

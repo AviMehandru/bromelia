@@ -17,11 +17,21 @@ struct DiscBrowser: View {
     @State private var selectedNode: DiscNode? = .disc
     @State private var expanded: Set<Int> = []
     @State private var showLog = false
+    /// A rip of a disc archived before, waiting for "Rip Again".
+    @State private var ripAgain: RipMode?
 
     var body: some View {
         let decisions = Dictionary(uniqueKeysWithValues: TitleSelector.evaluate(info.titles, rule: config.rip.titleSelection).decisions.map { ($0.titleIndex, $0) })
         let longest = info.titles.max { $0.durationSeconds < $1.durationSeconds }?.index
+        let archived = archivedText
         VStack(spacing: 0) {
+            if let archived {
+                Label(archived, systemImage: "checkmark.shield")
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Color.accentColor.opacity(0.12))
+            }
             HSplitView {
                 List(selection: $selectedNode) {
                     Label {
@@ -107,9 +117,9 @@ struct DiscBrowser: View {
                 .help("Show the disc log")
             if case .drive = session.source {
                 Menu {
-                    Button(RipMode.backup.label) { model.ripSession(session, mode: .backup) }
-                    Button(RipMode.backupDecrypted.label) { model.ripSession(session, mode: .backupDecrypted) }
-                    Button("Decrypted backup, then MKV of selected titles") { model.ripSession(session, mode: .backupThenMkv) }
+                    Button(RipMode.backup.label) { rip(.backup) }
+                    Button(RipMode.backupDecrypted.label) { rip(.backupDecrypted) }
+                    Button("Decrypted backup, then MKV of selected titles") { rip(.backupThenMkv) }
                 } label: {
                     Label("Backup", systemImage: "externaldrive")
                 }
@@ -117,9 +127,18 @@ struct DiscBrowser: View {
                 .disabled(driveBusy)
             }
             Button {
-                model.ripSession(session, mode: .mkv)
+                rip(.mkv)
             } label: {
                 Label("Make MKV", systemImage: "film.stack")
+            }
+            .confirmationDialog("Rip this disc again?", isPresented: Binding(get: { ripAgain != nil }, set: { if !$0 { ripAgain = nil } })) {
+                Button("Rip Again") {
+                    if let m = ripAgain { model.ripSession(session, mode: m) }
+                    ripAgain = nil
+                }
+                Button("Cancel", role: .cancel) { ripAgain = nil }
+            } message: {
+                Text(archivedText ?? "")
             }
             .keyboardShortcut(.return, modifiers: [.command])
             .buttonStyle(.borderedProminent)
@@ -127,6 +146,17 @@ struct DiscBrowser: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// "This disc was archived before, in …" when the history has a successful archive of it (same fingerprint).
+    private var archivedText: String? {
+        guard let m = model.archivedMatch(for: info) else { return nil }
+        return "This disc was archived before, in \(m.folder)\(m.archivedAt.map { " on " + $0.formatted(date: .abbreviated, time: .omitted) } ?? "")"
+    }
+
+    /// A disc archived before is only ripped again when the user says so.
+    private func rip(_ mode: RipMode) {
+        if archivedText != nil { ripAgain = mode } else { model.ripSession(session, mode: mode) }
     }
 
     /// What the disc is, as used for file names: editable name, movie / TV and first episode number.

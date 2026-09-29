@@ -80,13 +80,19 @@
                 <ContentControl x:Name="ErrorLogHost" Height="260" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
             </StackPanel>
 
-            <Grid x:Name="BrowserPanel" ColumnSpacing="12" Visibility="Collapsed">
+            <Grid x:Name="BrowserPanel" ColumnSpacing="12" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="340" />
                 </Grid.ColumnDefinitions>
-                <ListView x:Name="TitleList" SelectionMode="Single" SelectionChanged="TitleList_SelectionChanged" />
-                <Border Grid.Column="1" Style="{StaticResource CardStyle}">
+                <!-- The history has a successful archive of this disc (same fingerprint). -->
+                <InfoBar x:Name="ArchivedBar" Grid.ColumnSpan="2" Title="Archived before" Severity="Informational" IsOpen="False" IsClosable="True" />
+                <ListView x:Name="TitleList" Grid.Row="1" SelectionMode="Single" SelectionChanged="TitleList_SelectionChanged" />
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource CardStyle}">
                     <ScrollViewer>
                         <StackPanel x:Name="InfoPanel" Spacing="6" />
                     </ScrollViewer>

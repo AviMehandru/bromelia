@@ -17,6 +17,7 @@ typedef struct {
   GtkWidget *icon, *title, *subtitle, *status, *chips;
   GtkWidget *open_btn, *rip_btn, *eject_btn, *tray_btn, *configure_btn, *close_btn, *config_dropdown;
   GtkWidget *job_box;
+  GtkWidget *archived_banner; /* the disc was archived before (according to the history) */
   BroJob *shown_job;
 
   GtkWidget *stack;
@@ -382,12 +383,33 @@ on_customize (GtkButton *b, Page *p)
   gtk_button_set_label (b, bro_session_has_custom_tracks (p->session, index) ? "Use Profile Tracks" : "Choose Tracks");
 }
 
+/* "Already archived in …" when the history has a successful archive of this disc (same fingerprint). */
+static char *
+archived_text (BroDiscInfo *info)
+{
+  g_autoptr (BroArchivedMatch) m = info ? bro_state_archived_match (st (), info) : NULL;
+  g_autofree char *when = NULL;
+  if (!m)
+    return NULL;
+  if (m->archived_at)
+    {
+      g_autoptr (GDateTime) d = g_date_time_new_from_unix_local (m->archived_at);
+      when = g_date_time_format (d, "%x");
+    }
+  return g_strdup_printf ("This disc was archived before, in %s%s%s", m->folder, when ? " on " : "", when ? when : "");
+}
+
 static void
 build_titles (Page *p, BroDiscInfo *info)
 {
   GtkWidget *c;
   g_autoptr (BroSelectionResult) res = bro_select_titles (info, &current_config (p)->rip.titles);
   int longest = -1, longest_d = -1;
+  {
+    g_autofree char *archived = archived_text (info);
+    adw_banner_set_title (ADW_BANNER (p->archived_banner), archived ? archived : "");
+    adw_banner_set_revealed (ADW_BANNER (p->archived_banner), archived != NULL);
+  }
   if (p->shown_info)
     bro_disc_info_unref (p->shown_info);
   p->shown_info = bro_disc_info_ref (info);
@@ -860,12 +882,40 @@ on_config_selected (GObject *dd, GParamSpec *pspec, Page *p)
 }
 
 static void
-rip (Page *p, BroRipMode mode)
+rip_now (Page *p, BroRipMode mode)
 {
   if (p->session)
     bro_state_rip_session (st (), p->session, mode);
   refresh_job (p);
   refresh_header (p);
+}
+
+static void
+rip_again_response (AdwAlertDialog *d, const char *response, Page *p)
+{
+  if (g_str_equal (response, "rip"))
+    rip_now (p, GPOINTER_TO_INT (g_object_get_data (G_OBJECT (d), "mode")));
+}
+
+/* A disc archived before is only ripped again when the user says so. */
+static void
+rip (Page *p, BroRipMode mode)
+{
+  g_autofree char *archived = p->session && (bro_rip_mode_makes_mkv (mode) || bro_rip_mode_makes_backup (mode))
+                              ? archived_text (p->session->info) : NULL;
+  AdwDialog *d;
+  if (!archived)
+    {
+      rip_now (p, mode);
+      return;
+    }
+  d = adw_alert_dialog_new ("Rip this disc again?", archived);
+  adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (d), "cancel", "Cancel", "rip", "Rip Again", NULL);
+  adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (d), "cancel");
+  adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (d), "cancel");
+  g_object_set_data (G_OBJECT (d), "mode", GINT_TO_POINTER (mode));
+  g_signal_connect (d, "response", G_CALLBACK (rip_again_response), p);
+  adw_dialog_present (d, p->root);
 }
 
 static void on_make_mkv (GtkButton *b, Page *p) { rip (p, BRO_MODE_MKV); }
@@ -1194,6 +1244,8 @@ bro_drive_page_new (const char *tag)
   content = p->root;
   gtk_box_append (GTK_BOX (content), header);
   gtk_box_append (GTK_BOX (content), p->job_box);
+  p->archived_banner = adw_banner_new ("");
+  gtk_box_append (GTK_BOX (content), p->archived_banner);
   gtk_box_append (GTK_BOX (content), p->stack);
   gtk_box_append (GTK_BOX (content), p->identity_bar);
   gtk_box_append (GTK_BOX (content), p->action_bar);

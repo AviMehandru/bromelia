@@ -98,6 +98,8 @@ struct ArchiveRecord: Codable, Sendable {
         var part: Int?
         var volume: Int?
         var disc: Int?
+        /// The disc's fingerprint (DiscFingerprint), to recognise it when it is inserted again.
+        var fingerprint: String?
     }
     struct Title: Codable, Sendable {
         var index: Int
@@ -141,6 +143,252 @@ struct ArchiveRecord: Codable, Sendable {
     var readErrors: [String]
     /// "Using LibreDrive mode (…)" details when the drive read the disc in LibreDrive mode.
     var libreDrive: String?
+}
+
+// MARK: - Already archived
+
+/// Recognises a disc: "v1:" + 32 hex digits of SHA-256 over the volume name, the title count and, sorted, each
+/// title's source title id, length in seconds, segment map and size in bytes. The same on every platform
+/// (shared/fixtures/fingerprints.json).
+enum DiscFingerprint {
+    static func of(_ info: DiscInfo?) -> String? {
+        guard let info, !info.titles.isEmpty else { return nil }
+        let volume = info.volumeName.isEmpty ? info.name : info.volumeName
+        let lines = info.titles.map { "\($0.sourceTitleId ?? -1)|\($0.durationSeconds)|\($0.segmentMap)|\($0.sizeBytes)" }
+            .sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+        var text = "bromelia-disc-fingerprint 1\nvolume:\(volume)\ntitles:\(info.titles.count)\n"
+        for l in lines { text += l + "\n" }
+        let hex = SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "v1:" + hex.prefix(32)
+    }
+}
+
+/// Where a disc was archived before.
+struct ArchivedMatch: Equatable, Sendable {
+    var folder: String
+    var archivedAt: Date?
+}
+
+/// A finished job that may have archived a disc (from the history).
+struct ArchivedCandidate: Sendable {
+    var fingerprint: String
+    var folder: String
+    var state: JobState
+    var finishedAt: Date?
+}
+
+enum ArchiveLookup {
+    /// The first candidate (newest first) that archived `fingerprint` successfully and whose folder still exists; else,
+    /// with a root, the first bromelia*.json with status "success" and that fingerprint in root or up to four
+    /// folders below it.
+    static func find(fingerprint: String?, candidates: [ArchivedCandidate], root: URL?) -> ArchivedMatch? {
+        guard let fingerprint, !fingerprint.isEmpty else { return nil }
+        if let c = candidates.first(where: { $0.fingerprint == fingerprint && $0.state == .succeeded && isDirectory($0.folder) }) {
+            return ArchivedMatch(folder: c.folder, archivedAt: c.finishedAt)
+        }
+        guard let root else { return nil }
+        return scan(root, fingerprint: fingerprint, depth: 0)
+    }
+
+    static func isRecordName(_ name: String) -> Bool { name.hasPrefix("bromelia") && name.hasSuffix(".json") }
+
+    private static func isDirectory(_ path: String) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    private static func scan(_ dir: URL, fingerprint: String, depth: Int) -> ArchivedMatch? {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return nil }
+        var subdirs: [URL] = []
+        for name in names where !name.hasPrefix(".") {
+            let url = dir.appendingPathComponent(name)
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey])
+            if isRecordName(name), values?.isRegularFile == true {
+                if let when = recordMatches(url, fingerprint: fingerprint) { return ArchivedMatch(folder: dir.path, archivedAt: when) }
+            } else if depth < 4, values?.isDirectory == true, values?.isSymbolicLink != true {
+                subdirs.append(url)
+            }
+        }
+        for sub in subdirs.sorted(by: { $0.path.utf8.lexicographicallyPrecedes($1.path.utf8) }) {
+            if let m = scan(sub, fingerprint: fingerprint, depth: depth + 1) { return m }
+        }
+        return nil
+    }
+
+    /// The archive time of a record with status "success" and this fingerprint (distantPast when it has none); nil otherwise.
+    private static func recordMatches(_ url: URL, fingerprint: String) -> Date?? {
+        guard let data = try? Data(contentsOf: url),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              o["format"] as? String == "bromelia-archive", o["status"] as? String == "success",
+              let disc = o["disc"] as? [String: Any], disc["fingerprint"] as? String == fingerprint else { return nil }
+        return .some((o["finishedAt"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) })
+    }
+}
+
+// MARK: - Verifying archives
+
+enum ArchiveVerifier {
+    struct FolderCheck: Sendable, Equatable {
+        var folder: String
+        /// Entries in SHA256SUMS.
+        var files = 0
+        var bytes: Int64 = 0
+        var missing: [String] = []
+        var changed: [String] = []
+        var unreadable: [String] = []
+        /// Files in the folder that SHA256SUMS doesn't list (not an error).
+        var extra: [String] = []
+        /// SHA256SUMS couldn't be read.
+        var error: String?
+
+        var ok: Bool { error == nil && missing.isEmpty && changed.isEmpty && unreadable.isEmpty }
+
+        /// "12 file(s) OK" / "1 changed, 2 missing of 12 file(s); 1 not listed".
+        var summary: String {
+            if let error { return error }
+            var s: String
+            if ok {
+                s = "\(files) file(s) OK"
+            } else {
+                var parts: [String] = []
+                if !changed.isEmpty { parts.append("\(changed.count) changed") }
+                if !unreadable.isEmpty { parts.append("\(unreadable.count) unreadable") }
+                if !missing.isEmpty { parts.append("\(missing.count) missing") }
+                s = parts.joined(separator: ", ") + " of \(files) file(s)"
+            }
+            if !extra.isEmpty { s += "; \(extra.count) not listed" }
+            return s
+        }
+    }
+
+    /// Folders holding a SHA256SUMS: `path` itself and every folder below it (hidden folders skipped), sorted.
+    static func folders(under path: URL) -> [URL] {
+        var out: [URL] = []
+        func walk(_ dir: URL) {
+            let fm = FileManager.default
+            guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+            if names.contains(Checksums.fileName) { out.append(dir) }
+            for name in names where !name.hasPrefix(".") {
+                let url = dir.appendingPathComponent(name)
+                let v = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                if v?.isDirectory == true && v?.isSymbolicLink != true { walk(url) }
+            }
+        }
+        walk(path)
+        return out.sorted { $0.path.utf8.lexicographicallyPrecedes($1.path.utf8) }
+    }
+
+    /// Files Bromelia writes next to the archived ones that SHA256SUMS doesn't list.
+    static func isOwnFile(_ name: String) -> Bool {
+        name == Checksums.fileName || ArchiveLookup.isRecordName(name) || (name.hasPrefix("bromelia-log") && name.hasSuffix(".txt"))
+            || name == "INCOMPLETE.txt" || name == "READ ERRORS.txt"
+    }
+
+    /// Progress: bytes hashed so far of the total, the folder and the file being read. Return false to stop.
+    typealias Progress = (_ done: Int64, _ total: Int64, _ folder: String?, _ file: String?) -> Bool
+
+    /// Re-hashes every file of every folder (blocking; call off the main actor). Returns the folders finished and
+    /// whether `progress` asked to stop.
+    static func verify(folders: [URL], progress: Progress? = nil) -> (results: [FolderCheck], stopped: Bool) {
+        let fm = FileManager.default
+        var sums: [[String: String]?] = []
+        var total: Int64 = 0
+        for folder in folders {
+            if let text = try? String(contentsOf: folder.appendingPathComponent(Checksums.fileName), encoding: .utf8) {
+                var map: [String: String] = [:]
+                for e in Checksums.parse(text) { map[e.path] = e.hash }
+                sums.append(map)
+                for path in map.keys {
+                    total += ((try? fm.attributesOfItem(atPath: folder.appendingPathComponent(path).path))?[.size] as? NSNumber)?.int64Value ?? 0
+                }
+            } else {
+                sums.append(nil)
+            }
+        }
+        var stopped = !(progress?(0, total, nil, nil) ?? true)
+        var done: Int64 = 0
+        var results: [FolderCheck] = []
+        for (i, folder) in folders.enumerated() where !stopped {
+            var r = FolderCheck(folder: folder.path)
+            guard let map = sums[i] else {
+                r.error = "SHA256SUMS can't be read"
+                results.append(r)
+                continue
+            }
+            if map.isEmpty { r.error = "SHA256SUMS lists no files" }
+            r.files = map.count
+            for path in map.keys.sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {
+                let url = folder.appendingPathComponent(path)
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
+                    r.missing.append(path)
+                    continue
+                }
+                let size = ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0
+                let before = done
+                do {
+                    let hash = try Checksums.sha256(of: url, progress: { n in
+                        if !(progress?(before + n, total, folder.path, path) ?? true) { stopped = true }
+                    }, isCancelled: { stopped })
+                    if hash != map[path] { r.changed.append(path) }
+                } catch {
+                    if !stopped { r.unreadable.append(path) }
+                }
+                done = before + size
+                r.bytes += size
+                if stopped { break }
+            }
+            if stopped { break }
+            r.extra = extraFiles(folder, listed: Set(map.keys))
+            results.append(r)
+        }
+        return (results, stopped)
+    }
+
+    /// Visible files under `folder` that `listed` doesn't have, skipping folders that are archives of their own.
+    static func extraFiles(_ folder: URL, listed: Set<String>) -> [String] {
+        let fm = FileManager.default
+        var out: [String] = []
+        func walk(_ rel: String) {
+            let dir = rel.isEmpty ? folder : folder.appendingPathComponent(rel)
+            let names = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") }
+                .sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+            for name in names {
+                let r = rel.isEmpty ? name : rel + "/" + name
+                let url = folder.appendingPathComponent(r)
+                let v = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                if v?.isDirectory == true {
+                    if v?.isSymbolicLink != true && !fm.fileExists(atPath: url.appendingPathComponent(Checksums.fileName).path) { walk(r) }
+                } else if !listed.contains(r) && !(rel.isEmpty && isOwnFile(name)) {
+                    out.append(r)
+                }
+            }
+        }
+        walk("")
+        return out
+    }
+}
+
+/// When a folder was last verified (archive-checks.json in the data folder).
+struct CheckRecord: Codable, Equatable, Sendable {
+    var checkedAt: Date
+    var ok: Bool
+    var summary: String
+}
+
+enum CheckRecords {
+    static var file: URL { Paths.appSupport.appendingPathComponent("archive-checks.json") }
+
+    static func load(from url: URL = file) -> [String: CheckRecord] {
+        guard let data = try? Data(contentsOf: url) else { return [:] }
+        return (try? ConfigStore.decoder().decode([String: CheckRecord].self, from: data)) ?? [:]
+    }
+
+    static func save(_ records: [String: CheckRecord], to url: URL = file) {
+        try? Paths.ensureDirectory(url.deletingLastPathComponent())
+        try? ConfigStore.encoder().encode(records).write(to: url, options: .atomic)
+    }
 }
 
 /// Checks a ripped MKV against the title in the disc listing, using `mkvmerge -J`.

@@ -1198,3 +1198,190 @@ struct IntegrationJobTests {
         #expect((r4 as? HTTPURLResponse)?.statusCode == 400 && String(decoding: body, as: UTF8.self) == "No such job")
     }
 }
+
+// MARK: - Archives: fingerprints, already archived, verifying
+
+@Suite("Archive checks and discs archived before", .serialized)
+@MainActor
+struct ArchiveCheckTests {
+    let root: URL
+
+    init() throws {
+        Paths.dataOverride = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-test-data", isDirectory: true)
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-arch-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    @Test func fingerprintsMatchEveryPlatform() throws {
+        let dvd = info(try String(contentsOf: fixturesDir.appendingPathComponent("info-dvd.txt"), encoding: .utf8))
+        let shared = try JSONSerialization.jsonObject(with: Data(contentsOf: fixturesDir.appendingPathComponent("fingerprints.json"))) as? [String: Any]
+        #expect(DiscFingerprint.of(dvd) == shared?["info-dvd"] as? String)
+        let a = info(listing(volume: "SHOW_S1_D1", titles: [("0:22:10", 1), ("0:22:40", 2), ("0:23:05", 3)]))
+        let renumbered = info(listing(volume: "SHOW_S1_D1", titles: [("0:23:05", 3), ("0:22:10", 1), ("0:22:40", 2)]))
+        let otherDisc = info(listing(volume: "SHOW_S1_D1", titles: [("0:22:12", 1), ("0:22:40", 2), ("0:23:05", 3)]))
+        #expect(DiscFingerprint.of(a) == DiscFingerprint.of(renumbered), "MakeMKV's title numbers don't matter")
+        #expect(DiscFingerprint.of(a) != DiscFingerprint.of(otherDisc), "another disc of the set, same label")
+        #expect(DiscFingerprint.of(DiscInfo()) == nil)
+    }
+
+    private func writeRecord(_ dir: URL, _ name: String, status: String, fingerprint: String) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let text = #"{"format": "bromelia-archive", "status": "\#(status)", "finishedAt": "2024-05-01T10:00:00Z", "disc": {"label": "X", "fingerprint": "\#(fingerprint)"}}"#
+        try Data(text.utf8).write(to: dir.appendingPathComponent(name))
+    }
+
+    @Test func findsEarlierArchives() throws {
+        let movie = root.appendingPathComponent("Movies/Movie (2001)", isDirectory: true)
+        try writeRecord(movie, "bromelia (2).json", status: "success", fingerprint: "v1:aaaa")
+        try writeRecord(root.appendingPathComponent("Other [READ ERRORS]"), "bromelia.json", status: "errors", fingerprint: "v1:bbbb")
+        let when = Date(timeIntervalSince1970: 1_700_000_000)
+        let candidates = [
+            ArchivedCandidate(fingerprint: "v1:cccc", folder: root.appendingPathComponent("gone").path, state: .succeeded, finishedAt: when),
+            ArchivedCandidate(fingerprint: "v1:dddd", folder: root.path, state: .completedWithErrors, finishedAt: when),
+            ArchivedCandidate(fingerprint: "v1:eeee", folder: root.path, state: .succeeded, finishedAt: when),
+        ]
+        #expect(ArchiveLookup.find(fingerprint: "v1:eeee", candidates: candidates, root: nil) == ArchivedMatch(folder: root.path, archivedAt: when))
+        #expect(ArchiveLookup.find(fingerprint: "v1:aaaa", candidates: candidates, root: root)
+                == ArchivedMatch(folder: movie.path, archivedAt: Date(timeIntervalSince1970: 1_714_557_600)))
+        #expect(ArchiveLookup.find(fingerprint: "v1:aaaa", candidates: candidates, root: nil) == nil)
+        for fp in ["v1:bbbb", "v1:cccc", "v1:dddd"] {
+            #expect(ArchiveLookup.find(fingerprint: fp, candidates: candidates, root: root) == nil, "\(fp)")
+        }
+        #expect(ArchiveLookup.find(fingerprint: nil, candidates: candidates, root: root) == nil)
+    }
+
+    /// An archive folder: files with a SHA256SUMS listing them.
+    private func makeArchive(_ dir: URL, _ names: [String]) throws {
+        var entries: [Checksums.Entry] = []
+        for name in names {
+            let url = dir.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = Data("contents of \(name), long enough to hash".utf8)
+            try data.write(to: url)
+            entries.append(.init(path: name, size: Int64(data.count), sha256: try Checksums.sha256(of: url)))
+        }
+        try Checksums.render(entries).write(to: dir.appendingPathComponent(Checksums.fileName), atomically: true, encoding: .utf8)
+    }
+
+    @Test func verifiesArchives() throws {
+        let good = root.appendingPathComponent("Good", isDirectory: true)
+        let bad = root.appendingPathComponent("TV Shows/Bad", isDirectory: true)
+        try makeArchive(good, ["Good.mkv", "Backup/BDMV/index.bdmv"])
+        try makeArchive(bad, ["Season 01/E01.mkv", "Season 01/E02.mkv", "Season 01/E03.mkv"])
+        try makeArchive(root.appendingPathComponent(".bromelia-incomplete-1234"), ["Good.mkv"])
+        // One byte changed, one file gone, one file added; Bromelia's own files are not "extra".
+        let e1 = bad.appendingPathComponent("Season 01/E01.mkv")
+        var bytes = try Data(contentsOf: e1)
+        bytes[3] ^= 1
+        try bytes.write(to: e1)
+        try FileManager.default.removeItem(at: bad.appendingPathComponent("Season 01/E02.mkv"))
+        try Data("<episodedetails/>".utf8).write(to: bad.appendingPathComponent("Season 01/E01.nfo"))
+        try Data("{}".utf8).write(to: bad.appendingPathComponent("bromelia.json"))
+        try Data("log".utf8).write(to: bad.appendingPathComponent("bromelia-log.txt"))
+
+        let folders = ArchiveVerifier.folders(under: root)
+        #expect(folders.map(\.path) == [good.path, bad.path], "hidden (staging) folders are left out")
+        let (results, stopped) = ArchiveVerifier.verify(folders: folders)
+        #expect(!stopped && results.count == 2)
+        let g = try #require(results.first { $0.folder == good.path })
+        #expect(g.ok && g.files == 2 && g.extra.isEmpty)
+        let b = try #require(results.first { $0.folder == bad.path })
+        #expect(!b.ok)
+        #expect(b.changed == ["Season 01/E01.mkv"])
+        #expect(b.missing == ["Season 01/E02.mkv"])
+        #expect(b.extra == ["Season 01/E01.nfo"])
+        #expect(b.summary == "1 changed, 1 missing of 3 file(s); 1 not listed")
+        // Stopping keeps only folders that were finished.
+        let none = ArchiveVerifier.verify(folders: folders) { _, _, _, _ in false }
+        #expect(none.stopped && none.results.isEmpty)
+        // When each folder was checked, kept across runs.
+        let file = root.appendingPathComponent("checks/archive-checks.json")
+        #expect(CheckRecords.load(from: file).isEmpty)
+        let when = Date(timeIntervalSince1970: 1_700_000_000)
+        CheckRecords.save(Dictionary(uniqueKeysWithValues: results.map { ($0.folder, CheckRecord(checkedAt: when, ok: $0.ok, summary: $0.summary)) }), to: file)
+        let again = CheckRecords.load(from: file)
+        #expect(again[bad.path] == CheckRecord(checkedAt: when, ok: false, summary: "1 changed, 1 missing of 3 file(s); 1 not listed"))
+        #expect(again[good.path]?.ok == true)
+    }
+
+    @Test func verifiesFromTheApp() async throws {
+        let good = root.appendingPathComponent("Good", isDirectory: true)
+        try makeArchive(good, ["Good.mkv"])
+        let model = AppModel(persistent: false)
+        model.config.outputRoot = root.path
+        let now = Date()
+        #expect(!model.verifyDue(at: now), "archiveCheck is off by default")
+        model.config.archiveCheck.intervalDays = 30
+        #expect(model.verifyDue(at: now))
+        #expect(model.startVerify(root))
+        #expect(!model.startVerify(root), "one at a time")
+        for _ in 0..<100 where model.verify.running { try await Task.sleep(nanoseconds: 50_000_000) }
+        #expect(!model.verify.running && model.verify.results.count == 1)
+        #expect(model.checkRecords[good.path]?.ok == true)
+        #expect(model.checkRecords[model.outputRootURL.path] != nil, "the whole tree, for the schedule")
+        #expect(!model.verifyDue(at: now.addingTimeInterval(86400)))
+        #expect(model.verifyDue(at: now.addingTimeInterval(31 * 86400)))
+        // A damaged file shows in the next run.
+        try Data("bit rot".utf8).write(to: good.appendingPathComponent("Good.mkv"))
+        #expect(model.webAction(kind: "verify", id: "", action: "start") == nil)
+        for _ in 0..<100 where model.verify.running { try await Task.sleep(nanoseconds: 50_000_000) }
+        #expect(model.checkRecords[good.path]?.ok == false)
+        let status = model.webStatus()["verify"] as? [String: Any]
+        #expect((status?["damaged"] as? [[String: Any]])?.count == 1)
+    }
+
+    private func archivedJob(_ fake: FakeMakeMKV, automatic: Bool, policy: AlreadyArchived,
+                             candidates: [ArchivedCandidate] = [], root: URL? = nil) async -> RipJob {
+        var config = AppConfig()
+        config.outputRoot = (root ?? self.root).path
+        var drive = DriveConfig()
+        drive.automation.notify = false
+        drive.automation.ejectWhenDone = false
+        drive.automation.alreadyArchived = policy
+        drive.automation.waitForMountSeconds = 0
+        let job = RipJob(source: .iso(path: "/nonexistent/test.iso"), drive: drive, laneKey: "iso:archived", sourceLabel: "test", discLabel: "", mode: .mkv)
+        job.isAutomatic = automatic
+        job.archivedCandidates = candidates
+        await JobRunner(job: job, config: config, makemkvcon: fake.executable, mkvmerge: nil).run()
+        return job
+    }
+
+    @Test func discsArchivedBefore() async throws {
+        let fake = try FakeMakeMKV(listing: listing(titles: [("0:30:00", 1)]), mkv: writesFile(saved))
+        let first = await archivedJob(fake, automatic: false, policy: .skip)
+        #expect(first.state == .succeeded, "\(first.errorMessage ?? "")")
+        let fp = try #require(first.fingerprint)
+        let folder = try #require(first.outputDirectory)
+        let record = try String(contentsOf: folder.appendingPathComponent("bromelia.json"), encoding: .utf8)
+        #expect(record.contains(fp), "the fingerprint is in the archive record")
+
+        // Automatic rips of the same disc: found through the archive record under the output folder.
+        let skipped = await archivedJob(fake, automatic: true, policy: .skip)
+        #expect(skipped.state == .cancelled)
+        #expect(skipped.errorMessage?.hasPrefix("Already archived in ") == true && skipped.errorMessage?.contains(folder.path) == true,
+                "\(skipped.errorMessage ?? "")")
+        #expect(skipped.outputDirectory == nil)
+        let asked = await archivedJob(fake, automatic: true, policy: .ask)
+        #expect(asked.state == .cancelled && asked.errorMessage?.contains("Rip it again from the drive page") == true)
+        #expect(await archivedJob(fake, automatic: true, policy: .ripAgain).state == .succeeded)
+        #expect(await archivedJob(fake, automatic: false, policy: .skip).state == .succeeded, "manual rips only warn")
+
+        // Found through the history too (another output folder), but only while the folder is there.
+        let elsewhere = root.appendingPathComponent("elsewhere", isDirectory: true)
+        let empty = root.appendingPathComponent("empty-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        let candidate = [ArchivedCandidate(fingerprint: fp, folder: elsewhere.path, state: .succeeded, finishedAt: Date())]
+        let viaHistory = await archivedJob(fake, automatic: true, policy: .skip, candidates: candidate, root: empty)
+        #expect(viaHistory.state == .cancelled && viaHistory.errorMessage?.contains(elsewhere.path) == true)
+        try FileManager.default.removeItem(at: elsewhere)
+        let empty2 = root.appendingPathComponent("empty-root-2", isDirectory: true)
+        try FileManager.default.createDirectory(at: empty2, withIntermediateDirectories: true)
+        #expect(await archivedJob(fake, automatic: true, policy: .skip, candidates: candidate, root: empty2).state == .succeeded)
+
+        // Another disc of the set with the same label is not taken for the archived one.
+        let other = try FakeMakeMKV(listing: listing(titles: [("0:31:00", 1)]), mkv: writesFile(saved))
+        let otherJob = await archivedJob(other, automatic: true, policy: .skip, candidates: [ArchivedCandidate(fingerprint: fp, folder: root.path, state: .succeeded, finishedAt: Date())])
+        #expect(otherJob.state == .succeeded && otherJob.fingerprint != fp)
+    }
+}

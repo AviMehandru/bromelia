@@ -1,0 +1,4 @@
+{
+  "comment": "Disc fingerprints of fixture listings (see docs/architecture.md, 'Already archived'). Every platform's tests compute these and must get the same values.",
+  "info-dvd": "v1:975fb16e865898de86ce51c559e479fc"
+}

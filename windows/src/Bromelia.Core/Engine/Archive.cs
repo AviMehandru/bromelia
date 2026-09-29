@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Bromelia.Core.Config;
 using Bromelia.Core.Logic;
 using Bromelia.Core.Robot;
 
@@ -109,6 +110,8 @@ public sealed class ArchiveRecord
         public int? Part { get; set; }
         public int? Volume { get; set; }
         public int? Disc { get; set; }
+        /// <summary>The disc's fingerprint (<see cref="DiscFingerprint"/>), to recognise it when it is inserted again.</summary>
+        public string? Fingerprint { get; set; }
     }
 
     public sealed class TitleEntry
@@ -163,6 +166,272 @@ public sealed class ArchiveRecord
         WriteIndented = true,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     });
+}
+
+/// <summary>Recognises a disc: "v1:" + 32 hex digits of SHA-256 over the volume name, the title count and, sorted, each
+/// title's source title id, length in seconds, segment map and size in bytes. The same on every platform
+/// (shared/fixtures/fingerprints.json).</summary>
+public static class DiscFingerprint
+{
+    public static string? Of(DiscInfo? info)
+    {
+        if (info == null || info.Titles.Count == 0) return null;
+        var volume = info.VolumeName.Length > 0 ? info.VolumeName : info.Name;
+        var lines = info.Titles.Select(t => $"{t.SourceTitleId ?? -1}|{t.DurationSeconds}|{t.SegmentMap}|{t.SizeBytes}")
+            .OrderBy(l => l, StringComparer.Ordinal);
+        var text = new StringBuilder($"bromelia-disc-fingerprint 1\nvolume:{volume}\ntitles:{info.Titles.Count}\n");
+        foreach (var l in lines) text.Append(l).Append('\n');
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant();
+        return "v1:" + hash[..32];
+    }
+}
+
+/// <summary>Where a disc was archived before.</summary>
+public sealed record ArchivedMatch(string Folder, DateTime? ArchivedAt);
+
+/// <summary>A finished job that may have archived a disc (from the history).</summary>
+public sealed record ArchivedCandidate(string Fingerprint, string Folder, JobState State, DateTime? FinishedAt);
+
+public static class ArchiveLookup
+{
+    /// <summary>The first candidate (newest first) that archived <paramref name="fingerprint"/> successfully and whose folder still
+    /// exists; else, with a root, the first bromelia*.json with status "success" and that fingerprint in root or up to four
+    /// folders below it.</summary>
+    public static ArchivedMatch? Find(string? fingerprint, IEnumerable<ArchivedCandidate> candidates, string? root)
+    {
+        if (string.IsNullOrEmpty(fingerprint)) return null;
+        if (candidates.FirstOrDefault(c => c.Fingerprint == fingerprint && c.State == JobState.Succeeded && Directory.Exists(c.Folder)) is { } hit)
+            return new ArchivedMatch(hit.Folder, hit.FinishedAt);
+        return string.IsNullOrEmpty(root) ? null : Scan(root, fingerprint, 0);
+    }
+
+    public static bool IsRecordName(string name) => name.StartsWith("bromelia", StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal);
+
+    static ArchivedMatch? Scan(string dir, string fingerprint, int depth)
+    {
+        IEnumerable<string> entries;
+        try { entries = Directory.EnumerateFileSystemEntries(dir).ToList(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        var subdirs = new List<string>();
+        foreach (var path in entries)
+        {
+            var name = System.IO.Path.GetFileName(path);
+            if (name.StartsWith('.')) continue;
+            if (IsRecordName(name) && File.Exists(path))
+            {
+                if (RecordMatches(path, fingerprint, out var when)) return new ArchivedMatch(dir, when);
+            }
+            else if (depth < 4 && Directory.Exists(path) && !new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                subdirs.Add(path);
+            }
+        }
+        foreach (var sub in subdirs.OrderBy(p => p, StringComparer.Ordinal))
+            if (Scan(sub, fingerprint, depth + 1) is { } m) return m;
+        return null;
+    }
+
+    static bool RecordMatches(string path, string fingerprint, out DateTime? when)
+    {
+        when = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var o = doc.RootElement;
+            if (o.ValueKind != JsonValueKind.Object || Str(o, "format") != "bromelia-archive" || Str(o, "status") != "success") return false;
+            if (!o.TryGetProperty("disc", out var disc) || disc.ValueKind != JsonValueKind.Object || Str(disc, "fingerprint") != fingerprint) return false;
+            if (DateTime.TryParse(Str(o, "finishedAt"), System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var t))
+                when = t;
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return false; }
+    }
+
+    static string? Str(JsonElement o, string name) =>
+        o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+}
+
+/// <summary>Reads archive folders again and compares every file with its SHA256SUMS (bit rot, bad copies).</summary>
+public static class ArchiveVerifier
+{
+    public sealed class FolderCheck
+    {
+        public string Folder { get; init; } = "";
+        /// <summary>Entries in SHA256SUMS.</summary>
+        public int Files { get; set; }
+        public long Bytes { get; set; }
+        public List<string> Missing { get; } = new();
+        public List<string> Changed { get; } = new();
+        public List<string> Unreadable { get; } = new();
+        /// <summary>Files in the folder that SHA256SUMS doesn't list (not an error).</summary>
+        public List<string> Extra { get; set; } = new();
+        /// <summary>SHA256SUMS couldn't be read.</summary>
+        public string? Error { get; set; }
+
+        public bool Ok => Error == null && Missing.Count == 0 && Changed.Count == 0 && Unreadable.Count == 0;
+
+        /// <summary>"12 file(s) OK" / "1 changed, 2 missing of 12 file(s); 1 not listed".</summary>
+        public string Summary
+        {
+            get
+            {
+                if (Error != null) return Error;
+                string s;
+                if (Ok) s = $"{Files} file(s) OK";
+                else
+                {
+                    var parts = new List<string>();
+                    if (Changed.Count > 0) parts.Add($"{Changed.Count} changed");
+                    if (Unreadable.Count > 0) parts.Add($"{Unreadable.Count} unreadable");
+                    if (Missing.Count > 0) parts.Add($"{Missing.Count} missing");
+                    s = string.Join(", ", parts) + $" of {Files} file(s)";
+                }
+                if (Extra.Count > 0) s += $"; {Extra.Count} not listed";
+                return s;
+            }
+        }
+    }
+
+    static bool Hidden(string path) => System.IO.Path.GetFileName(path).StartsWith('.');
+
+    static bool IsLink(string path)
+    {
+        try { return new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint); }
+        catch (IOException) { return true; }
+    }
+
+    /// <summary>Folders holding a SHA256SUMS: <paramref name="path"/> itself and every folder below it (hidden folders skipped), sorted.</summary>
+    public static List<string> Folders(string path)
+    {
+        var out_ = new List<string>();
+        void Walk(string dir)
+        {
+            if (File.Exists(System.IO.Path.Combine(dir, Checksums.FileName))) out_.Add(dir);
+            IEnumerable<string> subs;
+            try { subs = Directory.EnumerateDirectories(dir).ToList(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }
+            foreach (var d in subs) if (!Hidden(d) && !IsLink(d)) Walk(d);
+        }
+        if (Directory.Exists(path)) Walk(path);
+        return out_.OrderBy(p => p, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>Files Bromelia writes next to the archived ones that SHA256SUMS doesn't list.</summary>
+    public static bool IsOwnFile(string name) =>
+        name == Checksums.FileName || ArchiveLookup.IsRecordName(name) || (name.StartsWith("bromelia-log", StringComparison.Ordinal) && name.EndsWith(".txt", StringComparison.Ordinal))
+        || name is "INCOMPLETE.txt" or "READ ERRORS.txt";
+
+    /// <summary>Progress: bytes hashed so far of the total, the folder and the file being read. Return false to stop.</summary>
+    public delegate bool Progress(long done, long total, string? folder, string? file);
+
+    static string Full(string folder, string rel) => System.IO.Path.Combine(folder, rel.Replace('/', System.IO.Path.DirectorySeparatorChar));
+
+    /// <summary>Re-hashes every file of every folder (blocking; call on a worker thread). Returns the folders finished and
+    /// whether <paramref name="progress"/> asked to stop.</summary>
+    public static (List<FolderCheck> Results, bool Stopped) Verify(IReadOnlyList<string> folders, Progress? progress = null)
+    {
+        var sums = new List<Dictionary<string, string>?>();
+        long total = 0;
+        foreach (var folder in folders)
+        {
+            try
+            {
+                var map = new Dictionary<string, string>();
+                foreach (var (hash, path) in Checksums.Parse(File.ReadAllText(System.IO.Path.Combine(folder, Checksums.FileName)))) map[path] = hash;
+                sums.Add(map);
+                foreach (var p in map.Keys) { var f = new FileInfo(Full(folder, p)); if (f.Exists) total += f.Length; }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { sums.Add(null); }
+        }
+        bool stopped = !(progress?.Invoke(0, total, null, null) ?? true);
+        long done = 0;
+        var results = new List<FolderCheck>();
+        using var cts = new CancellationTokenSource();
+        for (int i = 0; i < folders.Count && !stopped; i++)
+        {
+            var folder = folders[i];
+            var r = new FolderCheck { Folder = folder };
+            if (sums[i] is not { } map)
+            {
+                r.Error = "SHA256SUMS can't be read";
+                results.Add(r);
+                continue;
+            }
+            if (map.Count == 0) r.Error = "SHA256SUMS lists no files";
+            r.Files = map.Count;
+            foreach (var path in map.Keys.OrderBy(p => p, StringComparer.Ordinal))
+            {
+                var info = new FileInfo(Full(folder, path));
+                if (!info.Exists) { r.Missing.Add(path); continue; }
+                long before = done;
+                try
+                {
+                    var hash = Checksums.Sha256(info.FullName, n =>
+                    {
+                        if (!(progress?.Invoke(before + n, total, folder, path) ?? true)) { stopped = true; cts.Cancel(); }
+                    }, cts.Token);
+                    if (hash != map[path]) r.Changed.Add(path);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { r.Unreadable.Add(path); }
+                done = before + info.Length;
+                r.Bytes += info.Length;
+                if (stopped) break;
+            }
+            if (stopped) break;
+            r.Extra = ExtraFiles(folder, map.Keys.ToHashSet());
+            results.Add(r);
+        }
+        return (results, stopped);
+    }
+
+    /// <summary>Visible files under <paramref name="folder"/> that <paramref name="listed"/> doesn't have, skipping folders that are
+    /// archives of their own.</summary>
+    public static List<string> ExtraFiles(string folder, HashSet<string> listed)
+    {
+        var out_ = new List<string>();
+        void Walk(string rel)
+        {
+            var dir = rel.Length == 0 ? folder : Full(folder, rel);
+            List<string> names;
+            try { names = Directory.EnumerateFileSystemEntries(dir).Select(e => System.IO.Path.GetFileName(e)!).Where(n => !n.StartsWith('.')).OrderBy(n => n, StringComparer.Ordinal).ToList(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }
+            foreach (var name in names)
+            {
+                var r = rel.Length == 0 ? name : rel + "/" + name;
+                var full = Full(folder, r);
+                if (Directory.Exists(full))
+                {
+                    if (!IsLink(full) && !File.Exists(System.IO.Path.Combine(full, Checksums.FileName))) Walk(r);
+                }
+                else if (!listed.Contains(r) && !(rel.Length == 0 && IsOwnFile(name))) out_.Add(r);
+            }
+        }
+        Walk("");
+        return out_;
+    }
+}
+
+/// <summary>When a folder was last verified (archive-checks.json in the data folder).</summary>
+public sealed record CheckRecord(DateTime CheckedAt, bool Ok, string Summary);
+
+public static class CheckRecords
+{
+    public static string FilePath => System.IO.Path.Combine(Paths.AppData, "archive-checks.json");
+
+    public static Dictionary<string, CheckRecord> Load(string? path = null)
+    {
+        try
+        {
+            var p = path ?? FilePath;
+            return File.Exists(p) ? JsonSerializer.Deserialize<Dictionary<string, CheckRecord>>(File.ReadAllText(p), ConfigJson.Options) ?? new() : new();
+        }
+        catch (Exception) { return new(); }
+    }
+
+    public static void Save(Dictionary<string, CheckRecord> records, string? path = null) =>
+        ConfigStore.SaveRaw(path ?? FilePath, JsonSerializer.Serialize(records, ConfigJson.Options));
 }
 
 /// <summary>Runs the external tools used to split DVD "play all" titles: mkvextract (chapter times), ffmpeg +

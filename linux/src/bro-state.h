@@ -8,6 +8,7 @@
 #include "bro-makemkv.h"
 #include "bro-runner.h"
 #include "bro-sleep.h"
+#include "bro-archive.h"
 #include "bro-web.h"
 
 G_BEGIN_DECLS
@@ -59,6 +60,7 @@ struct _BroJob {
   GPtrArray *commands;
   GCancellable *cancellable;
   gint64 worker_last_progress; /* touched only by the worker thread */
+  char *fingerprint;           /* the disc's (bro_disc_fingerprint), once the job has read the listing */
 };
 
 double bro_job_overall (BroJob *job);
@@ -130,10 +132,23 @@ typedef struct {
 
 typedef struct {
   char *id, *title, *drive_name, *disc_name, *mode, *state, *output_dir, *error, *log_path;
+  char *fingerprint; /* the disc's, or NULL (see "already archived") */
   gint64 started_at, finished_at;
   GPtrArray *files;
   int warnings, errors;
 } BroHistoryRecord;
+
+/* Verifying archives again (Verify Archive…, the history, the web page, archiveCheck.intervalDays). */
+typedef struct {
+  gboolean running;
+  gboolean scheduled;   /* started by archiveCheck.intervalDays */
+  gboolean stopped;     /* the last run was cancelled */
+  char *path;           /* the folder being (or last) verified */
+  gint64 done, total;   /* bytes */
+  char *folder, *file;  /* being read */
+  GPtrArray *results;   /* BroFolderCheck* of the last run (finished folders) */
+  gint64 started_at, finished_at;
+} BroVerifyStatus;
 
 #define BRO_TYPE_STATE (bro_state_get_type ())
 G_DECLARE_FINAL_TYPE (BroState, bro_state, BRO, STATE, GObject)
@@ -164,6 +179,10 @@ struct _BroState {
   BroSleepInhibitor *inhibitor; /* owned; NULL = none */
   gboolean keeping_awake;
   char *unfinished_saved;    /* what unfinished-<pid>.json holds, to write it only when it changes */
+  BroVerifyStatus verify;    /* signal "verify-changed" */
+  gpointer verify_task;      /* the running verification (internal) */
+  GHashTable *check_records; /* folder -> BroCheckRecord*: when each folder was last verified */
+  gint64 next_schedule_check;
 };
 
 BroState       *bro_state_new (GApplication *app);
@@ -215,6 +234,21 @@ char           *bro_state_register_key_finish (BroState *self, GAsyncResult *res
  * inhibitor on and off as that changes (takes inhibitor; NULL = none). A headless state starts with logind's. */
 gboolean        bro_state_wants_awake (BroState *self);
 void            bro_state_set_sleep_inhibitor (BroState *self, BroSleepInhibitor *inhibitor);
+
+/* Already archived: the history's successful jobs with their disc fingerprints (BroArchivedCandidate*), and the
+ * earlier archive of the disc with this listing according to the history (quick; for the disc page and manual rips). */
+GPtrArray        *bro_state_archived_candidates (BroState *self);
+BroArchivedMatch *bro_state_archived_match (BroState *self, BroDiscInfo *info);
+
+/* Verifies every SHA256SUMS folder under path on a worker thread (FALSE when a check is already running). Results
+ * are recorded in archive-checks.json in the data folder; a scheduled check notifies (notifications, the app). */
+gboolean        bro_state_verify_start (BroState *self, const char *path, gboolean scheduled);
+void            bro_state_verify_cancel (BroState *self);
+/* When folder was last verified, or NULL. */
+BroCheckRecord *bro_state_check_record (BroState *self, const char *folder);
+/* Whether archiveCheck.intervalDays asks for a check of the output root at now (unix seconds). */
+gboolean        bro_state_verify_due (BroState *self, gint64 now);
+char           *bro_state_output_root (BroState *self); /* ~ expanded */
 
 /* Background post-processing (signal "jobs-changed" when it changes). */
 void            bro_state_enqueue_background (BroState *self, BroBackgroundWork *work); /* takes work */

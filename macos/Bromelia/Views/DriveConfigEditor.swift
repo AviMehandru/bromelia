@@ -147,6 +147,10 @@ private struct GeneralTab: View {
                 LabeledContent("Before an automatic rip, wait for the disc to be mounted for up to") {
                     IntField(title: "Seconds", value: $config.automation.waitForMountSeconds, suffix: "seconds")
                 }
+                Picker("A disc archived before", selection: $config.automation.alreadyArchived) {
+                    ForEach(AlreadyArchived.allCases) { Text($0.label).tag($0) }
+                }
+                .help("Automatic rips. A disc is recognised by its fingerprint, in the history or a bromelia.json under the output folder. Manual rips ask first.")
             }
             Section {
                 Toggle("Rip audio CDs", isOn: $config.other.ripAudioCDs)

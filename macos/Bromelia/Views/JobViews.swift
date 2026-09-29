@@ -171,6 +171,14 @@ struct HistoryView: View {
                     if let s = r.startedAt, let f = r.finishedAt { Text(Formatters.duration(f.timeIntervalSince(s))).monospacedDigit() }
                 }
                 .width(70)
+                TableColumn("Verified") { r in
+                    if let dir = r.outputDirectory, let c = model.checkRecords[dir] {
+                        Label(c.ok ? "OK" : "Damaged", systemImage: c.ok ? "checkmark.shield" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(c.ok ? Color.secondary : Color.red)
+                            .help("\(c.checkedAt.formatted(date: .abbreviated, time: .shortened)): \(c.summary)")
+                    }
+                }
+                .width(min: 60, ideal: 90)
             }
             .contextMenu(forSelectionType: HistoryRecord.ID.self) { ids in
                 if let id = ids.first, let r = model.history.first(where: { $0.id == id }) {
@@ -202,6 +210,7 @@ struct HistoryView: View {
 }
 
 struct HistoryDetail: View {
+    @Environment(AppModel.self) private var model
     let record: HistoryRecord
     @State private var logText = ""
 
@@ -212,6 +221,23 @@ struct HistoryDetail: View {
                 if let e = record.errorMessage { Text(e).foregroundStyle(.red).textSelection(.enabled) }
                 if let d = record.outputDirectory {
                     Button(d) { revealInFinder(d) }.buttonStyle(.link)
+                    if FileManager.default.fileExists(atPath: URL(fileURLWithPath: d).appendingPathComponent(Checksums.fileName).path) {
+                        HStack {
+                            Button("Verify Folder") {
+                                if !model.startVerify(URL(fileURLWithPath: d, isDirectory: true)) {
+                                    model.lastError = "An archive check is already running"
+                                }
+                                model.selection = .archiveCheck
+                            }
+                            .help("Read the files again and compare them with SHA256SUMS")
+                            if let c = model.checkRecords[d] {
+                                Text("Last verified \(c.checkedAt.formatted(date: .abbreviated, time: .shortened)): \(c.summary)")
+                                    .font(.caption).foregroundStyle(c.ok ? Color.secondary : Color.red)
+                            } else {
+                                Text("Not verified since it was archived").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
                 List(record.files, id: \.self) { f in
                     Text((f as NSString).lastPathComponent).help(f)
@@ -230,6 +256,123 @@ struct HistoryDetail: View {
         }
         .task(id: record.id) {
             logText = (try? String(contentsOfFile: record.logPath, encoding: .utf8)) ?? "Log not available"
+        }
+    }
+}
+
+/// Reads archive folders again and compares every file with its SHA256SUMS (bit rot, bad copies).
+struct ArchiveCheckView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let v = model.verify
+        let root = model.outputRootURL
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Archive Check").font(.title2.bold())
+                Spacer()
+                if v.running { Button("Stop") { model.cancelVerify() } }
+                Button("Check a Folder…") { checkFolder() }
+                    .disabled(v.running)
+                Button("Check Output Folder") { checkOutputFolder() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(v.running)
+            }
+            Text("Reads every file listed in each archive folder's SHA256SUMS again and compares it with its checksum, to find files damaged on the disk (bit rot) or by a bad copy. Files missing from the folder and files SHA256SUMS doesn't list are reported too.")
+                .font(.callout).foregroundStyle(.secondary)
+            Group {
+                if let c = model.checkRecords[root.path] {
+                    Text("Output folder \(root.path): last checked \(c.checkedAt.formatted(date: .abbreviated, time: .standard)) — \(c.summary)")
+                } else {
+                    Text("Output folder \(root.path): never checked")
+                }
+                if model.config.archiveCheck.intervalDays > 0 {
+                    Text("Checked every \(model.config.archiveCheck.intervalDays) day(s) (Settings).")
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            if v.running {
+                ProgressView(value: v.total > 0 ? Double(v.done) / Double(v.total) : 0) {
+                    Text("\(v.folder ?? v.path)\(v.file.map { " — " + $0 } ?? "")").lineLimit(1).truncationMode(.middle)
+                } currentValueLabel: {
+                    Text("\(ByteCountFormatter.string(fromByteCount: v.done, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: v.total, countStyle: .file))")
+                }
+            } else if let when = v.finishedAt {
+                let damaged = v.results.filter { !$0.ok }.count
+                Text(v.results.isEmpty ? "\(when.formatted(date: .abbreviated, time: .standard)): no archive folders (with a SHA256SUMS) found in \(v.path)"
+                     : "\(when.formatted(date: .abbreviated, time: .standard))\(v.stopped ? " (stopped)" : ""): \(v.results.count) folder(s) checked, \(damaged > 0 ? "some are damaged" : "all OK")")
+                    .font(.headline)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(v.results, id: \.folder) { r in
+                        ArchiveFolderRow(result: r)
+                        Divider()
+                    }
+                }
+                .padding(.trailing, 8)
+            }
+            .opacity(v.running ? 0.5 : 1)
+        }
+        .padding()
+        .navigationTitle("Archive Check")
+    }
+
+    private func checkFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Verify an Archive Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.directoryURL = model.outputRootURL
+        if panel.runModal() == .OK, let url = panel.url { model.startVerify(url) }
+    }
+
+    private func checkOutputFolder() {
+        let root = model.outputRootURL
+        guard JobRunner.isDirectory(root) else {
+            model.lastError = "The output folder \(root.path) doesn't exist"
+            return
+        }
+        model.startVerify(root)
+    }
+}
+
+private struct ArchiveFolderRow: View {
+    let result: ArchiveVerifier.FolderCheck
+    @State private var expanded: Bool
+
+    init(result: ArchiveVerifier.FolderCheck) {
+        self.result = result
+        _expanded = State(initialValue: !result.ok)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            ForEach(Array(zip(["changed", "unreadable", "missing", "not listed in SHA256SUMS"],
+                              [result.changed, result.unreadable, result.missing, result.extra])), id: \.0) { what, files in
+                ForEach(files.prefix(50), id: \.self) { f in
+                    HStack {
+                        Text(f).textSelection(.enabled)
+                        Spacer()
+                        Text(what).foregroundStyle(what == "not listed in SHA256SUMS" ? Color.secondary : Color.red)
+                    }
+                    .font(.callout)
+                }
+                if files.count > 50 { Text("… and \(files.count - 50) more \(what)").font(.caption).foregroundStyle(.secondary) }
+            }
+        } label: {
+            HStack {
+                Image(systemName: result.ok ? "checkmark.shield" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(result.ok ? Color.green : Color.red)
+                VStack(alignment: .leading) {
+                    Text((result.folder as NSString).lastPathComponent)
+                    Text(result.folder).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text(result.summary).font(.caption).foregroundStyle(result.ok ? Color.secondary : Color.red)
+                }
+                Spacer()
+                Button { revealInFinder(result.folder) } label: { Image(systemName: "folder") }
+                    .buttonStyle(.borderless).help("Show in Finder")
+            }
         }
     }
 }

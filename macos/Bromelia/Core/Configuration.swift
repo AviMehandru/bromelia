@@ -239,10 +239,14 @@ struct AutomationConfig: Codable, Hashable, Sendable {
     var playSound: Bool = true
     /// Before an automatic rip, wait up to this long for the system to mount the disc. 0 = don't wait.
     var waitForMountSeconds: Int = 30
+    /// What an automatic rip does with a disc that was archived before (manual rips only warn).
+    var alreadyArchived: AlreadyArchived = .skip
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case autoRipOnInsert, autoRipDelaySeconds, ejectWhenDone, ejectOnFailure, notify, playSound, waitForMountSeconds }
+    enum CodingKeys: String, CodingKey {
+        case autoRipOnInsert, autoRipDelaySeconds, ejectWhenDone, ejectOnFailure, notify, playSound, waitForMountSeconds, alreadyArchived
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -254,6 +258,20 @@ struct AutomationConfig: Codable, Hashable, Sendable {
         notify = c.value(.notify, d.notify)
         playSound = c.value(.playSound, d.playSound)
         waitForMountSeconds = c.value(.waitForMountSeconds, d.waitForMountSeconds)
+        alreadyArchived = c.value(.alreadyArchived, d.alreadyArchived)
+    }
+}
+
+/// What an automatic rip does with a disc found in the history or the output folder (same disc fingerprint).
+enum AlreadyArchived: String, Codable, CaseIterable, Sendable, Identifiable {
+    case skip, ask, ripAgain
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .skip: return "Skip it (eject when done)"
+        case .ask: return "Stop and ask (leave it in the drive)"
+        case .ripAgain: return "Rip it again"
+        }
     }
 }
 
@@ -635,13 +653,15 @@ struct AppConfig: Codable, Hashable, Sendable {
     var backgroundJobs: Int = 1
     /// Web page for watching and controlling Bromelia from a browser.
     var webUI = WebUIConfig()
+    /// Verifying the output folder's archives again on a schedule.
+    var archiveCheck = ArchiveCheckConfig()
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
         case version, makemkvconPath, mkvmergePath, outputRoot, pollIntervalSeconds, pollWhileRipping, maxConcurrentJobs,
              registrationKey, globalSettings, defaultDrive, drives, presets, plugins, historyLimit, stallTimeoutMinutes, preventSleep,
-             metadata, notifications, autoUpdateBetaKey, backgroundJobs, webUI
+             metadata, notifications, autoUpdateBetaKey, backgroundJobs, webUI, archiveCheck
     }
 
     init(from decoder: Decoder) throws {
@@ -668,6 +688,7 @@ struct AppConfig: Codable, Hashable, Sendable {
         autoUpdateBetaKey = c.value(.autoUpdateBetaKey, d.autoUpdateBetaKey)
         backgroundJobs = c.value(.backgroundJobs, d.backgroundJobs)
         webUI = c.value(.webUI, d.webUI)
+        archiveCheck = c.value(.archiveCheck, d.archiveCheck)
         // Files without a version are treated as version 1.
         let loaded = (try? c.decodeIfPresent(Int.self, forKey: .version)) ?? 1
         if loaded < 2 {
@@ -756,6 +777,20 @@ struct NotificationTarget: Codable, Hashable, Sendable, Identifiable {
         url = c.value(.url, d.url)
         enabled = c.value(.enabled, d.enabled)
         onlyProblems = c.value(.onlyProblems, d.onlyProblems)
+    }
+}
+
+struct ArchiveCheckConfig: Codable, Hashable, Sendable {
+    /// Verify every archive folder under the output root again every this many days (SHA256SUMS). 0 = never.
+    var intervalDays: Int = 0
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case intervalDays }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        intervalDays = max(0, c.value(.intervalDays, 0))
     }
 }
 

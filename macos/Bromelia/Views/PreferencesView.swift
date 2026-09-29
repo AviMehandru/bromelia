@@ -73,6 +73,13 @@ private struct GeneralPreferences: View {
                 Text("Sequential ripping (for hard disks that slow down with parallel writes): set the maximum to 1.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Archive check") {
+                LabeledContent("Check archives every") {
+                    IntField(title: "Days", value: $model.config.archiveCheck.intervalDays, suffix: "days (0 = never)")
+                }
+                Text("Reads the output folder's archives again and compares every file with SHA256SUMS, to find damaged or missing files. The result is sent to the notifications. Jobs → Verify Archive… checks now.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("MakeMKV") {
                 HStack {
                     Button("Import Settings from MakeMKV") {

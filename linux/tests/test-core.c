@@ -8,6 +8,7 @@
 #include <string.h>
 #include <json-glib/json-glib.h>
 
+#include "bro-archive.h"
 #include "bro-config.h"
 #include "bro-dvd.h"
 #include "bro-identity.h"
@@ -2901,6 +2902,361 @@ test_unfinished_jobs (void)
   g_unlink (live_path);
 }
 
+/* ---- archives: fingerprints, already archived, verifying ---- */
+
+static char *
+shared_fingerprint (const char *key)
+{
+  g_autofree char *path = fixture_path ("fingerprints.json");
+  g_autoptr (JsonParser) p = json_parser_new ();
+  g_assert_true (json_parser_load_from_file (p, path, NULL));
+  return g_strdup (json_object_get_string_member (json_node_get_object (json_parser_get_root (p)), key));
+}
+
+static void
+test_fingerprints (void)
+{
+  g_autofree char *dvd = fixture ("info-dvd");
+  g_autoptr (BroDiscInfo) info = bro_disc_info_from_output (dvd);
+  g_autofree char *fp = bro_disc_fingerprint (info);
+  g_autofree char *want = shared_fingerprint ("info-dvd");
+  g_autofree char *a = listing ("SHOW_S1_D1", "0:22:10,1;0:22:40,2;0:23:05,3");
+  g_autofree char *renumbered = listing ("SHOW_S1_D1", "0:23:05,3;0:22:10,1;0:22:40,2");
+  g_autofree char *other_disc = listing ("SHOW_S1_D1", "0:22:12,1;0:22:40,2;0:23:05,3");
+  g_autoptr (BroDiscInfo) ia = bro_disc_info_from_output (a);
+  g_autoptr (BroDiscInfo) ir = bro_disc_info_from_output (renumbered);
+  g_autoptr (BroDiscInfo) io = bro_disc_info_from_output (other_disc);
+  g_autoptr (BroDiscInfo) empty = bro_disc_info_new ();
+  g_autofree char *fa = bro_disc_fingerprint (ia), *fr = bro_disc_fingerprint (ir), *fo = bro_disc_fingerprint (io);
+  g_autofree char *fe = bro_disc_fingerprint (empty);
+  /* The same value on every platform. */
+  g_assert_cmpstr (fp, ==, want);
+  /* The same disc, whatever MakeMKV's title numbers; another disc of the set (same label) is different. */
+  g_assert_cmpstr (fa, ==, fr);
+  g_assert_cmpstr (fa, !=, fo);
+  g_assert_null (fe);
+}
+
+static BroArchivedCandidate *
+candidate (const char *fp, const char *folder, const char *state)
+{
+  BroArchivedCandidate *c = g_new0 (BroArchivedCandidate, 1);
+  c->fingerprint = g_strdup (fp);
+  c->folder = g_strdup (folder);
+  c->state = g_strdup (state);
+  c->finished_at = 1700000000;
+  return c;
+}
+
+static void
+write_record (const char *dir, const char *name, const char *status, const char *fp)
+{
+  g_autofree char *path = g_build_filename (dir, name, NULL);
+  g_autofree char *text = g_strdup_printf ("{\"format\": \"bromelia-archive\", \"status\": \"%s\", \"finishedAt\": \"2024-05-01T10:00:00Z\", "
+                                           "\"disc\": {\"label\": \"X\", \"fingerprint\": \"%s\"}}", status, fp);
+  g_mkdir_with_parents (dir, 0755);
+  g_assert_true (g_file_set_contents (path, text, -1, NULL));
+}
+
+static void
+test_find_archived (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("bromelia-archived-XXXXXX", NULL);
+  g_autofree char *movie = g_build_filename (root, "Movies", "Movie (2001)", NULL);
+  g_autofree char *errors = g_build_filename (root, "Other [READ ERRORS]", NULL);
+  g_autofree char *gone = g_build_filename (root, "gone", NULL);
+  g_autoptr (GPtrArray) cands = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_archived_candidate_free);
+  write_record (movie, "bromelia (2).json", "success", "v1:aaaa");
+  write_record (errors, "bromelia.json", "errors", "v1:bbbb");
+  g_ptr_array_add (cands, candidate ("v1:cccc", gone, "success"));   /* folder deleted since */
+  g_ptr_array_add (cands, candidate ("v1:dddd", root, "errors"));    /* read errors: not an archive */
+  g_ptr_array_add (cands, candidate ("v1:eeee", root, "success"));
+  {
+    g_autoptr (BroArchivedMatch) m = bro_find_archived ("v1:eeee", cands, NULL);
+    g_assert_nonnull (m);
+    g_assert_cmpstr (m->folder, ==, root);
+    g_assert_cmpint (m->archived_at, ==, 1700000000);
+  }
+  {
+    g_autoptr (BroArchivedMatch) m = bro_find_archived ("v1:aaaa", cands, root);
+    g_assert_nonnull (m);
+    g_assert_cmpstr (m->folder, ==, movie);
+    g_assert_cmpint (m->archived_at, ==, 1714557600);
+  }
+  g_assert_null (bro_find_archived ("v1:aaaa", cands, NULL));
+  g_assert_null (bro_find_archived ("v1:bbbb", cands, root));
+  g_assert_null (bro_find_archived ("v1:cccc", cands, root));
+  g_assert_null (bro_find_archived ("v1:dddd", cands, root));
+  g_assert_null (bro_find_archived (NULL, cands, root));
+}
+
+/* An archive folder: files with a SHA256SUMS listing them. */
+static void
+make_archive (const char *dir, const char *const *names)
+{
+  g_autoptr (GPtrArray) entries = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_checksum_free);
+  g_autofree char *sums = NULL;
+  g_mkdir_with_parents (dir, 0755);
+  for (int i = 0; names[i]; i++)
+    {
+      g_autofree char *full = g_build_filename (dir, names[i], NULL);
+      g_autofree char *parent = g_path_get_dirname (full);
+      g_autofree char *text = g_strdup_printf ("contents of %s, long enough to hash", names[i]);
+      BroChecksum *c = g_new0 (BroChecksum, 1);
+      g_mkdir_with_parents (parent, 0755);
+      g_assert_true (g_file_set_contents (full, text, -1, NULL));
+      c->path = g_strdup (names[i]);
+      c->size = strlen (text);
+      c->sha256 = bro_sha256_file (full, NULL, NULL, NULL);
+      g_ptr_array_add (entries, c);
+    }
+  sums = bro_checksums_write_merged (dir, entries, NULL);
+  g_assert_nonnull (sums);
+}
+
+static gboolean
+stop_at_once (gint64 done, gint64 total, const char *folder, const char *file, gpointer data)
+{
+  return FALSE;
+}
+
+static BroFolderCheck *
+result_for (GPtrArray *results, const char *folder)
+{
+  for (guint i = 0; i < results->len; i++)
+    if (g_str_equal (((BroFolderCheck *) results->pdata[i])->folder, folder))
+      return results->pdata[i];
+  return NULL;
+}
+
+static void
+test_verify_archives (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("bromelia-verify-XXXXXX", NULL);
+  g_autofree char *good = g_build_filename (root, "Good", NULL);
+  g_autofree char *bad = g_build_filename (root, "TV Shows", "Bad", NULL);
+  g_autofree char *hidden = g_build_filename (root, ".bromelia-incomplete-1234", NULL);
+  const char *good_files[] = { "Good.mkv", "Backup/BDMV/index.bdmv", NULL };
+  const char *bad_files[] = { "Season 01/E01.mkv", "Season 01/E02.mkv", "Season 01/E03.mkv", NULL };
+  g_autoptr (GPtrArray) folders = NULL;
+  g_autoptr (GPtrArray) results = NULL;
+  g_autofree char *e1 = g_build_filename (bad, "Season 01", "E01.mkv", NULL);
+  g_autofree char *e2 = g_build_filename (bad, "Season 01", "E02.mkv", NULL);
+  g_autofree char *extra = g_build_filename (bad, "Season 01", "E01.nfo", NULL);
+  g_autofree char *record = g_build_filename (bad, "bromelia.json", NULL);
+  g_autofree char *log = g_build_filename (bad, "bromelia-log.txt", NULL);
+  g_autofree char *contents = NULL;
+  gsize len = 0;
+  BroFolderCheck *r;
+  gboolean stopped = TRUE;
+  make_archive (good, good_files);
+  make_archive (bad, bad_files);
+  make_archive (hidden, good_files);
+  /* One byte changed, one file gone, one file added; Bromelia's own files are not "extra". */
+  g_assert_true (g_file_get_contents (e1, &contents, &len, NULL));
+  contents[3] ^= 1;
+  g_assert_true (g_file_set_contents (e1, contents, len, NULL));
+  g_assert_cmpint (g_unlink (e2), ==, 0);
+  g_assert_true (g_file_set_contents (extra, "<episodedetails/>", -1, NULL));
+  g_assert_true (g_file_set_contents (record, "{}", -1, NULL));
+  g_assert_true (g_file_set_contents (log, "log", -1, NULL));
+
+  folders = bro_archive_folders (root);
+  g_assert_cmpuint (folders->len, ==, 2); /* hidden (staging) folders are left out */
+  results = bro_verify_folders (folders, NULL, NULL, &stopped);
+  g_assert_false (stopped);
+  g_assert_cmpuint (results->len, ==, 2);
+  r = result_for (results, good);
+  g_assert_nonnull (r);
+  g_assert_true (bro_folder_check_ok (r));
+  g_assert_cmpint (r->files, ==, 2);
+  g_assert_cmpuint (r->extra->len, ==, 0);
+  r = result_for (results, bad);
+  g_assert_nonnull (r);
+  g_assert_false (bro_folder_check_ok (r));
+  g_assert_cmpuint (r->changed->len, ==, 1);
+  g_assert_cmpstr (r->changed->pdata[0], ==, "Season 01/E01.mkv");
+  g_assert_cmpuint (r->missing->len, ==, 1);
+  g_assert_cmpstr (r->missing->pdata[0], ==, "Season 01/E02.mkv");
+  g_assert_cmpuint (r->extra->len, ==, 1);
+  g_assert_cmpstr (r->extra->pdata[0], ==, "Season 01/E01.nfo");
+  {
+    g_autofree char *summary = bro_folder_check_summary (r);
+    g_assert_cmpstr (summary, ==, "1 changed, 1 missing of 3 file(s); 1 not listed");
+  }
+  /* Stopping keeps only folders that were finished. */
+  {
+    g_autoptr (GPtrArray) none = bro_verify_folders (folders, stop_at_once, NULL, &stopped);
+    g_assert_true (stopped);
+    g_assert_cmpuint (none->len, ==, 0);
+  }
+  /* When each folder was checked, kept across runs. */
+  {
+    g_autofree char *path = g_build_filename (root, "checks", "archive-checks.json", NULL);
+    g_autoptr (GHashTable) recs = bro_check_records_load (path);
+    g_autoptr (GHashTable) again = NULL;
+    BroCheckRecord *rec;
+    g_assert_cmpuint (g_hash_table_size (recs), ==, 0);
+    for (guint i = 0; i < results->len; i++)
+      bro_check_records_add (recs, results->pdata[i], 1700000000);
+    g_assert_true (bro_check_records_save (recs, path));
+    again = bro_check_records_load (path);
+    rec = g_hash_table_lookup (again, bad);
+    g_assert_nonnull (rec);
+    g_assert_false (rec->ok);
+    g_assert_cmpint (rec->checked_at, ==, 1700000000);
+    g_assert_cmpstr (rec->summary, ==, "1 changed, 1 missing of 3 file(s); 1 not listed");
+    g_assert_true (((BroCheckRecord *) g_hash_table_lookup (again, good))->ok);
+  }
+}
+
+static void
+test_verify_in_state (void)
+{
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  g_autofree char *root = g_dir_make_tmp ("bromelia-verify-state-XXXXXX", NULL);
+  g_autofree char *good = g_build_filename (root, "Good", NULL);
+  g_autofree char *file = g_build_filename (good, "Good.mkv", NULL);
+  const char *files[] = { "Good.mkv", NULL };
+  gint64 until, now = g_get_real_time () / G_USEC_PER_SEC;
+  make_archive (good, files);
+  g_free (st->config->output_root);
+  st->config->output_root = g_strdup (root);
+  g_assert_false (bro_state_verify_due (st, now)); /* archiveCheck is off by default */
+  st->config->archive_check_interval_days = 30;
+  g_assert_true (bro_state_verify_due (st, now));
+
+  g_assert_true (bro_state_verify_start (st, root, FALSE));
+  g_assert_false (bro_state_verify_start (st, root, FALSE)); /* one at a time */
+  until = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+  while (st->verify.running && g_get_monotonic_time () < until)
+    g_main_context_iteration (NULL, TRUE);
+  g_assert_false (st->verify.running);
+  g_assert_cmpuint (st->verify.results->len, ==, 1);
+  g_assert_true (bro_state_check_record (st, good) != NULL && bro_state_check_record (st, good)->ok);
+  g_assert_nonnull (bro_state_check_record (st, root)); /* the whole tree, for the schedule */
+  g_assert_false (bro_state_verify_due (st, now + 86400));
+  g_assert_true (bro_state_verify_due (st, now + 31 * 86400));
+
+  /* A damaged file shows in the next run and in the record. */
+  g_assert_true (g_file_set_contents (file, "bit rot", -1, NULL));
+  g_assert_true (bro_state_verify_start (st, good, FALSE));
+  while (st->verify.running && g_get_monotonic_time () < until)
+    g_main_context_iteration (NULL, TRUE);
+  g_assert_false (bro_state_check_record (st, good)->ok);
+  {
+    /* Kept for the next start. */
+    g_autoptr (BroState) st2 = bro_state_new (NULL);
+    g_assert_false (bro_state_check_record (st2, good)->ok);
+  }
+  /* The web page can start a check of the output folder. */
+  {
+    g_autofree char *err = bro_state_web_action (st, "verify", "", "start");
+    g_assert_null (err);
+    g_assert_true (st->verify.running);
+    while (st->verify.running && g_get_monotonic_time () < until)
+      g_main_context_iteration (NULL, TRUE);
+  }
+}
+
+typedef struct {
+  gboolean automatic;
+  BroAlreadyArchived policy;
+  GPtrArray *archived; /* borrowed */
+} ArchivedSetup;
+
+static void
+archived_setup (BroRunRequest *req, gpointer data)
+{
+  ArchivedSetup *a = data;
+  req->automatic = a->automatic;
+  req->drive->automation.already_archived = a->policy;
+  req->drive->automation.wait_for_mount_seconds = 0;
+  if (a->archived)
+    req->archived = g_ptr_array_ref (a->archived);
+}
+
+static void
+test_already_archived_jobs (void)
+{
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:30:00,1"), *m = writes_file (SAVED);
+  g_autofree char *other = listing ("SAMPLE_MOVIE", "0:31:00,1");
+  Fake *f = fake_new (l, m);
+  g_autofree char *fp = NULL, *folder = NULL;
+  ArchivedSetup manual = { FALSE, BRO_ARCHIVED_SKIP, NULL }, skip = { TRUE, BRO_ARCHIVED_SKIP, NULL };
+  ArchivedSetup ask = { TRUE, BRO_ARCHIVED_ASK, NULL }, again = { TRUE, BRO_ARCHIVED_RIP_AGAIN, NULL };
+  {
+    g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &manual);
+    g_autofree char *rec = NULL, *text = NULL;
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("%s", res->error);
+    g_assert_nonnull (res->fingerprint);
+    fp = g_strdup (res->fingerprint);
+    folder = g_strdup (res->output_dir);
+    rec = g_build_filename (folder, "bromelia.json", NULL);
+    g_assert_true (g_file_get_contents (rec, &text, NULL, NULL));
+    g_assert_nonnull (strstr (text, fp)); /* in the archive record */
+  }
+  /* Automatic rips of the same disc: found through the archive record under the output folder. */
+  {
+    g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &skip);
+    g_assert_cmpint (res->status, ==, BRO_JOB_CANCELLED);
+    g_assert_true (g_str_has_prefix (res->error, "Already archived in "));
+    g_assert_nonnull (strstr (res->error, folder));
+    g_assert_null (res->output_dir);
+  }
+  {
+    g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &ask);
+    g_assert_cmpint (res->status, ==, BRO_JOB_CANCELLED);
+    g_assert_nonnull (strstr (res->error, "Rip it again from the drive page"));
+  }
+  {
+    g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &again);
+    g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+  }
+  /* Manual rips only warn. */
+  {
+    g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &manual);
+    g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+  }
+  fake_free (f);
+
+  /* Found through the history too (another output folder), but only while the folder is there. */
+  f = fake_new (l, m);
+  {
+    g_autoptr (GPtrArray) cands = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_archived_candidate_free);
+    g_autofree char *elsewhere = g_dir_make_tmp ("bromelia-elsewhere-XXXXXX", NULL);
+    g_ptr_array_add (cands, candidate (fp, elsewhere, "success"));
+    skip.archived = cands;
+    {
+      g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &skip);
+      g_assert_cmpint (res->status, ==, BRO_JOB_CANCELLED);
+      g_assert_nonnull (strstr (res->error, elsewhere));
+    }
+    g_rmdir (elsewhere);
+    {
+      g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &skip);
+      g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+    }
+    skip.archived = NULL;
+  }
+  fake_free (f);
+
+  /* Another disc of the set with the same label is not taken for the archived one. */
+  f = fake_new (other, m);
+  {
+    g_autoptr (GPtrArray) cands = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_archived_candidate_free);
+    g_ptr_array_add (cands, candidate (fp, f->root, "success"));
+    skip.archived = cands;
+    {
+      g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, archived_setup, &skip);
+      g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+      g_assert_cmpstr (res->fingerprint, !=, fp);
+    }
+  }
+  fake_free (f);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -2977,5 +3333,10 @@ main (int argc, char **argv)
   g_test_add_func ("/reliability/keep-awake", test_keep_awake);
   g_test_add_func ("/reliability/keep-awake-without-logind", test_keep_awake_without_logind);
   g_test_add_func ("/reliability/unfinished-jobs", test_unfinished_jobs);
+  g_test_add_func ("/archive/fingerprints", test_fingerprints);
+  g_test_add_func ("/archive/find-archived", test_find_archived);
+  g_test_add_func ("/archive/verify", test_verify_archives);
+  g_test_add_func ("/archive/verify-in-state", test_verify_in_state);
+  g_test_add_func ("/archive/already-archived-jobs", test_already_archived_jobs);
   return g_test_run ();
 }

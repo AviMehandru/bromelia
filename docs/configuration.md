@@ -8,8 +8,8 @@ All Bromelia versions store their configuration as one JSON document with the sa
 | Windows | `%LOCALAPPDATA%\Bromelia\config.json` |
 | Linux | `$XDG_CONFIG_HOME/bromelia/config.json` (usually `~/.config/bromelia/config.json`) |
 
-Job logs, manifests and history live next to it (`jobs/<job id>/`, `history.json`; on Linux under
-`$XDG_DATA_HOME/bromelia`). Unknown keys are ignored and missing keys take their defaults, so files move
+Job logs, manifests and history live next to it (`jobs/<job id>/`, `history.json`, `archive-checks.json`,
+`unfinished-<pid>.json`; on Linux under `$XDG_DATA_HOME/bromelia`). Unknown keys are ignored and missing keys take their defaults, so files move
 between versions and platforms freely. Paths may start with `~`.
 
 ## Top level
@@ -42,6 +42,9 @@ between versions and platforms freely. Paths may start with `~`.
   ],
   "autoUpdateBetaKey": false,      // register MakeMKV's current beta key at startup and when it expires (never replaces a purchased key)
   "backgroundJobs": 1,             // background post-processing steps that run at the same time
+  "archiveCheck": {                // verify the output folder's archives again (see "Archive check")
+    "intervalDays": 0              // every N days; 0 = never
+  },
   "webUI": {                       // web page (see "Web page")
     "enabled": false,
     "address": "127.0.0.1",        // 127.0.0.1 = this computer only; 0.0.0.0 = the network (needs a token)
@@ -126,7 +129,8 @@ changed are kept.
     "ejectOnFailure": false,
     "notify": true,
     "playSound": true,
-    "waitForMountSeconds": 30                  // before an automatic rip, wait up to this long for the disc to be mounted; 0 = don't
+    "waitForMountSeconds": 30,                 // before an automatic rip, wait up to this long for the disc to be mounted; 0 = don't
+    "alreadyArchived": "skip"                  // a disc archived before, in automatic rips: skip | ask | ripAgain (see "Archive check")
   },
   "archive": {
     "checksums": true,                         // SHA256SUMS in the output folder
@@ -333,8 +337,49 @@ Every output folder gets, unless switched off in `archive`:
 | File | Content |
 | --- | --- |
 | `SHA256SUMS` | `sha256  relative/path` for every produced file, including all files of backup folders. Entries of earlier jobs writing into the same folder are kept. |
-| `bromelia.json` | `{"format": "bromelia-archive", "version": 1, …}`: name, kind, disc (label, volume name, type, format, format code, encrypted, season / part / volume / disc), rip, mode, source, drive, MakeMKV version, job id, times, titles (source id, source file, duration, chapters, size, segment map), episodes, files (path, size, sha256), warning and error counts and error messages |
+| `bromelia.json` | `{"format": "bromelia-archive", "version": 2, …}`: status (`success` / `errors`), name, kind, disc (label, volume name, type, format, format code, encrypted, season / part / volume / disc, fingerprint), rip, mode, source, drive, MakeMKV version, job id, times, titles (source id, source file, duration, chapters, size, segment map), episodes, files (path, size, sha256), warning and error counts and error messages. A folder shared by several jobs gets `bromelia (2).json` and so on |
 | `bromelia-log.txt` | The job log |
+
+## Archive check
+
+**Verifying archives.** *Verify Archive…* (the Archive Check page), *Verify Folder* in the history, `POST /api/verify`
+and `archiveCheck.intervalDays` look for every folder with a `SHA256SUMS` under the chosen folder (hidden folders, such
+as staging folders, are skipped), read every listed file again and compare its SHA-256. Each folder is reported as
+OK or damaged, with the files that are **changed**, **unreadable** or **missing**, and files the folder has that
+`SHA256SUMS` doesn't list (**not listed**; that alone doesn't make a folder damaged: post-processing may add files).
+Bromelia's own files (`SHA256SUMS`, `bromelia*.json`, `bromelia-log*.txt`, the `INCOMPLETE.txt` / `READ ERRORS.txt`
+notes) are not reported. When each folder was last verified is kept in `archive-checks.json` next to `history.json`
+(`{"<folder>": {"checkedAt", "ok", "summary"}}`); the history shows it. With `archiveCheck.intervalDays`, the apps and
+`bromelia-daemon` check the whole output folder when its last check is that old (looking a minute after starting,
+then every hour, and only while no job runs) and send the result to `notifications` (status `success`, or `failed`
+when a folder is damaged, which `onlyProblems` targets get); a damaged folder is also shown in the app. The computer
+is kept awake while a check runs (`preventSleep`).
+
+**Discs archived before.** Every job that reads a disc listing computes the disc's fingerprint: `v1:` and the first
+32 hex digits of the SHA-256 of
+
+```
+bromelia-disc-fingerprint 1
+volume:<volume name (CINFO 32), else the disc name>
+titles:<title count>
+<source title id (TINFO 24, -1 if none)>|<length in seconds>|<segment map (TINFO 26)>|<size in bytes (TINFO 11)>
+…one line per title, sorted by byte value
+```
+
+so a disc is recognised whatever numbers MakeMKV gives its titles, and another disc of a set with the same label is
+not taken for it. The fingerprint is stored in `bromelia.json` (`disc.fingerprint`) and in the history. Before an
+MKV rip or a backup, the job looks for it among the history's successful jobs whose folder still exists, then in the
+`bromelia*.json` files with status `success` in the output root and up to four folders below it. When found:
+
+| `automation.alreadyArchived` | Automatic rip |
+| --- | --- |
+| `skip` (default) | stops as *cancelled* (“Already archived in …”), without post-processing; the disc is ejected when `ejectWhenDone` is on |
+| `ask` | stops the same way but leaves the disc in the drive; rip it again from the drive page |
+| `ripAgain` | rips it as usual (the log says it was archived before) |
+
+A rip started by hand is never stopped: the disc page says the disc was archived before and asks before ripping it
+again, and the job only logs a warning. `shared/fixtures/fingerprints.json` holds fingerprints that every platform's
+tests check.
 
 ## Export bundle
 
@@ -402,14 +447,16 @@ didn't succeed):
 ## Web page
 
 With `webUI.enabled` Bromelia serves a page at `http://<address>:<port>/` showing drives, jobs,
-background steps and recent history, with *Rip*, *Eject*, *Close tray* and *Cancel*. The same data is
+background steps, recent history and the last archive check, with *Rip*, *Eject*, *Close tray*, *Cancel* and
+*Check output folder*. The same data is
 available as JSON:
 
 | Request | Result |
 | --- | --- |
-| `GET /api/status` | `{app, makemkv, problem, drives[{lane, name, device, state, hasDisc, disc, busy}], jobs[{id, title, state, stateLabel, phase, progress, error, outputDirectory, lane}], background[{id, title, state}], history[{title, state, stateLabel, error, outputDirectory, finishedAt}]}` |
+| `GET /api/status` | `{app, makemkv, problem, drives[{lane, name, device, state, hasDisc, disc, busy}], jobs[{id, title, state, stateLabel, phase, progress, error, outputDirectory, lane}], background[{id, title, state}], history[{title, state, stateLabel, error, outputDirectory, finishedAt}], verify{running, path, progress, folder, stopped, finishedAt, folders, damaged[{folder, summary}]}}` |
 | `POST /api/drives/<lane>/rip` · `eject` · `close` | 204, or 400 with the reason |
 | `POST /api/jobs/<id>/cancel` | 204, or 400 (`No such job`) |
+| `POST /api/verify` · `/api/verify/cancel` | Verify the output folder's archives (see "Archive check") · stop; 204, or 400 with the reason |
 
 Access rules: with a `token`, every request needs `Authorization: Bearer <token>` or `?token=<token>`
 (the page passes it on). Without one, only pages on this computer are served (the `Host` header must be

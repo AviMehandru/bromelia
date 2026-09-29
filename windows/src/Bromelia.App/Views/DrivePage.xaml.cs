@@ -239,7 +239,14 @@ public sealed partial class DrivePage : Page
         if (s.Info is { } info)
         {
             Show(BrowserPanel);
-            if (!ReferenceEquals(info, _shownInfo)) { BuildTitles(info); BuildIdentityBar(info); }
+            if (!ReferenceEquals(info, _shownInfo))
+            {
+                BuildTitles(info);
+                BuildIdentityBar(info);
+                var archived = ArchivedText(info);
+                ArchivedBar.Message = archived ?? "";
+                ArchivedBar.IsOpen = archived != null;
+            }
             RefreshHeader();
             return;
         }
@@ -607,9 +614,25 @@ public sealed partial class DrivePage : Page
         SyncChecks();
     }
 
-    void Rip(RipMode mode)
+    /// <summary>"This disc was archived before, in …" when the history has a successful archive of it (same fingerprint).</summary>
+    string? ArchivedText(DiscInfo? info) =>
+        State.ArchivedMatchFor(info) is { } m
+            ? $"This disc was archived before, in {m.Folder}{(m.ArchivedAt is { } t ? $" on {t.ToLocalTime():d}" : "")}"
+            : null;
+
+    /// <summary>A disc archived before is only ripped again when the user says so.</summary>
+    async void Rip(RipMode mode)
     {
         if (_session == null) return;
+        if (ArchivedText(_session.Info) is { } archived)
+        {
+            var dlg = new ContentDialog
+            {
+                Title = "Rip this disc again?", Content = archived, PrimaryButtonText = "Rip again", CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close, XamlRoot = XamlRoot,
+            };
+            if (await dlg.ShowAsync() != ContentDialogResult.Primary || _session == null) return;
+        }
         State.RipSession(_session, mode);
         RefreshJob();
     }

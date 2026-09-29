@@ -82,7 +82,16 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
   the disc page. Works from a disc, an ISO or a backup.
 - **Checksums and archive records.** Every output folder gets `SHA256SUMS` (checkable with
   `sha256sum -c SHA256SUMS` / `shasum -a 256 -c SHA256SUMS`), `bromelia.json` (disc identity, titles,
-  episodes, files with sizes and hashes, MakeMKV version, errors) and the job log.
+  episodes, files with sizes and hashes, MakeMKV version, errors, disc fingerprint) and the job log.
+- **Archive check.** *Verify Archive…* (Archive Check in the sidebar) reads every file of the output folder's
+  archives, or of any folder, again and compares it with `SHA256SUMS`, reporting changed, unreadable, missing and
+  unlisted files per folder; a finished job's folder can be checked from the history, which shows when each
+  folder was last verified. `archiveCheck.intervalDays` repeats the check of the whole output folder on a schedule
+  and sends the result to the notifications (also in `bromelia-daemon`, and `POST /api/verify` from the web page).
+- **Discs archived before are recognised** by a fingerprint of their listing (volume name and every title's
+  source, length, segment map and size), looked up in the history and in the output folder's `bromelia.json`
+  files. An automatic rip skips such a disc (or stops and asks, or rips it again: `automation.alreadyArchived`),
+  and the disc page says so and asks before ripping it again by hand.
 - **Output templates** for folders and file names using `{name}`, `{episode}`, `{discLabel}`, `{rip}`,
   `{track}`, `{format}`, `{season}`, `{disc}`, `{type}`, `{drive}`, `{date}`, `{title}`, `{index}`,
   `{n:2}`, `{source}`, `{duration}`, `{chapters}`, `{original}`, and conditional text such as

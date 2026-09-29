@@ -61,6 +61,7 @@ bro_job_finalize (GObject *obj)
   g_free (j->operation);
   g_free (j->total_operation);
   g_free (j->output_dir);
+  g_free (j->fingerprint);
   g_ptr_array_unref (j->files);
   g_free (j->error);
   g_ptr_array_unref (j->log);
@@ -391,7 +392,8 @@ bro_session_selected_size (BroSession *s)
 
 /* ================================ state ================================ */
 
-enum { STATE_DRIVES_CHANGED, STATE_JOBS_CHANGED, STATE_HISTORY_CHANGED, STATE_STATUS_CHANGED, STATE_TICK, STATE_N_SIGNALS };
+enum { STATE_DRIVES_CHANGED, STATE_JOBS_CHANGED, STATE_HISTORY_CHANGED, STATE_STATUS_CHANGED, STATE_TICK, STATE_VERIFY_CHANGED,
+       STATE_N_SIGNALS };
 static guint state_signals[STATE_N_SIGNALS];
 
 G_DEFINE_FINAL_TYPE (BroState, bro_state, G_TYPE_OBJECT)
@@ -410,6 +412,7 @@ history_record_free (BroHistoryRecord *r)
   g_free (r->output_dir);
   g_free (r->error);
   g_free (r->log_path);
+  g_free (r->fingerprint);
   g_ptr_array_unref (r->files);
   g_free (r);
 }
@@ -467,6 +470,12 @@ bro_state_finalize (GObject *obj)
   bro_web_server_free (self->web);
   bro_state_set_sleep_inhibitor (self, NULL);
   g_free (self->unfinished_saved);
+  bro_state_verify_cancel (self);
+  g_free (self->verify.path);
+  g_free (self->verify.folder);
+  g_free (self->verify.file);
+  if (self->verify.results) g_ptr_array_unref (self->verify.results);
+  if (self->check_records) g_hash_table_unref (self->check_records);
   G_OBJECT_CLASS (bro_state_parent_class)->finalize (obj);
 }
 
@@ -480,10 +489,14 @@ bro_state_class_init (BroStateClass *klass)
   state_signals[STATE_STATUS_CHANGED] = g_signal_new ("status-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
   /* Emitted every second while jobs are running or waiting (for progress text in lists). */
   state_signals[STATE_TICK] = g_signal_new ("tick", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+  /* Progress and results of verifying archives (BroState.verify). */
+  state_signals[STATE_VERIFY_CHANGED] = g_signal_new ("verify-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+                                                      G_TYPE_NONE, 0);
 }
 
 static void update_keep_awake (BroState *self);
 static void save_unfinished (BroState *self);
+static char *check_records_path (void);
 static void delete_recursive (GFile *f);
 static void add_history (BroState *self, BroHistoryRecord *r);
 
@@ -537,6 +550,7 @@ load_history (BroState *self)
       r->output_dir = GS ("outputDirectory");
       r->error = GS ("errorMessage");
       r->log_path = GS ("logPath");
+      r->fingerprint = GS ("fingerprint");
 #undef GS
       r->started_at = json_object_get_int_member_with_default (o, "startedAt", 0);
       r->finished_at = json_object_get_int_member_with_default (o, "finishedAt", 0);
@@ -576,6 +590,7 @@ save_history (BroState *self)
       if (r->output_dir) PS ("outputDirectory", r->output_dir);
       if (r->error) PS ("errorMessage", r->error);
       PS ("logPath", r->log_path);
+      if (r->fingerprint) PS ("fingerprint", r->fingerprint);
       PI ("startedAt", r->started_at);
       PI ("finishedAt", r->finished_at);
       PI ("warnings", r->warnings);
@@ -906,6 +921,10 @@ state_new_at (GApplication *app, const char *config_path)
     }
   load_history (self);
   bro_state_recover_unfinished (self);
+  {
+    g_autofree char *path = check_records_path ();
+    self->check_records = bro_check_records_load (path);
+  }
   return self;
 }
 
@@ -1826,6 +1845,7 @@ record_history (BroState *self, BroJob *j)
   r->finished_at = j->finished_at;
   r->warnings = j->warnings;
   r->errors = j->errors;
+  r->fingerprint = g_strdup (j->fingerprint);
   r->files = g_ptr_array_new_with_free_func (g_free);
   for (guint i = 0; i < j->files->len; i++)
     g_ptr_array_add (r->files, g_strdup (j->files->pdata[i]));
@@ -1993,6 +2013,8 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
       j->error = g_strdup (r->error);
       g_free (j->output_dir);
       j->output_dir = g_strdup (r->output_dir);
+      g_free (j->fingerprint);
+      j->fingerprint = g_strdup (r->fingerprint);
       g_ptr_array_set_size (j->files, 0);
       for (guint i = 0; i < r->files->len; i++)
         g_ptr_array_add (j->files, g_strdup (r->files->pdata[i]));
@@ -2105,6 +2127,7 @@ start_job (BroState *self, BroJob *j)
   req->cancellable = g_object_ref (j->cancellable);
   req->on_update = on_runner_update;
   req->user_data = j;
+  req->archived = bro_state_archived_candidates (self);
 
   job_changed (j);
   task = g_task_new (self, NULL, job_done, g_object_ref (j));
@@ -2379,6 +2402,18 @@ tick (gpointer data)
     }
   if (busy)
     emit (self, STATE_TICK);
+  {
+    gint64 now = g_get_real_time () / G_USEC_PER_SEC;
+    if (now >= self->next_schedule_check)
+      {
+        self->next_schedule_check = now + 3600;
+        if (bro_state_verify_due (self, now) && bro_state_active_count (self) == 0)
+          {
+            g_autofree char *root = bro_state_output_root (self);
+            bro_state_verify_start (self, root, TRUE);
+          }
+      }
+  }
   return G_SOURCE_CONTINUE;
 }
 
@@ -2404,6 +2439,8 @@ bro_state_start (BroState *self)
   if (self->tick_source)
     return;
   self->tick_source = g_timeout_add_seconds (1, tick, self);
+  /* The first scheduled archive check (archiveCheck.intervalDays) a minute after starting, then hourly. */
+  self->next_schedule_check = g_get_real_time () / G_USEC_PER_SEC + 60;
   self->poll_source = g_timeout_add_seconds (MAX (3, self->config->poll_interval_seconds), poll_timeout, self);
   self->monitor = g_volume_monitor_get ();
   g_signal_connect_swapped (self->monitor, "drive-changed", G_CALLBACK (on_media_changed), self);
@@ -2423,7 +2460,8 @@ bro_state_start (BroState *self)
 gboolean
 bro_state_wants_awake (BroState *self)
 {
-  return self->config && self->config->prevent_sleep && (bro_state_active_count (self) > 0 || bro_state_background_busy (self));
+  return self->config && self->config->prevent_sleep
+         && (bro_state_active_count (self) > 0 || bro_state_background_busy (self) || self->verify.running);
 }
 
 static void
@@ -2446,6 +2484,297 @@ bro_state_set_sleep_inhibitor (BroState *self, BroSleepInhibitor *inhibitor)
   self->inhibitor = inhibitor;
   if (inhibitor)
     update_keep_awake (self);
+}
+
+/* ---- archives: already archived, verifying ---- */
+
+char *
+bro_state_output_root (BroState *self)
+{
+  const char *root = self->config->output_root && *self->config->output_root ? self->config->output_root : "~/Videos/Bromelia";
+  return g_str_has_prefix (root, "~") ? g_build_filename (g_get_home_dir (), root + 1, NULL) : g_strdup (root);
+}
+
+GPtrArray *
+bro_state_archived_candidates (BroState *self)
+{
+  GPtrArray *out = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_archived_candidate_free);
+  for (guint i = 0; i < self->history->len; i++)
+    {
+      BroHistoryRecord *r = self->history->pdata[i];
+      BroArchivedCandidate *c;
+      if (!r->fingerprint || !*r->fingerprint || !r->output_dir)
+        continue;
+      c = g_new0 (BroArchivedCandidate, 1);
+      c->fingerprint = g_strdup (r->fingerprint);
+      c->folder = g_strdup (r->output_dir);
+      c->state = g_strdup (r->state);
+      c->finished_at = r->finished_at;
+      g_ptr_array_add (out, c);
+    }
+  return out;
+}
+
+BroArchivedMatch *
+bro_state_archived_match (BroState *self, BroDiscInfo *info)
+{
+  g_autofree char *fp = bro_disc_fingerprint (info);
+  g_autoptr (GPtrArray) candidates = NULL;
+  if (!fp)
+    return NULL;
+  candidates = bro_state_archived_candidates (self);
+  return bro_find_archived (fp, candidates, NULL);
+}
+
+static char *
+check_records_path (void)
+{
+  g_autofree char *dir = bro_data_dir ();
+  return g_build_filename (dir, "archive-checks.json", NULL);
+}
+
+BroCheckRecord *
+bro_state_check_record (BroState *self, const char *folder)
+{
+  return folder && self->check_records ? g_hash_table_lookup (self->check_records, folder) : NULL;
+}
+
+gboolean
+bro_state_verify_due (BroState *self, gint64 now)
+{
+  g_autofree char *root = NULL;
+  BroCheckRecord *last;
+  int days = self->config->archive_check_interval_days;
+  if (days <= 0 || self->verify.running)
+    return FALSE;
+  root = bro_state_output_root (self);
+  if (!g_file_test (root, G_FILE_TEST_IS_DIR))
+    return FALSE;
+  last = bro_state_check_record (self, root);
+  return !last || now - last->checked_at >= (gint64) days * 86400;
+}
+
+typedef struct {
+  BroState *self;          /* ref */
+  char *path;
+  gboolean scheduled;
+  GPtrArray *targets;      /* BroNotificationTarget* (a copy of the configuration's, for a scheduled check) */
+  BroAppConfig *config;    /* owns targets */
+  GCancellable *cancel;
+  GMutex lock;             /* guards the progress below */
+  gint64 done, total;
+  char *folder, *file;
+  GPtrArray *results;      /* set by the worker */
+  gboolean stopped;
+  guint poll;
+} VerifyTask;
+
+static void
+verify_task_free (VerifyTask *t)
+{
+  g_clear_handle_id (&t->poll, g_source_remove);
+  g_object_unref (t->self);
+  g_free (t->path);
+  if (t->config) bro_app_config_free (t->config);
+  g_object_unref (t->cancel);
+  g_mutex_clear (&t->lock);
+  g_free (t->folder);
+  g_free (t->file);
+  if (t->results) g_ptr_array_unref (t->results);
+  g_free (t);
+}
+
+static gboolean
+verify_progress (gint64 done, gint64 total, const char *folder, const char *file, gpointer data)
+{
+  VerifyTask *t = data;
+  g_mutex_lock (&t->lock);
+  t->done = done;
+  t->total = total;
+  if (folder && g_strcmp0 (folder, t->folder) != 0)
+    {
+      g_free (t->folder);
+      t->folder = g_strdup (folder);
+    }
+  if (file && g_strcmp0 (file, t->file) != 0)
+    {
+      g_free (t->file);
+      t->file = g_strdup (file);
+    }
+  g_mutex_unlock (&t->lock);
+  return !g_cancellable_is_cancelled (t->cancel);
+}
+
+static gboolean
+verify_poll (gpointer data)
+{
+  VerifyTask *t = data;
+  BroState *self = t->self;
+  g_mutex_lock (&t->lock);
+  self->verify.done = t->done;
+  self->verify.total = t->total;
+  g_free (self->verify.folder);
+  self->verify.folder = g_strdup (t->folder);
+  g_free (self->verify.file);
+  self->verify.file = g_strdup (t->file);
+  g_mutex_unlock (&t->lock);
+  emit (self, STATE_VERIFY_CHANGED);
+  return G_SOURCE_CONTINUE;
+}
+
+static int
+count_damaged (GPtrArray *results)
+{
+  int n = 0;
+  for (guint i = 0; results && i < results->len; i++)
+    n += !bro_folder_check_ok (results->pdata[i]);
+  return n;
+}
+
+/* "Archive check: all 12 folder(s) OK" and the damaged folders, for notifications. */
+static void
+verify_report (GPtrArray *results, char **title, char **body)
+{
+  int damaged = count_damaged (results);
+  GString *b = g_string_new (NULL);
+  *title = damaged ? g_strdup_printf ("Archive check: %d of %u folder(s) damaged", damaged, results->len)
+                   : g_strdup_printf ("Archive check: all %u folder(s) OK", results->len);
+  for (guint i = 0, shown = 0; i < results->len; i++)
+    {
+      BroFolderCheck *r = results->pdata[i];
+      g_autofree char *summary = NULL;
+      if (bro_folder_check_ok (r))
+        continue;
+      if (++shown > 10)
+        {
+          g_string_append_printf (b, "… and %d more\n", damaged - 10);
+          break;
+        }
+      summary = bro_folder_check_summary (r);
+      g_string_append_printf (b, "%s: %s\n", r->folder, summary);
+    }
+  if (!damaged)
+    g_string_append (b, "Every file matches its checksum.");
+  *body = g_string_free (b, FALSE);
+}
+
+static void
+verify_log (const char *text, gpointer data)
+{
+  g_message ("%s", text);
+}
+
+static void
+verify_thread (GTask *task, gpointer source, gpointer task_data, GCancellable *c)
+{
+  VerifyTask *t = task_data;
+  g_autoptr (GPtrArray) folders = bro_archive_folders (t->path);
+  t->results = bro_verify_folders (folders, verify_progress, t, &t->stopped);
+  if (t->scheduled && !t->stopped && t->targets && t->targets->len)
+    {
+      g_autofree char *title = NULL, *body = NULL;
+      verify_report (t->results, &title, &body);
+      bro_notifications_send (t->targets, title, body, count_damaged (t->results) ? "failed" : "success", verify_log, NULL);
+    }
+  g_task_return_boolean (task, TRUE);
+}
+
+static void
+verify_done (GObject *src, GAsyncResult *res, gpointer data)
+{
+  BroState *self = BRO_STATE (src);
+  VerifyTask *t = g_task_get_task_data (G_TASK (res));
+  gint64 now = g_get_real_time () / G_USEC_PER_SEC;
+  gboolean path_is_folder = FALSE;
+  int damaged = count_damaged (t->results);
+  g_autofree char *records = check_records_path ();
+  self->verify_task = NULL;
+  self->verify.running = FALSE;
+  self->verify.stopped = t->stopped;
+  self->verify.finished_at = now;
+  if (self->verify.results)
+    g_ptr_array_unref (self->verify.results);
+  self->verify.results = g_ptr_array_ref (t->results);
+  for (guint i = 0; i < t->results->len; i++)
+    {
+      BroFolderCheck *r = t->results->pdata[i];
+      bro_check_records_add (self->check_records, r, now);
+      path_is_folder |= g_str_equal (r->folder, t->path);
+    }
+  /* The whole tree, so a scheduled check knows when it last ran. */
+  if (!t->stopped && !path_is_folder)
+    {
+      BroCheckRecord *rec = g_new0 (BroCheckRecord, 1);
+      rec->checked_at = now;
+      rec->ok = damaged == 0;
+      rec->summary = damaged ? g_strdup_printf ("%d of %u archive folder(s) damaged", damaged, t->results->len)
+                             : g_strdup_printf ("%u archive folder(s), all OK", t->results->len);
+      g_hash_table_replace (self->check_records, g_strdup (t->path), rec);
+    }
+  bro_check_records_save (self->check_records, records);
+  if (t->scheduled && damaged)
+    {
+      g_autofree char *title = NULL, *body = NULL;
+      verify_report (t->results, &title, &body);
+      bro_state_set_error (self, title);
+      if (self->app)
+        {
+          g_autoptr (GNotification) n = g_notification_new (title);
+          g_notification_set_body (n, body);
+          g_application_send_notification (self->app, "archive-check", n);
+        }
+    }
+  emit (self, STATE_VERIFY_CHANGED);
+  emit (self, STATE_HISTORY_CHANGED); /* the history shows when folders were last checked */
+  update_keep_awake (self);
+}
+
+gboolean
+bro_state_verify_start (BroState *self, const char *path, gboolean scheduled)
+{
+  VerifyTask *t;
+  GTask *task;
+  if (self->verify.running || !path || !*path)
+    return FALSE;
+  t = g_new0 (VerifyTask, 1);
+  t->self = g_object_ref (self);
+  t->path = g_strdup (path);
+  t->scheduled = scheduled;
+  if (scheduled)
+    {
+      t->config = bro_app_config_copy (self->config);
+      t->targets = t->config->notifications;
+    }
+  t->cancel = g_cancellable_new ();
+  g_mutex_init (&t->lock);
+  self->verify_task = t;
+  self->verify.running = TRUE;
+  self->verify.scheduled = scheduled;
+  self->verify.stopped = FALSE;
+  self->verify.done = self->verify.total = 0;
+  self->verify.started_at = g_get_real_time () / G_USEC_PER_SEC;
+  self->verify.finished_at = 0;
+  g_free (self->verify.path);
+  self->verify.path = g_strdup (path);
+  g_clear_pointer (&self->verify.folder, g_free);
+  g_clear_pointer (&self->verify.file, g_free);
+  g_clear_pointer (&self->verify.results, g_ptr_array_unref);
+  t->poll = g_timeout_add (250, verify_poll, t);
+  task = g_task_new (self, NULL, verify_done, NULL);
+  g_task_set_task_data (task, t, (GDestroyNotify) verify_task_free);
+  g_task_run_in_thread (task, verify_thread);
+  g_object_unref (task);
+  emit (self, STATE_VERIFY_CHANGED);
+  update_keep_awake (self);
+  return TRUE;
+}
+
+void
+bro_state_verify_cancel (BroState *self)
+{
+  VerifyTask *t = self->verify_task;
+  if (t)
+    g_cancellable_cancel (t->cancel);
 }
 
 /* ---- background post-processing ---- */
@@ -2771,6 +3100,40 @@ bro_state_web_status (BroState *self)
       json_builder_end_object (b);
     }
   json_builder_end_array (b);
+  json_builder_set_member_name (b, "verify");
+  json_builder_begin_object (b);
+  {
+    BroVerifyStatus *v = &self->verify;
+    g_autoptr (GDateTime) t = v->finished_at ? g_date_time_new_from_unix_utc (v->finished_at) : NULL;
+    g_autofree char *when = t ? g_date_time_format_iso8601 (t) : g_strdup ("");
+    json_builder_set_member_name (b, "running");
+    json_builder_add_boolean_value (b, v->running);
+    JS ("path", v->path);
+    json_builder_set_member_name (b, "progress");
+    json_builder_add_double_value (b, v->total > 0 ? (double) v->done / v->total : 0);
+    JS ("folder", v->folder);
+    json_builder_set_member_name (b, "stopped");
+    json_builder_add_boolean_value (b, v->stopped);
+    JS ("finishedAt", when);
+    json_builder_set_member_name (b, "folders");
+    json_builder_add_int_value (b, v->results ? v->results->len : 0);
+    json_builder_set_member_name (b, "damaged");
+    json_builder_begin_array (b);
+    for (guint i = 0; v->results && i < v->results->len; i++)
+      {
+        BroFolderCheck *r = v->results->pdata[i];
+        g_autofree char *summary = NULL;
+        if (bro_folder_check_ok (r))
+          continue;
+        summary = bro_folder_check_summary (r);
+        json_builder_begin_object (b);
+        JS ("folder", r->folder);
+        JS ("summary", summary);
+        json_builder_end_object (b);
+      }
+    json_builder_end_array (b);
+  }
+  json_builder_end_object (b);
   json_builder_end_object (b);
   return json_builder_get_root (b);
 }
@@ -2818,6 +3181,23 @@ bro_state_web_action (BroState *self, const char *kind, const char *id, const ch
             }
         }
       return g_strdup ("No such job");
+    }
+  if (g_str_equal (kind, "verify"))
+    {
+      g_autofree char *root = bro_state_output_root (self);
+      if (g_str_equal (action, "cancel"))
+        {
+          bro_state_verify_cancel (self);
+          return NULL;
+        }
+      if (!g_str_equal (action, "start"))
+        return g_strdup ("Unknown action");
+      if (self->verify.running)
+        return g_strdup ("A check is already running");
+      if (!g_file_test (root, G_FILE_TEST_IS_DIR))
+        return g_strdup_printf ("The output folder %s doesn't exist", root);
+      bro_state_verify_start (self, root, FALSE);
+      return NULL;
     }
   return g_strdup ("Unknown action");
 }

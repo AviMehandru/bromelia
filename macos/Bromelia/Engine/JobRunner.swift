@@ -94,6 +94,8 @@ final class JobRunner {
     private(set) var cancelRequested = false
     private let cancelFlag = CancelFlag()
     private var summary = RunSummary()
+    /// Why an automatic rip stopped: the disc was archived before (see checkAlreadyArchived).
+    private var alreadyArchived: String?
     private var expectedDrive: (index: Int, device: String)?
     private var lastTotalTitle = ""
     // Episodes (see prepareEpisodes)
@@ -144,7 +146,10 @@ final class JobRunner {
         do {
             try await execute()
         } catch {
-            if cancelRequested || error is CancellationError {
+            if let skipped = alreadyArchived {
+                status = .cancelled
+                job.errorMessage = skipped
+            } else if cancelRequested || error is CancellationError {
                 status = .cancelled
                 job.errorMessage = "Cancelled by user"
                 job.appendLog("Job cancelled", severity: .warning)
@@ -172,7 +177,7 @@ final class JobRunner {
         let allSteps = applicableSteps(status: status)
         let steps = allSteps.filter { !$0.background }
         let backgroundSteps = allSteps.filter(\.background)
-        if !steps.isEmpty && !cancelRequested {
+        if !steps.isEmpty && !cancelRequested && alreadyArchived == nil {
             job.phase = "Post-processing"
             job.currentOperation = ""
             let context = PostProcessor.Context(status: status, values: templateValues(status: status),
@@ -195,7 +200,7 @@ final class JobRunner {
 
         // Eject.
         if case let .drive(_, device) = job.source,
-           (status == .succeeded && job.drive.automation.ejectWhenDone)
+           ((status == .succeeded || (alreadyArchived != nil && job.drive.automation.alreadyArchived == .skip)) && job.drive.automation.ejectWhenDone)
             || ((status == .failed || status == .completedWithErrors) && job.drive.automation.ejectOnFailure) {
             job.phase = "Ejecting"
             let ok = await DiscEjector.eject(devicePath: device)
@@ -208,7 +213,7 @@ final class JobRunner {
         job.currentOperation = ""
         if status == .succeeded { job.totalProgress = 1; job.currentProgress = 1 }
         writeManifest(status: status)
-        if !backgroundSteps.isEmpty && !cancelRequested {
+        if !backgroundSteps.isEmpty && !cancelRequested && alreadyArchived == nil {
             job.background = BackgroundWork(jobId: job.id, title: job.title, steps: backgroundSteps,
                                             context: PostProcessor.Context(status: status, values: templateValues(status: status),
                                                                            outputDirectory: job.outputDirectory, files: job.producedFiles,
@@ -242,7 +247,7 @@ final class JobRunner {
         switch status {
         case .succeeded: body = "\(job.producedFiles.count) item(s) saved to \(job.outputDirectory?.path ?? "")"
         case .completedWithErrors: body = "Read errors: the files were kept in \(job.outputDirectory?.path ?? "")"
-        case .cancelled: body = "Cancelled"
+        case .cancelled: body = job.errorMessage ?? "Cancelled"
         default: body = job.errorMessage ?? "Failed"
         }
         let what = job.identity?.name ?? (job.discLabel.isEmpty ? job.sourceLabel : job.discLabel)
@@ -322,6 +327,8 @@ final class JobRunner {
                 resolveIdentity(info: info)
             }
         }
+        job.fingerprint = DiscFingerprint.of(info)
+        if job.fingerprint != nil, job.mode != .infoOnly { try await checkAlreadyArchived() }
         await lookUpMetadata()
 
         let work = try prepareOutput()
@@ -370,6 +377,30 @@ final class JobRunner {
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         job.appendLog("Output folder: \(outDir.path) (files are moved there once the job has finished and been checked)")
         return work
+    }
+
+    /// A disc archived before (same fingerprint, in the history or a bromelia.json under the output root): automatic rips
+    /// follow `automation.alreadyArchived`, manual ones only warn. Throws (with `alreadyArchived` set) to stop the job.
+    private func checkAlreadyArchived() async throws {
+        job.phase = "Looking for earlier archives of this disc"
+        let root = URL(fileURLWithPath: Paths.expandTilde(config.outputRoot(for: job.drive)), isDirectory: true)
+        let fingerprint = job.fingerprint, candidates = job.archivedCandidates
+        guard let m = await Task.detached(operation: { ArchiveLookup.find(fingerprint: fingerprint, candidates: candidates, root: root) }).value
+        else { return }
+        let day = DateFormatter()
+        day.dateFormat = "yyyy-MM-dd"
+        let when = m.archivedAt.map { " on " + day.string(from: $0) } ?? ""
+        let policy = job.drive.automation.alreadyArchived
+        if !job.isAutomatic || policy == .ripAgain {
+            job.appendLog("This disc was archived before, in \(m.folder)\(when); ripping it again", severity: .warning)
+            return
+        }
+        let message = policy == .skip
+            ? "Already archived in \(m.folder)\(when), so it wasn't ripped again. To archive it again, rip it from the drive page."
+            : "Already archived in \(m.folder)\(when). Rip it again from the drive page, or eject it."
+        alreadyArchived = message
+        job.appendLog(message, severity: .warning)
+        throw JobError.message(message)
     }
 
     /// The canonical title and year from TMDb or OMDb, when a provider is set up. Failures only log.
@@ -838,7 +869,7 @@ final class JobRunner {
             status: status.statusWord, name: id.name, kind: id.kind.rawValue,
             disc: .init(label: job.discLabel, volumeName: info?.volumeName ?? "", type: info?.typeName ?? "", format: id.format.rawValue,
                         formatCode: id.formatCode, encrypted: id.encrypted, season: id.label.season, part: id.label.part,
-                        volume: id.label.volume, disc: id.label.disc),
+                        volume: id.label.volume, disc: id.label.disc, fingerprint: job.fingerprint),
             rip: job.mode.makesMKV ? "Rip" : "Backup", mode: job.mode.rawValue, source: job.source.infoArgument, driveName: job.drive.name,
             makemkv: job.makemkvVersion, jobId: job.id.uuidString, startedAt: job.startedAt, finishedAt: Date(), titles: titles,
             episodes: job.episodes, files: job.checksums, warnings: job.warningCount, errors: job.errorCount, errorMessages: job.errorMessages,

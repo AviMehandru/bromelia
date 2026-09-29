@@ -315,9 +315,13 @@ bro_web_server_handle (BroWebServer *s, const BroHttpRequest *r, const char **co
       *body = g_bytes_new_take (text, len);
       return 200;
     }
-  if (g_str_equal (r->method, "POST") && parts->len == 4 && g_str_equal (parts->pdata[0], "api"))
+  /* POST /api/<kind>/<id>/<action>, and /api/verify (check the output folder's archives) · /api/verify/cancel. */
+  if (g_str_equal (r->method, "POST") && parts->len >= 2 && parts->len <= 4 && g_str_equal (parts->pdata[0], "api")
+      && (parts->len == 4 || g_str_equal (parts->pdata[1], "verify")))
     {
-      g_autofree char *err = s->action ? s->action (parts->pdata[1], parts->pdata[2], parts->pdata[3], s->user_data)
+      const char *id = parts->len == 4 ? parts->pdata[2] : "";
+      const char *action = parts->len == 4 ? parts->pdata[3] : parts->len == 3 ? parts->pdata[2] : "start";
+      g_autofree char *err = s->action ? s->action (parts->pdata[1], id, action, s->user_data)
                                        : g_strdup ("Unknown action");
       if (!err)
         {

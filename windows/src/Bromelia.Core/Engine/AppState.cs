@@ -167,6 +167,7 @@ public sealed class AppState : ObservableObject
         if (Config.OutputRoot.Length == 0) Config.OutputRoot = Paths.DefaultOutputRoot;
         foreach (var h in ConfigStore.LoadHistory()) History.Add(h);
         RecoverUnfinishedJobs();
+        CheckRecords = Engine.CheckRecords.Load();
         Background = new BackgroundQueue(_ui) { Limit = Config.BackgroundJobs };
         Background.Changed += UpdateKeepAwake;
         Web = new WebServer(this, _ui);
@@ -242,6 +243,13 @@ public sealed class AppState : ObservableObject
             ["title"] = h.Title, ["state"] = WebState(h.State), ["stateLabel"] = h.State.Label(), ["error"] = h.ErrorMessage ?? "",
             ["outputDirectory"] = h.OutputDirectory ?? "", ["finishedAt"] = h.FinishedAt?.ToString("o") ?? "",
         }).ToList(),
+        ["verify"] = new Dictionary<string, object>
+        {
+            ["running"] = Verify.Running, ["path"] = Verify.Path, ["progress"] = Verify.Total > 0 ? (double)Verify.Done / Verify.Total : 0.0,
+            ["folder"] = Verify.Folder ?? "", ["stopped"] = Verify.Stopped, ["finishedAt"] = Verify.FinishedAt?.ToUniversalTime().ToString("o") ?? "",
+            ["folders"] = Verify.Results.Count,
+            ["damaged"] = Verify.Results.Where(r => !r.Ok).Select(r => new Dictionary<string, object> { ["folder"] = r.Folder, ["summary"] = r.Summary }).ToList(),
+        },
     };
 
     /// <summary>Runs an action from the web page: drives/&lt;lane&gt;/rip|eject|close, jobs/&lt;id&gt;/cancel. Returns an error, or null.</summary>
@@ -263,6 +271,14 @@ public sealed class AppState : ObservableObject
             case ("jobs", "cancel"):
                 if (Jobs.FirstOrDefault(j => j.Id.ToString() == id) is not { } job) return "No such job";
                 Cancel(job);
+                return null;
+            case ("verify", "cancel"):
+                CancelVerify();
+                return null;
+            case ("verify", "start"):
+                if (Verify.Running) return "A check is already running";
+                if (!Directory.Exists(OutputRootPath)) return $"The output folder {OutputRootPath} doesn't exist";
+                StartVerify(OutputRootPath);
                 return null;
             default:
                 return "Unknown action";
@@ -746,6 +762,7 @@ public sealed class AppState : ObservableObject
             Start(job);
         }
         SaveUnfinishedJobs(); // also picks up output folders chosen by running jobs
+        StartScheduledCheckIfDue();
     }
 
     void Start(RipJob job)
@@ -761,6 +778,7 @@ public sealed class AppState : ObservableObject
         }
         if (job.Source is DiscSource.Drive { DevicePath.Length: > 0 } d && ScannedDrives.FirstOrDefault(e => e.DevicePath == d.DevicePath) is { } fresh)
             job.Source = new DiscSource.Drive(fresh.Index, d.DevicePath);
+        job.ArchivedCandidates = ArchivedCandidates;
         var runner = new JobRunner(job, Config, exe, Mkvmerge, _ui, Platform, CatalogKeys);
         runner.Finished += finished =>
         {
@@ -788,7 +806,7 @@ public sealed class AppState : ObservableObject
     bool _keepingAwake;
 
     /// <summary>Whether the computer should be kept awake: jobs or background steps are running and PreventSleep is on.</summary>
-    public bool WantsAwake => Config.PreventSleep && (_runners.Count > 0 || Background.IsBusy);
+    public bool WantsAwake => Config.PreventSleep && (_runners.Count > 0 || Background.IsBusy || Verify.Running);
 
     /// <summary>Keeps the computer awake while jobs or background steps run (when enabled in the settings).</summary>
     public void UpdateKeepAwake()
@@ -806,8 +824,137 @@ public sealed class AppState : ObservableObject
             Id = job.Id, Title = job.Title, DriveName = job.Drive.Name, DiscName = job.DiscLabel, Mode = job.Mode, State = job.State,
             StartedAt = job.StartedAt, FinishedAt = job.FinishedAt, OutputDirectory = job.OutputDirectory, Files = job.ProducedFiles.ToList(),
             ErrorMessage = job.ErrorMessage, LogPath = job.LogFile, Warnings = job.WarningCount, Errors = job.ErrorCount,
+            Fingerprint = job.Fingerprint,
         });
         SaveUnfinishedJobs();
+    }
+
+    // --- archives: already archived, verifying ---------------------------------------------------------------
+
+    /// <summary>Verifying archives again (Verify Archive…, the history, the web page, ArchiveCheck.IntervalDays).</summary>
+    public sealed class VerifyStatus
+    {
+        public bool Running { get; init; }
+        /// <summary>Started by ArchiveCheck.IntervalDays.</summary>
+        public bool Scheduled { get; init; }
+        /// <summary>The last run was stopped.</summary>
+        public bool Stopped { get; init; }
+        public string Path { get; init; } = "";
+        public long Done { get; init; }
+        public long Total { get; init; }
+        public string? Folder { get; init; }
+        public string? File { get; init; }
+        /// <summary>The folders the last run finished.</summary>
+        public IReadOnlyList<ArchiveVerifier.FolderCheck> Results { get; init; } = Array.Empty<ArchiveVerifier.FolderCheck>();
+        public DateTime? FinishedAt { get; init; }
+    }
+
+    VerifyStatus _verify = new();
+    /// <summary>Replaced as a whole on every change (PropertyChanged "Verify").</summary>
+    public VerifyStatus Verify { get => _verify; private set => Set(ref _verify, value); }
+    /// <summary>When each folder was last verified (archive-checks.json). Changes raise PropertyChanged "CheckRecords".</summary>
+    public Dictionary<string, CheckRecord> CheckRecords { get; private set; } = new();
+    CancellationTokenSource? _verifyCts;
+    DateTime _nextScheduleCheck = DateTime.MaxValue;
+
+    public string OutputRootPath => System.IO.Path.GetFullPath(Paths.ExpandUser(Config.OutputRoot));
+
+    /// <summary>The history's successful jobs with their disc fingerprints.</summary>
+    public List<ArchivedCandidate> ArchivedCandidates =>
+        History.Where(h => !string.IsNullOrEmpty(h.Fingerprint) && h.OutputDirectory != null)
+            .Select(h => new ArchivedCandidate(h.Fingerprint!, h.OutputDirectory!, h.State, h.FinishedAt)).ToList();
+
+    /// <summary>The earlier archive of the disc with this listing according to the history (quick; for the disc page).</summary>
+    public ArchivedMatch? ArchivedMatchFor(DiscInfo? info) => ArchiveLookup.Find(DiscFingerprint.Of(info), ArchivedCandidates, null);
+
+    /// <summary>Whether ArchiveCheck.IntervalDays asks for a check of the output root at <paramref name="now"/>.</summary>
+    public bool VerifyDue(DateTime now)
+    {
+        var days = Config.ArchiveCheck.IntervalDays;
+        if (days <= 0 || Verify.Running || !Directory.Exists(OutputRootPath)) return false;
+        return !CheckRecords.TryGetValue(OutputRootPath, out var last) || (now - last.CheckedAt).TotalDays >= days;
+    }
+
+    /// <summary>Starts the scheduled check when it is due (called from Pump, once a second; looks once an hour).</summary>
+    void StartScheduledCheckIfDue()
+    {
+        var now = DateTime.Now;
+        if (_nextScheduleCheck == DateTime.MaxValue) { _nextScheduleCheck = now.AddSeconds(60); return; }
+        if (now < _nextScheduleCheck) return;
+        _nextScheduleCheck = now.AddHours(1);
+        if (VerifyDue(now) && ActiveJobCount == 0) StartVerify(OutputRootPath, scheduled: true);
+    }
+
+    /// <summary>Verifies every SHA256SUMS folder under <paramref name="path"/> on a worker thread. False when a check is already running.</summary>
+    public bool StartVerify(string path, bool scheduled = false)
+    {
+        if (Verify.Running) return false;
+        var cts = new CancellationTokenSource();
+        _verifyCts = cts;
+        Verify = new VerifyStatus { Running = true, Scheduled = scheduled, Path = path };
+        UpdateKeepAwake();
+        var targets = scheduled ? Config.Notifications.ToList() : new List<NotificationTarget>();
+        var gate = new object();
+        (long Done, long Total, string? Folder, string? File) live = (0, 0, null, null);
+        var poll = new Timer(_ => _ui.Post(() =>
+        {
+            if (!Verify.Running) return;
+            lock (gate) Verify = new VerifyStatus { Running = true, Scheduled = scheduled, Path = path, Done = live.Done, Total = live.Total, Folder = live.Folder, File = live.File };
+        }), null, 250, 250);
+        _ = Task.Run(async () =>
+        {
+            var (results, stopped) = ArchiveVerifier.Verify(ArchiveVerifier.Folders(path), (done, total, folder, file) =>
+            {
+                lock (gate) live = (done, total, folder ?? live.Folder, file ?? live.File);
+                return !cts.IsCancellationRequested;
+            });
+            poll.Dispose();
+            if (scheduled && !stopped && targets.Count > 0)
+            {
+                var report = VerifyReport(results);
+                await NotificationSender.SendAsync(targets, report.Title, report.Body, report.Damaged ? "failed" : "success", _ => { });
+            }
+            _ui.Post(() => FinishVerify(path, results, stopped, scheduled));
+        });
+        return true;
+    }
+
+    public void CancelVerify() => _verifyCts?.Cancel();
+
+    /// <summary>"Archive check: all 12 folder(s) OK" and the damaged folders, for notifications.</summary>
+    public static (string Title, string Body, bool Damaged) VerifyReport(IReadOnlyList<ArchiveVerifier.FolderCheck> results)
+    {
+        var bad = results.Where(r => !r.Ok).ToList();
+        var title = bad.Count == 0 ? $"Archive check: all {results.Count} folder(s) OK" : $"Archive check: {bad.Count} of {results.Count} folder(s) damaged";
+        var body = string.Concat(bad.Take(10).Select(r => $"{r.Folder}: {r.Summary}\n"));
+        if (bad.Count > 10) body += $"… and {bad.Count - 10} more\n";
+        if (bad.Count == 0) body = "Every file matches its checksum.";
+        return (title, body, bad.Count > 0);
+    }
+
+    void FinishVerify(string path, List<ArchiveVerifier.FolderCheck> results, bool stopped, bool scheduled)
+    {
+        var now = DateTime.Now;
+        var records = new Dictionary<string, CheckRecord>(CheckRecords);
+        foreach (var r in results) records[r.Folder] = new CheckRecord(now, r.Ok, r.Summary);
+        // The whole tree, so a scheduled check knows when it last ran.
+        if (!stopped && !results.Any(r => r.Folder == path))
+        {
+            var bad = results.Count(r => !r.Ok);
+            records[path] = new CheckRecord(now, bad == 0, bad > 0 ? $"{bad} of {results.Count} archive folder(s) damaged" : $"{results.Count} archive folder(s), all OK");
+        }
+        CheckRecords = records;
+        Engine.CheckRecords.Save(records);
+        OnPropertyChanged(nameof(CheckRecords));
+        Verify = new VerifyStatus { Path = path, Stopped = stopped, Results = results, FinishedAt = now, Scheduled = scheduled };
+        _verifyCts = null;
+        var report = VerifyReport(results);
+        if (scheduled && report.Damaged)
+        {
+            LastError = report.Title;
+            Platform.Notify(report.Title, report.Body, true);
+        }
+        UpdateKeepAwake();
     }
 
     string? _savedUnfinished;

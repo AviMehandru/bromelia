@@ -13,11 +13,23 @@ struct _BroWindow {
   GtkLabel *status_label;
   char *current_tag;
   gboolean rebuilding;
+  gboolean verify_running; /* shown in the sidebar */
 };
 
 G_DEFINE_FINAL_TYPE (BroWindow, bro_window, ADW_TYPE_APPLICATION_WINDOW)
 
 static void rebuild_sidebar (BroWindow *self);
+
+/* The sidebar says "Checking…" while archives are verified; progress alone doesn't rebuild it. */
+static void
+on_verify_changed (BroWindow *self)
+{
+  if (bro_app_state ()->verify.running != self->verify_running)
+    {
+      self->verify_running = bro_app_state ()->verify.running;
+      rebuild_sidebar (self);
+    }
+}
 
 static GtkWidget *
 sidebar_row (const char *tag, const char *icon, const char *title, const char *subtitle, gboolean dim)
@@ -147,6 +159,10 @@ rebuild_sidebar (BroWindow *self)
     gtk_list_box_append (self->sidebar, row);
     if (g_strcmp0 ("history", self->current_tag) == 0)
       select = GTK_LIST_BOX_ROW (row);
+    row = sidebar_row ("verify", "security-high-symbolic", "Archive Check", st->verify.running ? "Checking…" : NULL, FALSE);
+    gtk_list_box_append (self->sidebar, row);
+    if (g_strcmp0 ("verify", self->current_tag) == 0)
+      select = GTK_LIST_BOX_ROW (row);
   }
   if (select)
     gtk_list_box_select_row (self->sidebar, select);
@@ -171,6 +187,8 @@ bro_window_navigate (BroWindow *self, const char *tag)
     set_content (self, "History", bro_history_page_new ());
   else if (g_str_equal (tag, "tools"))
     set_content (self, "Drive Tools", bro_tools_page_new ());
+  else if (g_str_equal (tag, "verify"))
+    set_content (self, "Archive Check", bro_verify_page_new ());
   else
     set_content (self, "Queue", bro_queue_page_new ());
   rebuild_sidebar (self);
@@ -322,6 +340,8 @@ action_history (GSimpleAction *a, GVariant *p, gpointer self) { bro_window_navig
 static void
 action_tools (GSimpleAction *a, GVariant *p, gpointer self) { bro_window_navigate (self, "tools"); }
 static void
+action_verify (GSimpleAction *a, GVariant *p, gpointer self) { bro_window_navigate (self, "verify"); }
+static void
 action_prefs (GSimpleAction *a, GVariant *p, gpointer self) { bro_preferences_present (GTK_WIDGET (self)); }
 
 static void
@@ -396,6 +416,7 @@ bro_window_init (BroWindow *self)
     { "queue", action_queue, NULL, NULL, NULL, { 0 } },
     { "history", action_history, NULL, NULL, NULL, { 0 } },
     { "tools", action_tools, NULL, NULL, NULL, { 0 } },
+    { "verify", action_verify, NULL, NULL, NULL, { 0 } },
     { "preferences", action_prefs, NULL, NULL, NULL, { 0 } },
     { "about", action_about, NULL, NULL, NULL, { 0 } },
   };
@@ -431,6 +452,7 @@ bro_window_init (BroWindow *self)
   g_menu_append (menu, "Open BDMV / VIDEO_TS Folder…", "win.open-folder");
   g_menu_append (menu, "Rescan Drives", "win.rescan");
   g_menu_append (menu, "Close All Trays", "win.close-trays");
+  g_menu_append (menu, "Verify Archive…", "win.verify");
   g_menu_append (menu, "Drive Tools", "win.tools");
   g_menu_append (menu, "Preferences", "win.preferences");
   g_menu_append (menu, "About Bromelia", "win.about");
@@ -495,6 +517,7 @@ bro_window_init (BroWindow *self)
 
   g_signal_connect_object (bro_app_state (), "drives-changed", G_CALLBACK (rebuild_sidebar), self, G_CONNECT_SWAPPED);
   g_signal_connect_object (bro_app_state (), "jobs-changed", G_CALLBACK (rebuild_sidebar), self, G_CONNECT_SWAPPED);
+  g_signal_connect_object (bro_app_state (), "verify-changed", G_CALLBACK (on_verify_changed), self, G_CONNECT_SWAPPED);
   g_signal_connect_object (bro_app_state (), "tick", G_CALLBACK (rebuild_sidebar), self, G_CONNECT_SWAPPED);
   g_signal_connect_object (bro_app_state (), "status-changed", G_CALLBACK (on_status_changed), self, 0);
   bro_window_navigate (self, "queue");

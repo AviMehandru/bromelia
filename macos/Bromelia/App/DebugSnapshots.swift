@@ -67,6 +67,27 @@ enum DebugSnapshots {
         done.producedFiles = [URL(fileURLWithPath: "/Movies/x.mkv")]
         done.outputDirectory = URL(fileURLWithPath: "/Movies")
         model.jobs.append(done)
+        // The disc in the left drive was archived before; the last archive check found a damaged folder.
+        let archived = FileManager.default.temporaryDirectory.path
+        model.history = [HistoryRecord(id: UUID(), title: info.name, driveName: "Left drive", discName: info.name, mode: .mkv, state: .succeeded,
+                                       startedAt: Date().addingTimeInterval(-90000), finishedAt: Date().addingTimeInterval(-86400),
+                                       outputDirectory: archived, files: [], errorMessage: nil, logPath: "", warnings: 0, errors: 0,
+                                       fingerprint: DiscFingerprint.of(info))]
+        var ok = ArchiveVerifier.FolderCheck(folder: "/Volumes/Archive/Movies/Inception (2010)")
+        ok.files = 3
+        var bad = ArchiveVerifier.FolderCheck(folder: "/Volumes/Archive/TV Shows/One Piece (1999)")
+        bad.files = 12
+        bad.changed = ["Season 03/One Piece (1999) - S03E01.mkv"]
+        bad.missing = ["Season 03/One Piece (1999) - S03E04.mkv"]
+        bad.extra = ["Season 03/One Piece (1999) - S03E02.nfo"]
+        model.verify.results = [ok, bad]
+        model.verify.path = "/Volumes/Archive"
+        model.verify.finishedAt = Date()
+        model.checkRecords[archived] = CheckRecord(checkedAt: Date(), ok: true, summary: "3 file(s) OK")
+        model.selection = .history
+        render(ContentView().environment(model), size: CGSize(width: 1280, height: 800), to: out.appendingPathComponent("main-history.png"))
+        model.selection = .archiveCheck
+        render(ContentView().environment(model), size: CGSize(width: 1280, height: 800), to: out.appendingPathComponent("main-archive-check.png"))
 
         model.selection = .drive(left.id.uuidString)
         render(ContentView().environment(model), size: CGSize(width: 1280, height: 800), to: out.appendingPathComponent("main-drive.png"))

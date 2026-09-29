@@ -12,6 +12,7 @@ GtkWidget *bro_drive_page_new (const char *tag); /* "drive:<id>" or "source:<key
 GtkWidget *bro_queue_page_new (void);
 GtkWidget *bro_history_page_new (void);
 GtkWidget *bro_tools_page_new (void);
+GtkWidget *bro_verify_page_new (void); /* Archive Check */
 
 void       bro_config_dialog_present (GtkWidget *parent, const char *config_id);
 void       bro_preferences_present (GtkWidget *parent);

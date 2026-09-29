@@ -63,6 +63,13 @@ public static class DriveConfigEditor
         f.Toggle("Show a notification when the job finishes", () => c.Automation.Notify, v => c.Automation.Notify = v);
         f.Toggle("Play a sound", () => c.Automation.PlaySound, v => c.Automation.PlaySound = v);
         f.Number("Before an automatic rip, wait for the disc to be mounted for up to", () => c.Automation.WaitForMountSeconds, v => c.Automation.WaitForMountSeconds = v, 0, 600, suffix: "seconds");
+        f.Choice("A disc archived before", new[]
+            {
+                (AlreadyArchived.Skip, "Skip it (eject when done)"), (AlreadyArchived.Ask, "Stop and ask (leave it in the drive)"),
+                (AlreadyArchived.RipAgain, "Rip it again"),
+            },
+            () => c.Automation.AlreadyArchived, v => c.Automation.AlreadyArchived = v,
+            "Automatic rips. A disc is recognised by its fingerprint, in the history or a bromelia.json under the output folder. Manual rips ask first.");
         f.Section("Other discs", "For discs without a DVD or Blu-ray structure, when ripped automatically or with Rip. Audio CDs are ripped by cyanrip or abcde (both look up the album in MusicBrainz and write FLAC). Data discs are copied sector by sector to an ISO image.");
         f.Toggle("Rip audio CDs", () => c.Other.RipAudioCDs, v => c.Other.RipAudioCDs = v);
         f.Text("Audio CD command", () => c.Other.AudioCommand, v => c.Other.AudioCommand = v, "Empty: cyanrip -d {device} -o flac, else abcde");
