@@ -813,6 +813,17 @@ public class IntegrationFeatureTests
     }
 
     [Fact]
+    public void OnlyDriveLettersAreReadAsDevices()
+    {
+        // A file on C: must be read as that file, never as the whole C: volume.
+        Assert.Equal(@"\\.\E:", OtherDiscTools.DevicePath("e:", true));
+        Assert.Equal(@"\\.\E:", OtherDiscTools.DevicePath(@"E:\", true));
+        Assert.Equal(@"C:\Users\me\disc.bin", OtherDiscTools.DevicePath(@"C:\Users\me\disc.bin", true));
+        Assert.Equal("/dev/sr0", OtherDiscTools.DevicePath("/dev/sr0", false));
+        Assert.Equal("E:", OtherDiscTools.DevicePath("E:", false));
+    }
+
+    [Fact]
     public void WebAccessRules()
     {
         var c = new WebUIConfig();

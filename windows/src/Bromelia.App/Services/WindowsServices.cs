@@ -55,7 +55,9 @@ public sealed class WindowsPlatformServices : IPlatformServices
     public static string? Win32DevicePath(string device)
     {
         var d = device.Trim();
-        if (d.Length >= 2 && char.IsLetter(d[0]) && d[1] == ':') return $@"\\.\{char.ToUpperInvariant(d[0])}:";
+        // Only a bare drive letter (E: or E:\); a longer path is a file or folder, never a device.
+        if (d.Length >= 2 && char.IsLetter(d[0]) && d[1] == ':')
+            return d.Length == 2 || (d.Length == 3 && d[2] is '\\' or '/') ? $@"\\.\{char.ToUpperInvariant(d[0])}:" : null;
         if (d.StartsWith(@"\Device\", StringComparison.OrdinalIgnoreCase)) return @"\\.\" + d[8..];
         if (d.StartsWith(@"\\.\", StringComparison.Ordinal)) return d;
         return null;

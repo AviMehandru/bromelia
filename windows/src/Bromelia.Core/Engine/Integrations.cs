@@ -202,12 +202,15 @@ public static class OtherDiscTools
         return null;
     }
 
-    /// <summary>The path to read a disc from: \\.\E: for a Windows drive letter, else the device itself.</summary>
-    public static string DevicePath(string device)
+    /// <summary>The path to read a disc from: \\.\E: for a Windows drive letter (<c>E:</c> or <c>E:\</c>), else the device
+    /// itself. A longer path such as <c>C:\images\disc.iso</c> is a file, never its whole volume.</summary>
+    public static string DevicePath(string device) => DevicePath(device, OperatingSystem.IsWindows());
+
+    public static string DevicePath(string device, bool windows)
     {
         var d = device.Trim();
-        if (OperatingSystem.IsWindows() && d.Length >= 2 && char.IsLetter(d[0]) && d[1] == ':') return $@"\\.\{char.ToUpperInvariant(d[0])}:";
-        return d;
+        bool driveLetter = d.Length >= 2 && char.IsLetter(d[0]) && d[1] == ':' && (d.Length == 2 || (d.Length == 3 && d[2] is '\\' or '/'));
+        return windows && driveLetter ? $@"\\.\{char.ToUpperInvariant(d[0])}:" : d;
     }
 
     /// <summary>Copies a data disc sector by sector into <paramref name="destination"/>. A read error fails the copy (no
