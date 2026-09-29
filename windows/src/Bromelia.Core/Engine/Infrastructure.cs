@@ -303,8 +303,10 @@ public static class UnfinishedJobs
     public static List<HistoryRecord> Recover()
     {
         var records = new List<HistoryRecord>();
-        if (!Directory.Exists(Paths.AppData)) return records;
-        foreach (var path in Directory.EnumerateFiles(Paths.AppData, "unfinished-*.json").OrderBy(p => p, StringComparer.Ordinal))
+        List<string> files;
+        try { files = Directory.EnumerateFiles(Paths.AppData, "unfinished-*.json").OrderBy(p => p, StringComparer.Ordinal).ToList(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return records; } // no data folder yet
+        foreach (var path in files)
         {
             Contents? c;
             try { c = JsonSerializer.Deserialize<Contents>(File.ReadAllText(path), ConfigJson.Options); }

@@ -5,6 +5,9 @@ using Bromelia.Core.Logic;
 using Bromelia.Core.Robot;
 using Xunit;
 
+// Many tests point Paths.DataOverride (a static) at their own folder, so they must not run at the same time.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
 namespace Bromelia.Core.Tests;
 
 // Tests for the safeguards that keep damaged, incomplete or wrong rips out of the archive:
@@ -1265,8 +1268,8 @@ public class ArchiveCheckTests : IDisposable
             for (int i = 0; i < 200 && state.Verify.Running; i++) await Task.Delay(25);
             Assert.False(state.CheckRecords[good].Ok);
             Assert.False(CheckRecords.Load()[good].Ok);
-            var damaged = (System.Collections.IList)((Dictionary<string, object>)state.WebStatus()["verify"])["damaged"];
-            Assert.Equal(1, damaged.Count);
+            var damaged = (System.Collections.IEnumerable)((Dictionary<string, object>)state.WebStatus()["verify"])["damaged"];
+            Assert.Single(damaged);
         });
     }
 
