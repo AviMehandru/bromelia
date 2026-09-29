@@ -62,6 +62,11 @@ public static class DriveConfigEditor
         f.Toggle("Eject the disc when the job fails", () => c.Automation.EjectOnFailure, v => c.Automation.EjectOnFailure = v);
         f.Toggle("Show a notification when the job finishes", () => c.Automation.Notify, v => c.Automation.Notify = v);
         f.Toggle("Play a sound", () => c.Automation.PlaySound, v => c.Automation.PlaySound = v);
+        f.Number("Before an automatic rip, wait for the disc to be mounted for up to", () => c.Automation.WaitForMountSeconds, v => c.Automation.WaitForMountSeconds = v, 0, 600, suffix: "seconds");
+        f.Section("Other discs", "For discs without a DVD or Blu-ray structure, when ripped automatically or with Rip. Audio CDs are ripped by cyanrip or abcde (both look up the album in MusicBrainz and write FLAC). Data discs are copied sector by sector to an ISO image.");
+        f.Toggle("Rip audio CDs", () => c.Other.RipAudioCDs, v => c.Other.RipAudioCDs = v);
+        f.Text("Audio CD command", () => c.Other.AudioCommand, v => c.Other.AudioCommand = v, "Empty: cyanrip -d {device} -o flac, else abcde");
+        f.Toggle("Save data discs as ISO images", () => c.Other.ImageDataDiscs, v => c.Other.ImageDataDiscs = v);
         return f.Root;
     }
 
@@ -98,8 +103,16 @@ public static class DriveConfigEditor
 
         f.Section("What to do with a disc");
         var help = Form.Help(ModeHelp(c.Rip.Mode));
-        f.Choice("Mode", Enum.GetValues<RipMode>().Select(m => (m, m.Label())), () => c.Rip.Mode, v => { c.Rip.Mode = v; help.Text = ModeHelp(v); });
+        f.Choice("Mode", EnumLabels.VideoModes.Select(m => (m, m.Label())), () => c.Rip.Mode, v => { c.Rip.Mode = v; help.Text = ModeHelp(v); });
         f.Add(help);
+        foreach (var (key, label) in new[] { ("dvd", "DVDs"), ("bluray", "Blu-rays"), ("uhd", "4K UHD discs") })
+        {
+            var options = new List<(RipMode?, string)> { (null, "Same as above") };
+            options.AddRange(EnumLabels.VideoModes.Select(m => ((RipMode?)m, m.Label())));
+            f.Choice(label, options, () => c.Rip.FormatModes.TryGetValue(key, out var fm) ? fm : null,
+                v => { if (v is { } mode) c.Rip.FormatModes[key] = mode; else c.Rip.FormatModes.Remove(key); });
+        }
+        f.Note("Automatic and quick rips can use a different mode for each kind of disc, for example a backup of every Blu-ray and MKV files of DVDs.");
         f.Choice("Backup format", new[] { (BackupFormat.Folder, "Folder (BDMV / VIDEO_TS)"), (BackupFormat.Iso, "ISO image") }, () => c.Rip.BackupFormat, v => c.Rip.BackupFormat = v);
         f.Toggle("Keep the backup after the MKV files are made (backup + MKV mode)", () => c.Rip.KeepBackupAfterMkv, v => c.Rip.KeepBackupAfterMkv = v);
 
@@ -182,6 +195,9 @@ public static class DriveConfigEditor
         }
         f.Changed += () => { Refresh(); changed(); };
         f.Section("Location");
+        f.Choice("Layout", new[] { (LibraryLayout.Templates, "Folder and file name templates"), (LibraryLayout.MediaServer, "Plex / Jellyfin / Emby library") },
+            () => c.Output.Layout, v => c.Output.Layout = v,
+            "Plex / Jellyfin / Emby: Movies\\Name (Year)\\Name (Year).mkv, TV Shows\\Name (Year)\\Season 02\\Name (Year) - S02E05.mkv; other titles go to Other and backups to Backup (hidden from the server). Turn on the online lookup for years; the templates below aren't used.");
         f.PathPicker("Output folder", () => c.Output.RootOverride, v => c.Output.RootOverride = v, folder: true, placeholder: $"Global default: {App.State.Config.OutputRoot}");
         var folderBox = f.Text("Folder name", () => c.Output.FolderTemplate, v => c.Output.FolderTemplate = v, OutputConfig.DefaultFolderTemplate);
         f.Add(preview);

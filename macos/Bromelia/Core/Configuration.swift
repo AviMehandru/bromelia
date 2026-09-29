@@ -79,8 +79,11 @@ struct TitleSelection: Codable, Hashable, Sendable {
 // MARK: - Rip
 
 enum RipMode: String, Codable, CaseIterable, Sendable, Identifiable {
-    case mkv, backup, backupDecrypted, backupThenMkv, infoOnly
+    /// `audioCD` and `dataImage` are for discs without a DVD / Blu-ray structure (see OtherDiscsConfig).
+    case mkv, backup, backupDecrypted, backupThenMkv, infoOnly, audioCD, dataImage
     var id: String { rawValue }
+    /// The modes a drive can be set to (the others are chosen from the kind of disc).
+    static let videoModes: [RipMode] = [.mkv, .backup, .backupDecrypted, .backupThenMkv, .infoOnly]
     var label: String {
         switch self {
         case .mkv: return "Rip titles to MKV"
@@ -88,6 +91,8 @@ enum RipMode: String, Codable, CaseIterable, Sendable, Identifiable {
         case .backupDecrypted: return "Backup (decrypted)"
         case .backupThenMkv: return "Decrypted backup, then MKV from backup"
         case .infoOnly: return "Scan only (save disc information)"
+        case .audioCD: return "Rip audio CD"
+        case .dataImage: return "Image data disc (ISO)"
         }
     }
     var shortLabel: String {
@@ -97,6 +102,8 @@ enum RipMode: String, Codable, CaseIterable, Sendable, Identifiable {
         case .backupDecrypted: return "Decrypted backup"
         case .backupThenMkv: return "Backup + MKV"
         case .infoOnly: return "Scan"
+        case .audioCD: return "Audio CD"
+        case .dataImage: return "Disc image"
         }
     }
     var makesBackup: Bool { self == .backup || self == .backupDecrypted || self == .backupThenMkv }
@@ -123,11 +130,28 @@ struct RipConfig: Codable, Hashable, Sendable {
     /// Additional raw switches appended before the command (advanced).
     var extraArguments: String = ""
     var writeDiscInfoJSON: Bool = false
+    /// Modes by disc format ("dvd", "bluray", "uhd") that replace `mode` for automatic and quick rips.
+    var formatModes: [String: RipMode] = [:]
 
     init() {}
 
+    /// The mode for a disc of `format` (automatic and quick rips).
+    func mode(for format: DiscFormat?) -> RipMode {
+        guard let format, let key = RipConfig.formatKey(format) else { return mode }
+        return formatModes[key] ?? mode
+    }
+
+    static func formatKey(_ f: DiscFormat) -> String? {
+        switch f {
+        case .dvd: return "dvd"
+        case .bluray: return "bluray"
+        case .uhd: return "uhd"
+        default: return nil
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case mode, backupFormat, keepBackupAfterMKV, titleSelection, minLengthSeconds, cacheMB, directIO, extraArguments, writeDiscInfoJSON
+        case mode, backupFormat, keepBackupAfterMKV, titleSelection, minLengthSeconds, cacheMB, directIO, extraArguments, writeDiscInfoJSON, formatModes
     }
 
     init(from decoder: Decoder) throws {
@@ -142,6 +166,7 @@ struct RipConfig: Codable, Hashable, Sendable {
         directIO = try? c.decodeIfPresent(Bool.self, forKey: .directIO)
         extraArguments = c.value(.extraArguments, d.extraArguments)
         writeDiscInfoJSON = c.value(.writeDiscInfoJSON, d.writeDiscInfoJSON)
+        formatModes = c.value(.formatModes, d.formatModes)
     }
 }
 
@@ -159,6 +184,17 @@ enum ConflictPolicy: String, Codable, CaseIterable, Sendable, Identifiable {
     }
 }
 
+/// How output is named: with the folder and file name templates, or the way media servers expect it.
+enum LibraryLayout: String, Codable, CaseIterable, Sendable, Identifiable {
+    /// The folder and file name templates.
+    case templates
+    /// Plex / Jellyfin / Emby: `Movies/Name (Year)/Name (Year).mkv`,
+    /// `TV Shows/Name (Year)/Season 02/Name (Year) - S02E05.mkv`, other titles in `Other/`.
+    case mediaServer
+    var id: String { rawValue }
+    var label: String { self == .templates ? "Folder and file name templates" : "Plex / Jellyfin / Emby library" }
+}
+
 struct OutputConfig: Codable, Hashable, Sendable {
     /// `{name} - {episode} - {discLabel} - {rip} - {track} - {format}`, leaving out the parts that don't apply.
     static let defaultFileNameTemplate = "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
@@ -173,10 +209,11 @@ struct OutputConfig: Codable, Hashable, Sendable {
     var fileNameTemplate: String = OutputConfig.defaultFileNameTemplate
     var backupSubfolder: String = "backup"
     var conflictPolicy: ConflictPolicy = .uniqueSuffix
+    var layout: LibraryLayout = .templates
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case rootOverride, folderTemplate, fileNameTemplate, backupSubfolder, conflictPolicy }
+    enum CodingKeys: String, CodingKey { case rootOverride, folderTemplate, fileNameTemplate, backupSubfolder, conflictPolicy, layout }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -186,6 +223,7 @@ struct OutputConfig: Codable, Hashable, Sendable {
         fileNameTemplate = c.value(.fileNameTemplate, d.fileNameTemplate)
         backupSubfolder = c.value(.backupSubfolder, d.backupSubfolder)
         conflictPolicy = c.value(.conflictPolicy, d.conflictPolicy)
+        layout = c.value(.layout, d.layout)
     }
 }
 
@@ -199,10 +237,12 @@ struct AutomationConfig: Codable, Hashable, Sendable {
     var ejectOnFailure: Bool = false
     var notify: Bool = true
     var playSound: Bool = true
+    /// Before an automatic rip, wait up to this long for the system to mount the disc. 0 = don't wait.
+    var waitForMountSeconds: Int = 30
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case autoRipOnInsert, autoRipDelaySeconds, ejectWhenDone, ejectOnFailure, notify, playSound }
+    enum CodingKeys: String, CodingKey { case autoRipOnInsert, autoRipDelaySeconds, ejectWhenDone, ejectOnFailure, notify, playSound, waitForMountSeconds }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -213,6 +253,31 @@ struct AutomationConfig: Codable, Hashable, Sendable {
         ejectOnFailure = c.value(.ejectOnFailure, d.ejectOnFailure)
         notify = c.value(.notify, d.notify)
         playSound = c.value(.playSound, d.playSound)
+        waitForMountSeconds = c.value(.waitForMountSeconds, d.waitForMountSeconds)
+    }
+}
+
+// MARK: - Other discs
+
+/// What to do with discs that aren't DVDs or Blu-rays, when they are ripped automatically or with “Rip”.
+struct OtherDiscsConfig: Codable, Hashable, Sendable {
+    /// Rip audio CDs with `audioCommand` (cyanrip or abcde look up the album in MusicBrainz).
+    var ripAudioCDs: Bool = true
+    /// Save data discs (CD-ROM, DVD-ROM, BD-ROM without video) as ISO images.
+    var imageDataDiscs: Bool = true
+    /// Command for audio CDs, run in the output folder. `{device}` is the drive. Empty = cyanrip, else abcde.
+    var audioCommand: String = ""
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case ripAudioCDs, imageDataDiscs, audioCommand }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = OtherDiscsConfig()
+        ripAudioCDs = c.value(.ripAudioCDs, d.ripAudioCDs)
+        imageDataDiscs = c.value(.imageDataDiscs, d.imageDataDiscs)
+        audioCommand = c.value(.audioCommand, d.audioCommand)
     }
 }
 
@@ -299,12 +364,15 @@ struct PostProcessStep: Codable, Hashable, Sendable, Identifiable {
     var matchName: String = ""
     /// Run only for these format codes (DVD, DVDe, BR, BRe, 4K, 4Ke; `BR*` = any code starting with BR). Empty = all.
     var matchFormats: [String] = []
+    /// Run after the job has finished and the disc is out, in a queue of its own (encoding, uploads), so the
+    /// drive is free for the next disc. Such steps can't fail the job.
+    var background: Bool = false
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
         case id, name, enabled, executable, interpreter, arguments, workingDirectory, runOn, perFile, timeoutSeconds, environment, failJobOnError,
-             matchName, matchFormats
+             matchName, matchFormats, background
     }
 
     init(from decoder: Decoder) throws {
@@ -324,6 +392,7 @@ struct PostProcessStep: Codable, Hashable, Sendable, Identifiable {
         failJobOnError = c.value(.failJobOnError, d.failJobOnError)
         matchName = c.value(.matchName, d.matchName)
         matchFormats = c.value(.matchFormats, d.matchFormats)
+        background = c.value(.background, d.background)
     }
 }
 
@@ -455,11 +524,12 @@ struct DriveConfig: Codable, Hashable, Sendable, Identifiable {
     var automation = AutomationConfig()
     var archive = ArchiveConfig()
     var episodes = EpisodeConfig()
+    var other = OtherDiscsConfig()
     var postProcess: [PostProcessStep] = []
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case id, name, enabled, match, settings, profile, rip, output, automation, archive, episodes, postProcess }
+    enum CodingKeys: String, CodingKey { case id, name, enabled, match, settings, profile, rip, output, automation, archive, episodes, other, postProcess }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -475,6 +545,7 @@ struct DriveConfig: Codable, Hashable, Sendable, Identifiable {
         automation = c.value(.automation, d.automation)
         archive = c.value(.archive, d.archive)
         episodes = c.value(.episodes, d.episodes)
+        other = c.value(.other, d.other)
         postProcess = c.value(.postProcess, d.postProcess)
     }
 
@@ -554,12 +625,23 @@ struct AppConfig: Codable, Hashable, Sendable {
     var stallTimeoutMinutes: Int = 30
     /// Keep the computer from going to sleep while jobs run.
     var preventSleep: Bool = true
+    /// Online lookup of the movie / show (canonical title, year, ids).
+    var metadata = MetadataConfig()
+    /// Where to send notifications of finished jobs (webhooks, ntfy, Discord, Slack, any Apprise URL).
+    var notifications: [NotificationTarget] = []
+    /// Download and register MakeMKV's current beta key at startup and when the key has expired.
+    var autoUpdateBetaKey: Bool = false
+    /// How many background post-processing steps (encoding, uploads) run at the same time.
+    var backgroundJobs: Int = 1
+    /// Web page for watching and controlling Bromelia from a browser.
+    var webUI = WebUIConfig()
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
         case version, makemkvconPath, mkvmergePath, outputRoot, pollIntervalSeconds, pollWhileRipping, maxConcurrentJobs,
-             registrationKey, globalSettings, defaultDrive, drives, presets, plugins, historyLimit, stallTimeoutMinutes, preventSleep
+             registrationKey, globalSettings, defaultDrive, drives, presets, plugins, historyLimit, stallTimeoutMinutes, preventSleep,
+             metadata, notifications, autoUpdateBetaKey, backgroundJobs, webUI
     }
 
     init(from decoder: Decoder) throws {
@@ -581,6 +663,11 @@ struct AppConfig: Codable, Hashable, Sendable {
         historyLimit = c.value(.historyLimit, d.historyLimit)
         stallTimeoutMinutes = c.value(.stallTimeoutMinutes, d.stallTimeoutMinutes)
         preventSleep = c.value(.preventSleep, d.preventSleep)
+        metadata = c.value(.metadata, d.metadata)
+        notifications = c.value(.notifications, d.notifications)
+        autoUpdateBetaKey = c.value(.autoUpdateBetaKey, d.autoUpdateBetaKey)
+        backgroundJobs = c.value(.backgroundJobs, d.backgroundJobs)
+        webUI = c.value(.webUI, d.webUI)
         // Files without a version are treated as version 1.
         let loaded = (try? c.decodeIfPresent(Int.self, forKey: .version)) ?? 1
         if loaded < 2 {
@@ -612,5 +699,84 @@ struct AppConfig: Codable, Hashable, Sendable {
     func outputRoot(for drive: DriveConfig) -> String {
         let r = drive.output.rootOverride.trimmingCharacters(in: .whitespaces)
         return r.isEmpty ? outputRoot : r
+    }
+}
+
+// MARK: - Online services
+
+enum MetadataProvider: String, Codable, CaseIterable, Sendable, Identifiable {
+    case none, tmdb, omdb
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .none: return "Off"
+        case .tmdb: return "The Movie Database (TMDb)"
+        case .omdb: return "OMDb (IMDb data)"
+        }
+    }
+}
+
+struct MetadataConfig: Codable, Hashable, Sendable {
+    var provider: MetadataProvider = .none
+    /// TMDb: API key (v3) or read access token; OMDb: API key.
+    var apiKey: String = ""
+    /// TMDb language for titles, e.g. en-US.
+    var language: String = "en-US"
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case provider, apiKey, language }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = MetadataConfig()
+        provider = c.value(.provider, d.provider)
+        apiKey = c.value(.apiKey, d.apiKey)
+        language = c.value(.language, d.language)
+    }
+}
+
+/// A place to send job notifications. `url` is an http(s) webhook (Discord and Slack webhooks are recognised),
+/// `ntfy://topic` / `ntfys://host/topic`, or any other Apprise URL (sent with the `apprise` command).
+struct NotificationTarget: Codable, Hashable, Sendable, Identifiable {
+    var id = UUID()
+    var url: String = ""
+    var enabled: Bool = true
+    /// Only for jobs that didn't succeed (failed, cancelled, read errors).
+    var onlyProblems: Bool = false
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case id, url, enabled, onlyProblems }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = NotificationTarget()
+        id = c.value(.id, UUID())
+        url = c.value(.url, d.url)
+        enabled = c.value(.enabled, d.enabled)
+        onlyProblems = c.value(.onlyProblems, d.onlyProblems)
+    }
+}
+
+struct WebUIConfig: Codable, Hashable, Sendable {
+    var enabled: Bool = false
+    /// 127.0.0.1 = this computer only; 0.0.0.0 = the network (set a token).
+    var address: String = "127.0.0.1"
+    var port: Int = 51280
+    /// Required for everything when set (header `Authorization: Bearer <token>` or `?token=`).
+    var token: String = ""
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case enabled, address, port, token }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = WebUIConfig()
+        enabled = c.value(.enabled, d.enabled)
+        address = c.value(.address, d.address)
+        port = c.value(.port, d.port)
+        token = c.value(.token, d.token)
     }
 }

@@ -9,11 +9,19 @@ G_BEGIN_DECLS
 
 typedef enum { BRO_STRATEGY_ALL, BRO_STRATEGY_LONGEST, BRO_STRATEGY_INDICES, BRO_STRATEGY_MANUAL } BroStrategy;
 typedef enum { BRO_INDEX_MAKEMKV, BRO_INDEX_SOURCE } BroIndexBase;
-typedef enum { BRO_MODE_MKV, BRO_MODE_BACKUP, BRO_MODE_BACKUP_DECRYPTED, BRO_MODE_BACKUP_THEN_MKV, BRO_MODE_INFO_ONLY } BroRipMode;
+/* AUDIO_CD and DATA_IMAGE are for discs without a DVD / Blu-ray structure (see BroOtherDiscs). */
+typedef enum { BRO_MODE_MKV, BRO_MODE_BACKUP, BRO_MODE_BACKUP_DECRYPTED, BRO_MODE_BACKUP_THEN_MKV, BRO_MODE_INFO_ONLY,
+               BRO_MODE_AUDIO_CD, BRO_MODE_DATA_IMAGE } BroRipMode;
+#define BRO_VIDEO_MODE_COUNT 5 /* the modes a drive can be set to; the others are chosen from the kind of disc */
 typedef enum { BRO_BACKUP_FOLDER, BRO_BACKUP_ISO } BroBackupFormat;
 typedef enum { BRO_CONFLICT_UNIQUE, BRO_CONFLICT_OVERWRITE, BRO_CONFLICT_SKIP } BroConflictPolicy;
 typedef enum { BRO_RUN_SUCCESS, BRO_RUN_FAILURE, BRO_RUN_ALWAYS } BroRunCondition;
 typedef enum { BRO_PROFILE_MAKEMKV_DEFAULT, BRO_PROFILE_GENERATED, BRO_PROFILE_CUSTOM_FILE } BroProfileMode;
+/* How output is named: with the folder and file name templates, or the way Plex / Jellyfin / Emby expect it. */
+typedef enum { BRO_LAYOUT_TEMPLATES, BRO_LAYOUT_MEDIA_SERVER } BroLibraryLayout;
+typedef enum { BRO_METADATA_NONE, BRO_METADATA_TMDB, BRO_METADATA_OMDB } BroMetadataProvider;
+/* Disc formats with a mode of their own (rip.formatModes). */
+typedef enum { BRO_FORMAT_KEY_DVD, BRO_FORMAT_KEY_BLURAY, BRO_FORMAT_KEY_UHD, BRO_FORMAT_KEY_COUNT } BroFormatKey;
 typedef enum { BRO_LPCM_COPY, BRO_LPCM_LPCM, BRO_LPCM_WAVEX, BRO_LPCM_FLAC_BEST, BRO_LPCM_FLAC_FAST } BroLpcmOutput;
 
 typedef struct {
@@ -41,6 +49,7 @@ typedef struct {
   int direct_io;          /* -1 = not set, 0 = false, 1 = true */
   char *extra_arguments;
   gboolean write_disc_info_json;
+  int format_modes[BRO_FORMAT_KEY_COUNT]; /* BroRipMode for DVDs, Blu-rays and 4K UHD discs; -1 = the drive's mode */
 } BroRipConfig;
 
 /* {name} - {episode} - {discLabel} - {rip} - {track} - {format}, leaving out parts that don't apply. */
@@ -55,6 +64,7 @@ typedef struct {
   char *file_name_template;
   char *backup_subfolder;
   BroConflictPolicy conflict_policy;
+  BroLibraryLayout layout;
 } BroOutputConfig;
 
 typedef struct {
@@ -64,7 +74,15 @@ typedef struct {
   gboolean eject_on_failure;
   gboolean notify;
   gboolean play_sound;
+  int wait_for_mount_seconds; /* before an automatic rip, wait up to this long for the disc to be mounted; 0 = don't */
 } BroAutomation;
+
+/* What to do with discs that aren't DVDs or Blu-rays, when they are ripped automatically or with "Rip". */
+typedef struct {
+  gboolean rip_audio_cds;    /* with audio_command (cyanrip or abcde look the album up in MusicBrainz) */
+  gboolean image_data_discs; /* data discs as ISO images */
+  char *audio_command;       /* run in the output folder; {device} is the drive; "" = cyanrip, else abcde */
+} BroOtherDiscs;
 
 typedef struct {
   gboolean checksums;      /* SHA256SUMS in the output folder */
@@ -93,6 +111,7 @@ typedef struct {
   gboolean fail_job_on_error;
   char *match_name;        /* regular expression on the name / disc label; "" = all */
   GPtrArray *match_formats; /* char*: DVD, DVDe, BR, BRe, 4K, 4Ke, "BR*"…; empty = all */
+  gboolean background;      /* run after the job, once the disc is out, in the background queue; can't fail the job */
 } BroPostStep;
 
 typedef struct {
@@ -127,6 +146,7 @@ typedef struct {
   BroAutomation automation;
   BroArchiveConfig archive;
   BroEpisodeConfig episodes;
+  BroOtherDiscs other;
   GPtrArray *post_process; /* BroPostStep* */
 } BroDriveConfig;
 
@@ -135,6 +155,28 @@ typedef struct {
   char *name;
   BroDriveConfig *config;
 } BroPreset;
+
+typedef struct {
+  BroMetadataProvider provider;
+  char *api_key;  /* TMDb: API key (v3) or read access token; OMDb: API key */
+  char *language; /* TMDb language, e.g. en-US */
+} BroMetadataConfig;
+
+/* Where job notifications go: an http(s) webhook (Discord and Slack are recognised), ntfy://topic,
+ * ntfys://host/topic, or any other Apprise URL (sent with the apprise command). */
+typedef struct {
+  char *id;
+  char *url;
+  gboolean enabled;
+  gboolean only_problems; /* only jobs that didn't succeed */
+} BroNotificationTarget;
+
+typedef struct {
+  gboolean enabled;
+  char *address; /* 127.0.0.1 = this computer only; 0.0.0.0 = the network (needs a token) */
+  int port;
+  char *token;   /* required for everything when set (Authorization: Bearer <token> or ?token=) */
+} BroWebUIConfig;
 
 typedef struct {
   int version;
@@ -153,6 +195,11 @@ typedef struct {
   int history_limit;
   int stall_timeout_minutes; /* stop a rip or backup that prints nothing for this long; 0 = never */
   gboolean prevent_sleep;    /* keep the computer awake while jobs run */
+  BroMetadataConfig metadata;
+  GPtrArray *notifications;  /* BroNotificationTarget* */
+  gboolean auto_update_beta_key; /* register MakeMKV's current beta key at startup and when it has expired */
+  int background_jobs;       /* background post-processing steps that run at the same time */
+  BroWebUIConfig web_ui;
 } BroAppConfig;
 
 /* Enum <-> JSON string helpers (also used by labels in the UI). */
@@ -167,6 +214,15 @@ const char *bro_lpcm_to_string (BroLpcmOutput o);
 const char *bro_lpcm_label (BroLpcmOutput o);
 const char *bro_profile_mode_label (BroProfileMode m);
 const char *bro_conflict_label (BroConflictPolicy p);
+const char *bro_layout_label (BroLibraryLayout l);
+const char *bro_metadata_provider_label (BroMetadataProvider p);
+const char *bro_metadata_provider_to_string (BroMetadataProvider p);
+/* The mode for a disc with format key (BroFormatKey; -1 = unknown) in automatic and quick rips. */
+BroRipMode  bro_rip_config_mode_for (const BroRipConfig *r, int format_key);
+const char *bro_format_key_name (BroFormatKey k); /* dvd, bluray, uhd */
+
+BroNotificationTarget *bro_notification_target_new (void);
+void                   bro_notification_target_free (BroNotificationTarget *t);
 
 BroPostStep    *bro_post_step_new (void);
 void            bro_post_step_free (BroPostStep *s);

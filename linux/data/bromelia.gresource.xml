@@ -2,6 +2,7 @@
 <gresources>
   <gresource prefix="/app/bromelia/Bromelia">
     <file>settings-catalog.json</file>
+    <file>bromelia-web.html</file>
     <file>style.css</file>
     <file alias="icons/scalable/apps/app.bromelia.Bromelia.png">icons/app.bromelia.Bromelia.png</file>
   </gresource>

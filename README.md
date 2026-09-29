@@ -114,6 +114,25 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - Safety check: if MakeMKV's drive numbering changes during a backup (backups must use `disc:N`), the job
   stops instead of reading the wrong disc.
 
+### Like the other makemkvcon wrappers (ARM, docker-makemkv, MakeMKV-Auto-Rip, riplex, …)
+- **Online lookup** of the movie or show on TMDb or OMDb for canonical names such as `Inception (2010)`, with
+  `{releaseYear}`, `{tmdb}` and `{imdb}` tokens.
+- **Plex / Jellyfin / Emby layout**: `Movies/Name (Year)/Name (Year).mkv`,
+  `TV Shows/Name (Year)/Season 02/Name (Year) - S02E05.mkv`, extras in `Other/`, backups in an ignored `Backup/`;
+  later discs are added to the same show and season folders.
+- **Audio CDs** ripped with cyanrip or abcde (MusicBrainz tags, FLAC) and **data discs** saved as exact ISO images,
+  chosen automatically from what is in the drive.
+- **Separate modes for DVDs, Blu-rays and 4K discs** (e.g. backups of DVDs, MKVs of Blu-rays).
+- **Notifications** to Discord, Slack, ntfy, any webhook, or any Apprise service (Telegram, Pushover, e-mail, …).
+- **Background post-processing**: encoding or upload steps run after the disc is out, in their own queue, so the
+  drive is free for the next disc.
+- **Web page** for watching and controlling Bromelia from a browser (rip, eject, close tray, cancel), with a JSON
+  API, local-only by default and token-protected on a network.
+- **Headless**: `bromelia-daemon` and a Docker image for servers and NAS boxes ([docs/docker.md](docs/docker.md)).
+- **Beta key kept current** automatically (at startup and when it expires; purchased keys are never replaced).
+- **Trays**: close one drive's tray or all trays; automatic rips wait for the system to mount the disc first.
+- **Sequential or parallel** ripping: one job per drive in parallel, or set the maximum number of jobs to 1.
+
 ## Building
 
 ### macOS
@@ -158,7 +177,17 @@ ninja -C builddir
 sudo ninja -C builddir install   # optional: desktop file, icon, AppStream metadata
 ```
 
-`-Dui=false` builds only the core library and tests (no GTK needed).
+`-Dui=false` builds only the core library, `bromelia-daemon` and the tests (no GTK needed).
+
+### Headless / Docker
+`bromelia-daemon` runs Bromelia without a window (automatic rips, post-processing, notifications, web page).
+`docker/Dockerfile` builds it together with MakeMKV:
+
+```bash
+docker build -f docker/Dockerfile --build-arg ACCEPT_MAKEMKV_EULA=yes -t bromelia .
+```
+
+See [docs/docker.md](docs/docker.md) for drives, folders and the web page token.
 
 ## Testing
 
@@ -173,6 +202,10 @@ end-to-end tests that run a real disc image through the complete pipeline when p
 | `BROMELIA_TEST_ISO` | Any disc image: title choice, `mkvmerge` track removal, renaming, post-processing script, manifest |
 | `BROMELIA_TEST_DVD_ISO` | `One_Piece_S2_P7_D2.iso`: episode analysis straight from the ISO, menu OCR |
 | `BROMELIA_TEST_PLAYALL_ISO` | Same ISO: rip → split into episodes 138–143 → names → `SHA256SUMS` → plugins |
+| `BROMELIA_TEST_ONEPASS_ISO` | Same ISO: several titles ripped in one `makemkvcon` run |
+
+The data-disc tests image a random file standing in for a drive; with `BROMELIA_TEST_DVD_ISO` set they copy that
+image instead and compare hashes.
 
 ```bash
 # macOS
@@ -193,11 +226,12 @@ including the full WinUI 3 build on a Windows runner.
 ## Repository layout
 
 ```
-shared/     settings catalog, robot-output fixtures, icon source
+shared/     settings catalog, robot-output fixtures, web page, icon source
 macos/      Xcode project: Bromelia (SwiftUI app) and BromeliaTests
 windows/    Bromelia.sln: Bromelia.Core (platform-neutral engine), Bromelia.App (WinUI 3), tests
-linux/      meson project: core static library, GTK application, tests, desktop data
-docs/       configuration format and architecture notes
+linux/      meson project: core static library, GTK application, bromelia-daemon, tests, desktop data
+docker/     Dockerfile for bromelia-daemon with MakeMKV
+docs/       configuration format, architecture notes, running headless
 ```
 
 See [docs/architecture.md](docs/architecture.md) for how the pieces fit together.
@@ -213,7 +247,9 @@ See [docs/architecture.md](docs/architecture.md) for how the pieces fit together
   numbers from menus needs `ffmpeg` and `tesseract`.
 - Episode splitting works for DVDs (their menu navigation says where episodes start). Blu-ray TV discs
   normally store each episode as its own playlist, which is ripped and named per episode anyway.
-- The name comes from the disc itself; there is no online database lookup. Change it on the disc page
-  when the label is cryptic.
+- Without an online lookup the name comes from the disc itself; change it on the disc page when the label is
+  cryptic. The lookup finds the title and year, not episode titles.
+- Audio CDs need cyanrip or abcde (not on Windows by default: set an audio CD command); `apprise` URLs need the
+  `apprise` command.
 - The `e` format codes mean “not decrypted by Bromelia”: a DVD without CSS backed up without decryption
   is still labelled `DVDe`.

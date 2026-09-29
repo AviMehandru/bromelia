@@ -111,6 +111,8 @@ final class JobRunner {
     /// Error messages of the running makemkvcon count as read errors (rips and backups, not listings).
     private var collectDataErrors = false
     private var reportedMissingVerifier = false
+    /// The main feature of a movie (the longest title ripped), for media server names.
+    private var mainTitle: Int?
 
     init(job: RipJob, config: AppConfig, makemkvcon: URL, mkvmerge: URL?) {
         self.job = job
@@ -165,9 +167,11 @@ final class JobRunner {
         }
         status = await finishOutput(status: status)
 
-        // Post-processing.
+        // Post-processing. Background steps run later, in the background queue, once the disc is out.
         writeManifest(status: status)
-        let steps = applicableSteps(status: status)
+        let allSteps = applicableSteps(status: status)
+        let steps = allSteps.filter { !$0.background }
+        let backgroundSteps = allSteps.filter(\.background)
         if !steps.isEmpty && !cancelRequested {
             job.phase = "Post-processing"
             job.currentOperation = ""
@@ -204,6 +208,21 @@ final class JobRunner {
         job.currentOperation = ""
         if status == .succeeded { job.totalProgress = 1; job.currentProgress = 1 }
         writeManifest(status: status)
+        if !backgroundSteps.isEmpty && !cancelRequested {
+            job.background = BackgroundWork(jobId: job.id, title: job.title, steps: backgroundSteps,
+                                            context: PostProcessor.Context(status: status, values: templateValues(status: status),
+                                                                           outputDirectory: job.outputDirectory, files: job.producedFiles,
+                                                                           manifestPath: job.manifestFile.path, environment: scriptEnvironment(status: status)),
+                                            logFile: job.logDirectory.appendingPathComponent("background.txt"))
+            job.appendLog("\(backgroundSteps.count) post-processing step(s) queued to run in the background")
+        }
+        let summary = notificationText(status: status)
+        if !config.notifications.isEmpty {
+            await NotificationSender.send(config.notifications, title: summary.title, body: summary.body, status: status.statusWord) { [weak self] text in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.job.appendLog(text, severity: .warning) } }
+            }
+            await flushMainQueue()
+        }
         job.appendLog("Finished: \(status.label) in \(Formatters.duration(job.elapsed))")
         try? job.logHandle?.close()
         job.logHandle = nil
@@ -212,17 +231,22 @@ final class JobRunner {
         }
 
         if job.drive.automation.notify {
-            let body: String
-            switch status {
-            case .succeeded: body = "\(job.producedFiles.count) item(s) saved to \(job.outputDirectory?.path ?? "")"
-            case .completedWithErrors: body = "Read errors: the files were kept in \(job.outputDirectory?.path ?? "")"
-            case .cancelled: body = "Cancelled"
-            default: body = job.errorMessage ?? "Failed"
-            }
-            Notifier.post(title: "\(job.mode.shortLabel) \(status == .succeeded ? "finished" : status.label.lowercased()): \(job.discLabel.isEmpty ? job.sourceLabel : job.discLabel)",
-                          body: body, sound: job.drive.automation.playSound)
+            Notifier.post(title: summary.title, body: summary.body, sound: job.drive.automation.playSound)
         }
         onFinished?(job)
+    }
+
+    /// Title and text of the notification for a finished job.
+    private func notificationText(status: JobState) -> (title: String, body: String) {
+        let body: String
+        switch status {
+        case .succeeded: body = "\(job.producedFiles.count) item(s) saved to \(job.outputDirectory?.path ?? "")"
+        case .completedWithErrors: body = "Read errors: the files were kept in \(job.outputDirectory?.path ?? "")"
+        case .cancelled: body = "Cancelled"
+        default: body = job.errorMessage ?? "Failed"
+        }
+        let what = job.identity?.name ?? (job.discLabel.isEmpty ? job.sourceLabel : job.discLabel)
+        return ("\(job.mode.shortLabel) \(status == .succeeded ? "finished" : status.label.lowercased()): \(what)", body)
     }
 
     private func flushMainQueue() async {
@@ -232,6 +256,17 @@ final class JobRunner {
     // MARK: - Pipeline
 
     private func execute() async throws {
+        if case let .drive(_, device) = job.source, job.isAutomatic, job.drive.automation.waitForMountSeconds > 0, !device.isEmpty {
+            job.phase = "Waiting for the disc to be mounted"
+            let flag = cancelFlag
+            let mounted = await DriveControl.waitForMount(device: device, seconds: job.drive.automation.waitForMountSeconds, isCancelled: flag.isSet)
+            if cancelRequested { throw CancellationError() }
+            job.appendLog(mounted ? "The disc is mounted" : "The disc wasn't mounted after \(job.drive.automation.waitForMountSeconds) s; continuing")
+        }
+        if job.mode == .audioCD || job.mode == .dataImage {
+            try await executeOtherDisc()
+            return
+        }
         let needsAllTracks = job.mode.makesMKV && !job.trackSelections.isEmpty
         if needsAllTracks && mkvmerge == nil {
             throw JobError.message("Choosing individual tracks requires mkvmerge (MKVToolNix). Install MKVToolNix or reset the track choices.")
@@ -278,16 +313,18 @@ final class JobRunner {
         job.discInfo = info
         if let n = info?.name, !n.isEmpty { job.discLabel = n }
         resolveIdentity(info: info)
+        // Separate modes for DVDs, Blu-rays and 4K UHD discs (automatic and quick rips).
+        if job.usesConfiguredMode {
+            let m = job.drive.rip.mode(for: job.identity?.format)
+            if m != job.mode {
+                job.appendLog("\(job.identity?.format.label ?? "This disc"): \(m.label)")
+                job.mode = m
+                resolveIdentity(info: info)
+            }
+        }
+        await lookUpMetadata()
 
-        let outDir = try resolveOutputDirectory()
-        outputDir = outDir
-        job.outputDirectory = outDir
-        // Everything is written to a hidden staging folder first and only moved into the output folder
-        // once the job has finished and passed its checks.
-        let work = outDir.appendingPathComponent(Self.stagingPrefix + jobShortId, isDirectory: true)
-        workDir = work
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        job.appendLog("Output folder: \(outDir.path) (files are moved there once the job has finished and been checked)")
+        let work = try prepareOutput()
 
         switch job.mode {
         case .infoOnly:
@@ -302,6 +339,8 @@ final class JobRunner {
             job.stepCount = 1
             let dest = try await backup(decrypt: job.mode == .backupDecrypted, outDir: work, inSubfolder: false)
             job.producedFiles.append(dest)
+        case .audioCD, .dataImage:
+            break   // handled by executeOtherDisc
         case .backupThenMkv:
             job.stepCount = 2
             let dest = try await backup(decrypt: true, outDir: work, inSubfolder: true)
@@ -317,6 +356,88 @@ final class JobRunner {
                 job.appendLog("Removing backup \(dest.path)")
                 try? FileManager.default.removeItem(at: dest)
             }
+        }
+    }
+
+    /// Reserves the output folder and creates the hidden staging folder inside it, where everything is written
+    /// until the job has finished and passed its checks.
+    private func prepareOutput() throws -> URL {
+        let outDir = try resolveOutputDirectory()
+        outputDir = outDir
+        job.outputDirectory = outDir
+        let work = outDir.appendingPathComponent(Self.stagingPrefix + jobShortId, isDirectory: true)
+        workDir = work
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        job.appendLog("Output folder: \(outDir.path) (files are moved there once the job has finished and been checked)")
+        return work
+    }
+
+    /// The canonical title and year from TMDb or OMDb, when a provider is set up. Failures only log.
+    private func lookUpMetadata() async {
+        let m = config.metadata
+        guard m.provider != .none, !m.apiKey.isEmpty, let id = job.identity, !id.name.isEmpty else { return }
+        job.phase = "Looking up “\(id.name)”"
+        do {
+            if let match = try await MetadataLookup.lookup(name: id.name, kind: id.kind, config: m) {
+                job.metadata = match
+                job.appendLog("\(match.provider): “\(match.title)”\(match.year.map { " (\($0))" } ?? "")\(match.tmdbId.map { ", TMDb \($0)" } ?? "")\(match.imdbId.map { ", \($0)" } ?? "")")
+                resolveIdentity(info: job.discInfo)
+            } else {
+                job.appendLog("\(m.provider.label) found nothing for “\(id.name)”", severity: .warning)
+            }
+        } catch {
+            job.appendLog("Looking up “\(id.name)” failed: \(error.localizedDescription)", severity: .warning)
+        }
+    }
+
+    /// Audio CDs (ripped with cyanrip / abcde) and data discs (copied to an ISO image).
+    private func executeOtherDisc() async throws {
+        guard case let .drive(_, device) = job.source, !device.isEmpty else {
+            throw JobError.message("\(job.mode.label) needs a disc in a drive")
+        }
+        resolveIdentity(info: nil)
+        let work = try prepareOutput()
+        job.stepCount = 1
+        let (exe, args): (URL, [String])
+        if job.mode == .audioCD {
+            guard let cmd = OtherDiscTools.audioCommand(job.drive.other, device: device) else {
+                throw JobError.message("Ripping audio CDs needs cyanrip or abcde (both look up the album in MusicBrainz). Install one, or set an audio CD command.")
+            }
+            (exe, args) = cmd
+            job.phase = "Ripping the audio CD"
+        } else {
+            let name = backupName(decrypt: true)
+            let dest = work.appendingPathComponent("\((name.isEmpty ? "disc" : name)).iso")
+            (exe, args) = OtherDiscTools.imageCommand(device: device, destination: dest)
+            job.phase = "Copying the disc to an ISO image"
+        }
+        let runner = ProcessRunner(executable: exe, arguments: args, workingDirectory: work, stopSignal: SIGTERM)
+        job.commands.append(runner.commandLine)
+        job.appendLog("$ " + runner.commandLine)
+        activeRunner = runner
+        defer { activeRunner = nil }
+        let out: ProcessRunner.Output
+        do {
+            out = try await runner.run(stallTimeout: TimeInterval(max(0, config.stallTimeoutMinutes) * 60)) { [weak self] line in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.job.appendLog(line) } }
+            }
+        } catch {
+            throw JobError.message("Could not start \(exe.lastPathComponent): \(error.localizedDescription)")
+        }
+        await flushMainQueue()
+        if cancelRequested || out.wasCancelled { throw CancellationError() }
+        if out.stalled { throw JobError.message("\(exe.lastPathComponent) printed nothing for \(config.stallTimeoutMinutes) minutes and was stopped") }
+        if out.exitCode != 0 { throw JobError.message("\(exe.lastPathComponent) failed (exit status \(out.exitCode))") }
+        // hdiutil names its image .cdr.
+        for name in Self.visibleItems(work) where name.hasSuffix(".cdr") {
+            let from = work.appendingPathComponent(name)
+            try? FileManager.default.moveItem(at: from, to: Paths.uniqueURL(from.deletingPathExtension().appendingPathExtension("iso")))
+        }
+        job.producedFiles = Self.visibleItems(work).map { work.appendingPathComponent($0) }
+        if job.producedFiles.isEmpty { throw JobError.message("\(exe.lastPathComponent) saved nothing") }
+        if job.mode == .dataImage, job.drive.archive.verifyRips, let iso = job.producedFiles.first(where: { $0.pathExtension == "iso" }),
+           let problem = BackupVerifier.problem(iso, iso: true) {
+            throw JobError.message("The disc image failed the check: \(problem)")
         }
     }
 
@@ -338,9 +459,10 @@ final class JobRunner {
     // MARK: - Identity
 
     private func resolveIdentity(info: DiscInfo?, playAllEpisodes: Int = 0, format: DiscFormat? = nil) {
-        let id = MediaIdentity.resolve(info: info, discLabel: job.discLabel, flags: job.discFlags, format: format ?? job.identity?.format,
+        var id = MediaIdentity.resolve(info: info, discLabel: job.discLabel, flags: job.discFlags, format: format ?? job.identity?.format,
                                        encrypted: job.mode == .backup, nameOverride: job.mediaName, kindOverride: job.mediaKind,
                                        playAllEpisodes: playAllEpisodes)
+        if let m = job.metadata { id.name = TemplateRenderer.sanitizeComponent(m.title) }
         if id != job.identity {
             let set = id.label.setDescription
             job.appendLog("Identified as \(id.kind == .tv ? "TV show" : "movie") “\(id.name)”\(set.isEmpty ? "" : " (\(set))"), \(id.format.label), format code \(id.formatCode) — \(id.reason)")
@@ -459,7 +581,9 @@ final class JobRunner {
             }
             values["track"] = "\(MediaIdentity.trackLabel(title)) Ch \(range.lowerBound == range.upperBound ? "\(range.lowerBound)" : "\(range.lowerBound)-\(range.upperBound)")"
             let fallback = "\(file.deletingPathExtension().lastPathComponent) - \(i < plan.episodeCount ? "Episode \(firstEpisodeNumber + i)" : "after last episode")"
-            let final = rename(part, values: values, template: job.drive.output.fileNameTemplate, fallbackName: fallback, outDir: outDir)
+            let template = job.drive.output.layout == .mediaServer ? MediaServerNaming.fileTemplate(values: values, isMainFeature: false)
+                : job.drive.output.fileNameTemplate
+            let final = rename(part, values: values, template: template, fallbackName: fallback, outDir: outDir)
             outputs.append(final)
             if i < plan.episodeCount {
                 job.episodes.append(.init(file: relativePath(final, outDir), episode: firstEpisodeNumber + i, sourceTitleId: plan.title,
@@ -535,18 +659,30 @@ final class JobRunner {
         if let tag { (dest, from) = markedFolder(out: out, stage: stage, tag: tag) }
 
         job.phase = "Moving files"
+        // Keys are paths relative to the staging folder; folders merged into existing ones have an entry per item.
         var moved: [String: URL] = [:]
         var left = false
-        for name in Self.visibleItems(from) {
-            let target = Paths.uniqueURL(dest.appendingPathComponent(name))
+        // A media server library keeps adding to the show's folders (Season 02, Other, Backup) instead of making new ones.
+        let merge = tag == nil && job.drive.output.layout == .mediaServer
+        func move(_ rel: String) {
+            let src = from.appendingPathComponent(rel)
+            let want = dest.appendingPathComponent(rel)
+            var srcDir: ObjCBool = false, wantDir: ObjCBool = false
+            if merge, fm.fileExists(atPath: src.path, isDirectory: &srcDir), srcDir.boolValue,
+               fm.fileExists(atPath: want.path, isDirectory: &wantDir), wantDir.boolValue {
+                for name in Self.visibleItems(src) { move(rel + "/" + name) }
+                return
+            }
+            let target = Paths.uniqueURL(want)
             do {
-                try fm.moveItem(at: from.appendingPathComponent(name), to: target)
-                moved[name] = target
+                try fm.moveItem(at: src, to: target)
+                moved[rel] = target
             } catch {
                 left = true
-                job.appendLog("Could not move \(name) out of \(from.path): \(error.localizedDescription)", severity: .error)
+                job.appendLog("Could not move \(rel) out of \(from.path): \(error.localizedDescription)", severity: .error)
             }
         }
+        for name in Self.visibleItems(from) { move(name) }
         if left {
             if status == .succeeded {
                 status = .failed
@@ -562,9 +698,15 @@ final class JobRunner {
         func relocate(_ u: URL) -> URL {
             let p = u.standardizedFileURL.path
             guard p.hasPrefix(stagePath) else { return u }
-            let parts = p.dropFirst(stagePath.count).split(separator: "/", maxSplits: 1).map(String.init)
-            guard let first = parts.first, let top = moved[first] else { return u }
-            return parts.count > 1 ? top.appendingPathComponent(parts[1]) : top
+            let rest = String(p.dropFirst(stagePath.count))
+            var key = rest
+            while true {
+                if let top = moved[key] {
+                    return key.count == rest.count ? top : top.appendingPathComponent(String(rest.dropFirst(key.count + 1)))
+                }
+                guard let slash = key.lastIndex(of: "/") else { return u }
+                key = String(key[..<slash])
+            }
         }
         func relocate(relative r: String) -> String { relativePath(relocate(stage.appendingPathComponent(r)), dest) }
         job.producedFiles = job.producedFiles.map(relocate)
@@ -590,6 +732,14 @@ final class JobRunner {
     /// Returns that folder and the staging folder's (possibly new) location.
     private func markedFolder(out: URL, stage: URL, tag: String) -> (URL, URL) {
         let fm = FileManager.default
+        // Kept outside a media server library, where the server would pick the files up.
+        if job.drive.output.layout == .mediaServer {
+            let root = URL(fileURLWithPath: Paths.expandTilde(config.outputRoot(for: job.drive)), isDirectory: true)
+            let name = TemplateRenderer.sanitizeComponent("\(out.lastPathComponent) [\(tag) \(jobShortId)]")
+            let d = Paths.uniqueURL(root.appendingPathComponent(name, isDirectory: true))
+            try? fm.createDirectory(at: d, withIntermediateDirectories: true)
+            return (d, stage)
+        }
         if ownsOutputDir, Self.visibleItems(out).isEmpty {
             let target = Paths.uniqueURL(out.deletingLastPathComponent().appendingPathComponent("\(out.lastPathComponent) [\(tag)]", isDirectory: true))
             do {
@@ -850,6 +1000,7 @@ final class JobRunner {
         }
         job.ripInfo = info
         job.ripTitles = indices
+        mainTitle = indices.compactMap { info.title(at: $0) }.max { $0.durationSeconds < $1.durationSeconds }?.index
         fileTitles = [:]
         await prepareEpisodes(source: source, info: info, indices: indices)
         try checkFreeSpace(titles: indices.compactMap { info.title(at: $0) }, outDir: outDir)
@@ -915,7 +1066,14 @@ final class JobRunner {
         }
         let fm = FileManager.default
         var dest = outDir
-        if inSubfolder {
+        let mediaServer = job.drive.output.layout == .mediaServer
+        if mediaServer {
+            // Kept out of the media server's scan (.plexignore for Plex, .ignore for Jellyfin / Emby).
+            dest = outDir.appendingPathComponent("Backup", isDirectory: true)
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            try? "*\n".write(to: dest.appendingPathComponent(".plexignore"), atomically: true, encoding: .utf8)
+            try? "".write(to: dest.appendingPathComponent(".ignore"), atomically: true, encoding: .utf8)
+        } else if inSubfolder {
             let sub = TemplateRenderer.renderPath(job.drive.output.backupSubfolder, values: templateValues(status: .running))
             dest = outDir.appendingPathComponent(sub.isEmpty ? "backup" : sub, isDirectory: true)
         }
@@ -971,7 +1129,8 @@ final class JobRunner {
 
     /// File / folder name of a backup from the file name template (rip = Backup, no episode or track).
     private func backupName(decrypt: Bool) -> String {
-        let template = job.drive.output.fileNameTemplate.trimmingCharacters(in: .whitespaces)
+        let template = job.drive.output.layout == .mediaServer ? "{name}{releaseYear? ({releaseYear})} - Backup - {format}"
+            : job.drive.output.fileNameTemplate.trimmingCharacters(in: .whitespaces)
         guard !template.isEmpty else { return "" }
         var values = templateValues(status: .running)
         values["rip"] = "Backup"
@@ -1079,7 +1238,6 @@ final class JobRunner {
 
     private func rename(_ file: URL, title: TitleInfo, ordinal: Int, info: DiscInfo, outDir: URL) -> URL {
         let explicit = job.titleNameOverrides[title.index]?.trimmingCharacters(in: .whitespaces) ?? ""
-        let template = explicit.isEmpty ? job.drive.output.fileNameTemplate.trimmingCharacters(in: .whitespaces) : explicit
         var values = templateValues(status: .running)
         for (k, v) in Self.titleValues(title, ordinal: ordinal, disc: info, originalFile: file) { values[k] = v }
         values["track"] = MediaIdentity.trackLabel(title)
@@ -1087,6 +1245,9 @@ final class JobRunner {
             values["episode"] = MediaIdentity.episodeLabel(firstEpisodeNumber + k, width: episodeWidth)
             values["episodeNumber"] = String(firstEpisodeNumber + k)
         }
+        let template = !explicit.isEmpty ? explicit
+            : job.drive.output.layout == .mediaServer ? MediaServerNaming.fileTemplate(values: values, isMainFeature: title.index == mainTitle)
+            : job.drive.output.fileNameTemplate.trimmingCharacters(in: .whitespaces)
         let final = rename(file, values: values, template: template, fallbackName: nil, outDir: outDir)
         if let k = separateEpisodes[title.index] {
             job.episodes.append(.init(file: relativePath(final, outDir), episode: firstEpisodeNumber + k, sourceTitleId: title.sourceTitleId ?? title.index,
@@ -1120,8 +1281,16 @@ final class JobRunner {
     private func resolveOutputDirectory() throws -> URL {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: Paths.expandTilde(config.outputRoot(for: job.drive)), isDirectory: true)
-        let rel = TemplateRenderer.renderPath(job.drive.output.folderTemplate, values: templateValues(status: .running))
+        let mediaServer = job.drive.output.layout == .mediaServer
+        let folderTemplate = mediaServer ? MediaServerNaming.folderTemplate : job.drive.output.folderTemplate
+        let rel = TemplateRenderer.renderPath(folderTemplate, values: templateValues(status: .running))
         var dir = rel.isEmpty ? root : root.appendingPathComponent(rel, isDirectory: true)
+        // A media server library keeps one folder per movie / show: later discs are added to it.
+        if mediaServer {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            ownsOutputDir = false
+            return dir
+        }
         // A staging folder of a running job counts as content, so two jobs never both take a folder as new.
         let occupied = ((try? fm.contentsOfDirectory(atPath: dir.path))?.contains { !$0.hasPrefix(".") || $0.hasPrefix(Self.stagingPrefix) }) ?? false
         // Only a folder made for this disc may be renamed or removed; never the output root itself.
@@ -1189,6 +1358,11 @@ final class JobRunner {
                                                        nameOverride: job.mediaName, kindOverride: job.mediaKind)
         for (k, value) in id.templateValues(rip: job.mode.makesMKV ? "Rip" : "Backup") { v[k] = value }
         v["checksums"] = job.checksumFile?.path ?? ""
+        v["releaseYear"] = job.metadata?.year.map(String.init) ?? ""
+        v["tmdb"] = job.metadata?.tmdbId.map(String.init) ?? ""
+        v["imdb"] = job.metadata?.imdbId ?? ""
+        v["libraryFolder"] = id.kind == .tv ? "TV Shows" : "Movies"
+        v["seasonOr1"] = id.label.season.map(String.init) ?? "1"
         return v
     }
 

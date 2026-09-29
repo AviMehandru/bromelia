@@ -104,6 +104,13 @@ final class RipJob: Identifiable {
     var makemkvProblem: MakeMKVNotice?
     /// The listing the titles were ripped from (the disc's, a backup's, or a one-pass listing).
     var ripInfo: DiscInfo?
+    /// The job was started with the drive's configured mode (automatic and quick rips), so the mode may follow
+    /// the disc's format (`rip.formatModes`).
+    var usesConfiguredMode = false
+    /// The movie / show found online.
+    var metadata: MediaMatch?
+    /// Post-processing steps that run after the job, in the background queue.
+    var background: BackgroundWork?
 
     @ObservationIgnored private var nextLogId = 0
     @ObservationIgnored var logHandle: FileHandle?
@@ -226,4 +233,13 @@ struct JobManifest: Codable, Sendable {
     var startedAt: Date?
     var finishedAt: Date?
     var error: String?
+}
+
+/// Post-processing steps to run after a job has finished (and the disc is out), in the background queue.
+struct BackgroundWork: Sendable {
+    var jobId: UUID
+    var title: String
+    var steps: [PostProcessStep]
+    var context: PostProcessor.Context
+    var logFile: URL
 }

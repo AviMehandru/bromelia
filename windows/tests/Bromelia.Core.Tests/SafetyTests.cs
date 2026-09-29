@@ -744,3 +744,245 @@ public class OnePassJobTests
         Assert.Equal("v06.3 id=4FBA32AEC678", record.GetProperty("libreDrive").GetString());
     }
 }
+
+public class IntegrationFeatureTests
+{
+    static JsonElement BodyJson(NotificationSender.Delivery? d) => JsonDocument.Parse(d!.Body).RootElement;
+
+    [Fact]
+    public void NotificationDeliveries()
+    {
+        Assert.Equal("**T**\nB", BodyJson(NotificationSender.For("https://discord.com/api/webhooks/1/abc", "T", "B", "success")).GetProperty("content").GetString());
+        Assert.Equal("*T*\nB", BodyJson(NotificationSender.For("https://hooks.slack.com/services/x/y/z", "T", "B", "failed")).GetProperty("text").GetString());
+        var ntfy = NotificationSender.For("ntfy://rips", "T", "B", "failed")!;
+        Assert.Equal("https://ntfy.sh/rips", ntfy.Url!.ToString());
+        Assert.Equal("T", ntfy.Headers["Title"]);
+        Assert.Equal("B", System.Text.Encoding.UTF8.GetString(ntfy.Body));
+        Assert.Equal("https://ntfy.example.org/rips", NotificationSender.For("ntfys://ntfy.example.org/rips", "T", "B", "success")!.Url!.ToString());
+        Assert.Equal("errors", BodyJson(NotificationSender.For("https://example.org/hook", "T", "B", "errors")).GetProperty("status").GetString());
+        Assert.Equal("tgram://bot/chat", NotificationSender.For("tgram://bot/chat", "T", "B", "success")!.AppriseUrl);
+        Assert.Null(NotificationSender.For("", "T", "B", "success"));
+    }
+
+    [Fact]
+    public void MetadataResults()
+    {
+        var m = MetadataLookup.Parse("{\"results\":[{\"id\":1,\"title\":\"Inception Behind\",\"release_date\":\"2011-01-01\"},{\"id\":27205,\"title\":\"Inception\",\"release_date\":\"2010-07-15\"}]}", MetadataProvider.Tmdb, "INCEPTION")!;
+        Assert.Equal(("Inception", 2010, 27205), (m.Title, m.Year!.Value, m.TmdbId!.Value));
+        Assert.Equal(1999, MetadataLookup.Parse("{\"results\":[{\"id\":37854,\"name\":\"One Piece\",\"first_air_date\":\"1999-10-20\"}]}", MetadataProvider.Tmdb, "One Piece")!.Year);
+        var o = MetadataLookup.Parse("{\"Title\":\"Friends\",\"Year\":\"1994–2004\",\"imdbID\":\"tt0108778\",\"Response\":\"True\"}", MetadataProvider.Omdb, "Friends")!;
+        Assert.Equal((1994, "tt0108778"), (o.Year!.Value, o.ImdbId!));
+        Assert.Null(MetadataLookup.Parse("{\"Response\":\"False\"}", MetadataProvider.Omdb, "x"));
+        var c = new MetadataConfig { Provider = MetadataProvider.Tmdb, ApiKey = "0123456789abcdef0123456789abcdef" };
+        var r = MetadataLookup.Request("One Piece", MediaKind.Tv, c)!.Value;
+        Assert.Equal("/3/search/tv", r.Url.AbsolutePath);
+        Assert.Contains("api_key=0123", r.Url.Query);
+        c.ApiKey = "eyJ" + new string('x', 60);
+        var b = MetadataLookup.Request("One Piece", MediaKind.Movie, c)!.Value;
+        Assert.StartsWith("eyJ", b.Bearer);
+        Assert.DoesNotContain("api_key", b.Url.Query);
+    }
+
+    [Fact]
+    public void OtherDiscModesAndBetaKeys()
+    {
+        var d = new DriveConfig();
+        d.Rip.Mode = RipMode.BackupThenMkv;
+        Assert.Equal(RipMode.BackupThenMkv, DiscContentRules.ModeFor(DiscFlags.BlurayFiles, () => DiscContent.Data, d));
+        Assert.Equal(RipMode.BackupThenMkv, DiscContentRules.ModeFor(DiscFlags.None, () => DiscContent.Video, d));
+        Assert.Equal(RipMode.AudioCD, DiscContentRules.ModeFor(DiscFlags.None, () => DiscContent.Audio, d));
+        Assert.Equal(RipMode.DataImage, DiscContentRules.ModeFor(DiscFlags.None, () => DiscContent.Data, d));
+        d.Other.RipAudioCDs = false;
+        d.Other.ImageDataDiscs = false;
+        Assert.Null(DiscContentRules.ModeFor(DiscFlags.None, () => DiscContent.Audio, d));
+        Assert.Null(DiscContentRules.ModeFor(DiscFlags.None, () => DiscContent.Data, d));
+        Assert.True(BetaKey.MayReplace(null) && BetaKey.MayReplace("") && BetaKey.MayReplace("T-abc"));
+        Assert.False(BetaKey.MayReplace("M-purchasedkey"));
+        d.Rip.FormatModes["bluray"] = RipMode.Backup;
+        Assert.Equal(RipMode.Backup, d.Rip.ModeFor(DiscFormat.Bluray));
+        Assert.Equal(RipMode.BackupThenMkv, d.Rip.ModeFor(DiscFormat.Dvd));
+        var json = ConfigJson.Serialize(new AppConfig { WebUI = { Enabled = true }, Notifications = { new NotificationTarget { Url = "ntfy://x" } } });
+        Assert.Contains("\"webUI\"", json);
+        Assert.Contains("\"audioCommand\"", ConfigJson.Serialize(new AppConfig()) + "");
+        var c2 = JsonSerializer.Deserialize<AppConfig>("{}", ConfigJson.Options)!;
+        Assert.Equal(1, c2.BackgroundJobs);
+        Assert.Equal("\"audioCD\"", JsonSerializer.Serialize(RipMode.AudioCD, ConfigJson.Options));
+        Assert.Equal("\"mediaServer\"", JsonSerializer.Serialize(LibraryLayout.MediaServer, ConfigJson.Options));
+    }
+
+    [Fact]
+    public void WebAccessRules()
+    {
+        var c = new WebUIConfig();
+        Assert.True(WebAccess.Allowed("GET", "localhost:51280", null, null, null, c).Ok);
+        Assert.Equal(403, WebAccess.Allowed("GET", "attacker.example:51280", null, null, null, c).Status);
+        Assert.Equal(403, WebAccess.Allowed("POST", "127.0.0.1:51280", null, null, null, c).Status);
+        Assert.True(WebAccess.Allowed("POST", "127.0.0.1:51280", null, null, "1", c).Ok);
+        c.Token = "s3cret";
+        Assert.True(WebAccess.Allowed("GET", "attacker.example", null, "s3cret", null, c).Ok);
+        Assert.Equal(401, WebAccess.Allowed("GET", "localhost", null, null, null, c).Status);
+        Assert.True(WebAccess.Allowed("GET", "x", "Bearer s3cret", null, null, c).Ok);
+        Assert.NotNull(WebAccess.StartProblem(new WebUIConfig { Address = "0.0.0.0" }));
+        Assert.Null(WebAccess.StartProblem(new WebUIConfig { Address = "0.0.0.0", Token = "t" }));
+        Assert.NotNull(WebServer.Page());
+    }
+
+    [Fact]
+    public void WebServerAnswersStatusAndActions()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "bromelia-web-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        Paths.DataOverride = dir;
+        try
+        {
+            SingleThreadContext.Run(async () =>
+            {
+                var state = new AppState(new NullPlatformServices(), Path.Combine(dir, "config.json"));
+                state.Web.Apply(new WebUIConfig { Enabled = true, Port = Random.Shared.Next(52000, 58000) });
+                Assert.Null(state.Web.LastError);
+                try
+                {
+                    var (s1, _, status) = state.Web.Handle("GET", "/api/status", "127.0.0.1:1", null, null, null);
+                    Assert.Equal(200, s1);
+                    var doc = JsonDocument.Parse(status).RootElement;
+                    Assert.Equal(JsonValueKind.Array, doc.GetProperty("drives").ValueKind);
+                    Assert.Equal(JsonValueKind.Array, doc.GetProperty("background").ValueKind);
+                    var (s2, _, page) = state.Web.Handle("GET", "/", "localhost", null, null, null);
+                    Assert.Equal(200, s2);
+                    Assert.Contains("<title>Bromelia</title>", System.Text.Encoding.UTF8.GetString(page));
+                    Assert.Equal(403, state.Web.Handle("POST", "/api/jobs/nope/cancel", "localhost", null, null, null).Item1);
+                    var (s4, _, body) = state.Web.Handle("POST", "/api/jobs/nope/cancel", "localhost", null, null, "1");
+                    Assert.Equal((400, "No such job"), (s4, System.Text.Encoding.UTF8.GetString(body)));
+                }
+                finally { state.Web.Stop(); }
+                await Task.CompletedTask;
+            });
+        }
+        finally
+        {
+            Paths.DataOverride = null;
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+}
+
+public class IntegrationJobTests
+{
+    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-int-" + Guid.NewGuid().ToString("N")[..8]);
+
+    RipJob Run(FakeMakeMkv fake, Action<DriveConfig> configure, DiscSource? source = null, RipMode mode = RipMode.Mkv, Action<RipJob>? prepare = null)
+    {
+        Directory.CreateDirectory(_root);
+        Paths.DataOverride = Path.Combine(Path.GetTempPath(), "bromelia-test-data");
+        var config = new AppConfig { OutputRoot = _root };
+        var drive = new DriveConfig();
+        drive.Automation.Notify = false;
+        drive.Automation.EjectWhenDone = false;
+        configure(drive);
+        var job = new RipJob(source ?? new DiscSource.Iso("/nonexistent/test.iso"), drive, "lane", "test", "", mode);
+        prepare?.Invoke(job);
+        SingleThreadContext.Run(async () =>
+            await new JobRunner(job, config, fake.Executable, null, new UiDispatcher(), new NullPlatformServices(), new[] { "dvd_MinimumTitleLength" }).RunAsync());
+        return job;
+    }
+
+    List<string> Files() => Directory.Exists(_root)
+        ? Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(_root, f).Replace('\\', '/'))
+            .Where(f => !f.Split('/').Any(p => p.StartsWith('.'))).OrderBy(f => f, StringComparer.Ordinal).ToList()
+        : new();
+
+    [Fact]
+    public void MoviesAndEpisodesAreNamedForMediaServers()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var movie = Run(new FakeMakeMkv(Listing.Make(("1:50:00", 1), ("0:05:00", 2)), FakeMakeMkv.WritesFile(Listing.Saved)), d => d.Output.Layout = LibraryLayout.MediaServer);
+        Assert.True(movie.State == JobState.Succeeded, movie.ErrorMessage);
+        Assert.Equal(new[] { "Movies/Sample Movie/Other/Sample Movie - Playlist 00002.mkv", "Movies/Sample Movie/Sample Movie.mkv" },
+            Files().Where(f => f.EndsWith(".mkv")));
+        var tv = Run(new FakeMakeMkv(Listing.Make("SAMPLE_SHOW_S2_D1", ("0:22:00", 1), ("0:22:30", 2), ("0:21:40", 3)), FakeMakeMkv.WritesFile(Listing.Saved)),
+            d => d.Output.Layout = LibraryLayout.MediaServer);
+        Assert.True(tv.State == JobState.Succeeded, tv.ErrorMessage);
+        Assert.Equal(Enumerable.Range(1, 3).Select(i => $"TV Shows/Sample Show/Season 02/Sample Show - S02E0{i}.mkv"),
+            Files().Where(f => f.StartsWith("TV Shows") && f.EndsWith(".mkv")));
+        // The next disc of the season is added to the same show and Season folders.
+        var tv2 = Run(new FakeMakeMkv(Listing.Make("SAMPLE_SHOW_S2_D2", ("0:22:00", 1), ("0:22:30", 2), ("0:21:40", 3)), FakeMakeMkv.WritesFile(Listing.Saved)),
+            d => d.Output.Layout = LibraryLayout.MediaServer, prepare: j => j.FirstEpisode = 4);
+        Assert.True(tv2.State == JobState.Succeeded, tv2.ErrorMessage);
+        Assert.Equal(Enumerable.Range(1, 6).Select(i => $"TV Shows/Sample Show/Season 02/Sample Show - S02E0{i}.mkv"),
+            Files().Where(f => f.StartsWith("TV Shows") && f.EndsWith(".mkv")));
+        Assert.All(tv2.ProducedFiles, f => Assert.True(File.Exists(f), f));
+        Assert.Empty(Checksums.Verify(Path.Combine(_root, "TV Shows", "Sample Show")));
+    }
+
+    [Fact]
+    public void BackgroundStepsRunAfterTheJob()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var marker = Path.Combine(Path.GetTempPath(), "bromelia-bg-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+        var job = Run(new FakeMakeMkv(Listing.Make(("0:30:00", 1)), FakeMakeMkv.WritesFile(Listing.Saved)), d => d.PostProcess.Add(new PostProcessStep
+        {
+            Name = "Encode", Executable = "/bin/sh", Arguments = $"-c 'sleep 0.3; echo \"$BROMELIA_STATUS\" > \"$0\"' {marker}", Background = true,
+        }));
+        Assert.Equal(JobState.Succeeded, job.State);
+        Assert.False(File.Exists(marker), "a background step must not run during the job");
+        Assert.NotNull(job.Background);
+        SingleThreadContext.Run(async () =>
+        {
+            var queue = new BackgroundQueue(new UiDispatcher());
+            queue.Enqueue(job.Background!);
+            for (int i = 0; i < 200 && queue.IsBusy; i++) await Task.Delay(20);
+            Assert.Equal("done", queue.Items[0].State);
+        });
+        Assert.Equal("success\n", File.ReadAllText(marker));
+    }
+
+    [Fact]
+    public void FormatModesReplaceTheConfiguredMode()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:30:00", 1)), FakeMakeMkv.WritesFile(Listing.Saved));
+        var job = Run(fake, d => d.Rip.FormatModes["bluray"] = RipMode.InfoOnly, prepare: j => j.UsesConfiguredMode = true);
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        Assert.Equal(RipMode.InfoOnly, job.Mode);
+        Assert.Equal("disc-info.json", Path.GetFileName(Assert.Single(job.ProducedFiles)));
+        Assert.DoesNotContain(" mkv ", fake.Calls);
+    }
+
+    [Fact]
+    public void AudioCDsUseTheAudioCommand()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv("", ":");
+        var job = Run(fake, d => d.Other.AudioCommand = "/bin/sh -c 'mkdir -p \"Artist - Album\" && printf \"%s\" \"$0\" > \"Artist - Album/01 - Track.flac\"' {device}",
+            new DiscSource.Drive(0, "/dev/fake9"), RipMode.AudioCD);
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        var flac = Assert.Single(Files(), f => f.EndsWith(".flac"));
+        Assert.EndsWith("Artist - Album/01 - Track.flac", flac);
+        Assert.Equal("/dev/fake9", File.ReadAllText(Path.Combine(_root, flac)));
+        Assert.DoesNotContain("info", fake.Calls);
+        var missing = Run(new FakeMakeMkv("", ":"), d => d.Other.AudioCommand = "no-such-ripper-xyz {device}", new DiscSource.Drive(0, "/dev/fake9"), RipMode.AudioCD);
+        Assert.Equal(JobState.Failed, missing.State);
+        Assert.Contains("cyanrip or abcde", missing.ErrorMessage);
+    }
+
+    [Fact]
+    public void DataDiscsAreCopiedExactly()
+    {
+        // A file stands in for the disc device; set BROMELIA_TEST_DVD_ISO to copy a real disc image.
+        var iso = Environment.GetEnvironmentVariable("BROMELIA_TEST_DVD_ISO");
+        var source = iso;
+        if (string.IsNullOrEmpty(source))
+        {
+            source = Path.Combine(Path.GetTempPath(), "bromelia-disc-" + Guid.NewGuid().ToString("N")[..8] + ".bin");
+            var image = new byte[3 * 1024 * 1024 + 2048];
+            new Random(7).NextBytes(image);
+            System.Text.Encoding.ASCII.GetBytes("CD001").CopyTo(image, 32769);
+            File.WriteAllBytes(source, image);
+        }
+        var job = Run(new FakeMakeMkv("", ":"), _ => { }, new DiscSource.Drive(0, source), RipMode.DataImage);
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        var copy = Assert.Single(job.ProducedFiles);
+        Assert.EndsWith(".iso", copy);
+        Assert.Equal(Checksums.Sha256(source), Assert.Single(job.Checksums).Sha256);
+    }
+}

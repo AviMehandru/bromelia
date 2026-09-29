@@ -15,7 +15,7 @@ typedef struct {
   GtkWidget *root;
 
   GtkWidget *icon, *title, *subtitle, *status, *chips;
-  GtkWidget *open_btn, *rip_btn, *eject_btn, *configure_btn, *close_btn, *config_dropdown;
+  GtkWidget *open_btn, *rip_btn, *eject_btn, *tray_btn, *configure_btn, *close_btn, *config_dropdown;
   GtkWidget *job_box;
   BroJob *shown_job;
 
@@ -163,6 +163,7 @@ refresh_header (Page *p)
       gtk_button_set_label (GTK_BUTTON (p->open_btn), "Reload");
       gtk_widget_set_visible (p->rip_btn, FALSE);
       gtk_widget_set_visible (p->eject_btn, FALSE);
+      gtk_widget_set_visible (p->tray_btn, FALSE);
       gtk_widget_set_visible (p->configure_btn, FALSE);
       gtk_widget_set_visible (p->close_btn, TRUE);
       gtk_widget_set_visible (p->config_dropdown, TRUE);
@@ -213,6 +214,8 @@ refresh_header (Page *p)
       gtk_widget_set_sensitive (p->open_btn, inserted && !busy && !(p->session && p->session->loading));
       gtk_widget_set_sensitive (p->rip_btn, inserted && !job);
       gtk_widget_set_sensitive (p->eject_btn, e && !busy);
+      gtk_widget_set_visible (p->tray_btn, e && !inserted);
+      gtk_widget_set_sensitive (p->tray_btn, e && !busy);
       gtk_button_set_label (GTK_BUTTON (p->configure_btn), it && !it->config && e ? "Set Up This Drive…" : "Configure…");
       gtk_widget_set_visible (p->close_btn, FALSE);
       gtk_widget_set_visible (p->config_dropdown, FALSE);
@@ -815,6 +818,12 @@ on_eject (GtkButton *b, Page *p)
 }
 
 static void
+on_close_tray (GtkButton *b, Page *p)
+{
+  bro_state_close_tray (st (), lane_of (p));
+}
+
+static void
 on_configure (GtkButton *b, Page *p)
 {
   BroDriveItem *it = current_item (p);
@@ -1008,6 +1017,9 @@ bro_drive_page_new (const char *tag)
   gtk_widget_set_tooltip_text (p->rip_btn, "Rip with this drive's configured mode and title rules");
   p->eject_btn = gtk_button_new_with_label ("Eject");
   g_signal_connect (p->eject_btn, "clicked", G_CALLBACK (on_eject), p);
+  p->tray_btn = gtk_button_new_with_label ("Close Tray");
+  gtk_widget_set_tooltip_text (p->tray_btn, "Close the drive's tray (eject -t)");
+  g_signal_connect (p->tray_btn, "clicked", G_CALLBACK (on_close_tray), p);
   p->close_btn = gtk_button_new_with_label ("Close");
   g_signal_connect (p->close_btn, "clicked", G_CALLBACK (on_close_source), p);
   p->config_dropdown = gtk_drop_down_new (NULL, NULL);
@@ -1020,6 +1032,7 @@ bro_drive_page_new (const char *tag)
   gtk_box_append (GTK_BOX (buttons_row), p->open_btn);
   gtk_box_append (GTK_BOX (buttons_row), p->rip_btn);
   gtk_box_append (GTK_BOX (buttons_row), p->eject_btn);
+  gtk_box_append (GTK_BOX (buttons_row), p->tray_btn);
   gtk_box_append (GTK_BOX (buttons_row), p->close_btn);
   buttons_col = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
   gtk_box_append (GTK_BOX (buttons_col), buttons_row);

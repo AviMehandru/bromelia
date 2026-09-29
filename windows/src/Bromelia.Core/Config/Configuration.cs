@@ -9,7 +9,11 @@ namespace Bromelia.Core.Config;
 
 public enum TitleStrategy { All, Longest, Indices, Manual }
 public enum IndexBase { Makemkv, Source }
-public enum RipMode { Mkv, Backup, BackupDecrypted, BackupThenMkv, InfoOnly }
+/// <summary>AudioCD and DataImage are for discs without a DVD / Blu-ray structure (see OtherDiscsConfig).</summary>
+public enum RipMode { Mkv, Backup, BackupDecrypted, BackupThenMkv, InfoOnly, AudioCD, DataImage }
+/// <summary>How output is named: with the templates, or the way Plex / Jellyfin / Emby expect it.</summary>
+public enum LibraryLayout { Templates, MediaServer }
+public enum MetadataProvider { None, Tmdb, Omdb }
 public enum BackupFormat { Folder, Iso }
 public enum ConflictPolicy { UniqueSuffix, Overwrite, Skip }
 public enum RunCondition { Success, Failure, Always }
@@ -26,8 +30,13 @@ public static class EnumLabels
         RipMode.Backup => "Backup (encrypted, 1:1)",
         RipMode.BackupDecrypted => "Backup (decrypted)",
         RipMode.BackupThenMkv => "Decrypted backup, then MKV from backup",
+        RipMode.AudioCD => "Rip audio CD",
+        RipMode.DataImage => "Image data disc (ISO)",
         _ => "Scan only (save disc information)",
     };
+
+    /// <summary>The modes a drive can be set to (the others are chosen from the kind of disc).</summary>
+    public static readonly RipMode[] VideoModes = { RipMode.Mkv, RipMode.Backup, RipMode.BackupDecrypted, RipMode.BackupThenMkv, RipMode.InfoOnly };
 
     public static string ShortLabel(this RipMode m) => m switch
     {
@@ -35,6 +44,8 @@ public static class EnumLabels
         RipMode.Backup => "Backup",
         RipMode.BackupDecrypted => "Decrypted backup",
         RipMode.BackupThenMkv => "Backup + MKV",
+        RipMode.AudioCD => "Audio CD",
+        RipMode.DataImage => "Disc image",
         _ => "Scan",
     };
 
@@ -126,6 +137,16 @@ public sealed class TitleSelection
 
 public sealed class RipConfig
 {
+    /// <summary>Modes by disc format ("dvd", "bluray", "uhd") that replace Mode for automatic and quick rips.</summary>
+    public Dictionary<string, RipMode> FormatModes { get; set; } = new();
+
+    /// <summary>The mode for a disc of <paramref name="format"/> (automatic and quick rips).</summary>
+    public RipMode ModeFor(Logic.DiscFormat? format)
+    {
+        var key = format switch { Logic.DiscFormat.Dvd => "dvd", Logic.DiscFormat.Bluray => "bluray", Logic.DiscFormat.Uhd => "uhd", _ => null };
+        return key != null && FormatModes.TryGetValue(key, out var m) ? m : Mode;
+    }
+
     /// <summary>A shallow copy (the title selection is shared), for changing switches of one makemkvcon run.</summary>
     public RipConfig Clone() => (RipConfig)MemberwiseClone();
 
@@ -156,6 +177,7 @@ public sealed class OutputConfig
     public string FileNameTemplate { get; set; } = DefaultFileNameTemplate;
     public string BackupSubfolder { get; set; } = "backup";
     public ConflictPolicy ConflictPolicy { get; set; } = ConflictPolicy.UniqueSuffix;
+    public LibraryLayout Layout { get; set; } = LibraryLayout.Templates;
 }
 
 public sealed class AutomationConfig
@@ -166,6 +188,48 @@ public sealed class AutomationConfig
     public bool EjectOnFailure { get; set; }
     public bool Notify { get; set; } = true;
     public bool PlaySound { get; set; } = true;
+    /// <summary>Before an automatic rip, wait up to this long for the system to mount the disc. 0 = don't wait.</summary>
+    public int WaitForMountSeconds { get; set; } = 30;
+}
+
+/// <summary>What to do with discs that aren't DVDs or Blu-rays, when they are ripped automatically or with “Rip”.</summary>
+public sealed class OtherDiscsConfig
+{
+    /// <summary>Rip audio CDs with AudioCommand (cyanrip or abcde look up the album in MusicBrainz).</summary>
+    public bool RipAudioCDs { get; set; } = true;
+    /// <summary>Save data discs (CD-ROM, DVD-ROM, BD-ROM without video) as ISO images.</summary>
+    public bool ImageDataDiscs { get; set; } = true;
+    /// <summary>Command for audio CDs, run in the output folder. {device} is the drive. Empty = cyanrip, else abcde.</summary>
+    public string AudioCommand { get; set; } = "";
+}
+
+public sealed class MetadataConfig
+{
+    public MetadataProvider Provider { get; set; } = MetadataProvider.None;
+    /// <summary>TMDb: API key (v3) or read access token; OMDb: API key.</summary>
+    public string ApiKey { get; set; } = "";
+    public string Language { get; set; } = "en-US";
+}
+
+/// <summary>A place to send job notifications: an http(s) webhook (Discord and Slack are recognised),
+/// ntfy://topic / ntfys://host/topic, or any other Apprise URL (sent with the apprise command).</summary>
+public sealed class NotificationTarget
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Url { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    /// <summary>Only for jobs that didn't succeed (failed, cancelled, read errors).</summary>
+    public bool OnlyProblems { get; set; }
+}
+
+public sealed class WebUIConfig
+{
+    public bool Enabled { get; set; }
+    /// <summary>127.0.0.1 = this computer only; 0.0.0.0 = the network (set a token).</summary>
+    public string Address { get; set; } = "127.0.0.1";
+    public int Port { get; set; } = 51280;
+    /// <summary>Required for everything when set (Authorization: Bearer or ?token=).</summary>
+    public string Token { get; set; } = "";
 }
 
 public sealed class ArchiveConfig
@@ -206,6 +270,8 @@ public sealed class PostProcessStep
     public string MatchName { get; set; } = "";
     /// <summary>Run only for these format codes (DVD, DVDe, BR, BRe, 4K, 4Ke; "BR*" = any code starting with BR). Empty = all.</summary>
     public List<string> MatchFormats { get; set; } = new();
+    /// <summary>Run after the job has finished and the disc is out, in a queue of its own (encoding, uploads).</summary>
+    public bool Background { get; set; }
 }
 
 public sealed class GeneratedProfile
@@ -264,6 +330,7 @@ public sealed class DriveConfig
     public AutomationConfig Automation { get; set; } = new();
     public ArchiveConfig Archive { get; set; } = new();
     public EpisodeConfig Episodes { get; set; } = new();
+    public OtherDiscsConfig Other { get; set; } = new();
     public List<PostProcessStep> PostProcess { get; set; } = new();
 
     /// <summary>Version 1 defaults kept MakeMKV's file names and named folders after the disc label; version 2
@@ -339,6 +406,15 @@ public sealed class AppConfig
     public int StallTimeoutMinutes { get; set; } = 30;
     /// <summary>Keep the computer from going to sleep while jobs run.</summary>
     public bool PreventSleep { get; set; } = true;
+    /// <summary>Online lookup of the movie / show (canonical title, year, ids).</summary>
+    public MetadataConfig Metadata { get; set; } = new();
+    /// <summary>Where to send notifications of finished jobs.</summary>
+    public List<NotificationTarget> Notifications { get; set; } = new();
+    /// <summary>Download and register MakeMKV's current beta key at startup and when the key has expired.</summary>
+    public bool AutoUpdateBetaKey { get; set; }
+    /// <summary>How many background post-processing steps run at the same time.</summary>
+    public int BackgroundJobs { get; set; } = 1;
+    public WebUIConfig WebUI { get; set; } = new();
 
     /// <summary>Upgrades a configuration loaded from a file of version <paramref name="loaded"/>.</summary>
     public AppConfig Upgrade(int loaded)

@@ -55,6 +55,32 @@ public sealed partial class SettingsPage : Page
         f.Number("Keep history for", () => c.HistoryLimit, v => c.HistoryLimit = v, 10, 100000, suffix: "jobs");
         f.Number("Stop a stuck rip after (0 = never)", () => c.StallTimeoutMinutes, v => c.StallTimeoutMinutes = v, 0, 1440, suffix: "minutes without output");
         f.Toggle("Keep the computer awake while jobs run", () => c.PreventSleep, v => { c.PreventSleep = v; State.UpdateKeepAwake(); });
+        f.Number("Background post-processing steps at a time", () => c.BackgroundJobs, v => c.BackgroundJobs = v, 1, 16,
+            "Sequential ripping (for hard disks that slow down with parallel writes): set the maximum simultaneous jobs to 1.");
+
+        f.Section("Online lookup", "Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for media server names. Get a free key at themoviedb.org or omdbapi.com.");
+        f.Choice("Look up movies and shows", new[] { (MetadataProvider.None, "Off"), (MetadataProvider.Tmdb, "The Movie Database (TMDb)"), (MetadataProvider.Omdb, "OMDb (IMDb data)") },
+            () => c.Metadata.Provider, v => c.Metadata.Provider = v);
+        f.Text("API key", () => c.Metadata.ApiKey, v => c.Metadata.ApiKey = v);
+        f.Text("Language (TMDb)", () => c.Metadata.Language, v => c.Metadata.Language = v, "en-US");
+
+        f.Section("Notifications", "Sent when a job finishes, one URL per line. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook (JSON) work directly; other Apprise URLs need the apprise command. Add “ !” at the end of a line to be told only about problems.");
+        var urls = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 80,
+            Text = string.Join("\r", c.Notifications.Select(n => n.Url + (n.OnlyProblems ? " !" : ""))) };
+        urls.LostFocus += (_, _) =>
+        {
+            c.Notifications = urls.Text.Split('\r', '\n').Select(l => l.Trim()).Where(l => l.Length > 0)
+                .Select(l => new NotificationTarget { Url = l.TrimEnd('!').Trim(), OnlyProblems = l.EndsWith('!') }).ToList();
+            State.ConfigChanged();
+        };
+        f.Add(urls);
+
+        f.Section("Web page", "Shows the drives, jobs and background steps and lets you rip, eject, close trays and cancel from a browser. 127.0.0.1 keeps it on this computer; 0.0.0.0 opens it to the network, needs a token and may need “netsh http add urlacl”.");
+        f.Toggle("Serve a web page", () => c.WebUI.Enabled, v => c.WebUI.Enabled = v);
+        f.Text("Address", () => c.WebUI.Address, v => c.WebUI.Address = v, "127.0.0.1");
+        f.Number("Port", () => c.WebUI.Port, v => c.WebUI.Port = v, 1, 65535);
+        f.Text("Token", () => c.WebUI.Token, v => c.WebUI.Token = v, "Required for other computers");
+
         f.Section("MakeMKV");
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttons.Children.Add(PageHelpers.Button("Import settings from MakeMKV", () => State.ImportSettings(MakeMKVEnvironment.InstalledSettings())));

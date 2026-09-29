@@ -7,6 +7,8 @@ core_sources = files(
   'bro-state.c',
   'bro-identity.c',
   'bro-dvd.c',
+  'bro-integrations.c',
+  'bro-web.c',
 )
 
 core_deps = [glib_dep, gio_dep, json_dep]
@@ -20,6 +22,11 @@ bromelia_core_dep = declare_dependency(
   sources: resources,
   include_directories: include_directories('.'),
   dependencies: core_deps,
+)
+
+executable('bromelia-daemon', 'bromelia-daemon.c',
+  dependencies: [bromelia_core_dep],
+  install: true,
 )
 
 if build_ui

@@ -1,0 +1,6 @@
+linux/builddir
+linux/build
+macos/build
+windows/**/bin
+windows/**/obj
+.git

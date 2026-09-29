@@ -70,10 +70,30 @@ typedef struct {
   char *makemkvcon;
   char *mkvmerge;                /* may be NULL */
   gboolean skip_eject;
+  gboolean automatic;            /* started on insert: wait for the disc to be mounted first */
+  gboolean uses_configured_mode; /* the drive's mode (automatic and quick rips), so it may follow the disc's format */
   GCancellable *cancellable;     /* owned */
   BroUpdateFunc on_update;
   gpointer user_data;
 } BroRunRequest;
+
+/* Post-processing steps marked "background", to run after the job has finished (and the disc is out). */
+typedef struct {
+  char *job_id;
+  char *title;
+  GPtrArray *steps;   /* BroPostStep* (copies) */
+  GHashTable *values; /* template values */
+  char **environ;     /* BROMELIA_* variables */
+  GPtrArray *files;   /* char* */
+  char *output_dir;
+  char *log_file;
+  BroJobState status;
+} BroBackgroundWork;
+
+void  bro_background_work_free (BroBackgroundWork *w);
+/* Runs the steps (blocking; call on a worker thread), logging to log_file. Returns the name of the first step that
+ * failed, or NULL; *ran (optional) receives the number of steps run. */
+char *bro_background_work_run (BroBackgroundWork *w, int *ran, GCancellable *cancellable);
 
 typedef struct {
   BroJobState status;
@@ -86,12 +106,18 @@ typedef struct {
   gint64 started_at, finished_at; /* unix seconds */
   char *libre_drive;              /* "Using LibreDrive mode (…)" details, or NULL */
   int problem;                    /* BroNotice: a problem with MakeMKV or the drive, BRO_NOTICE_NONE if none */
+  BroRipMode mode;                /* the mode the job ran with (may follow the disc's format) */
+  char *name;                     /* the movie / show name, or NULL */
+  BroBackgroundWork *background;  /* steps for the background queue, or NULL */
 } BroRunResult;
 
 BroRunRequest *bro_run_request_new (void);
 void           bro_run_request_free (BroRunRequest *r);
 void           bro_run_result_free (BroRunResult *r);
 BroRunResult  *bro_run_job (BroRunRequest *req);
+/* Title and text of the notification for a finished job (what: the movie / show or disc). */
+void           bro_notification_text (BroJobState status, BroRipMode mode, const char *what, guint file_count,
+                                      const char *output_dir, const char *error, char **title, char **body);
 
 GHashTable *bro_int_set_new (void);
 GHashTable *bro_track_selections_new (void);
@@ -142,6 +168,7 @@ GHashTable  *bro_listing_map (GArray *indices, BroDiscInfo *old, BroDiscInfo *no
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroMkvProbe, bro_mkv_probe_free)
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroBackgroundWork, bro_background_work_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroRunRequest, bro_run_request_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroRunResult, bro_run_result_free)
 

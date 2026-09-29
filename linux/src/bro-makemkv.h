@@ -119,6 +119,8 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroMakemkvEnv, bro_makemkv_env_free)
 #define BRO_BETA_KEY_URL "https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053"
 char      *bro_beta_key_parse (const char *html); /* the "T-…" key in the post, or NULL */
 char      *bro_beta_key_fetch (GError **error);   /* downloads the forum page with curl; blocking */
+/* Whether an automatic update may replace installed: only a beta key (T-…) or no key, never a purchased one. */
+gboolean   bro_beta_key_may_replace (const char *installed);
 
 /* Where a file or folder the user opened leads: MakeMKV opens discs (an image, or a folder holding BDMV / VIDEO_TS /
  * HVDVD_TS), not single files, so a file inside a disc structure (.IFO, .VOB, .mpls, .m2ts, …) opens its disc. */

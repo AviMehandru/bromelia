@@ -1,5 +1,6 @@
 resources = gnome.compile_resources('bromelia-resources', 'bromelia.gresource.xml',
-  source_dir: [meson.current_source_dir(), meson.project_source_root() / '..' / 'shared' / 'catalog'],
+  source_dir: [meson.current_source_dir(), meson.project_source_root() / '..' / 'shared' / 'catalog',
+              meson.project_source_root() / '..' / 'shared' / 'web'],
   c_name: 'bromelia',
 )
 

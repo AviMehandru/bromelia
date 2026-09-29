@@ -5,13 +5,51 @@
 /* ---- queue ---- */
 
 static void
+on_clear_background (GtkButton *b, gpointer data)
+{
+  bro_state_clear_background (bro_app_state ());
+}
+
+/* Background post-processing (encoding, uploads) of finished jobs. */
+static GtkWidget *
+background_list (void)
+{
+  BroState *st = bro_app_state ();
+  GtkWidget *group = adw_preferences_group_new ();
+  GtkWidget *clear = gtk_button_new_with_label ("Clear Finished");
+  gtk_widget_add_css_class (clear, "flat");
+  g_signal_connect (clear, "clicked", G_CALLBACK (on_clear_background), NULL);
+  adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), "Background");
+  adw_preferences_group_set_header_suffix (ADW_PREFERENCES_GROUP (group), clear);
+  for (guint i = 0; i < st->background->len; i++)
+    {
+      BroBackgroundItem *b = st->background->pdata[i];
+      GtkWidget *row = adw_action_row_new ();
+      GtkWidget *icon = gtk_image_new_from_icon_name (g_str_equal (b->state, "done") ? "emblem-ok-symbolic"
+                                                      : g_str_equal (b->state, "failed") ? "dialog-error-symbolic"
+                                                      : g_str_equal (b->state, "running") ? "system-run-symbolic" : "alarm-symbolic");
+      g_autofree char *title = g_markup_escape_text (b->work->title, -1);
+      g_autofree char *sub = g_markup_escape_text (*b->message ? b->message : b->state, -1);
+      adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+      adw_action_row_set_subtitle (ADW_ACTION_ROW (row), sub);
+      adw_action_row_add_prefix (ADW_ACTION_ROW (row), icon);
+      if (g_str_equal (b->state, "failed"))
+        gtk_widget_add_css_class (icon, "error");
+      adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), row);
+    }
+  return group;
+}
+
+static void
 queue_rebuild (GtkWidget *box)
 {
   BroState *st = bro_app_state ();
   GtkWidget *c;
   while ((c = gtk_widget_get_first_child (box)))
     gtk_box_remove (GTK_BOX (box), c);
-  if (st->jobs->len == 0)
+  if (st->background->len)
+    gtk_box_append (GTK_BOX (box), background_list ());
+  if (st->jobs->len == 0 && st->background->len == 0)
     {
       GtkWidget *empty = adw_status_page_new ();
       adw_status_page_set_icon_name (ADW_STATUS_PAGE (empty), "view-list-symbolic");

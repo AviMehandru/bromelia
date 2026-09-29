@@ -20,6 +20,8 @@ struct PreferencesView: View {
                            emptyText: "Plugins are post-processing steps for every drive, usually limited to a movie or show (by name or disc label) and to formats such as DVD or 4Ke — for example a script that archives one series in a particular way. They run after the drive's own steps.")
                 .padding(12)
                 .tabItem { Label("Plugins", systemImage: "puzzlepiece.extension") }
+            ServicesPreferences()
+                .tabItem { Label("Services", systemImage: "network") }
             RegistrationPreferences()
                 .tabItem { Label("Registration", systemImage: "key") }
         }
@@ -65,6 +67,11 @@ private struct GeneralPreferences: View {
                 Toggle("Keep the Mac awake while jobs run", isOn: $model.config.preventSleep)
                     .onChange(of: model.config.preventSleep) { model.updateKeepAwake() }
                 Text("A Mac with its lid closed still sleeps unless it is connected to a display and power.")
+                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Background post-processing") {
+                    IntField(title: "Steps", value: $model.config.backgroundJobs, suffix: "at a time")
+                }
+                Text("Sequential ripping (for hard disks that slow down with parallel writes): set the maximum to 1.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("MakeMKV") {
@@ -201,6 +208,81 @@ private struct DrivesPreferences: View {
     }
 }
 
+/// Online lookup, notifications and the web page.
+private struct ServicesPreferences: View {
+    @Environment(AppModel.self) private var model
+    @State private var testResult = ""
+
+    var body: some View {
+        @Bindable var model = model
+        Form {
+            Section {
+                Picker("Look up movies and shows", selection: $model.config.metadata.provider) {
+                    ForEach(MetadataProvider.allCases) { Text($0.label).tag($0) }
+                }
+                if model.config.metadata.provider != .none {
+                    SecureField("API key", text: $model.config.metadata.apiKey)
+                    if model.config.metadata.provider == .tmdb {
+                        TextField("Language", text: $model.config.metadata.language, prompt: Text("en-US"))
+                    }
+                }
+            } header: {
+                Text("Online lookup")
+            } footer: {
+                Text("Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for media server names. Get a free key at themoviedb.org (Settings → API) or omdbapi.com.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                ForEach($model.config.notifications) { $t in
+                    HStack {
+                        Toggle("", isOn: $t.enabled).labelsHidden()
+                        TextField("URL", text: $t.url, prompt: Text("https://discord.com/api/webhooks/…, ntfy://topic, tgram://…"))
+                        Toggle("Only problems", isOn: $t.onlyProblems).toggleStyle(.checkbox)
+                        Button(role: .destructive) { model.config.notifications.removeAll { $0.id == t.id } } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.borderless)
+                    }
+                }
+                HStack {
+                    Button("Add") { model.config.notifications.append(NotificationTarget()) }
+                    Button("Send a Test") {
+                        Task {
+                            testResult = "Sending…"
+                            let log = LineCollector()
+                            await NotificationSender.send(model.config.notifications, title: "Bromelia test", body: "Notifications work.", status: "success") { log.append($0) }
+                            testResult = log.all.isEmpty ? "Sent." : log.joined
+                        }
+                    }
+                    .disabled(model.config.notifications.isEmpty)
+                    if !testResult.isEmpty { Text(testResult).font(.caption).textSelection(.enabled) }
+                }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("Sent when a job finishes. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook (JSON) work directly; other Apprise URLs (Telegram, Pushover, e-mail, …) need the apprise command (pip install apprise).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Serve a web page", isOn: $model.config.webUI.enabled)
+                TextField("Address", text: $model.config.webUI.address, prompt: Text("127.0.0.1"))
+                LabeledContent("Port") { IntField(title: "Port", value: $model.config.webUI.port, suffix: "") }
+                SecureField("Token", text: $model.config.webUI.token, prompt: Text("Required for other computers"))
+                if model.config.webUI.enabled {
+                    let host = model.config.webUI.address == "0.0.0.0" ? "localhost" : model.config.webUI.address
+                    let url = "http://\(host):\(model.config.webUI.port)/" + (model.config.webUI.token.isEmpty ? "" : "?token=\(model.config.webUI.token)")
+                    Link(url, destination: URL(string: url) ?? URL(string: "http://localhost")!).font(.caption)
+                }
+                if let e = model.web.lastError { Text(e).font(.caption).foregroundStyle(.red) }
+            } header: {
+                Text("Web page")
+            } footer: {
+                Text("Shows the drives, jobs and background steps and lets you rip, eject, close trays and cancel from a browser. 127.0.0.1 keeps it on this Mac; 0.0.0.0 opens it to your network and needs a token.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 private struct RegistrationPreferences: View {
     @Environment(AppModel.self) private var model
     @State private var reveal = false
@@ -251,6 +333,9 @@ private struct RegistrationPreferences: View {
                     Button("Beta Key Forum Page…") { NSWorkspace.shared.open(BetaKey.pageURL) }
                 }
                 if let result { Text(result).font(.caption).textSelection(.enabled) }
+                Toggle("Update the beta key automatically (at startup and when it expires)", isOn: $model.config.autoUpdateBetaKey)
+                Text("Only a beta key (or no key) is replaced; a purchased key is never changed.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("“Register Key with MakeMKV” runs makemkvcon reg, which stores the key in MakeMKV's own settings so the MakeMKV app uses it too. “Get the Current Beta Key” reads the free beta key from MakeMKV's forum and registers it the same way.")
                     .font(.caption).foregroundStyle(.secondary)
             }

@@ -7,6 +7,7 @@
 #include "bro-config.h"
 #include "bro-makemkv.h"
 #include "bro-runner.h"
+#include "bro-web.h"
 
 G_BEGIN_DECLS
 
@@ -41,6 +42,7 @@ struct _BroJob {
   int first_episode;           /* -1 = menus / 1 */
   int disc_flags;              /* DRV flags, -1 = unknown */
   gboolean automatic;
+  gboolean uses_configured_mode; /* the drive's mode, so it may follow the disc's format (automatic and quick rips) */
   gint64 start_at;             /* unix seconds; 0 = start when possible */
 
   BroJobState state;
@@ -117,6 +119,14 @@ typedef struct {
 void  bro_drive_item_free (BroDriveItem *item);
 char *bro_drive_item_name (BroDriveItem *item);
 
+/* Post-processing steps marked "background" (encoding, uploads), run after their job, a few at a time. */
+typedef struct {
+  char *id;
+  BroBackgroundWork *work;
+  char *state;   /* queued, running, done, failed */
+  char *message;
+} BroBackgroundItem;
+
 typedef struct {
   char *id, *title, *drive_name, *disc_name, *mode, *state, *output_dir, *error, *log_path;
   gint64 started_at, finished_at;
@@ -147,6 +157,9 @@ struct _BroState {
   int makemkv_problem;       /* BroNotice: expired key, outdated MakeMKV…, from the last makemkvcon run */
   guint save_source, tick_source, poll_source, rescan_source;
   GVolumeMonitor *monitor;
+  GPtrArray *background;     /* BroBackgroundItem* */
+  BroWebServer *web;
+  gboolean beta_key_tried;   /* the automatic update after an expired key runs once per session */
 };
 
 BroState       *bro_state_new (GApplication *app);
@@ -193,6 +206,25 @@ void            bro_state_import_settings (BroState *self, GHashTable *settings)
 void            bro_state_save_preset (BroState *self, const char *name, const BroDriveConfig *from);
 void            bro_state_register_key (BroState *self, const char *key, GAsyncReadyCallback cb, gpointer data);
 char           *bro_state_register_key_finish (BroState *self, GAsyncResult *res);
+
+/* Background post-processing (signal "jobs-changed" when it changes). */
+void            bro_state_enqueue_background (BroState *self, BroBackgroundWork *work); /* takes work */
+gboolean        bro_state_background_busy (BroState *self);
+void            bro_state_clear_background (BroState *self);
+
+void            bro_state_close_tray (BroState *self, const char *lane);
+void            bro_state_close_all_trays (BroState *self);
+/* With autoUpdateBetaKey: registers the forum's current beta key when MakeMKV uses a beta key (or none) and it
+ * differs. A purchased key is never replaced. */
+void            bro_state_update_beta_key_if_needed (BroState *self, const char *reason);
+
+/* The web page: the JSON for /api/status, and actions (drives/<lane>/rip|eject|close, jobs/<id>/cancel; returns an
+ * error or NULL). */
+JsonNode       *bro_state_web_status (BroState *self);
+char           *bro_state_web_action (BroState *self, const char *kind, const char *id, const char *action);
+const char     *bro_state_web_error (BroState *self);
+/* A state for a headless process (no GApplication), with its configuration at config_path (NULL = the default). */
+BroState       *bro_state_new_headless (const char *config_path);
 
 char           *bro_data_dir (void);
 

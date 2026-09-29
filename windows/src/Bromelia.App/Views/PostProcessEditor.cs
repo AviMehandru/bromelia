@@ -41,7 +41,12 @@ public sealed class PostProcessEditor : UserControl
         AddExample(examples, "Encode with HandBrakeCLI", new PostProcessStep
         {
             Name = "Encode with HandBrake", Executable = @"C:\Program Files\HandBrake\HandBrakeCLI.exe",
-            Arguments = "-i {file} -o \"{outputDir}\\{stem}.mp4\" --preset \"Fast 1080p30\"", PerFile = true,
+            Arguments = "-i {file} -o \"{outputDir}\\{stem}.mp4\" --preset \"Fast 1080p30\"", PerFile = true, Background = true,
+        });
+        AddExample(examples, "Rename for Plex with FileBot", new PostProcessStep
+        {
+            Name = "Rename for Plex with FileBot", Executable = @"C:\Program Files\FileBot\filebot.exe",
+            Arguments = "-rename {files} --db TheMovieDB --format \"{plex}\" --output D:\\Media -non-strict --action copy",
         });
         AddExample(examples, "Append to a log file", new PostProcessStep
         {
@@ -166,6 +171,7 @@ public sealed class PostProcessEditor : UserControl
         f.Toggle("Enabled", () => s.Enabled, v => s.Enabled = v);
         f.Choice("Run", Enum.GetValues<RunCondition>().Select(r => (r, r.Label())), () => s.RunOn, v => s.RunOn = v);
         f.Toggle("Run once for every produced file", () => s.PerFile, v => s.PerFile = v);
+        f.Toggle("Run in the background after the disc is ejected (encoding, uploads)", () => s.Background, v => s.Background = v);
         f.Section("Applies to", "Leave both empty to run for every disc. The name is the movie or show name used for file names; the disc label (e.g. ONE_PIECE_S2_P7_D2) lets a step target one specific disc. No format ticked = all formats; the e codes are backups that are not decrypted.");
         var nameError = Form.Help(PluginMatcher.Validate(s.MatchName) ?? "");
         var nameBox = f.Text("Movie / show name or disc label matches", () => s.MatchName, v => s.MatchName = v, "Any — regular expression, e.g. ^One Piece$", width: 320);

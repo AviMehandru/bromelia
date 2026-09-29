@@ -827,6 +827,13 @@ bro_beta_key_fetch (GError **error)
   return key;
 }
 
+gboolean
+bro_beta_key_may_replace (const char *installed)
+{
+  g_autofree char *k = g_strstrip (g_strdup (installed ? installed : ""));
+  return !*k || g_str_has_prefix (k, "T-");
+}
+
 BroSource *
 bro_source_resolve (const char *path, gboolean is_dir)
 {

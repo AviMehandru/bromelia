@@ -61,6 +61,59 @@ public sealed class WindowsPlatformServices : IPlatformServices
         return null;
     }
 
+    public Task<bool> CloseTrayAsync(string devicePath) => Task.Run(() => DeviceControl(devicePath, NativeMethods.IOCTL_STORAGE_LOAD_MEDIA));
+
+    public bool IsDiscMounted(string devicePath)
+    {
+        var d = devicePath.Trim();
+        if (d.Length < 2 || !char.IsLetter(d[0]) || d[1] != ':') return true;
+        try { return new DriveInfo(d[..2] + "\\").IsReady; } catch (Exception) { return false; }
+    }
+
+    /// <summary>A mounted DVD / Blu-ray structure means video; otherwise the table of contents tells audio CDs (any audio
+    /// track) from data discs.</summary>
+    public DiscContent ProbeDisc(string devicePath)
+    {
+        var d = devicePath.Trim();
+        if (d.Length >= 2 && char.IsLetter(d[0]) && d[1] == ':')
+        {
+            try
+            {
+                var root = d[..2] + "\\";
+                if (new DriveInfo(root).IsReady && DiscContentRules.HasVideoStructure(root)) return DiscContent.Video;
+            }
+            catch (Exception) { }
+        }
+        var path = Win32DevicePath(devicePath);
+        if (path == null) return DiscContent.Unknown;
+        using var handle = NativeMethods.CreateFile(path, NativeMethods.GENERIC_READ, NativeMethods.FILE_SHARE_READ | NativeMethods.FILE_SHARE_WRITE,
+            IntPtr.Zero, NativeMethods.OPEN_EXISTING, 0, IntPtr.Zero);
+        if (handle.IsInvalid) return DiscContent.Unknown;
+        var buffer = Marshal.AllocHGlobal(804);
+        try
+        {
+            if (!NativeMethods.DeviceIoControl(handle, NativeMethods.IOCTL_CDROM_READ_TOC, IntPtr.Zero, 0, buffer, 804, out _, IntPtr.Zero))
+                return DiscContent.Unknown;
+            var toc = new byte[804];
+            Marshal.Copy(buffer, toc, 0, toc.Length);
+            int first = toc[2], last = toc[3];
+            if (last < first) return DiscContent.Unknown;
+            for (int i = 0; i <= last - first && i < 99; i++)
+                if ((toc[4 + i * 8 + 1] & 0x04) == 0) return DiscContent.Audio;   // control bit 2 clear: audio track
+            return DiscContent.Data;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    static bool DeviceControl(string device, uint code)
+    {
+        var path = Win32DevicePath(device);
+        if (path == null) return false;
+        using var handle = NativeMethods.CreateFile(path, NativeMethods.GENERIC_READ, NativeMethods.FILE_SHARE_READ | NativeMethods.FILE_SHARE_WRITE,
+            IntPtr.Zero, NativeMethods.OPEN_EXISTING, 0, IntPtr.Zero);
+        return !handle.IsInvalid && NativeMethods.DeviceIoControl(handle, code, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+    }
+
     static bool Eject(string device)
     {
         var path = Win32DevicePath(device);
@@ -78,6 +131,8 @@ public sealed class WindowsPlatformServices : IPlatformServices
         public const uint FILE_SHARE_WRITE = 0x2;
         public const uint OPEN_EXISTING = 3;
         public const uint IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808;
+        public const uint IOCTL_STORAGE_LOAD_MEDIA = 0x2D480C;
+        public const uint IOCTL_CDROM_READ_TOC = 0x24000;
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);

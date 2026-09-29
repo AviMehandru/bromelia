@@ -16,6 +16,18 @@ bro_format_code (BroDiscFormat f, gboolean encrypted)
   return g_strconcat (b, encrypted ? "e" : "", NULL);
 }
 
+int
+bro_format_key (BroDiscFormat f)
+{
+  switch (f)
+    {
+    case BRO_FORMAT_DVD: return BRO_FORMAT_KEY_DVD;
+    case BRO_FORMAT_BLURAY: return BRO_FORMAT_KEY_BLURAY;
+    case BRO_FORMAT_UHD: return BRO_FORMAT_KEY_UHD;
+    default: return -1;
+    }
+}
+
 const char *
 bro_format_label (BroDiscFormat f)
 {

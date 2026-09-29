@@ -154,6 +154,12 @@ enum BetaKey {
         return html.firstMatch(of: keyPattern).map { String($0.0) }
     }
 
+    /// Whether an automatic update may replace `installed`: only a beta key (T-…) or no key, never a purchased one.
+    static func mayReplace(_ installed: String?) -> Bool {
+        guard let k = installed?.trimmingCharacters(in: .whitespaces), !k.isEmpty else { return true }
+        return k.hasPrefix("T-")
+    }
+
     static func fetch() async throws -> String {
         var request = URLRequest(url: pageURL)
         request.timeoutInterval = 30

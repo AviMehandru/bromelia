@@ -41,6 +41,7 @@
                     <Button x:Name="EjectButton" Click="Eject_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xF847;" /><TextBlock Text="Eject" /></StackPanel>
                     </Button>
+                    <Button x:Name="CloseTrayButton" Click="CloseTray_Click" Content="Close tray" />
                     <Button x:Name="CloseSourceButton" Click="CloseSource_Click" Content="Close" Visibility="Collapsed" />
                 </StackPanel>
                 <Button x:Name="ConfigureButton" HorizontalAlignment="Right" Click="Configure_Click" Content="Configure…" />

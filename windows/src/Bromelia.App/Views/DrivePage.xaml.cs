@@ -117,6 +117,7 @@ public sealed partial class DrivePage : Page
             HeaderIcon.Glyph = s?.Source is DiscSource.Iso ? "" : "";
             OpenDiscButton.Content = "Reload";
             EjectButton.Visibility = Visibility.Collapsed;
+            CloseTrayButton.Visibility = Visibility.Collapsed;
             RipButton.Visibility = Visibility.Collapsed;
             CloseSourceButton.Visibility = Visibility.Visible;
             ConfigureButton.Visibility = Visibility.Collapsed;
@@ -143,6 +144,7 @@ public sealed partial class DrivePage : Page
             OpenDiscButton.IsEnabled = inserted && !DriveBusy && _session?.IsLoading != true;
             RipButton.IsEnabled = inserted && ActiveJob == null;
             EjectButton.IsEnabled = e != null && !DriveBusy;
+            CloseTrayButton.IsEnabled = e != null && !inserted;
             ConfigureButton.Content = _item?.Config == null && e != null ? "Set up this drive…" : "Configure…";
             BackupButton.Visibility = Visibility.Visible;
 
@@ -548,6 +550,8 @@ public sealed partial class DrivePage : Page
     }
 
     async void Eject_Click(object sender, RoutedEventArgs e) => await State.EjectAsync(Lane);
+
+    async void CloseTray_Click(object sender, RoutedEventArgs e) => await State.CloseTrayAsync(Lane);
 
     void CloseSource_Click(object sender, RoutedEventArgs e)
     {

@@ -1,5 +1,6 @@
 /* bro-preferences.c — application preferences: tools, global MakeMKV settings, default drive, drives & presets, registration. */
 #include "bro-pages.h"
+#include "bro-integrations.h"
 
 static void
 changed_cb (gpointer data)
@@ -80,6 +81,7 @@ general_page (void)
   adw_preferences_group_add (g, bro_spin_row ("Keep history for", "jobs", &c->history_limit, 10, 100000, changed_cb, NULL));
   adw_preferences_group_add (g, bro_spin_row ("Stop a stuck rip after", "minutes without output (0 = never)", &c->stall_timeout_minutes, 0, 1440, changed_cb, NULL));
   adw_preferences_group_add (g, bro_switch_row ("Keep the computer awake while jobs run", NULL, &c->prevent_sleep, changed_cb, NULL));
+  adw_preferences_group_add (g, bro_spin_row ("Background post-processing", "steps at a time (encoding, uploads)", &c->background_jobs, 1, 16, changed_cb, NULL));
   g = group (ADW_PREFERENCES_PAGE (page), "MakeMKV", st->makemkv_version && *st->makemkv_version ? st->makemkv_version : NULL);
   adw_preferences_group_add (g, button_row ("Import settings from MakeMKV", "Copies ~/.MakeMKV/settings.conf into the global settings", "Import", G_CALLBACK (on_import), NULL));
   adw_preferences_group_add (g, button_row ("Bromelia data folder", "Job logs, manifests and history", "Open", G_CALLBACK (on_open_data), NULL));
@@ -396,8 +398,239 @@ registration_page (void)
     adw_action_row_add_suffix (ADW_ACTION_ROW (row), beta);
     adw_preferences_group_add (g, row);
   }
+  adw_preferences_group_add (g, bro_switch_row ("Update the beta key automatically", "At startup and when it expires. Only a beta key "
+                                                "(or no key) is replaced; a purchased key is never changed.",
+                                                &st->config->auto_update_beta_key, changed_cb, NULL));
   gtk_widget_set_margin_top (result, 6);
   adw_preferences_group_add (g, result);
+  return ADW_PREFERENCES_PAGE (page);
+}
+
+/* ---- services ---- */
+
+static const char *const provider_labels[] = { "Off", "The Movie Database (TMDb)", "OMDb (IMDb data)", NULL };
+
+static void
+on_secret_changed (GtkEditable *e, char **field)
+{
+  g_free (*field);
+  *field = g_strdup (gtk_editable_get_text (e));
+  bro_state_config_changed (bro_app_state ());
+}
+
+static GtkWidget *
+secret_row (const char *title, char **field)
+{
+  GtkWidget *row = adw_password_entry_row_new ();
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+  gtk_editable_set_text (GTK_EDITABLE (row), *field ? *field : "");
+  g_signal_connect (row, "changed", G_CALLBACK (on_secret_changed), field);
+  return row;
+}
+
+typedef struct {
+  AdwPreferencesGroup *group;
+  GPtrArray *rows;
+  GtkWidget *result;
+  GtkWidget *web_status;
+} Services;
+
+static void notifications_rebuild (Services *sv);
+
+static void
+on_remove_target (GtkButton *b, Services *sv)
+{
+  BroState *st = bro_app_state ();
+  g_ptr_array_remove (st->config->notifications, g_object_get_data (G_OBJECT (b), "target"));
+  bro_state_config_changed (st);
+  notifications_rebuild (sv);
+}
+
+static void
+on_add_target (GtkButton *b, Services *sv)
+{
+  BroState *st = bro_app_state ();
+  g_ptr_array_add (st->config->notifications, bro_notification_target_new ());
+  bro_state_config_changed (st);
+  notifications_rebuild (sv);
+}
+
+typedef struct {
+  GPtrArray *targets; /* copies */
+  GString *log;
+} TestSend;
+
+static void
+test_log (const char *text, gpointer data)
+{
+  TestSend *t = data;
+  g_string_append_printf (t->log, "%s%s", t->log->len ? "\n" : "", text);
+}
+
+static void
+test_thread (GTask *task, gpointer source, gpointer task_data, GCancellable *c)
+{
+  TestSend *t = task_data;
+  bro_notifications_send (t->targets, "Bromelia test", "Notifications work.", "success", test_log, t);
+  g_task_return_pointer (task, g_strdup (t->log->len ? t->log->str : "Sent."), g_free);
+}
+
+static void
+test_free (TestSend *t)
+{
+  g_ptr_array_unref (t->targets);
+  g_string_free (t->log, TRUE);
+  g_free (t);
+}
+
+static void
+test_done (GObject *src, GAsyncResult *res, gpointer data)
+{
+  GtkWidget *label = data;
+  g_autofree char *text = g_task_propagate_pointer (G_TASK (res), NULL);
+  gtk_label_set_text (GTK_LABEL (label), text ? text : "");
+  g_object_unref (label);
+}
+
+static void
+on_test_targets (GtkButton *b, Services *sv)
+{
+  BroState *st = bro_app_state ();
+  TestSend *t = g_new0 (TestSend, 1);
+  GTask *task = g_task_new (NULL, NULL, test_done, g_object_ref (sv->result));
+  t->targets = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_notification_target_free);
+  t->log = g_string_new (NULL);
+  for (guint i = 0; i < st->config->notifications->len; i++)
+    {
+      BroNotificationTarget *src = st->config->notifications->pdata[i], *copy = bro_notification_target_new ();
+      g_free (copy->url);
+      copy->url = g_strdup (src->url);
+      copy->enabled = src->enabled;
+      g_ptr_array_add (t->targets, copy);
+    }
+  gtk_label_set_text (GTK_LABEL (sv->result), "Sending…");
+  g_task_set_task_data (task, t, (GDestroyNotify) test_free);
+  g_task_run_in_thread (task, test_thread);
+  g_object_unref (task);
+}
+
+static void
+notifications_rebuild (Services *sv)
+{
+  BroState *st = bro_app_state ();
+  for (guint i = 0; i < sv->rows->len; i++)
+    adw_preferences_group_remove (sv->group, sv->rows->pdata[i]);
+  g_ptr_array_set_size (sv->rows, 0);
+  for (guint i = 0; i < st->config->notifications->len; i++)
+    {
+      BroNotificationTarget *t = st->config->notifications->pdata[i];
+      GtkWidget *exp = adw_expander_row_new ();
+      GtkWidget *remove = gtk_button_new_from_icon_name ("user-trash-symbolic");
+      g_autofree char *title = g_markup_escape_text (*t->url ? t->url : "New notification", -1);
+      adw_preferences_row_set_title (ADW_PREFERENCES_ROW (exp), title);
+      adw_expander_row_set_subtitle (ADW_EXPANDER_ROW (exp), t->enabled ? (t->only_problems ? "Only problems" : "Every job") : "Off");
+      gtk_widget_add_css_class (remove, "flat");
+      gtk_widget_set_valign (remove, GTK_ALIGN_CENTER);
+      gtk_widget_set_tooltip_text (remove, "Remove");
+      g_object_set_data (G_OBJECT (remove), "target", t);
+      g_signal_connect (remove, "clicked", G_CALLBACK (on_remove_target), sv);
+      adw_expander_row_add_suffix (ADW_EXPANDER_ROW (exp), remove);
+      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp),
+                                bro_entry_row ("URL", &t->url, "https://discord.com/api/webhooks/…, ntfy://topic, tgram://…", changed_cb, NULL));
+      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Enabled", NULL, &t->enabled, changed_cb, NULL));
+      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Only jobs that didn't succeed", NULL, &t->only_problems, changed_cb, NULL));
+      adw_preferences_group_add (sv->group, exp);
+      g_ptr_array_add (sv->rows, exp);
+    }
+}
+
+static void
+services_free (Services *sv)
+{
+  g_ptr_array_unref (sv->rows);
+  g_free (sv);
+}
+
+static void
+refresh_web_status (Services *sv)
+{
+  BroState *st = bro_app_state ();
+  const BroWebUIConfig *w = &st->config->web_ui;
+  const char *err = bro_state_web_error (st);
+  g_autofree char *text = NULL;
+  if (w->enabled && !err)
+    {
+      const char *host = g_str_equal (w->address, "0.0.0.0") ? "localhost" : w->address;
+      text = g_strdup_printf ("http://%s:%d/%s%s", host, w->port, *w->token ? "?token=" : "", w->token);
+    }
+  gtk_label_set_text (GTK_LABEL (sv->web_status), err && w->enabled ? err : (text ? text : ""));
+  gtk_label_set_selectable (GTK_LABEL (sv->web_status), TRUE);
+}
+
+static void
+web_changed_cb (gpointer data)
+{
+  bro_state_config_changed (bro_app_state ());
+  refresh_web_status (data);
+}
+
+static AdwPreferencesPage *
+services_page (void)
+{
+  BroState *st = bro_app_state ();
+  BroAppConfig *c = st->config;
+  GtkWidget *page = adw_preferences_page_new ();
+  Services *sv = g_new0 (Services, 1);
+  AdwPreferencesGroup *g;
+  GtkWidget *row;
+  sv->rows = g_ptr_array_new ();
+  g_object_set_data_full (G_OBJECT (page), "services", sv, (GDestroyNotify) services_free);
+  adw_preferences_page_set_title (ADW_PREFERENCES_PAGE (page), "Services");
+  adw_preferences_page_set_name (ADW_PREFERENCES_PAGE (page), "services");
+  adw_preferences_page_set_icon_name (ADW_PREFERENCES_PAGE (page), "network-workgroup-symbolic");
+
+  g = group (ADW_PREFERENCES_PAGE (page), "Online lookup",
+             "Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for "
+             "media server names. Get a free key at themoviedb.org (Settings → API) or omdbapi.com. Needs curl.");
+  adw_preferences_group_add (g, bro_combo_row ("Look up movies and shows", provider_labels, (int *) &c->metadata.provider, changed_cb, NULL));
+  adw_preferences_group_add (g, secret_row ("API key", &c->metadata.api_key));
+  adw_preferences_group_add (g, bro_entry_row ("Language (TMDb)", &c->metadata.language, "en-US", changed_cb, NULL));
+
+  g = group (ADW_PREFERENCES_PAGE (page), "Notifications",
+             "Sent when a job finishes. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook "
+             "(JSON) work directly with curl; other Apprise URLs (Telegram, Pushover, e-mail, …) need the apprise command "
+             "(pip install apprise).");
+  sv->group = g;
+  sv->result = bro_caption ("");
+  {
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *add = gtk_button_new_with_label ("Add");
+    GtkWidget *test = gtk_button_new_with_label ("Send a Test");
+    gtk_widget_add_css_class (add, "flat");
+    gtk_widget_add_css_class (test, "flat");
+    g_signal_connect (add, "clicked", G_CALLBACK (on_add_target), sv);
+    g_signal_connect (test, "clicked", G_CALLBACK (on_test_targets), sv);
+    gtk_box_append (GTK_BOX (box), add);
+    gtk_box_append (GTK_BOX (box), test);
+    adw_preferences_group_set_header_suffix (g, box);
+  }
+  notifications_rebuild (sv);
+  g = group (ADW_PREFERENCES_PAGE (page), NULL, NULL);
+  adw_preferences_group_add (g, sv->result);
+
+  g = group (ADW_PREFERENCES_PAGE (page), "Web page",
+             "Shows the drives, jobs and background steps and lets you rip, eject, close trays and cancel from a browser. "
+             "127.0.0.1 keeps it on this computer; 0.0.0.0 opens it to your network and needs a token.");
+  sv->web_status = bro_caption ("");
+  adw_preferences_group_add (g, bro_switch_row ("Serve a web page", NULL, &c->web_ui.enabled, web_changed_cb, sv));
+  adw_preferences_group_add (g, bro_entry_row ("Address", &c->web_ui.address, "127.0.0.1", web_changed_cb, sv));
+  adw_preferences_group_add (g, bro_spin_row ("Port", NULL, &c->web_ui.port, 1, 65535, web_changed_cb, sv));
+  row = secret_row ("Token (required for other computers)", &c->web_ui.token);
+  g_signal_connect_swapped (row, "changed", G_CALLBACK (refresh_web_status), sv);
+  adw_preferences_group_add (g, row);
+  gtk_widget_set_margin_top (sv->web_status, 6);
+  adw_preferences_group_add (g, sv->web_status);
+  refresh_web_status (sv);
   return ADW_PREFERENCES_PAGE (page);
 }
 
@@ -411,8 +644,11 @@ bro_preferences_present (GtkWidget *parent)
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), ADW_PREFERENCES_PAGE (catalog));
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), drives_page ());
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), ADW_PREFERENCES_PAGE (bro_plugins_page_new (st->config->plugins, changed_cb, NULL)));
+  adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), services_page ());
   adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (dialog), registration_page ());
   adw_dialog_set_content_width (dialog, 760);
   adw_dialog_set_content_height (dialog, 720);
+  if (g_getenv ("BROMELIA_SNAPSHOT_PAGE")) /* developer aid, see main.c */
+    adw_preferences_dialog_set_visible_page_name (ADW_PREFERENCES_DIALOG (dialog), g_getenv ("BROMELIA_SNAPSHOT_PAGE"));
   adw_dialog_present (dialog, parent);
 }

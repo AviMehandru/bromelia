@@ -148,6 +148,7 @@ public sealed class AppState : ObservableObject
 {
     readonly UiDispatcher _ui;
     readonly Dictionary<Guid, JobRunner> _runners = new();
+    bool _betaKeyTried;
     readonly Dictionary<string, DriveState> _knownStates = new();
     bool _firstScanDone;
     bool _isScanning;
@@ -165,6 +166,105 @@ public sealed class AppState : ObservableObject
         Config = ConfigStore.Load(ConfigPath);
         if (Config.OutputRoot.Length == 0) Config.OutputRoot = Paths.DefaultOutputRoot;
         foreach (var h in ConfigStore.LoadHistory()) History.Add(h);
+        Background = new BackgroundQueue(_ui) { Limit = Config.BackgroundJobs };
+        Web = new WebServer(this, _ui);
+    }
+
+    public BackgroundQueue Background { get; }
+    public WebServer Web { get; }
+
+    /// <summary>Starts the web page and, when enabled, the automatic beta key update. Call once at startup.</summary>
+    public void StartServices()
+    {
+        Web.Apply(Config.WebUI);
+        if (Config.AutoUpdateBetaKey) _ = UpdateBetaKeyIfNeededAsync("at startup");
+    }
+
+    /// <summary>With AutoUpdateBetaKey: registers the forum's current beta key when MakeMKV uses a beta key (or none) and
+    /// it differs. A purchased key is never replaced.</summary>
+    public async Task<string?> UpdateBetaKeyIfNeededAsync(string reason)
+    {
+        var installed = Config.RegistrationKey.Length > 0 ? Config.RegistrationKey : (MakeMKVEnvironment.InstalledSettings().TryGetValue("app_Key", out var ik) ? ik : null);
+        if (!BetaKey.MayReplace(installed)) return null;
+        string key;
+        try { key = await BetaKey.FetchAsync(); } catch (Exception) { return null; }
+        if (key == installed) return null;
+        var result = await InstallBetaKeyAsync();
+        LastError = $"Beta key updated {reason}: {result}";
+        return result;
+    }
+
+    public async Task CloseTrayAsync(string lane)
+    {
+        if (EntryForLane(lane) is not { DevicePath.Length: > 0 } e) return;
+        if (!await Platform.CloseTrayAsync(e.DevicePath)) LastError = $"Could not close the tray of {DriveItem.ShortModel(e.DriveName)}";
+        await Task.Delay(5000);
+        await RefreshDrivesAsync(true);
+    }
+
+    public async Task CloseAllTraysAsync()
+    {
+        foreach (var e in ScannedDrives.Where(d => d.IsPresent && d.State != DriveState.Inserted && d.DevicePath.Length > 0).ToList())
+            await Platform.CloseTrayAsync(e.DevicePath);
+        await Task.Delay(5000);
+        await RefreshDrivesAsync(true);
+    }
+
+    static string WebState(JobState s) => s switch
+    {
+        JobState.Queued => "queued",
+        JobState.Waiting => "waiting",
+        JobState.Running => "running",
+        _ => s.StatusWord(),
+    };
+
+    /// <summary>The JSON the web page shows (see shared/web/bromelia-web.html).</summary>
+    public Dictionary<string, object> WebStatus() => new()
+    {
+        ["app"] = "Bromelia",
+        ["makemkv"] = MakemkvVersion,
+        ["problem"] = MakemkvProblem?.Explanation ?? "",
+        ["drives"] = DriveItems.Where(i => i.Entry != null).Select(i => new Dictionary<string, object>
+        {
+            ["lane"] = i.LaneKey, ["name"] = i.DisplayName, ["device"] = i.Entry!.DevicePath, ["state"] = i.Entry.State.DisplayName(),
+            ["hasDisc"] = i.Entry.State == DriveState.Inserted, ["disc"] = i.Entry.DiscName, ["busy"] = ActiveJob(i.LaneKey) != null,
+        }).ToList(),
+        ["jobs"] = Jobs.Select(j => new Dictionary<string, object>
+        {
+            ["id"] = j.Id.ToString(), ["title"] = j.Title, ["state"] = WebState(j.State), ["stateLabel"] = j.State.Label(), ["phase"] = j.Phase,
+            ["progress"] = j.OverallProgress, ["error"] = j.ErrorMessage ?? "", ["outputDirectory"] = j.OutputDirectory ?? "", ["lane"] = j.LaneKey,
+        }).ToList(),
+        ["background"] = Background.Items.Select(b => new Dictionary<string, object> { ["id"] = b.Id.ToString(), ["title"] = b.Work.Title, ["state"] = b.State }).ToList(),
+        ["history"] = History.Take(20).Select(h => new Dictionary<string, object>
+        {
+            ["title"] = h.Title, ["state"] = WebState(h.State), ["stateLabel"] = h.State.Label(), ["error"] = h.ErrorMessage ?? "",
+            ["outputDirectory"] = h.OutputDirectory ?? "", ["finishedAt"] = h.FinishedAt?.ToString("o") ?? "",
+        }).ToList(),
+    };
+
+    /// <summary>Runs an action from the web page: drives/&lt;lane&gt;/rip|eject|close, jobs/&lt;id&gt;/cancel. Returns an error, or null.</summary>
+    public string? WebAction(string kind, string id, string action)
+    {
+        switch (kind, action)
+        {
+            case ("drives", "rip" or "eject" or "close"):
+                if (DriveItems.FirstOrDefault(d => d.LaneKey == id) is not { Entry: not null } item) return "No such drive";
+                if (action == "rip")
+                {
+                    if (ActiveJob(id) != null) return "The drive is busy";
+                    var before = Jobs.Count;
+                    QuickRip(item);
+                    return Jobs.Count > before ? null : LastError ?? "Nothing to rip";
+                }
+                _ = action == "eject" ? EjectAsync(id) : CloseTrayAsync(id);
+                return null;
+            case ("jobs", "cancel"):
+                if (Jobs.FirstOrDefault(j => j.Id.ToString() == id) is not { } job) return "No such job";
+                Cancel(job);
+                return null;
+            default:
+                return "Unknown action";
+        }
     }
 
     public IPlatformServices Platform { get; }
@@ -198,6 +298,8 @@ public sealed class AppState : ObservableObject
     /// <summary>Call after changing Config; saves (debounced) and refreshes drive items.</summary>
     public void ConfigChanged()
     {
+        Background.Limit = Config.BackgroundJobs;
+        Web.Apply(Config.WebUI);
         EnsureSessions(ScannedDrives);
         DrivesChanged?.Invoke();
         _saveCts?.Cancel();
@@ -395,7 +497,9 @@ public sealed class AppState : ObservableObject
         Sessions.GetValueOrDefault(e.LaneKey)?.Reset();
         if (Config.DriveConfigFor(e) is not { Enabled: true, Automation.AutoRipOnInsert: true } cfg) return;
         if (Jobs.Any(j => j.LaneKey == e.LaneKey && !j.State.IsFinished())) return;
-        var job = MakeJob(e, cfg, cfg.Rip.Mode);
+        if (DiscContentRules.ModeFor(e.Flags, () => Platform.ProbeDisc(e.DevicePath), cfg) is not { } mode) return;
+        var job = MakeJob(e, cfg, mode);
+        job.UsesConfiguredMode = mode == cfg.Rip.Mode;
         job.IsAutomatic = true;
         job.StartAt = DateTime.Now.AddSeconds(Math.Max(0, cfg.Automation.AutoRipDelaySeconds));
         job.State = JobState.Waiting;
@@ -527,7 +631,15 @@ public sealed class AppState : ObservableObject
     {
         if (item.Entry == null) return;
         var cfg = item.Config ?? Config.DefaultDrive;
-        var job = MakeJob(item.Entry, cfg, mode ?? cfg.Rip.Mode);
+        var entry = item.Entry;
+        var chosen = mode ?? DiscContentRules.ModeFor(entry.Flags, () => Platform.ProbeDisc(entry.DevicePath), cfg);
+        if (chosen is not { } m)
+        {
+            LastError = $"{item.DisplayName}: this isn't a DVD or Blu-ray, and the drive is set to leave other discs alone";
+            return;
+        }
+        var job = MakeJob(item.Entry, cfg, m);
+        job.UsesConfiguredMode = mode == null && m == cfg.Rip.Mode;
         if (Sessions.GetValueOrDefault(item.LaneKey) is { Info: { } info } session)
         {
             job.PreloadedInfo = info;
@@ -650,7 +762,16 @@ public sealed class AppState : ObservableObject
         {
             _runners.Remove(finished.Id);
             UpdateKeepAwake();
-            if (finished.MakemkvProblem is { IsLicenseProblem: true } problem) MakemkvProblem = problem;
+            if (finished.Background is { } work) Background.Enqueue(work);
+            if (finished.MakemkvProblem is { IsLicenseProblem: true } problem)
+            {
+                MakemkvProblem = problem;
+                if (problem.Kind == NoticeKind.KeyExpired && Config.AutoUpdateBetaKey && !_betaKeyTried)
+                {
+                    _betaKeyTried = true;
+                    _ = UpdateBetaKeyIfNeededAsync("after it expired");
+                }
+            }
             RecordHistory(finished);
             _ = Task.Delay(3000).ContinueWith(_ => _ui.Post(() => _ = RefreshDrivesAsync(true)), TaskScheduler.Default);
             Pump();

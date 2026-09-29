@@ -34,6 +34,7 @@ public partial class App : Application
         // Created on the UI thread: the engine captures this thread's SynchronizationContext.
         State = new AppState(platform);
         State.ImportFromMakeMkvIfFirstRun();
+        State.StartServices();
 
         MainWindow = new MainWindow();
         MainWindow.Activate();

@@ -33,7 +33,11 @@ struct DriveItem: Identifiable, Hashable {
 @Observable
 final class AppModel {
     var config: AppConfig {
-        didSet { if config != oldValue { scheduleSave() } }
+        didSet {
+            if config != oldValue { scheduleSave() }
+            if config.webUI != oldValue.webUI { web.apply(config.webUI) }
+            background.limit = config.backgroundJobs
+        }
     }
     private(set) var scannedDrives: [DriveScanEntry] = []
     var sessions: [String: DiscSession] = [:]
@@ -51,6 +55,9 @@ final class AppModel {
     var selection: SidebarSelection? = .queue
 
     @ObservationIgnored private var runners: [UUID: JobRunner] = [:]
+    let background = BackgroundQueue()
+    @ObservationIgnored private(set) lazy var web = WebServer(model: self)
+    @ObservationIgnored private var betaKeyTried = false
     @ObservationIgnored private var keepAwake: NSObjectProtocol?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -94,6 +101,21 @@ final class AppModel {
                 self?.pump()
             }
         }
+        background.limit = config.backgroundJobs
+        web.apply(config.webUI)
+        if config.autoUpdateBetaKey { Task { await updateBetaKeyIfNeeded(reason: "at startup") } }
+    }
+
+    /// With `autoUpdateBetaKey`: registers the forum's current beta key when MakeMKV uses a beta key (or none)
+    /// and it differs. A purchased key is never replaced.
+    @discardableResult
+    func updateBetaKeyIfNeeded(reason: String) async -> String? {
+        let installed = config.registrationKey.isEmpty ? MakeMKVEnvironment.installedRegistrationKey() : config.registrationKey
+        guard BetaKey.mayReplace(installed) else { return nil }
+        guard let key = try? await BetaKey.fetch(), key != installed else { return nil }
+        let result = await installBetaKey()
+        lastError = "Beta key updated \(reason): \(result)"
+        return result
     }
 
     private func importFromMakeMKVIfFirstRun() {
@@ -236,7 +258,9 @@ final class AppModel {
         sessions[lane]?.reset()
         guard let cfg = config.driveConfig(for: e), cfg.enabled, cfg.automation.autoRipOnInsert else { return }
         guard !jobs.contains(where: { $0.laneKey == lane && !$0.state.isFinished }) else { return }
-        let job = makeJob(for: e, config: cfg, mode: cfg.rip.mode)
+        guard let mode = DiscContent.mode(flags: e.flags, content: { DiscContentProbe.probe(device: e.devicePath) }, drive: cfg) else { return }
+        let job = makeJob(for: e, config: cfg, mode: mode)
+        job.usesConfiguredMode = mode == cfg.rip.mode
         job.isAutomatic = true
         job.startAt = Date().addingTimeInterval(TimeInterval(max(0, cfg.automation.autoRipDelaySeconds)))
         job.state = .waiting
@@ -277,6 +301,21 @@ final class AppModel {
     func removeDriveConfig(_ id: UUID) {
         config.drives.removeAll { $0.id == id }
         ensureSessions(scannedDrives)
+    }
+
+    func closeTray(lane: String) {
+        guard let e = entry(forLane: lane) else { return }
+        Task {
+            if !(await DriveControl.closeTray(driveName: e.driveName)) { self.lastError = "Could not close the tray of \(DriveItem.shortModel(e.driveName))" }
+            self.scheduleRescan(after: 5)
+        }
+    }
+
+    func closeAllTrays() {
+        Task {
+            if !(await DriveControl.closeTray(driveName: "")) { self.lastError = "Could not close the trays" }
+            self.scheduleRescan(after: 5)
+        }
     }
 
     func eject(lane: String) {
@@ -420,7 +459,13 @@ final class AppModel {
     func quickRip(_ item: DriveItem, mode: RipMode? = nil) {
         guard let e = item.entry else { return }
         let cfg = item.config ?? config.defaultDrive
-        let job = makeJob(for: e, config: cfg, mode: mode ?? cfg.rip.mode)
+        let configured = DiscContent.mode(flags: e.flags, content: { DiscContentProbe.probe(device: e.devicePath) }, drive: cfg)
+        guard let chosen = mode ?? configured else {
+            lastError = "\(item.displayName): this isn't a DVD or Blu-ray, and the drive is set to leave other discs alone"
+            return
+        }
+        let job = makeJob(for: e, config: cfg, mode: chosen)
+        job.usesConfiguredMode = mode == nil && chosen == cfg.rip.mode
         if let s = sessions[item.laneKey], let info = s.info {
             job.preloadedInfo = info
             job.discLabel = info.name
@@ -552,7 +597,14 @@ final class AppModel {
             guard let self else { return }
             self.runners[finished.id] = nil
             self.updateKeepAwake()
-            if let p = finished.makemkvProblem, p.isLicenseProblem { self.makemkvProblem = p }
+            if let w = finished.background { self.background.enqueue(w) }
+            if let p = finished.makemkvProblem, p.isLicenseProblem {
+                self.makemkvProblem = p
+                if p == .keyExpired, self.config.autoUpdateBetaKey, !self.betaKeyTried {
+                    self.betaKeyTried = true
+                    Task { await self.updateBetaKeyIfNeeded(reason: "after it expired") }
+                }
+            }
             self.recordHistory(finished)
             self.scheduleRescan(after: 3)
             self.pump()
@@ -647,4 +699,60 @@ enum SidebarSelection: Hashable {
     case source(String)
     case queue
     case history
+}
+
+// MARK: - Web page
+
+extension AppModel {
+    private static func webState(_ s: JobState) -> String {
+        switch s {
+        case .queued: return "queued"
+        case .waiting: return "waiting"
+        case .running: return "running"
+        default: return s.statusWord
+        }
+    }
+
+    /// The JSON the web page shows (see shared/web/bromelia-web.html).
+    func webStatus() -> [String: Any] {
+        var drives: [[String: Any]] = []
+        for item in driveItems {
+            guard let e = item.entry else { continue }
+            drives.append(["lane": item.laneKey, "name": item.displayName, "device": e.devicePath, "state": e.state.displayName,
+                           "hasDisc": e.state.hasDisc, "disc": e.discName, "busy": activeJob(lane: item.laneKey) != nil])
+        }
+        let jobList: [[String: Any]] = jobs.map { j in
+            ["id": j.id.uuidString, "title": j.title, "state": Self.webState(j.state), "stateLabel": j.state.label, "phase": j.phase,
+             "progress": j.overallProgress, "error": j.errorMessage ?? "", "outputDirectory": j.outputDirectory?.path ?? "", "lane": j.laneKey]
+        }
+        let bg: [[String: Any]] = background.items.map { ["id": $0.id.uuidString, "title": $0.work.title, "state": $0.state.rawValue] }
+        let hist: [[String: Any]] = history.prefix(20).map {
+            ["title": $0.title, "state": Self.webState($0.state), "stateLabel": $0.state.label, "error": $0.errorMessage ?? "",
+             "outputDirectory": $0.outputDirectory ?? "", "finishedAt": $0.finishedAt.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
+        }
+        return ["app": "Bromelia", "makemkv": makemkvVersion, "problem": makemkvProblem?.explanation ?? "",
+                "drives": drives, "jobs": jobList, "background": bg, "history": hist]
+    }
+
+    /// Runs an action from the web page: drives/<lane>/rip|eject|close, jobs/<id>/cancel. Returns an error, or nil.
+    func webAction(kind: String, id: String, action: String) -> String? {
+        switch (kind, action) {
+        case ("drives", "rip"), ("drives", "eject"), ("drives", "close"):
+            guard let item = driveItems.first(where: { $0.laneKey == id }), item.entry != nil else { return "No such drive" }
+            if action == "rip" {
+                if activeJob(lane: id) != nil { return "The drive is busy" }
+                let before = jobs.count
+                quickRip(item)
+                return jobs.count > before ? nil : (lastError ?? "Nothing to rip")
+            }
+            if action == "eject" { eject(lane: id) } else { closeTray(lane: id) }
+            return nil
+        case ("jobs", "cancel"):
+            guard let job = jobs.first(where: { $0.id.uuidString == id }) else { return "No such job" }
+            cancel(job)
+            return nil
+        default:
+            return "Unknown action"
+        }
+    }
 }

@@ -14,7 +14,19 @@ static const EnumEntry rip_modes[] = {
   { BRO_MODE_BACKUP_DECRYPTED, "backupDecrypted", "Backup (decrypted)" },
   { BRO_MODE_BACKUP_THEN_MKV, "backupThenMkv", "Decrypted backup, then MKV from backup" },
   { BRO_MODE_INFO_ONLY, "infoOnly", "Scan only (save disc information)" },
+  { BRO_MODE_AUDIO_CD, "audioCD", "Rip audio CD" },
+  { BRO_MODE_DATA_IMAGE, "dataImage", "Image data disc (ISO)" },
   { 0, NULL, NULL } };
+static const EnumEntry layouts[] = {
+  { BRO_LAYOUT_TEMPLATES, "templates", "Folder and file name templates" },
+  { BRO_LAYOUT_MEDIA_SERVER, "mediaServer", "Plex / Jellyfin / Emby library" },
+  { 0, NULL, NULL } };
+static const EnumEntry metadata_providers[] = {
+  { BRO_METADATA_NONE, "none", "Off" },
+  { BRO_METADATA_TMDB, "tmdb", "The Movie Database (TMDb)" },
+  { BRO_METADATA_OMDB, "omdb", "OMDb (IMDb data)" },
+  { 0, NULL, NULL } };
+static const char *const format_key_names[BRO_FORMAT_KEY_COUNT] = { "dvd", "bluray", "uhd" };
 static const EnumEntry strategies[] = {
   { BRO_STRATEGY_ALL, "all", "All titles" },
   { BRO_STRATEGY_LONGEST, "longest", "Longest title(s)" },
@@ -80,6 +92,18 @@ const char *bro_lpcm_to_string (BroLpcmOutput o) { return enum_find (lpcm_output
 const char *bro_lpcm_label (BroLpcmOutput o) { return enum_find (lpcm_outputs, o)->label; }
 const char *bro_profile_mode_label (BroProfileMode m) { return enum_find (profile_modes, m)->label; }
 const char *bro_conflict_label (BroConflictPolicy p) { return enum_find (conflicts, p)->label; }
+const char *bro_layout_label (BroLibraryLayout l) { return enum_find (layouts, l)->label; }
+const char *bro_metadata_provider_label (BroMetadataProvider p) { return enum_find (metadata_providers, p)->label; }
+const char *bro_metadata_provider_to_string (BroMetadataProvider p) { return enum_find (metadata_providers, p)->json; }
+const char *bro_format_key_name (BroFormatKey k) { return k >= 0 && k < BRO_FORMAT_KEY_COUNT ? format_key_names[k] : ""; }
+
+BroRipMode
+bro_rip_config_mode_for (const BroRipConfig *r, int format_key)
+{
+  if (format_key < 0 || format_key >= BRO_FORMAT_KEY_COUNT || r->format_modes[format_key] < 0)
+    return r->mode;
+  return r->format_modes[format_key];
+}
 
 const char *
 bro_rip_mode_short (BroRipMode m)
@@ -90,6 +114,8 @@ bro_rip_mode_short (BroRipMode m)
     case BRO_MODE_BACKUP: return "Backup";
     case BRO_MODE_BACKUP_DECRYPTED: return "Decrypted backup";
     case BRO_MODE_BACKUP_THEN_MKV: return "Backup + MKV";
+    case BRO_MODE_AUDIO_CD: return "Audio CD";
+    case BRO_MODE_DATA_IMAGE: return "Disc image";
     default: return "Scan";
     }
 }
@@ -254,6 +280,7 @@ post_step_to_json (JsonBuilder *b, const BroPostStep *s)
   for (guint i = 0; i < s->match_formats->len; i++)
     json_builder_add_string_value (b, s->match_formats->pdata[i]);
   json_builder_end_array (b);
+  B ("background", s->background);
   json_builder_end_object (b);
 }
 
@@ -285,6 +312,7 @@ post_step_from_json (JsonObject *o)
           g_ptr_array_add (s->match_formats, g_strdup (json_node_get_string (n)));
       }
   }
+  s->background = get_bool (o, "background", FALSE);
   return s;
 }
 
@@ -339,6 +367,12 @@ drive_config_init_defaults (BroDriveConfig *c)
   c->automation.eject_when_done = TRUE;
   c->automation.notify = TRUE;
   c->automation.play_sound = TRUE;
+  c->automation.wait_for_mount_seconds = 30;
+  for (int i = 0; i < BRO_FORMAT_KEY_COUNT; i++)
+    c->rip.format_modes[i] = -1;
+  c->other.rip_audio_cds = TRUE;
+  c->other.image_data_discs = TRUE;
+  c->other.audio_command = g_strdup ("");
   c->archive.checksums = TRUE;
   c->archive.archive_record = TRUE;
   c->archive.verify_rips = TRUE;
@@ -405,6 +439,7 @@ bro_drive_config_free (BroDriveConfig *c)
   g_free (c->output.folder_template);
   g_free (c->output.file_name_template);
   g_free (c->output.backup_subfolder);
+  g_free (c->other.audio_command);
   g_ptr_array_unref (c->post_process);
   g_free (c);
 }
@@ -475,6 +510,12 @@ drive_config_build (JsonBuilder *b, const BroDriveConfig *c)
   if (c->rip.direct_io >= 0) B ("directIO", c->rip.direct_io == 1);
   S ("extraArguments", c->rip.extra_arguments);
   B ("writeDiscInfoJSON", c->rip.write_disc_info_json);
+  json_builder_set_member_name (b, "formatModes");
+  json_builder_begin_object (b);
+  for (int i = 0; i < BRO_FORMAT_KEY_COUNT; i++)
+    if (c->rip.format_modes[i] >= 0)
+      S (format_key_names[i], bro_rip_mode_to_string (c->rip.format_modes[i]));
+  json_builder_end_object (b);
   json_builder_end_object (b);
 
   json_builder_set_member_name (b, "output");
@@ -484,6 +525,7 @@ drive_config_build (JsonBuilder *b, const BroDriveConfig *c)
   S ("fileNameTemplate", c->output.file_name_template);
   S ("backupSubfolder", c->output.backup_subfolder);
   S ("conflictPolicy", enum_find (conflicts, c->output.conflict_policy)->json);
+  S ("layout", enum_find (layouts, c->output.layout)->json);
   json_builder_end_object (b);
 
   json_builder_set_member_name (b, "automation");
@@ -494,6 +536,7 @@ drive_config_build (JsonBuilder *b, const BroDriveConfig *c)
   B ("ejectOnFailure", c->automation.eject_on_failure);
   B ("notify", c->automation.notify);
   B ("playSound", c->automation.play_sound);
+  I ("waitForMountSeconds", c->automation.wait_for_mount_seconds);
   json_builder_end_object (b);
 
   json_builder_set_member_name (b, "archive");
@@ -508,6 +551,13 @@ drive_config_build (JsonBuilder *b, const BroDriveConfig *c)
   B ("splitPlayAll", c->episodes.split_play_all);
   B ("keepPlayAll", c->episodes.keep_play_all);
   B ("readMenuNumbers", c->episodes.read_menu_numbers);
+  json_builder_end_object (b);
+
+  json_builder_set_member_name (b, "other");
+  json_builder_begin_object (b);
+  B ("ripAudioCDs", c->other.rip_audio_cds);
+  B ("imageDataDiscs", c->other.image_data_discs);
+  S ("audioCommand", c->other.audio_command);
   json_builder_end_object (b);
 
   json_builder_set_member_name (b, "postProcess");
@@ -589,6 +639,11 @@ drive_config_from_object (JsonObject *o)
     c->rip.direct_io = get_bool (r, "directIO", FALSE) ? 1 : 0;
   REPLACE (c->rip.extra_arguments, dup_str (r, "extraArguments", ""));
   c->rip.write_disc_info_json = get_bool (r, "writeDiscInfoJSON", FALSE);
+  {
+    JsonObject *fm = get_obj (r, "formatModes");
+    for (int i = 0; i < BRO_FORMAT_KEY_COUNT; i++)
+      c->rip.format_modes[i] = enum_parse (rip_modes, get_str (fm, format_key_names[i], NULL), -1);
+  }
 
   out = get_obj (o, "output");
   REPLACE (c->output.root_override, dup_str (out, "rootOverride", ""));
@@ -596,6 +651,7 @@ drive_config_from_object (JsonObject *o)
   REPLACE (c->output.file_name_template, dup_str (out, "fileNameTemplate", BRO_DEFAULT_FILE_TEMPLATE));
   REPLACE (c->output.backup_subfolder, dup_str (out, "backupSubfolder", "backup"));
   c->output.conflict_policy = enum_parse (conflicts, get_str (out, "conflictPolicy", NULL), BRO_CONFLICT_UNIQUE);
+  c->output.layout = enum_parse (layouts, get_str (out, "layout", NULL), BRO_LAYOUT_TEMPLATES);
 
   a = get_obj (o, "automation");
   c->automation.auto_rip_on_insert = get_bool (a, "autoRipOnInsert", FALSE);
@@ -604,6 +660,7 @@ drive_config_from_object (JsonObject *o)
   c->automation.eject_on_failure = get_bool (a, "ejectOnFailure", FALSE);
   c->automation.notify = get_bool (a, "notify", TRUE);
   c->automation.play_sound = get_bool (a, "playSound", TRUE);
+  c->automation.wait_for_mount_seconds = get_int (a, "waitForMountSeconds", 30);
 
   a = get_obj (o, "archive");
   c->archive.checksums = get_bool (a, "checksums", TRUE);
@@ -613,6 +670,10 @@ drive_config_from_object (JsonObject *o)
   c->episodes.split_play_all = get_bool (a, "splitPlayAll", TRUE);
   c->episodes.keep_play_all = get_bool (a, "keepPlayAll", TRUE);
   c->episodes.read_menu_numbers = get_bool (a, "readMenuNumbers", TRUE);
+  a = get_obj (o, "other");
+  c->other.rip_audio_cds = get_bool (a, "ripAudioCDs", TRUE);
+  c->other.image_data_discs = get_bool (a, "imageDataDiscs", TRUE);
+  REPLACE (c->other.audio_command, dup_str (a, "audioCommand", ""));
 
   steps = get_arr (o, "postProcess");
   if (steps)
@@ -750,7 +811,34 @@ bro_app_config_new (void)
   c->history_limit = 500;
   c->stall_timeout_minutes = 30;
   c->prevent_sleep = TRUE;
+  c->metadata.api_key = g_strdup ("");
+  c->metadata.language = g_strdup ("en-US");
+  c->notifications = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_notification_target_free);
+  c->background_jobs = 1;
+  c->web_ui.address = g_strdup ("127.0.0.1");
+  c->web_ui.port = 51280;
+  c->web_ui.token = g_strdup ("");
   return c;
+}
+
+BroNotificationTarget *
+bro_notification_target_new (void)
+{
+  BroNotificationTarget *t = g_new0 (BroNotificationTarget, 1);
+  t->id = g_uuid_string_random ();
+  t->url = g_strdup ("");
+  t->enabled = TRUE;
+  return t;
+}
+
+void
+bro_notification_target_free (BroNotificationTarget *t)
+{
+  if (!t)
+    return;
+  g_free (t->id);
+  g_free (t->url);
+  g_free (t);
 }
 
 void
@@ -767,6 +855,11 @@ bro_app_config_free (BroAppConfig *c)
   g_ptr_array_unref (c->drives);
   g_ptr_array_unref (c->presets);
   g_ptr_array_unref (c->plugins);
+  g_free (c->metadata.api_key);
+  g_free (c->metadata.language);
+  g_ptr_array_unref (c->notifications);
+  g_free (c->web_ui.address);
+  g_free (c->web_ui.token);
   g_free (c);
 }
 
@@ -813,6 +906,34 @@ bro_app_config_to_json (const BroAppConfig *c)
   I ("stallTimeoutMinutes", c->stall_timeout_minutes);
   json_builder_set_member_name (b, "preventSleep");
   json_builder_add_boolean_value (b, c->prevent_sleep);
+  json_builder_set_member_name (b, "metadata");
+  json_builder_begin_object (b);
+  S ("provider", bro_metadata_provider_to_string (c->metadata.provider));
+  S ("apiKey", c->metadata.api_key);
+  S ("language", c->metadata.language);
+  json_builder_end_object (b);
+  json_builder_set_member_name (b, "notifications");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < c->notifications->len; i++)
+    {
+      BroNotificationTarget *t = c->notifications->pdata[i];
+      json_builder_begin_object (b);
+      S ("id", t->id);
+      S ("url", t->url);
+      B ("enabled", t->enabled);
+      B ("onlyProblems", t->only_problems);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  B ("autoUpdateBetaKey", c->auto_update_beta_key);
+  I ("backgroundJobs", c->background_jobs);
+  json_builder_set_member_name (b, "webUI");
+  json_builder_begin_object (b);
+  B ("enabled", c->web_ui.enabled);
+  S ("address", c->web_ui.address);
+  I ("port", c->web_ui.port);
+  S ("token", c->web_ui.token);
+  json_builder_end_object (b);
   json_builder_end_object (b);
   return json_builder_get_root (b);
 }
@@ -864,6 +985,32 @@ bro_app_config_from_json (JsonNode *node)
   c->history_limit = get_int (o, "historyLimit", 500);
   c->stall_timeout_minutes = get_int (o, "stallTimeoutMinutes", 30);
   c->prevent_sleep = get_bool (o, "preventSleep", TRUE);
+  {
+    JsonObject *m = get_obj (o, "metadata"), *w = get_obj (o, "webUI");
+    c->metadata.provider = enum_parse (metadata_providers, get_str (m, "provider", NULL), BRO_METADATA_NONE);
+    REPLACE (c->metadata.api_key, dup_str (m, "apiKey", ""));
+    REPLACE (c->metadata.language, dup_str (m, "language", "en-US"));
+    if ((arr = get_arr (o, "notifications")))
+      for (guint i = 0; i < json_array_get_length (arr); i++)
+        if (JSON_NODE_HOLDS_OBJECT (json_array_get_element (arr, i)))
+          {
+            JsonObject *no = json_array_get_object_element (arr, i);
+            BroNotificationTarget *t = bro_notification_target_new ();
+            const char *id = get_str (no, "id", NULL);
+            if (id && *id)
+              REPLACE (t->id, g_strdup (id));
+            REPLACE (t->url, dup_str (no, "url", ""));
+            t->enabled = get_bool (no, "enabled", TRUE);
+            t->only_problems = get_bool (no, "onlyProblems", FALSE);
+            g_ptr_array_add (c->notifications, t);
+          }
+    c->auto_update_beta_key = get_bool (o, "autoUpdateBetaKey", FALSE);
+    c->background_jobs = get_int (o, "backgroundJobs", 1);
+    c->web_ui.enabled = get_bool (w, "enabled", FALSE);
+    REPLACE (c->web_ui.address, dup_str (w, "address", "127.0.0.1"));
+    c->web_ui.port = get_int (w, "port", 51280);
+    REPLACE (c->web_ui.token, dup_str (w, "token", ""));
+  }
   /* Version 1 kept MakeMKV's file names and named folders after the disc label; version 2 names
    * everything "{name} - … - {format}". Only untouched defaults are replaced. */
   if (c->version < 2)

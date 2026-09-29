@@ -1,5 +1,6 @@
 /* bro-state.c — application state, drive scanning, disc sessions, job queue and history. */
 #include "bro-state.h"
+#include "bro-integrations.h"
 #include "bro-logic.h"
 
 #include <json-glib/json-glib.h>
@@ -429,6 +430,16 @@ bro_drive_item_name (BroDriveItem *item)
 }
 
 static void
+background_item_free (BroBackgroundItem *b)
+{
+  g_free (b->id);
+  bro_background_work_free (b->work);
+  g_free (b->state);
+  g_free (b->message);
+  g_free (b);
+}
+
+static void
 bro_state_finalize (GObject *obj)
 {
   BroState *self = BRO_STATE (obj);
@@ -448,6 +459,8 @@ bro_state_finalize (GObject *obj)
   g_free (self->makemkv_version);
   g_free (self->last_error);
   g_ptr_array_unref (self->scan_messages);
+  g_ptr_array_unref (self->background);
+  bro_web_server_free (self->web);
   G_OBJECT_CLASS (bro_state_parent_class)->finalize (obj);
 }
 
@@ -474,6 +487,7 @@ bro_state_init (BroState *self)
   self->history = g_ptr_array_new_with_free_func ((GDestroyNotify) history_record_free);
   self->makemkv_version = g_strdup ("");
   self->scan_messages = g_ptr_array_new_with_free_func (g_free);
+  self->background = g_ptr_array_new_with_free_func ((GDestroyNotify) background_item_free);
 }
 
 static void emit (BroState *self, guint sig) { g_signal_emit (self, state_signals[sig], 0); }
@@ -580,6 +594,7 @@ save_timeout (gpointer data)
 }
 
 static void ensure_sessions (BroState *self);
+static void pump_background (BroState *self);
 
 void
 bro_state_config_changed (BroState *self)
@@ -587,6 +602,9 @@ bro_state_config_changed (BroState *self)
   g_clear_handle_id (&self->save_source, g_source_remove);
   self->save_source = g_timeout_add (400, save_timeout, self);
   ensure_sessions (self);
+  if (self->web)
+    bro_web_server_apply (self->web, &self->config->web_ui);
+  pump_background (self);
   emit (self, STATE_DRIVES_CHANGED);
 }
 
@@ -631,13 +649,26 @@ bro_state_import_settings (BroState *self, GHashTable *settings)
   bro_state_config_changed (self);
 }
 
-BroState *
-bro_state_new (GApplication *app)
+static JsonNode *
+web_status (gpointer data)
+{
+  return bro_state_web_status (data);
+}
+
+static char *
+web_action (const char *kind, const char *id, const char *action, gpointer data)
+{
+  return bro_state_web_action (data, kind, id, action);
+}
+
+static BroState *
+state_new_at (GApplication *app, const char *config_path)
 {
   BroState *self = g_object_new (BRO_TYPE_STATE, NULL);
-  g_autofree char *cfgdir = g_build_filename (g_get_user_config_dir (), "bromelia", NULL);
   self->app = app;
-  self->config_path = g_build_filename (cfgdir, "config.json", NULL);
+  self->config_path = config_path ? g_strdup (config_path)
+                                  : g_build_filename (g_get_user_config_dir (), "bromelia", "config.json", NULL);
+  self->web = bro_web_server_new (web_status, web_action, self);
   if (g_file_test (self->config_path, G_FILE_TEST_EXISTS))
     self->config = bro_app_config_load (self->config_path);
   else
@@ -656,6 +687,18 @@ bro_state_new (GApplication *app)
     }
   load_history (self);
   return self;
+}
+
+BroState *
+bro_state_new (GApplication *app)
+{
+  return state_new_at (app, NULL);
+}
+
+BroState *
+bro_state_new_headless (const char *config_path)
+{
+  return state_new_at (NULL, config_path);
 }
 
 /* ---- drives ---- */
@@ -800,7 +843,13 @@ disc_inserted (BroState *self, BroDriveEntry *e)
       if (g_str_equal (j->lane, lane) && !bro_job_state_finished (j->state))
         return;
     }
-  job = make_drive_job (e, cfg, cfg->rip.mode);
+  {
+    BroRipMode mode;
+    if (!bro_disc_mode_for (e->flags, bro_disc_content_probe, e->device, cfg, &mode))
+      return;
+    job = make_drive_job (e, cfg, mode);
+    job->uses_configured_mode = mode == cfg->rip.mode;
+  }
   job->automatic = TRUE;
   job->start_at = g_get_real_time () / G_USEC_PER_SEC + MAX (0, cfg->automation.auto_rip_delay_seconds);
   job->state = BRO_JOB_WAITING;
@@ -1438,9 +1487,18 @@ bro_state_quick_rip (BroState *self, BroDriveItem *item, int mode)
   const BroDriveConfig *cfg = item->config ? item->config : self->config->default_drive;
   BroSession *s;
   BroJob *job;
+  BroRipMode chosen = mode >= 0 ? (BroRipMode) mode : cfg->rip.mode;
   if (!item->entry)
     return;
-  job = make_drive_job (item->entry, cfg, mode >= 0 ? (BroRipMode) mode : cfg->rip.mode);
+  if (mode < 0 && !bro_disc_mode_for (item->entry->flags, bro_disc_content_probe, item->entry->device, cfg, &chosen))
+    {
+      g_autofree char *name = bro_drive_item_name (item);
+      g_autofree char *msg = g_strdup_printf ("%s: this isn't a DVD or Blu-ray, and the drive is set to leave other discs alone", name);
+      bro_state_set_error (self, msg);
+      return;
+    }
+  job = make_drive_job (item->entry, cfg, chosen);
+  job->uses_configured_mode = mode < 0 && chosen == cfg->rip.mode;
   s = g_hash_table_lookup (self->sessions, item->lane);
   if (s && s->info)
     {
@@ -1678,11 +1736,19 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
   if (r)
     {
       j->state = r->status;
+      j->mode = r->mode;
       if (bro_notice_is_license_problem (r->problem))
         {
           self->makemkv_problem = r->problem;
           emit (self, STATE_STATUS_CHANGED);
+          if (r->problem == BRO_NOTICE_KEY_EXPIRED && self->config->auto_update_beta_key && !self->beta_key_tried)
+            {
+              self->beta_key_tried = TRUE;
+              bro_state_update_beta_key_if_needed (self, "after it expired");
+            }
         }
+      if (r->background)
+        bro_state_enqueue_background (self, g_steal_pointer (&r->background));
       g_free (j->error);
       j->error = g_strdup (r->error);
       g_free (j->output_dir);
@@ -1711,12 +1777,9 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
   if (j->drive->automation.notify && self->app)
     {
       g_autoptr (GNotification) n = NULL;
-      g_autofree char *title = g_strdup_printf ("%s %s: %s", bro_rip_mode_short (j->mode),
-                                                j->state == BRO_JOB_SUCCEEDED ? "finished" : bro_job_state_label (j->state),
-                                                *j->disc_label ? j->disc_label : j->source_label);
-      g_autofree char *body = j->state == BRO_JOB_SUCCEEDED
-                                ? g_strdup_printf ("%u item(s) saved to %s", j->files->len, j->output_dir ? j->output_dir : "")
-                                : g_strdup (j->error ? j->error : "Failed");
+      g_autofree char *title = NULL, *body = NULL;
+      bro_notification_text (j->state, j->mode, *j->disc_label ? j->disc_label : j->source_label, j->files->len, j->output_dir,
+                             j->error, &title, &body);
       n = g_notification_new (title);
       g_notification_set_body (n, body);
       g_application_send_notification (self->app, NULL, n);
@@ -1765,6 +1828,8 @@ start_job (BroState *self, BroJob *j)
   req->source = bro_source_copy (j->source);
   req->disc_label = g_strdup (j->disc_label);
   req->mode = j->mode;
+  req->automatic = j->automatic;
+  req->uses_configured_mode = j->uses_configured_mode;
   req->preloaded = j->preloaded ? bro_disc_info_ref (j->preloaded) : NULL;
   if (j->manual_titles)
     {
@@ -2106,5 +2171,388 @@ bro_state_start (BroState *self)
   g_signal_connect_swapped (self->monitor, "volume-added", G_CALLBACK (on_media_changed), self);
   g_signal_connect_swapped (self->monitor, "volume-removed", G_CALLBACK (on_media_changed), self);
   g_signal_connect_swapped (self->monitor, "drive-eject-button", G_CALLBACK (on_media_changed), self);
+  bro_web_server_apply (self->web, &self->config->web_ui);
+  if (self->config->auto_update_beta_key)
+    bro_state_update_beta_key_if_needed (self, "at startup");
   bro_state_refresh_drives (self, TRUE);
+}
+
+/* ---- background post-processing ---- */
+
+static void
+background_thread (GTask *task, gpointer source, gpointer task_data, GCancellable *c)
+{
+  BroBackgroundItem *b = task_data;
+  int ran = 0;
+  char *failed = bro_background_work_run (b->work, &ran, NULL);
+  g_object_set_data (G_OBJECT (task), "ran", GINT_TO_POINTER (ran));
+  g_task_return_pointer (task, failed, g_free);
+}
+
+static void
+background_done (GObject *src, GAsyncResult *res, gpointer data)
+{
+  BroState *self = BRO_STATE (src);
+  g_autofree char *id = data;
+  int ran = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (res), "ran"));
+  g_autofree char *failed = g_task_propagate_pointer (G_TASK (res), NULL);
+  for (guint i = 0; i < self->background->len; i++)
+    {
+      BroBackgroundItem *b = self->background->pdata[i];
+      if (!g_str_equal (b->id, id))
+        continue;
+      g_free (b->state);
+      g_free (b->message);
+      b->state = g_strdup (failed ? "failed" : "done");
+      b->message = failed ? g_strdup_printf ("“%s” failed; see %s", failed, b->work->log_file)
+                          : g_strdup_printf ("%d step(s) finished", ran);
+    }
+  emit (self, STATE_JOBS_CHANGED);
+  pump_background (self);
+}
+
+static void
+pump_background (BroState *self)
+{
+  int running = 0;
+  for (guint i = 0; i < self->background->len; i++)
+    running += g_str_equal (((BroBackgroundItem *) self->background->pdata[i])->state, "running");
+  for (guint i = 0; i < self->background->len && running < MAX (1, self->config->background_jobs); i++)
+    {
+      BroBackgroundItem *b = self->background->pdata[i];
+      GTask *task;
+      if (!g_str_equal (b->state, "queued"))
+        continue;
+      g_free (b->state);
+      b->state = g_strdup ("running");
+      running++;
+      task = g_task_new (self, NULL, background_done, g_strdup (b->id));
+      /* The item stays in the list while it runs (it is only removed once finished). */
+      g_task_set_task_data (task, b, NULL);
+      g_task_run_in_thread (task, background_thread);
+      g_object_unref (task);
+    }
+}
+
+void
+bro_state_enqueue_background (BroState *self, BroBackgroundWork *work)
+{
+  BroBackgroundItem *b = g_new0 (BroBackgroundItem, 1);
+  b->id = g_uuid_string_random ();
+  b->work = work;
+  b->state = g_strdup ("queued");
+  b->message = g_strdup ("");
+  g_ptr_array_add (self->background, b);
+  pump_background (self);
+  emit (self, STATE_JOBS_CHANGED);
+}
+
+gboolean
+bro_state_background_busy (BroState *self)
+{
+  for (guint i = 0; i < self->background->len; i++)
+    {
+      const char *st = ((BroBackgroundItem *) self->background->pdata[i])->state;
+      if (g_str_equal (st, "queued") || g_str_equal (st, "running"))
+        return TRUE;
+    }
+  return FALSE;
+}
+
+void
+bro_state_clear_background (BroState *self)
+{
+  for (guint i = self->background->len; i > 0; i--)
+    {
+      const char *st = ((BroBackgroundItem *) self->background->pdata[i - 1])->state;
+      if (g_str_equal (st, "done") || g_str_equal (st, "failed"))
+        g_ptr_array_remove_index (self->background, i - 1);
+    }
+  emit (self, STATE_JOBS_CHANGED);
+}
+
+/* ---- trays ---- */
+
+static void
+close_tray_thread (GTask *task, gpointer source, gpointer task_data, GCancellable *c)
+{
+  GPtrArray *devices = task_data;
+  gboolean ok = TRUE;
+  for (guint i = 0; i < devices->len; i++)
+    ok &= bro_close_tray (devices->pdata[i]);
+  g_task_return_boolean (task, ok);
+}
+
+static void
+close_tray_done (GObject *src, GAsyncResult *res, gpointer data)
+{
+  BroState *self = BRO_STATE (src);
+  if (!g_task_propagate_boolean (G_TASK (res), NULL))
+    bro_state_set_error (self, "Could not close the tray (is the eject command installed?)");
+  bro_state_schedule_rescan (self, 5);
+}
+
+static void
+close_trays (BroState *self, GPtrArray *devices)
+{
+  GTask *task;
+  if (!devices->len)
+    {
+      g_ptr_array_unref (devices);
+      return;
+    }
+  task = g_task_new (self, NULL, close_tray_done, NULL);
+  g_task_set_task_data (task, devices, (GDestroyNotify) g_ptr_array_unref);
+  g_task_run_in_thread (task, close_tray_thread);
+  g_object_unref (task);
+}
+
+void
+bro_state_close_tray (BroState *self, const char *lane)
+{
+  BroDriveEntry *e = bro_state_entry_for_lane (self, lane);
+  GPtrArray *devices = g_ptr_array_new_with_free_func (g_free);
+  if (e && e->device && *e->device)
+    g_ptr_array_add (devices, g_strdup (e->device));
+  close_trays (self, devices);
+}
+
+void
+bro_state_close_all_trays (BroState *self)
+{
+  GPtrArray *devices = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < self->drives->len; i++)
+    {
+      BroDriveEntry *e = self->drives->pdata[i];
+      if (bro_drive_entry_present (e) && e->state != BRO_DRIVE_INSERTED && e->device && *e->device)
+        g_ptr_array_add (devices, g_strdup (e->device));
+    }
+  close_trays (self, devices);
+}
+
+/* ---- beta key updates ---- */
+
+typedef struct {
+  char *installed;
+  char *reason;
+} BetaCheck;
+
+static void
+beta_check_free (BetaCheck *b)
+{
+  g_free (b->installed);
+  g_free (b->reason);
+  g_free (b);
+}
+
+static void
+beta_check_thread (GTask *task, gpointer source, gpointer task_data, GCancellable *c)
+{
+  BetaCheck *b = task_data;
+  g_autofree char *key = bro_beta_key_fetch (NULL);
+  g_task_return_boolean (task, key && g_strcmp0 (key, b->installed) != 0);
+}
+
+static void
+beta_installed (GObject *src, GAsyncResult *res, gpointer data)
+{
+  BroState *self = BRO_STATE (src);
+  g_autofree char *reason = data;
+  g_autofree char *result = bro_state_install_beta_key_finish (self, res);
+  g_autofree char *msg = g_strdup_printf ("Beta key updated %s: %s", reason, result ? result : "");
+  bro_state_set_error (self, msg);
+}
+
+static void
+beta_checked (GObject *src, GAsyncResult *res, gpointer data)
+{
+  BroState *self = BRO_STATE (src);
+  BetaCheck *b = g_task_get_task_data (G_TASK (res));
+  if (g_task_propagate_boolean (G_TASK (res), NULL))
+    bro_state_install_beta_key (self, beta_installed, g_strdup (b->reason));
+}
+
+void
+bro_state_update_beta_key_if_needed (BroState *self, const char *reason)
+{
+  BetaCheck *b;
+  GTask *task;
+  const char *installed = self->config->registration_key;
+  g_autoptr (GHashTable) settings = NULL;
+  if (!installed || !*installed)
+    {
+      settings = bro_makemkv_installed_settings ();
+      installed = g_hash_table_lookup (settings, "app_Key");
+    }
+  if (!bro_beta_key_may_replace (installed))
+    return;
+  b = g_new0 (BetaCheck, 1);
+  b->installed = g_strdup (installed ? installed : "");
+  b->reason = g_strdup (reason);
+  task = g_task_new (self, NULL, beta_checked, NULL);
+  g_task_set_task_data (task, b, (GDestroyNotify) beta_check_free);
+  g_task_run_in_thread (task, beta_check_thread);
+  g_object_unref (task);
+}
+
+/* ---- web page ---- */
+
+static const char *
+web_state (BroJobState s)
+{
+  switch (s)
+    {
+    case BRO_JOB_QUEUED: return "queued";
+    case BRO_JOB_WAITING: return "waiting";
+    case BRO_JOB_RUNNING: return "running";
+    default: return bro_job_state_word (s);
+    }
+}
+
+static const char *
+word_label (const char *word)
+{
+  for (int s = BRO_JOB_SUCCEEDED; s <= BRO_JOB_COMPLETED_WITH_ERRORS; s++)
+    if (g_strcmp0 (bro_job_state_word (s), word) == 0)
+      return bro_job_state_label (s);
+  return word ? word : "";
+}
+
+#define JS(k, v) do { json_builder_set_member_name (b, k); json_builder_add_string_value (b, (v) ? (v) : ""); } while (0)
+
+JsonNode *
+bro_state_web_status (BroState *self)
+{
+  g_autoptr (JsonBuilder) b = json_builder_new ();
+  g_autoptr (GPtrArray) items = bro_state_drive_items (self);
+  json_builder_begin_object (b);
+  JS ("app", "Bromelia");
+  JS ("makemkv", self->makemkv_version);
+  JS ("problem", self->makemkv_problem != BRO_NOTICE_NONE ? bro_notice_explanation (self->makemkv_problem) : "");
+  json_builder_set_member_name (b, "drives");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < items->len; i++)
+    {
+      BroDriveItem *d = items->pdata[i];
+      g_autofree char *name = NULL;
+      if (!d->entry)
+        continue;
+      name = bro_drive_item_name (d);
+      json_builder_begin_object (b);
+      JS ("lane", d->lane);
+      JS ("name", name);
+      JS ("device", d->entry->device);
+      JS ("state", bro_drive_state_name (d->entry->state));
+      json_builder_set_member_name (b, "hasDisc");
+      json_builder_add_boolean_value (b, d->entry->state == BRO_DRIVE_INSERTED);
+      JS ("disc", d->entry->disc_name);
+      json_builder_set_member_name (b, "busy");
+      json_builder_add_boolean_value (b, bro_state_active_job (self, d->lane) != NULL);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  json_builder_set_member_name (b, "jobs");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < self->jobs->len; i++)
+    {
+      BroJob *j = self->jobs->pdata[i];
+      g_autofree char *title = bro_job_title (j);
+      json_builder_begin_object (b);
+      JS ("id", j->id);
+      JS ("title", title);
+      JS ("state", web_state (j->state));
+      JS ("stateLabel", bro_job_state_label (j->state));
+      JS ("phase", j->phase);
+      json_builder_set_member_name (b, "progress");
+      json_builder_add_double_value (b, bro_job_overall (j));
+      JS ("error", j->error);
+      JS ("outputDirectory", j->output_dir);
+      JS ("lane", j->lane);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  json_builder_set_member_name (b, "background");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < self->background->len; i++)
+    {
+      BroBackgroundItem *bg = self->background->pdata[i];
+      json_builder_begin_object (b);
+      JS ("id", bg->id);
+      JS ("title", bg->work->title);
+      JS ("state", bg->state);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  json_builder_set_member_name (b, "history");
+  json_builder_begin_array (b);
+  for (guint i = 0; i < self->history->len && i < 20; i++)
+    {
+      BroHistoryRecord *h = self->history->pdata[i];
+      g_autoptr (GDateTime) t = h->finished_at ? g_date_time_new_from_unix_utc (h->finished_at) : NULL;
+      g_autofree char *when = t ? g_date_time_format_iso8601 (t) : g_strdup ("");
+      json_builder_begin_object (b);
+      JS ("title", h->title);
+      JS ("state", h->state);
+      JS ("stateLabel", word_label (h->state));
+      JS ("error", h->error);
+      JS ("outputDirectory", h->output_dir);
+      JS ("finishedAt", when);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  json_builder_end_object (b);
+  return json_builder_get_root (b);
+}
+
+#undef JS
+
+char *
+bro_state_web_action (BroState *self, const char *kind, const char *id, const char *action)
+{
+  if (g_str_equal (kind, "drives") && (g_str_equal (action, "rip") || g_str_equal (action, "eject") || g_str_equal (action, "close")))
+    {
+      g_autoptr (GPtrArray) items = bro_state_drive_items (self);
+      BroDriveItem *item = NULL;
+      for (guint i = 0; i < items->len; i++)
+        if (g_str_equal (((BroDriveItem *) items->pdata[i])->lane, id) && ((BroDriveItem *) items->pdata[i])->entry)
+          item = items->pdata[i];
+      if (!item)
+        return g_strdup ("No such drive");
+      if (g_str_equal (action, "rip"))
+        {
+          guint before = self->jobs->len;
+          if (bro_state_active_job (self, id))
+            return g_strdup ("The drive is busy");
+          g_clear_pointer (&self->last_error, g_free);
+          bro_state_quick_rip (self, item, -1);
+          if (self->jobs->len > before)
+            return NULL;
+          return g_strdup (self->last_error ? self->last_error : "Nothing to rip");
+        }
+      if (g_str_equal (action, "eject"))
+        bro_state_eject (self, id);
+      else
+        bro_state_close_tray (self, id);
+      return NULL;
+    }
+  if (g_str_equal (kind, "jobs") && g_str_equal (action, "cancel"))
+    {
+      for (guint i = 0; i < self->jobs->len; i++)
+        {
+          BroJob *j = self->jobs->pdata[i];
+          if (g_str_equal (j->id, id))
+            {
+              bro_state_cancel_job (self, j);
+              return NULL;
+            }
+        }
+      return g_strdup ("No such job");
+    }
+  return g_strdup ("Unknown action");
+}
+
+const char *
+bro_state_web_error (BroState *self)
+{
+  return bro_web_server_last_error (self->web);
 }

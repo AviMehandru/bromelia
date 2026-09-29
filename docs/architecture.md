@@ -13,8 +13,10 @@ matches across platforms:
 | Disc identity, naming, plugin matching | `Core/MediaIdentity.swift` | `Logic/MediaIdentity.cs` | `bro-identity.c` |
 | DVD navigation (episodes in “play all” titles) | `Core/DVDNavigation.swift` | `Logic/DvdNavigation.cs` | `bro-dvd.c` |
 | Checksums, archive record, episode splitting tools | `Engine/Archive.swift`, `Engine/EpisodeSplitter.swift` | `Engine/Archive.cs` | `bro-identity.c`, `bro-runner.c` |
+| Notifications, online lookup, media server names, other discs | `Engine/Integrations.swift` | `Engine/Integrations.cs` | `bro-integrations.c` |
 | App state: drives, sessions, queue, history | `App/AppModel.swift` | `Engine/AppState.cs` | `bro-state.c` |
-| UI | SwiftUI views | WinUI 3 pages | GTK 4 / libadwaita widgets |
+| Background queue, web page | `App/BackgroundQueue.swift`, `App/WebServer.swift` | `Engine/Services.cs` | `bro-state.c`, `bro-web.c` |
+| UI | SwiftUI views | WinUI 3 pages | GTK 4 / libadwaita widgets (`bromelia`); none (`bromelia-daemon`) |
 
 ## makemkvcon
 
@@ -136,3 +138,26 @@ the tests of all three platforms replay it through the job pipeline with a stand
 
 While jobs run, macOS gets a `ProcessInfo` activity (no idle sleep, no App Nap), Windows
 `SetThreadExecutionState(ES_SYSTEM_REQUIRED)`, and Linux a GTK inhibitor (suspend and idle).
+
+## Services
+
+- **Notifications and online lookup** are plain HTTPS requests (`URLSession`, `HttpClient`, and `curl` on Linux
+  with the request written to a private config file so keys stay off the command line). Other Apprise URLs run
+  the `apprise` command. They happen on the job's thread at the end of the job (notifications) or after the
+  listing has been read (lookup); failures are logged and never fail a job.
+- **Other discs.** Before an automatic or quick rip, a disc whose `DRV` flags show no DVD / Blu-ray structure is
+  probed (DiskArbitration, the Windows table of contents, udev) and gets the `audioCD` or `dataImage` mode. Those
+  jobs skip `makemkvcon` entirely: the audio command runs in the staging folder, and data discs are copied to an
+  ISO there; staging, checksums, records and marked folders work as for any other job.
+- **Background queue.** Steps marked `background` are handed from the finished job to a queue in the app state
+  that runs them `backgroundJobs` at a time on worker threads, with the job's tokens and variables captured when
+  the job ended.
+- **Web page.** A small HTTP/1.1 server (Network.framework, `HttpListener`, `GSocketService`) answers one request
+  per connection on the UI thread: the page itself (`shared/web/bromelia-web.html`, bundled as a resource), a
+  status document built from the app state, and four actions that call the same functions as the UI.
+- **Media server layout** swaps the folder and file templates for fixed ones and makes the show / movie folder
+  shared between jobs: when files are moved out of the staging folder, folders that exist already (`Season 02`,
+  `Other`, `Backup`) are merged item by item instead of getting a numbered name.
+- **`bromelia-daemon`** (Linux) is the app state without a window: it scans drives, starts automatic rips, runs
+  the background queue and serves the web page, logging job changes to stdout. `docker/Dockerfile` builds it
+  together with MakeMKV (see [docker.md](docker.md)).

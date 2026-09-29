@@ -13,6 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\..\..\shared\web\bromelia-web.html" Link="bromelia-web.html" LogicalName="Bromelia.Core.bromelia-web.html" />
     <None Include="..\..\..\shared\catalog\settings-catalog.json" Link="settings-catalog.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

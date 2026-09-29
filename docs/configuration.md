@@ -31,7 +31,23 @@ between versions and platforms freely. Paths may start with `~`.
   "plugins": [ /* PostProcessStep */ ],   // steps for every drive, usually with matchName / matchFormats
   "historyLimit": 500,
   "stallTimeoutMinutes": 30,       // stop a rip or backup that prints nothing for this long (stuck drive); 0 = never
-  "preventSleep": true             // keep the computer awake while jobs run
+  "preventSleep": true,            // keep the computer awake while jobs run
+  "metadata": {                    // online lookup of the movie / show (see "Online lookup")
+    "provider": "none",            // none | tmdb | omdb
+    "apiKey": "",                  // TMDb: API key (v3) or read access token; OMDb: API key
+    "language": "en-US"            // TMDb language of titles
+  },
+  "notifications": [               // where to send a message when a job finishes (see "Notifications")
+    { "id": "…", "url": "https://discord.com/api/webhooks/…", "enabled": true, "onlyProblems": false }
+  ],
+  "autoUpdateBetaKey": false,      // register MakeMKV's current beta key at startup and when it expires (never replaces a purchased key)
+  "backgroundJobs": 1,             // background post-processing steps that run at the same time
+  "webUI": {                       // web page (see "Web page")
+    "enabled": false,
+    "address": "127.0.0.1",        // 127.0.0.1 = this computer only; 0.0.0.0 = the network (needs a token)
+    "port": 51280,
+    "token": ""                    // required for every request when set
+  }
 }
 ```
 
@@ -70,6 +86,7 @@ changed are kept.
   },
   "rip": {
     "mode": "mkv",                             // mkv | backup | backupDecrypted | backupThenMkv | infoOnly
+                                               // (audioCD and dataImage are chosen from the disc, see "Other discs")
     "backupFormat": "folder",                  // folder | iso
     "keepBackupAfterMKV": true,
     "titleSelection": {
@@ -89,7 +106,9 @@ changed are kept.
     "cacheMB": 1024,                           // optional: --cache
     "directIO": true,                          // optional: --directio
     "extraArguments": "",
-    "writeDiscInfoJSON": false
+    "writeDiscInfoJSON": false,
+    // Modes by disc format for automatic rips and "Rip" (not for titles chosen by hand); missing = "mode".
+    "formatModes": { "dvd": "backupThenMkv", "bluray": "mkv", "uhd": "backupDecrypted" }
   },
   "output": {
     "rootOverride": "",                        // empty = outputRoot
@@ -97,7 +116,8 @@ changed are kept.
     // MKV files and backups; empty = keep MakeMKV's names
     "fileNameTemplate": "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
     "backupSubfolder": "backup",
-    "conflictPolicy": "uniqueSuffix"           // uniqueSuffix | overwrite | skip
+    "conflictPolicy": "uniqueSuffix",          // uniqueSuffix | overwrite | skip
+    "layout": "templates"                      // templates | mediaServer (Plex / Jellyfin / Emby, see below)
   },
   "automation": {
     "autoRipOnInsert": false,
@@ -105,7 +125,8 @@ changed are kept.
     "ejectWhenDone": true,
     "ejectOnFailure": false,
     "notify": true,
-    "playSound": true
+    "playSound": true,
+    "waitForMountSeconds": 30                  // before an automatic rip, wait up to this long for the disc to be mounted; 0 = don't
   },
   "archive": {
     "checksums": true,                         // SHA256SUMS in the output folder
@@ -116,6 +137,11 @@ changed are kept.
     "splitPlayAll": true,                      // split DVD "play all" titles of TV shows into episodes
     "keepPlayAll": true,                       // keep the unsplit title too
     "readMenuNumbers": true                    // read episode numbers from the menus (ffmpeg + tesseract)
+  },
+  "other": {                                   // discs without a DVD / Blu-ray structure (see "Other discs")
+    "ripAudioCDs": true,
+    "imageDataDiscs": true,
+    "audioCommand": ""                         // empty = cyanrip, else abcde; {device} is the drive
   },
   "postProcess": [ /* PostProcessStep */ ]
 }
@@ -199,9 +225,15 @@ name, source file name (e.g. `00800.mpls`), segment map, `#<source id>` and dura
   "environment": { "PRESET": "{disc}" },
   "failJobOnError": false,
   "matchName": "",                             // regular expression on the name or disc label; "" = every disc
-  "matchFormats": []                           // e.g. ["DVD", "DVDe"] or ["BR*"]; [] = every format
+  "matchFormats": [],                          // e.g. ["DVD", "DVDe"] or ["BR*"]; [] = every format
+  "background": false                          // run after the job, in the background queue (see below)
 }
 ```
+
+**Background steps** (`"background": true`) run after the job has finished and the disc is out, in a queue
+of their own (`backgroundJobs` at a time), so a slow encode or upload doesn't hold up the next disc. They
+get the same tokens and variables, can't change the job's result, and write their output to
+`background.txt` in the job's log folder. The queue is shown under *Queue* (and on the web page).
 
 `matchName` is matched case-insensitively against the movie / show name used for file names *and*
 against the disc label, so `^One Piece$` targets a show and `ONE_PIECE_S2_P7_D2` (or `S2_P7`) one
@@ -259,6 +291,8 @@ The manifest (`BROMELIA_MANIFEST`) also contains `name`, `kind`, `format`, `form
 | `{date}`, `{time}`, `{year}`, `{month}`, `{day}`, `{job}` | Date/time of the job, short job id |
 | `{title}`, `{index}`, `{n}`, `{source}` | Title name, MakeMKV title number, position in the job, source title id |
 | `{duration}`, `{chapters}`, `{original}`, `{comment}` | `h-mm-ss`, chapter count, MakeMKV's file name, title comment |
+| `{releaseYear}`, `{tmdb}`, `{imdb}` | Year and ids found by the online lookup (empty without one) |
+| `{libraryFolder}`, `{seasonOr1}` | `Movies` / `TV Shows`; the season, or 1 (media server names) |
 | `{outputDir}`, `{file}`, `{filename}`, `{stem}`, `{files}`, `{status}`, `{manifest}`, `{device}`, `{checksums}` | Scripts only |
 
 `{n:3}` zero-pads to three digits; `{token?text}` inserts `text` (which may contain tokens) only
@@ -309,3 +343,76 @@ Every output folder gets, unless switched off in `archive`:
 ```json
 { "format": "bromelia-drives", "version": 1, "drives": [ … ], "presets": [ … ] }
 ```
+
+## Media server layout
+
+With `"layout": "mediaServer"` the templates are replaced by the names Plex, Jellyfin and Emby expect:
+
+```
+Movies/Inception (2010)/Inception (2010).mkv                    the main feature (longest title)
+Movies/Inception (2010)/Other/Inception (2010) - Playlist 00800.mkv
+Movies/Inception (2010)/Backup/Inception (2010) - Backup - BR   backups (.plexignore / .ignore keep servers out)
+TV Shows/One Piece (1999)/Season 02/One Piece (1999) - S02E138.mkv
+```
+
+A show or movie keeps one folder: later discs are added to it (`Season 02` gets the next disc's episodes)
+instead of creating numbered folders. The year comes from the online lookup; without one the names have no
+year. Jobs that fail or have read errors are kept outside the library in `<output root>/<name> [INCOMPLETE …]`.
+
+## Other discs
+
+Automatic rips and *Rip* look at what is in the drive. DVDs and Blu-rays use the drive's mode (or
+`formatModes`). Other discs:
+
+- **Audio CDs** (`ripAudioCDs`) are ripped with `audioCommand`, run in the output folder with `{device}` set
+  to the drive. Empty uses `cyanrip -d <device> -o flac`, else `abcde -d <device> -o flac -N`; both look the
+  album up in MusicBrainz.
+- **Data discs** (`imageDataDiscs`) are copied to `<name> - Backup - DISC.iso`: byte for byte on Linux and
+  Windows, with `hdiutil` (2048-byte sectors) on macOS. A read error fails the job; with `verifyRips` the
+  image must contain an ISO 9660 or UDF file system.
+
+When an option is off, the disc is left alone (and *Rip* says why). How discs are recognised: macOS
+mounts audio CDs as `cddafs`; Linux asks udev (`ID_CDROM_MEDIA_TRACK_COUNT_AUDIO`); Windows reads the disc's table of
+contents (any audio track makes an audio CD).
+A mounted disc with `BDMV`, `VIDEO_TS` or `HVDVD_TS` always counts as a video disc.
+
+## Online lookup
+
+With `metadata.provider` set to `tmdb` (The Movie Database; free API key at themoviedb.org → Settings → API,
+v3 key or read access token) or `omdb` (omdbapi.com), every job looks up the name read from the disc and uses
+the canonical title for `{name}`, plus `{releaseYear}`, `{tmdb}` and `{imdb}`. The result whose title matches
+the disc's name (ignoring case and punctuation) wins, else the first one. A failed lookup is logged and the
+job continues with the disc's own name. Requests use `curl` on Linux; the key never appears on a command line.
+
+## Notifications
+
+Every entry in `notifications` gets a message when a job finishes (with `onlyProblems`, only when it
+didn't succeed):
+
+| URL | Sent as |
+| --- | --- |
+| `https://discord.com/api/webhooks/…` | Discord webhook (`content`) |
+| `https://hooks.slack.com/services/…` | Slack webhook (`text`) |
+| `ntfy://topic`, `ntfy://host/topic`, `ntfys://host/topic`, `https://ntfy.sh/topic` | ntfy (title, tags) |
+| any other `http(s)://` URL | JSON `{"app", "title", "body", "status"}` |
+| anything else (`tgram://…`, `pover://…`, `mailto://…`) | the [`apprise`](https://github.com/caronc/apprise) command, when installed |
+
+`status` is `success`, `errors`, `failed` or `cancelled`. Failures are written to the job log.
+
+## Web page
+
+With `webUI.enabled` Bromelia serves a page at `http://<address>:<port>/` showing drives, jobs,
+background steps and recent history, with *Rip*, *Eject*, *Close tray* and *Cancel*. The same data is
+available as JSON:
+
+| Request | Result |
+| --- | --- |
+| `GET /api/status` | `{app, makemkv, problem, drives[{lane, name, device, state, hasDisc, disc, busy}], jobs[{id, title, state, stateLabel, phase, progress, error, outputDirectory, lane}], background[{id, title, state}], history[{title, state, stateLabel, error, outputDirectory, finishedAt}]}` |
+| `POST /api/drives/<lane>/rip` · `eject` · `close` | 204, or 400 with the reason |
+| `POST /api/jobs/<id>/cancel` | 204, or 400 (`No such job`) |
+
+Access rules: with a `token`, every request needs `Authorization: Bearer <token>` or `?token=<token>`
+(the page passes it on). Without one, only pages on this computer are served (the `Host` header must be
+`localhost`, `127.0.0.1` or `[::1]`, which also stops DNS rebinding), and an `address` other than
+`127.0.0.1` / `localhost` / `::1` is refused. `POST` requests need the header `X-Bromelia: 1`, which other
+web sites can't send. There is no TLS: put a reverse proxy in front of it for access over the internet.

@@ -23,6 +23,8 @@ struct ContentView: View {
                 Button {
                     Task { await model.refreshDrives(force: true) }
                 } label: { Label("Rescan", systemImage: "arrow.clockwise") }
+                Button { model.closeAllTrays() } label: { Label("Close Trays", systemImage: "arrow.down.to.line") }
+                    .help("Close the trays of all drives")
                 .disabled(model.isScanning)
                 .help("Rescan optical drives")
                 SettingsLink { Label("Settings", systemImage: "gearshape") }
@@ -264,7 +266,7 @@ struct DriveContextMenu: View {
             }
             .disabled(e.state != .inserted)
             Menu("Rip Using Drive Rules") {
-                ForEach(RipMode.allCases) { mode in
+                ForEach(RipMode.videoModes) { mode in
                     Button(mode.label) { model.quickRip(item, mode: mode) }
                 }
             }

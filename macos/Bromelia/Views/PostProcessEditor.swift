@@ -32,6 +32,7 @@ struct PostProcessTab: View {
                     Menu("Examples") {
                         Button("Move files to a library folder") { addExample(.move) }
                         Button("Encode with HandBrakeCLI") { addExample(.handbrake) }
+                        Button("Rename for Plex with FileBot") { addExample(.filebot) }
                         Button("Log to a file") { addExample(.log) }
                         Button("Run a shell command") { addExample(.shell) }
                     }
@@ -79,7 +80,7 @@ struct PostProcessTab: View {
         selected = steps.first?.id
     }
 
-    enum Example { case move, handbrake, log, shell }
+    enum Example { case move, handbrake, filebot, log, shell }
 
     private func addExample(_ e: Example) {
         var s = PostProcessStep()
@@ -94,6 +95,11 @@ struct PostProcessTab: View {
             s.executable = "/opt/homebrew/bin/HandBrakeCLI"
             s.arguments = "-i {file} -o \"{outputDir}/{stem}.mp4\" --preset \"Fast 1080p30\""
             s.perFile = true
+            s.background = true
+        case .filebot:
+            s.name = "Rename for Plex with FileBot"
+            s.executable = "/opt/homebrew/bin/filebot"
+            s.arguments = "-rename {files} --db TheMovieDB --format \"{plex}\" --output ~/Media -non-strict --action copy"
         case .log:
             s.name = "Append to rip log"
             s.executable = "/bin/sh"
@@ -124,6 +130,7 @@ private struct PostStepEditor: View {
                     ForEach(RunCondition.allCases) { Text($0.label).tag($0) }
                 }
                 Toggle("Run once for every produced file", isOn: $step.perFile)
+                Toggle("Run in the background after the disc is ejected (encoding, uploads)", isOn: $step.background)
             }
             Section {
                 TextField("Movie / show name or disc label matches", text: $step.matchName, prompt: Text("Any — regular expression, e.g. ^One Piece$ or S2_P7"))

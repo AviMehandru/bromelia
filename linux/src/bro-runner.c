@@ -2,6 +2,7 @@
 #include "bro-runner.h"
 #include "bro-dvd.h"
 #include "bro-identity.h"
+#include "bro-integrations.h"
 #include "bro-logic.h"
 
 #include <glib/gstdio.h>
@@ -97,6 +98,8 @@ bro_run_result_free (BroRunResult *r)
   g_free (r->disc_label);
   if (r->info) bro_disc_info_unref (r->info);
   g_free (r->libre_drive);
+  g_free (r->name);
+  bro_background_work_free (r->background);
   g_free (r);
 }
 
@@ -180,6 +183,8 @@ typedef struct {
   GCancellable *run_cancel;    /* stops the running makemkvcon only (drive changed, not enough space) */
   BroNotice problem;           /* a problem with MakeMKV or the drive that explains a failure */
   BroDiscInfo *rip_info;       /* the listing the titles were ripped from (disc, backup or one-pass listing) */
+  BroMediaMatch *metadata;     /* the movie / show found online */
+  int main_title;              /* the main feature of a movie (the longest title ripped), for media server names; -1 */
 } Ctx;
 
 typedef struct {
@@ -481,7 +486,35 @@ base_values (Ctx *c, BroJobState status)
       bro_identity_free (id);
     }
   bro_template_values_set (v, "checksums", c->checksum_file ? c->checksum_file : "");
+  {
+    BroMediaMatch *m = c->metadata;
+    g_autofree char *year = m && m->year ? g_strdup_printf ("%d", m->year) : g_strdup ("");
+    g_autofree char *tmdb = m && m->tmdb_id ? g_strdup_printf ("%d", m->tmdb_id) : g_strdup ("");
+    const char *season = g_hash_table_lookup (v, "season");
+    g_autofree char *season_or_1 = g_strdup (season && *season ? season : "1");
+    bro_template_values_set (v, "releaseYear", year);
+    bro_template_values_set (v, "tmdb", tmdb);
+    bro_template_values_set (v, "imdb", m && m->imdb_id ? m->imdb_id : "");
+    bro_template_values_set (v, "libraryFolder", g_strcmp0 (g_hash_table_lookup (v, "kind"), "tv") == 0 ? "TV Shows" : "Movies");
+    bro_template_values_set (v, "seasonOr1", season_or_1);
+  }
   return v;
+}
+
+static gboolean
+media_server (Ctx *c)
+{
+  return c->req->drive->output.layout == BRO_LAYOUT_MEDIA_SERVER;
+}
+
+/* The output root with ~ expanded. */
+static char *
+output_root (Ctx *c)
+{
+  const char *root_t = bro_app_config_output_root (c->req->config, c->req->drive);
+  if (!root_t || !*root_t)
+    root_t = "~/Videos/Bromelia";
+  return g_str_has_prefix (root_t, "~") ? g_build_filename (g_get_home_dir (), root_t + 1, NULL) : g_strdup (root_t);
 }
 
 static void
@@ -490,6 +523,11 @@ resolve_identity (Ctx *c, BroDiscInfo *info, int play_all, int format)
   int fmt = format >= 0 ? format : (c->identity ? (int) c->identity->format : -1);
   BroIdentity *id = bro_identity_resolve (info, c->res->disc_label, c->req->disc_flags, fmt, c->req->mode == BRO_MODE_BACKUP,
                                           c->req->media_name, c->req->media_kind, play_all);
+  if (c->metadata)
+    {
+      g_free (id->name);
+      id->name = bro_sanitize_component (c->metadata->title);
+    }
   if (!bro_identity_equal (id, c->identity))
     {
       g_autofree char *set = bro_label_set_description (&id->label);
@@ -528,19 +566,27 @@ title_values (GHashTable *v, BroTitle *t, int ordinal, BroDiscInfo *info, const 
 static char *
 resolve_output_dir (Ctx *c, GError **error)
 {
-  const char *root_t = bro_app_config_output_root (c->req->config, c->req->drive);
-  g_autofree char *root = NULL;
+  g_autofree char *root = output_root (c);
   g_autoptr (GHashTable) v = base_values (c, BRO_JOB_RUNNING);
-  g_autofree char *rel = bro_template_render_path (c->req->drive->output.folder_template, v);
+  g_autofree char *rel = bro_template_render_path (media_server (c) ? BRO_MEDIA_FOLDER_TEMPLATE : c->req->drive->output.folder_template, v);
   char *dir;
   gboolean non_empty = FALSE;
   /* Only a folder made for this disc may be renamed or removed; never the output root itself. */
   gboolean owned = *rel != '\0';
 
-  if (!root_t || !*root_t)
-    root_t = "~/Videos/Bromelia";
-  root = g_str_has_prefix (root_t, "~") ? g_build_filename (g_get_home_dir (), root_t + 1, NULL) : g_strdup (root_t);
   dir = *rel ? g_build_filename (root, rel, NULL) : g_strdup (root);
+  /* A media server library keeps one folder per movie / show: later discs are added to it. */
+  if (media_server (c))
+    {
+      c->owns_output_dir = FALSE;
+      if (g_mkdir_with_parents (dir, 0755) != 0)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not create %s", dir);
+          g_free (dir);
+          return NULL;
+        }
+      return dir;
+    }
 
   if (g_file_test (dir, G_FILE_TEST_IS_DIR))
     {
@@ -830,7 +876,7 @@ static char *
 rename_file (Ctx *c, const char *file, BroTitle *title, int ordinal, BroDiscInfo *info, const char *out_dir)
 {
   const char *explicit_name = g_hash_table_lookup (c->req->name_overrides, GINT_TO_POINTER (title->index));
-  const char *tmpl = explicit_name && *explicit_name ? explicit_name : c->req->drive->output.file_name_template;
+  const char *tmpl;
   g_autoptr (GHashTable) v = base_values (c, BRO_JOB_RUNNING);
   g_autofree char *track = bro_track_label (title);
   int k = GPOINTER_TO_INT (g_hash_table_lookup (c->separate, GINT_TO_POINTER (title->index))) - 1;
@@ -845,6 +891,9 @@ rename_file (Ctx *c, const char *file, BroTitle *title, int ordinal, BroDiscInfo
       bro_template_values_set (v, "episode", label);
       bro_template_values_set (v, "episodeNumber", num);
     }
+  tmpl = explicit_name && *explicit_name ? explicit_name
+         : media_server (c) ? bro_media_server_file_template (v, title->index == c->main_title)
+         : c->req->drive->output.file_name_template;
   final = rename_to (c, file, v, tmpl, NULL, out_dir);
   if (k >= 0)
     add_episode (c, final, out_dir, c->first_episode + k, bro_title_source_id (title) >= 0 ? bro_title_source_id (title) : title->index,
@@ -1306,7 +1355,9 @@ split_episodes (Ctx *c, const char *out_dir, BroDiscInfo *info, GError **error)
       range = f == l ? g_strdup_printf ("%d", f) : g_strdup_printf ("%d-%d", f, l);
       full_track = g_strdup_printf ("%s Ch %s", track, range);
       bro_template_values_set (vals, "track", full_track);
-      char *final = rename_to (c, parts->pdata[i], vals, c->req->drive->output.file_name_template, fallback, out_dir);
+      char *final = rename_to (c, parts->pdata[i], vals,
+                               media_server (c) ? bro_media_server_file_template (vals, FALSE) : c->req->drive->output.file_name_template,
+                               fallback, out_dir);
       if (i < p->starts->len)
         add_episode (c, final, out_dir, c->first_episode + (int) i, p->title, f, l);
       g_ptr_array_add (outputs, final);
@@ -1453,6 +1504,19 @@ marked_folder (Ctx *c, const char *tag, char **dest, char **from)
 {
   g_autofree char *short_id = g_ascii_strdown (c->req->job_id, MIN (strlen (c->req->job_id), 8));
   g_autoptr (GPtrArray) items = visible_items (c->output_dir);
+  /* Kept outside a media server library, where the server would pick the files up. */
+  if (media_server (c))
+    {
+      g_autofree char *root = output_root (c);
+      g_autofree char *base = g_path_get_basename (c->output_dir);
+      g_autofree char *raw = g_strdup_printf ("%s [%s %s]", base, tag, short_id);
+      g_autofree char *name = bro_sanitize_component (raw);
+      g_autofree char *want = g_build_filename (root, name, NULL);
+      *dest = bro_unique_path (want);
+      g_mkdir_with_parents (*dest, 0755);
+      *from = g_strdup (c->work_dir);
+      return;
+    }
   if (c->owns_output_dir && items->len == 0)
     {
       g_autofree char *parent = g_path_get_dirname (c->output_dir);
@@ -1505,23 +1569,59 @@ write_note (Ctx *c, const char *dir, const char *tag, BroJobState status)
   g_file_set_contents (path, t->str, -1, NULL);
 }
 
-/* A path under the staging folder, moved to where its top-level item went (moved: name -> new path). */
+/* A path under the staging folder, moved to where it (or the folder holding it) went (moved: relative path -> new
+ * path; folders merged into existing ones have an entry for each item moved). */
 static char *
 relocate (const char *path, const char *stage, GHashTable *moved)
 {
   g_autofree char *prefix = g_strconcat (stage, G_DIR_SEPARATOR_S, NULL);
-  const char *rest, *slash;
-  g_autofree char *first = NULL;
-  const char *top;
+  g_autofree char *key = NULL;
+  const char *rest;
   if (!g_str_has_prefix (path, prefix))
     return g_strdup (path);
   rest = path + strlen (prefix);
-  slash = strchr (rest, G_DIR_SEPARATOR);
-  first = slash ? g_strndup (rest, slash - rest) : g_strdup (rest);
-  top = g_hash_table_lookup (moved, first);
-  if (!top)
-    return g_strdup (path);
-  return slash ? g_build_filename (top, slash + 1, NULL) : g_strdup (top);
+  key = g_strdup (rest);
+  for (;;)
+    {
+      const char *top = g_hash_table_lookup (moved, key);
+      char *slash;
+      if (top)
+        return rest[strlen (key)] ? g_build_filename (top, rest + strlen (key) + 1, NULL) : g_strdup (top);
+      slash = strrchr (key, G_DIR_SEPARATOR);
+      if (!slash)
+        return g_strdup (path);
+      *slash = '\0';
+    }
+}
+
+/* Moves from/rel to dest/rel (a unique name when taken). With merge, a folder that exists in dest already (a
+ * media server's show or Season folder) gets the items instead. */
+static void
+move_item (Ctx *c, const char *from, const char *rel, const char *dest, gboolean merge, GHashTable *moved, gboolean *left)
+{
+  g_autofree char *source = g_build_filename (from, rel, NULL);
+  g_autofree char *want = g_build_filename (dest, rel, NULL);
+  char *target;
+  if (merge && g_file_test (source, G_FILE_TEST_IS_DIR) && !g_file_test (source, G_FILE_TEST_IS_SYMLINK) &&
+      g_file_test (want, G_FILE_TEST_IS_DIR))
+    {
+      g_autoptr (GPtrArray) items = visible_items (source);
+      for (guint i = 0; i < items->len; i++)
+        {
+          g_autofree char *child = g_build_filename (rel, items->pdata[i], NULL);
+          move_item (c, from, child, dest, merge, moved, left);
+        }
+      return;
+    }
+  target = bro_unique_path (want);
+  if (g_rename (source, target) == 0)
+    g_hash_table_insert (moved, g_strdup (rel), target);
+  else
+    {
+      *left = TRUE;
+      log_line (c, BRO_SEV_ERROR, "Could not move %s out of %s", rel, from);
+      g_free (target);
+    }
 }
 
 /* Moves the job's files out of the staging folder. A job that succeeded goes into the output folder. Anything else
@@ -1601,20 +1701,7 @@ finish_output (Ctx *c, BroJobState status)
   moved = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   items = visible_items (from);
   for (guint i = 0; i < items->len; i++)
-    {
-      const char *name = items->pdata[i];
-      g_autofree char *source = g_build_filename (from, name, NULL);
-      g_autofree char *want = g_build_filename (dest, name, NULL);
-      char *target = bro_unique_path (want);
-      if (g_rename (source, target) == 0)
-        g_hash_table_insert (moved, g_strdup (name), target);
-      else
-        {
-          left = TRUE;
-          log_line (c, BRO_SEV_ERROR, "Could not move %s out of %s", name, from);
-          g_free (target);
-        }
-    }
+    move_item (c, from, items->pdata[i], dest, !tag && c->req->drive->output.layout == BRO_LAYOUT_MEDIA_SERVER, moved, &left);
   if (left)
     {
       if (status == BRO_JOB_SUCCEEDED)
@@ -1840,7 +1927,7 @@ write_archive_record (Ctx *c, const char *out_dir, BroJobState status)
 static char *
 backup_name (Ctx *c, gboolean decrypt)
 {
-  g_autofree char *tmpl = g_strstrip (g_strdup (c->req->drive->output.file_name_template));
+  g_autofree char *tmpl = g_strstrip (g_strdup (media_server (c) ? BRO_MEDIA_BACKUP_NAME : c->req->drive->output.file_name_template));
   g_autoptr (GHashTable) v = NULL;
   static const char *const blank[] = { "title", "index", "n", "source", "duration", "chapters", "original", "comment", NULL };
   char *rel;
@@ -2352,6 +2439,19 @@ rip_titles (Ctx *c, const BroSource *src, BroDiscInfo *info, const char *out_dir
   if (c->rip_titles)
     g_array_unref (c->rip_titles);
   c->rip_titles = g_array_ref (indices);
+  c->main_title = -1;
+  {
+    int longest = -1;
+    for (guint i = 0; i < indices->len; i++)
+      {
+        BroTitle *t = bro_disc_info_title (info, g_array_index (indices, int, i));
+        if (t && bro_title_duration (t) > longest)
+          {
+            longest = bro_title_duration (t);
+            c->main_title = t->index;
+          }
+      }
+  }
   g_hash_table_remove_all (c->file_titles);
   prepare_episodes (c, src, info, indices);
   if (!check_free_space (c, info, indices, out_dir, error))
@@ -2488,7 +2588,19 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
       g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Backups can only be made from a disc in a drive");
       return NULL;
     }
-  if (in_subfolder)
+  if (media_server (c))
+    {
+      /* Kept out of the media server's scan (.plexignore for Plex, .ignore for Jellyfin / Emby). */
+      g_autofree char *plex = NULL, *ignore = NULL;
+      g_free (dest);
+      dest = g_build_filename (out_dir, "Backup", NULL);
+      g_mkdir_with_parents (dest, 0755);
+      plex = g_build_filename (dest, ".plexignore", NULL);
+      ignore = g_build_filename (dest, ".ignore", NULL);
+      g_file_set_contents (plex, "*\n", -1, NULL);
+      g_file_set_contents (ignore, "", 0, NULL);
+    }
+  else if (in_subfolder)
     {
       g_autoptr (GHashTable) v = base_values (c, BRO_JOB_RUNNING);
       g_autofree char *sub = bro_template_render_path (c->req->drive->output.backup_subfolder, v);
@@ -2685,6 +2797,211 @@ write_disc_info (BroDiscInfo *info, const char *dir, char **path_out)
   return ok;
 }
 
+/* Reserves the output folder and creates the hidden staging folder inside it, where everything is written until the
+ * job has finished and passed its checks. Returns the staging folder. */
+static char *
+prepare_output (Ctx *c, GError **error)
+{
+  g_autofree char *final_dir = resolve_output_dir (c, error);
+  g_autofree char *short_id = NULL, *name = NULL;
+  char *out_dir;
+  if (!final_dir)
+    return NULL;
+  c->output_dir = g_strdup (final_dir);
+  c->res->output_dir = g_strdup (final_dir);
+  update (c, BRO_UPDATE_OUTPUT_DIR, BRO_SEV_INFO, final_dir, 0, 0);
+  short_id = g_ascii_strdown (c->req->job_id, MIN (strlen (c->req->job_id), 8));
+  name = g_strconcat (BRO_STAGING_PREFIX, short_id, NULL);
+  out_dir = g_build_filename (final_dir, name, NULL);
+  c->work_dir = g_strdup (out_dir);
+  if (g_mkdir_with_parents (out_dir, 0755) != 0)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not create %s", out_dir);
+      g_free (out_dir);
+      return NULL;
+    }
+  log_line (c, BRO_SEV_INFO, "Output folder: %s (files are moved there once the job has finished and been checked)", final_dir);
+  return out_dir;
+}
+
+/* The canonical title and year from TMDb or OMDb, when a provider is set up. Failures only log. */
+static void
+look_up_metadata (Ctx *c, BroDiscInfo *info)
+{
+  const BroMetadataConfig *m = &c->req->config->metadata;
+  g_autoptr (GError) err = NULL;
+  g_autofree char *name = NULL, *what = NULL;
+  const char *provider = m->provider == BRO_METADATA_TMDB ? "TMDb" : "OMDb";
+  BroMediaMatch *match;
+  if (m->provider == BRO_METADATA_NONE || !m->api_key || !*m->api_key || !c->identity || !*c->identity->name)
+    return;
+  name = g_strdup (c->identity->name);
+  what = g_strdup_printf ("Looking up “%s”", name);
+  phase (c, what);
+  match = bro_metadata_lookup (name, c->identity->kind, m, &err);
+  if (!match)
+    {
+      if (err)
+        log_line (c, BRO_SEV_WARNING, "Looking up “%s” failed: %s", name, err->message);
+      else
+        log_line (c, BRO_SEV_WARNING, "%s found nothing for “%s”", provider, name);
+      return;
+    }
+  {
+    g_autofree char *year = match->year ? g_strdup_printf (" (%d)", match->year) : g_strdup ("");
+    g_autofree char *tmdb = match->tmdb_id ? g_strdup_printf (", TMDb %d", match->tmdb_id) : g_strdup ("");
+    g_autofree char *imdb = match->imdb_id ? g_strdup_printf (", %s", match->imdb_id) : g_strdup ("");
+    log_line (c, BRO_SEV_INFO, "%s: “%s”%s%s%s", match->provider, match->title, year, tmdb, imdb);
+  }
+  bro_media_match_free (c->metadata);
+  c->metadata = match;
+  resolve_identity (c, info, 0, -1);
+}
+
+/* Before an automatic rip, waits for the system to mount the disc (up to automation.waitForMountSeconds). */
+static gboolean
+wait_for_mount (Ctx *c, GError **error)
+{
+  int seconds = c->req->drive->automation.wait_for_mount_seconds;
+  gint64 deadline;
+  gboolean mounted;
+  if (!c->req->automatic || c->req->source->kind != BRO_SOURCE_DRIVE || !c->req->source->path || !*c->req->source->path || seconds <= 0)
+    return TRUE;
+  phase (c, "Waiting for the disc to be mounted");
+  deadline = g_get_monotonic_time () + (gint64) seconds * G_USEC_PER_SEC;
+  while (!(mounted = bro_disc_is_mounted (c->req->source->path)) && g_get_monotonic_time () < deadline && !cancelled (c))
+    g_usleep (G_USEC_PER_SEC / 2);
+  if (cancelled (c))
+    {
+      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
+      return FALSE;
+    }
+  if (mounted)
+    log_line (c, BRO_SEV_INFO, "The disc is mounted");
+  else
+    log_line (c, BRO_SEV_INFO, "The disc wasn't mounted after %d s; continuing", seconds);
+  return TRUE;
+}
+
+static gboolean
+on_copy_progress (gint64 done, gint64 total, gpointer data)
+{
+  Ctx *c = data;
+  g_autofree char *text = bro_format_bytes (done);
+  gint64 now = g_get_monotonic_time ();
+  static __thread gint64 last;
+  if (now - last > G_USEC_PER_SEC / 4)
+    {
+      last = now;
+      update (c, BRO_UPDATE_OPERATION, BRO_SEV_INFO, text, 0, 0);
+      if (total > 0)
+        update (c, BRO_UPDATE_PROGRESS, BRO_SEV_INFO, NULL, (double) done / total, (double) done / total);
+    }
+  return !cancelled (c);
+}
+
+static void
+on_audio_line (const char *line, gpointer data)
+{
+  log_line (data, BRO_SEV_INFO, "%s", line);
+}
+
+/* Audio CDs (ripped with cyanrip / abcde, which look the album up in MusicBrainz) and data discs (copied byte for byte
+ * to an ISO image). */
+static gboolean
+execute_other_disc (Ctx *c, GError **error)
+{
+  BroRunRequest *req = c->req;
+  g_autofree char *work = NULL;
+  const char *device = req->source->path;
+
+  if (req->source->kind != BRO_SOURCE_DRIVE || !device || !*device)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "%s needs a disc in a drive", bro_rip_mode_label (req->mode));
+      return FALSE;
+    }
+  resolve_identity (c, NULL, 0, -1);
+  if (!(work = prepare_output (c, error)))
+    return FALSE;
+  steps (c, 0, 1);
+  if (req->mode == BRO_MODE_DATA_IMAGE)
+    {
+      g_autofree char *name = backup_name (c, TRUE);
+      g_autofree char *file = g_strconcat (*name ? name : "disc", ".iso", NULL);
+      g_autofree char *dest = g_build_filename (work, file, NULL);
+      g_autoptr (GError) err = NULL;
+      g_autofree char *problem = NULL;
+      phase (c, "Copying the disc to an ISO image");
+      log_line (c, BRO_SEV_INFO, "Copying %s to %s", device, file);
+      if (!bro_copy_disc (device, dest, on_copy_progress, c, req->cancellable, &err))
+        {
+          if (cancelled (c) || g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
+          else
+            g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not read the disc: %s", err ? err->message : "unknown error");
+          return FALSE;
+        }
+      g_ptr_array_add (c->res->files, g_strdup (dest));
+      if (req->drive->archive.verify_rips && (problem = bro_backup_problem (dest, TRUE)))
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "The disc image failed the check: %s", problem);
+          return FALSE;
+        }
+      return TRUE;
+    }
+  {
+    g_autoptr (GPtrArray) argv = bro_audio_command (&req->drive->other, device);
+    g_autoptr (GPtrArray) items = NULL;
+    g_autoptr (GError) err = NULL;
+    g_autofree char *cmd = NULL, *tool = NULL;
+    BroRunOptions opt = { 0, MAX (0, req->config->stall_timeout_minutes) * 60, 0 };
+    BroRunStatus st = { 0 };
+    if (!argv)
+      {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                             "Ripping audio CDs needs cyanrip or abcde (both look up the album in MusicBrainz). "
+                             "Install one, or set an audio CD command.");
+        return FALSE;
+      }
+    tool = g_path_get_basename (argv->pdata[0]);
+    g_ptr_array_add (argv, NULL);
+    cmd = bro_command_line ((const char *const *) argv->pdata);
+    phase (c, "Ripping the audio CD");
+    update (c, BRO_UPDATE_COMMAND, BRO_SEV_INFO, cmd, 0, 0);
+    log_line (c, BRO_SEV_INFO, "$ %s", cmd);
+    if (!bro_process_run_ex ((const char *const *) argv->pdata, NULL, work, &opt, req->cancellable, on_audio_line, c, &st, &err))
+      {
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not start %s: %s", tool, err ? err->message : "unknown error");
+        return FALSE;
+      }
+    if (cancelled (c) || st.cancelled)
+      {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
+        return FALSE;
+      }
+    if (st.stalled)
+      {
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "%s printed nothing for %d minutes and was stopped", tool,
+                     req->config->stall_timeout_minutes);
+        return FALSE;
+      }
+    if (st.exit_status != 0)
+      {
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed (exit status %d)", tool, st.exit_status);
+        return FALSE;
+      }
+    items = visible_items (work);
+    for (guint i = 0; i < items->len; i++)
+      g_ptr_array_add (c->res->files, g_build_filename (work, items->pdata[i], NULL));
+    if (!items->len)
+      {
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s saved nothing", tool);
+        return FALSE;
+      }
+    return TRUE;
+  }
+}
+
 static gboolean
 execute (Ctx *c, GError **error)
 {
@@ -2694,8 +3011,12 @@ execute (Ctx *c, GError **error)
   BroDiscInfo *opened = req->preloaded;
   BroDiscInfo *info = NULL;
   gboolean need_info, using_opened = FALSE;
-  g_autofree char *final_dir = NULL, *out_dir = NULL, *short_id = NULL;
+  g_autofree char *out_dir = NULL;
 
+  if (!wait_for_mount (c, error))
+    return FALSE;
+  if (req->mode == BRO_MODE_AUDIO_CD || req->mode == BRO_MODE_DATA_IMAGE)
+    return execute_other_disc (c, error);
   if (needs_all && !req->mkvmerge)
     {
       g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -2780,27 +3101,27 @@ execute (Ctx *c, GError **error)
       update (c, BRO_UPDATE_DISC_LABEL, BRO_SEV_INFO, c->res->disc_label, 0, 0);
     }
   resolve_identity (c, info, 0, -1);
-
-  final_dir = resolve_output_dir (c, error);
-  if (!final_dir)
-    return FALSE;
-  c->output_dir = g_strdup (final_dir);
-  c->res->output_dir = g_strdup (final_dir);
-  update (c, BRO_UPDATE_OUTPUT_DIR, BRO_SEV_INFO, final_dir, 0, 0);
-  /* Everything is written to a hidden staging folder first and only moved into the output folder once the job has
-   * finished and passed its checks. */
-  short_id = g_ascii_strdown (req->job_id, MIN (strlen (req->job_id), 8));
-  {
-    g_autofree char *name = g_strconcat (BRO_STAGING_PREFIX, short_id, NULL);
-    out_dir = g_build_filename (final_dir, name, NULL);
-  }
-  c->work_dir = g_strdup (out_dir);
-  if (g_mkdir_with_parents (out_dir, 0755) != 0)
+  /* Separate modes for DVDs, Blu-rays and 4K UHD discs (automatic and quick rips). */
+  if (req->uses_configured_mode && c->identity)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Could not create %s", out_dir);
-      return FALSE;
+      BroRipMode m = bro_rip_config_mode_for (&req->drive->rip, bro_format_key (c->identity->format));
+      if (m != req->mode)
+        {
+          if (!info && (bro_rip_mode_makes_mkv (m) && m != BRO_MODE_BACKUP_THEN_MKV))
+            {
+              g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s needs the disc listing, which couldn't be read", bro_rip_mode_label (m));
+              return FALSE;
+            }
+          log_line (c, BRO_SEV_INFO, "%s: %s", bro_format_label (c->identity->format), bro_rip_mode_label (m));
+          req->mode = m;
+          c->res->mode = m;
+          resolve_identity (c, info, 0, -1);
+        }
     }
-  log_line (c, BRO_SEV_INFO, "Output folder: %s (files are moved there once the job has finished and been checked)", final_dir);
+  look_up_metadata (c, info);
+
+  if (!(out_dir = prepare_output (c, error)))
+    return FALSE;
 
   switch (req->mode)
     {
@@ -2874,6 +3195,9 @@ execute (Ctx *c, GError **error)
           }
         return TRUE;
       }
+    case BRO_MODE_AUDIO_CD:
+    case BRO_MODE_DATA_IMAGE:
+      break; /* handled by execute_other_disc */
     }
   return TRUE;
 }
@@ -2938,24 +3262,145 @@ bro_post_step_argv (const BroPostStep *step, GHashTable *values, GPtrArray *file
   return argv;
 }
 
+typedef void (*StepLogFunc) (BroSeverity sev, const char *text, gpointer data);
+
 typedef struct {
-  Ctx *c;
+  StepLogFunc log;
+  gpointer data;
   const char *name;
 } StepLog;
+
+static void
+step_log (StepLog *sl, BroSeverity sev, const char *fmt, ...) G_GNUC_PRINTF (3, 4);
+
+static void
+step_log (StepLog *sl, BroSeverity sev, const char *fmt, ...)
+{
+  va_list ap;
+  g_autofree char *text = NULL;
+  va_start (ap, fmt);
+  text = g_strdup_vprintf (fmt, ap);
+  va_end (ap);
+  sl->log (sev, text, sl->data);
+}
 
 static void
 on_step_line (const char *line, gpointer data)
 {
   StepLog *sl = data;
-  log_line (sl->c, BRO_SEV_INFO, "  [%s] %s", sl->name, line);
+  step_log (sl, BRO_SEV_INFO, "  [%s] %s", sl->name, line);
 }
 
+static GHashTable *
+copy_values (GHashTable *v)
+{
+  GHashTable *out = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  GHashTableIter it;
+  gpointer k, val;
+  g_hash_table_iter_init (&it, v);
+  while (g_hash_table_iter_next (&it, &k, &val))
+    g_hash_table_insert (out, g_strdup (k), g_strdup (val));
+  return out;
+}
+
+/* Runs steps (already matched to the disc) for a job that ended with status. Returns whether a step marked "fail the
+ * job" failed; *any_failed (optional) receives the first step that failed at all. */
 static gboolean
-run_post_processing (Ctx *c, BroJobState status)
+run_steps (GPtrArray *steps_arr, GHashTable *base_vals, char **base_env, GPtrArray *files, const char *output_dir,
+           BroJobState status, GCancellable *cancellable, StepLogFunc log, gpointer log_data, int *ran, char **any_failed)
 {
   gboolean failed = FALSE;
-  g_autoptr (GPtrArray) steps_arr = g_ptr_array_new ();
-  g_auto (GStrv) base_env = g_get_environ ();
+  for (guint i = 0; i < steps_arr->len; i++)
+    {
+      BroPostStep *step = steps_arr->pdata[i];
+      guint targets = step->per_file ? files->len : 1;
+      if (!bro_post_step_should_run (step, status))
+        continue;
+      if (!targets)
+        continue;
+      if (ran)
+        (*ran)++;
+      for (guint t = 0; t < targets; t++)
+        {
+          const char *file = step->per_file ? files->pdata[t] : NULL;
+          g_autoptr (GHashTable) values = copy_values (base_vals);
+          g_auto (GStrv) envp = g_strdupv (base_env);
+          g_autoptr (GPtrArray) argv = NULL;
+          g_autoptr (GError) err = NULL;
+          g_autofree char *cmd = NULL;
+          g_autofree char *wd = NULL;
+          int exit_status = -1;
+          gboolean timed_out = FALSE;
+          GHashTableIter it;
+          gpointer k, v;
+          StepLog sl = { log, log_data, step->name };
+
+          if (g_cancellable_is_cancelled (cancellable))
+            return failed;
+          if (file)
+            {
+              g_autofree char *fname = g_path_get_basename (file);
+              g_autofree char *stem = g_strdup (fname);
+              char *dot = strrchr (stem, '.');
+              if (dot) *dot = '\0';
+              bro_template_values_set (values, "file", file);
+              bro_template_values_set (values, "filename", fname);
+              bro_template_values_set (values, "stem", stem);
+              envp = g_environ_setenv (envp, "BROMELIA_FILE", file, TRUE);
+            }
+          g_hash_table_iter_init (&it, step->environment);
+          while (g_hash_table_iter_next (&it, &k, &v))
+            {
+              g_autofree char *rv = bro_template_render (v, values, FALSE);
+              envp = g_environ_setenv (envp, k, rv, TRUE);
+            }
+          argv = bro_post_step_argv (step, values, files);
+          g_ptr_array_add (argv, NULL);
+          cmd = bro_command_line ((const char *const *) argv->pdata);
+          if (step->working_directory && *step->working_directory)
+            {
+              g_autofree char *r = bro_template_render (step->working_directory, values, FALSE);
+              wd = expand_home (r);
+            }
+          else
+            wd = g_strdup (output_dir);
+          step_log (&sl, BRO_SEV_INFO, "▶ %s: %s", step->name, cmd);
+          if (!bro_process_run ((const char *const *) argv->pdata, (const char *const *) envp, wd, step->timeout_seconds,
+                                cancellable, on_step_line, &sl, &exit_status, NULL, &timed_out, &err))
+            {
+              step_log (&sl, step->fail_job_on_error ? BRO_SEV_ERROR : BRO_SEV_WARNING, "%s could not be started: %s",
+                        step->name, err ? err->message : "unknown error");
+              if (step->fail_job_on_error)
+                failed = TRUE;
+              if (any_failed && !*any_failed)
+                *any_failed = g_strdup (step->name);
+              continue;
+            }
+          if (timed_out)
+            step_log (&sl, BRO_SEV_WARNING, "%s timed out after %d s", step->name, step->timeout_seconds);
+          else
+            step_log (&sl, exit_status == 0 ? BRO_SEV_INFO : (step->fail_job_on_error ? BRO_SEV_ERROR : BRO_SEV_WARNING),
+                      "%s exited with status %d", step->name, exit_status);
+          if ((exit_status != 0 || timed_out) && step->fail_job_on_error)
+            failed = TRUE;
+          if ((exit_status != 0 || timed_out) && any_failed && !*any_failed)
+            *any_failed = g_strdup (step->name);
+        }
+    }
+  return failed;
+}
+
+static void
+ctx_step_log (BroSeverity sev, const char *text, gpointer data)
+{
+  log_line (data, sev, "%s", text);
+}
+
+/* BROMELIA_* variables for scripts. */
+static char **
+script_environment (Ctx *c, BroJobState status)
+{
+  char **base_env = g_get_environ ();
   g_autofree char *code = c->identity ? bro_identity_format_code (c->identity) : g_strdup ("");
   g_autofree char *manifest = g_build_filename (c->req->job_dir, "manifest.json", NULL);
   g_autofree char *logpath = g_build_filename (c->req->job_dir, "log.txt", NULL);
@@ -2999,88 +3444,112 @@ run_post_processing (Ctx *c, BroJobState status)
   if (c->checksum_file)
     SETENV ("BROMELIA_CHECKSUMS", c->checksum_file);
 #undef SETENV
+  g_string_free (files, TRUE);
+  return base_env;
+}
+
+/* Runs the steps that apply to this disc; steps marked "background" are handed to the background queue instead
+ * (res->background). Returns whether a step marked "fail the job" failed. */
+static gboolean
+run_post_processing (Ctx *c, BroJobState status)
+{
+  g_autoptr (GPtrArray) now = g_ptr_array_new ();
+  g_autoptr (GPtrArray) later = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_post_step_free);
+  g_autofree char *code = c->identity ? bro_identity_format_code (c->identity) : g_strdup ("");
+  g_auto (GStrv) base_env = NULL;
+  g_autoptr (GHashTable) values = NULL;
+  gboolean failed = FALSE;
+
   /* The drive's steps, then the global plugins; each limited by its name / format conditions. */
   for (int pass = 0; pass < 2; pass++)
     {
       GPtrArray *src = pass == 0 ? c->req->drive->post_process : c->req->config->plugins;
       for (guint i = 0; i < src->len; i++)
-        if (bro_plugin_matches (src->pdata[i], c->identity ? c->identity->name : c->res->disc_label, c->res->disc_label, code))
-          g_ptr_array_add (steps_arr, src->pdata[i]);
-    }
-  g_string_free (files, TRUE);
-
-  for (guint i = 0; i < steps_arr->len; i++)
-    {
-      BroPostStep *step = steps_arr->pdata[i];
-      guint targets = step->per_file ? c->res->files->len : 1;
-      if (!bro_post_step_should_run (step, status))
-        continue;
-      if (!targets)
-        continue;
-      phase (c, "Post-processing");
-      for (guint t = 0; t < targets; t++)
         {
-          const char *file = step->per_file ? c->res->files->pdata[t] : NULL;
-          g_autoptr (GHashTable) values = base_values (c, status);
-          g_auto (GStrv) envp = g_strdupv (base_env);
-          g_autoptr (GPtrArray) argv = NULL;
-          g_autoptr (GError) err = NULL;
-          g_autofree char *cmd = NULL;
-          g_autofree char *wd = NULL;
-          int exit_status = -1;
-          gboolean timed_out = FALSE;
-          GHashTableIter it;
-          gpointer k, v;
-          StepLog sl = { c, step->name };
-
-          if (cancelled (c))
-            return failed;
-          if (file)
+          BroPostStep *step = src->pdata[i];
+          if (!bro_plugin_matches (step, c->identity ? c->identity->name : c->res->disc_label, c->res->disc_label, code))
+            continue;
+          if (step->background)
             {
-              g_autofree char *fname = g_path_get_basename (file);
-              g_autofree char *stem = g_strdup (fname);
-              char *dot = strrchr (stem, '.');
-              if (dot) *dot = '\0';
-              bro_template_values_set (values, "file", file);
-              bro_template_values_set (values, "filename", fname);
-              bro_template_values_set (values, "stem", stem);
-              envp = g_environ_setenv (envp, "BROMELIA_FILE", file, TRUE);
-            }
-          g_hash_table_iter_init (&it, step->environment);
-          while (g_hash_table_iter_next (&it, &k, &v))
-            {
-              g_autofree char *rv = bro_template_render (v, values, FALSE);
-              envp = g_environ_setenv (envp, k, rv, TRUE);
-            }
-          argv = bro_post_step_argv (step, values, c->res->files);
-          g_ptr_array_add (argv, NULL);
-          cmd = bro_command_line ((const char *const *) argv->pdata);
-          if (step->working_directory && *step->working_directory)
-            {
-              g_autofree char *r = bro_template_render (step->working_directory, values, FALSE);
-              wd = expand_home (r);
+              if (bro_post_step_should_run (step, status))
+                g_ptr_array_add (later, bro_post_step_copy (step));
             }
           else
-            wd = g_strdup (c->res->output_dir);
-          log_line (c, BRO_SEV_INFO, "▶ %s: %s", step->name, cmd);
-          if (!bro_process_run ((const char *const *) argv->pdata, (const char *const *) envp, wd, step->timeout_seconds,
-                                c->req->cancellable, on_step_line, &sl, &exit_status, NULL, &timed_out, &err))
-            {
-              log_line (c, step->fail_job_on_error ? BRO_SEV_ERROR : BRO_SEV_WARNING, "%s could not be started: %s",
-                        step->name, err ? err->message : "unknown error");
-              if (step->fail_job_on_error)
-                failed = TRUE;
-              continue;
-            }
-          if (timed_out)
-            log_line (c, BRO_SEV_WARNING, "%s timed out after %d s", step->name, step->timeout_seconds);
-          else
-            log_line (c, exit_status == 0 ? BRO_SEV_INFO : (step->fail_job_on_error ? BRO_SEV_ERROR : BRO_SEV_WARNING),
-                      "%s exited with status %d", step->name, exit_status);
-          if ((exit_status != 0 || timed_out) && step->fail_job_on_error)
-            failed = TRUE;
+            g_ptr_array_add (now, step);
         }
     }
+  if (!now->len && !later->len)
+    return FALSE;
+  base_env = script_environment (c, status);
+  values = base_values (c, status);
+  if (now->len)
+    {
+      phase (c, "Post-processing");
+      failed = run_steps (now, values, base_env, c->res->files, c->res->output_dir, status, c->req->cancellable,
+                          ctx_step_log, c, NULL, NULL);
+    }
+  if (later->len && !cancelled (c))
+    {
+      BroBackgroundWork *w = g_new0 (BroBackgroundWork, 1);
+      g_autofree char *title = g_strdup (c->identity && *c->identity->name ? c->identity->name
+                                         : (c->res->disc_label && *c->res->disc_label ? c->res->disc_label : "Disc"));
+      w->job_id = g_strdup (c->req->job_id);
+      w->title = g_steal_pointer (&title);
+      w->steps = g_steal_pointer (&later);
+      w->values = g_steal_pointer (&values);
+      w->environ = g_steal_pointer (&base_env);
+      w->files = g_ptr_array_new_with_free_func (g_free);
+      for (guint i = 0; i < c->res->files->len; i++)
+        g_ptr_array_add (w->files, g_strdup (c->res->files->pdata[i]));
+      w->output_dir = g_strdup (c->res->output_dir);
+      w->log_file = g_build_filename (c->req->job_dir, "background.txt", NULL);
+      w->status = status;
+      c->res->background = w;
+      log_line (c, BRO_SEV_INFO, "%u post-processing step(s) queued to run in the background", w->steps->len);
+    }
+  return failed;
+}
+
+void
+bro_background_work_free (BroBackgroundWork *w)
+{
+  if (!w)
+    return;
+  g_free (w->job_id);
+  g_free (w->title);
+  g_ptr_array_unref (w->steps);
+  g_hash_table_unref (w->values);
+  g_strfreev (w->environ);
+  g_ptr_array_unref (w->files);
+  g_free (w->output_dir);
+  g_free (w->log_file);
+  g_free (w);
+}
+
+static void
+file_step_log (BroSeverity sev, const char *text, gpointer data)
+{
+  if (data)
+    {
+      if (sev == BRO_SEV_INFO)
+        fprintf (data, "%s\n", text);
+      else
+        fprintf (data, "[%s] %s\n", bro_severity_name (sev), text);
+      fflush (data);
+    }
+}
+
+char *
+bro_background_work_run (BroBackgroundWork *w, int *ran, GCancellable *cancellable)
+{
+  FILE *log = fopen (w->log_file, "a");
+  char *failed = NULL;
+  int count = 0;
+  run_steps (w->steps, w->values, w->environ, w->files, w->output_dir, w->status, cancellable, file_step_log, log, &count, &failed);
+  if (log)
+    fclose (log);
+  if (ran)
+    *ran = count;
   return failed;
 }
 
@@ -3180,6 +3649,34 @@ eject_device (const char *device)
   return FALSE;
 }
 
+void
+bro_notification_text (BroJobState status, BroRipMode mode, const char *what, guint file_count, const char *output_dir,
+                       const char *error, char **title, char **body)
+{
+  g_autofree char *label = g_ascii_strdown (bro_job_state_label (status), -1);
+  *title = g_strdup_printf ("%s %s: %s", bro_rip_mode_short (mode), status == BRO_JOB_SUCCEEDED ? "finished" : label, what);
+  switch (status)
+    {
+    case BRO_JOB_SUCCEEDED:
+      *body = g_strdup_printf ("%u item(s) saved to %s", file_count, output_dir ? output_dir : "");
+      break;
+    case BRO_JOB_COMPLETED_WITH_ERRORS:
+      *body = g_strdup_printf ("Read errors: the files were kept in %s", output_dir ? output_dir : "");
+      break;
+    case BRO_JOB_CANCELLED:
+      *body = g_strdup ("Cancelled");
+      break;
+    default:
+      *body = g_strdup (error && *error ? error : "Failed");
+    }
+}
+
+static void
+notification_log (const char *text, gpointer data)
+{
+  log_line (data, BRO_SEV_WARNING, "%s", text);
+}
+
 BroRunResult *
 bro_run_job (BroRunRequest *req)
 {
@@ -3203,6 +3700,8 @@ bro_run_job (BroRunRequest *req)
   c.first_episode = 1;
   c.episode_width = 2;
   c.step_count = 1;
+  c.main_title = -1;
+  res->mode = req->mode;
   g_mkdir_with_parents (req->job_dir, 0755);
   logpath = g_build_filename (req->job_dir, "log.txt", NULL);
   c.log = fopen (logpath, "a");
@@ -3269,7 +3768,17 @@ bro_run_job (BroRunRequest *req)
 
   res->status = status;
   res->finished_at = g_get_real_time () / G_USEC_PER_SEC;
+  res->mode = req->mode;
+  if (c.identity && *c.identity->name)
+    res->name = g_strdup (c.identity->name);
   write_manifest (&c, status);
+  if (req->config->notifications->len)
+    {
+      g_autofree char *title = NULL, *body = NULL;
+      const char *what = res->name ? res->name : (res->disc_label && *res->disc_label ? res->disc_label : "Disc");
+      bro_notification_text (status, req->mode, what, res->files->len, res->output_dir, res->error, &title, &body);
+      bro_notifications_send (req->config->notifications, title, body, bro_job_state_word (status), notification_log, &c);
+    }
   log_line (&c, BRO_SEV_INFO, "Finished: %s", bro_job_state_label (status));
   if (c.log)
     fclose (c.log);
@@ -3302,5 +3811,6 @@ bro_run_job (BroRunRequest *req)
   g_free (c.output_dir);
   g_free (c.work_dir);
   if (c.rip_info) bro_disc_info_unref (c.rip_info);
+  bro_media_match_free (c.metadata);
   return res;
 }

@@ -264,6 +264,9 @@ public static class BetaKey
         return any.Success ? any.Value : null;
     }
 
+    /// <summary>Whether an automatic update may replace <paramref name="installed"/>: only a beta key (T-…) or no key, never a purchased one.</summary>
+    public static bool MayReplace(string? installed) => string.IsNullOrWhiteSpace(installed) || installed.Trim().StartsWith("T-", StringComparison.Ordinal);
+
     public static async Task<string> FetchAsync(CancellationToken ct = default)
     {
         using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };

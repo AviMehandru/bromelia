@@ -9,11 +9,13 @@
 #include "bro-config.h"
 #include "bro-dvd.h"
 #include "bro-identity.h"
+#include "bro-integrations.h"
 #include "bro-logic.h"
 #include "bro-makemkv.h"
 #include "bro-robot.h"
 #include "bro-runner.h"
 #include "bro-state.h"
+#include "bro-web.h"
 
 static char *
 fixture (const char *name)
@@ -2114,6 +2116,546 @@ test_one_pass_integration (void)
   }
 }
 
+/* ---- integrations: online services, media server names, other discs, web page ---- */
+
+static JsonObject *
+body_object (BroDelivery *d, JsonParser *p)
+{
+  g_assert_nonnull (d);
+  g_assert_true (json_parser_load_from_data (p, d->body, -1, NULL));
+  return json_node_get_object (json_parser_get_root (p));
+}
+
+static gboolean
+has_header (BroDelivery *d, const char *h)
+{
+  for (guint i = 0; i < d->headers->len; i++)
+    if (g_str_equal (d->headers->pdata[i], h))
+      return TRUE;
+  return FALSE;
+}
+
+static void
+test_notification_deliveries (void)
+{
+  g_autoptr (JsonParser) p = json_parser_new ();
+  {
+    g_autoptr (BroDelivery) d = bro_delivery_for ("https://discord.com/api/webhooks/1/abc", "T", "B", "success");
+    g_assert_cmpstr (json_object_get_string_member (body_object (d, p), "content"), ==, "**T**\nB");
+  }
+  {
+    g_autoptr (BroDelivery) d = bro_delivery_for ("https://hooks.slack.com/services/x/y/z", "T", "B", "failed");
+    g_assert_cmpstr (json_object_get_string_member (body_object (d, p), "text"), ==, "*T*\nB");
+  }
+  {
+    g_autoptr (BroDelivery) d = bro_delivery_for ("ntfy://rips", "T", "B", "failed");
+    g_assert_cmpstr (d->url, ==, "https://ntfy.sh/rips");
+    g_assert_true (has_header (d, "Title: T"));
+    g_assert_true (has_header (d, "Tags: warning"));
+    g_assert_cmpstr (d->body, ==, "B");
+  }
+  {
+    g_autoptr (BroDelivery) d = bro_delivery_for ("ntfys://ntfy.example.org/rips", "T", "B", "success");
+    g_assert_cmpstr (d->url, ==, "https://ntfy.example.org/rips");
+  }
+  {
+    g_autoptr (BroDelivery) d = bro_delivery_for ("https://example.org/hook", "T", "B", "errors");
+    g_assert_cmpstr (json_object_get_string_member (body_object (d, p), "status"), ==, "errors");
+    g_assert_true (has_header (d, "Content-Type: application/json"));
+  }
+  {
+    g_autoptr (BroDelivery) d = bro_delivery_for ("tgram://bot/chat", "T", "B", "success");
+    g_assert_cmpstr (d->apprise_url, ==, "tgram://bot/chat");
+    g_assert_null (d->url);
+  }
+  g_assert_null (bro_delivery_for ("", "T", "B", "success"));
+  g_assert_null (bro_delivery_for ("not a url", "T", "B", "success"));
+}
+
+static void
+test_metadata_results (void)
+{
+  BroMetadataConfig c = { BRO_METADATA_TMDB, (char *) "0123456789abcdef0123456789abcdef", (char *) "en-US" };
+  g_autofree char *url = NULL, *bearer = NULL, *long_key = NULL;
+  {
+    g_autoptr (BroMediaMatch) m = bro_metadata_parse ("{\"results\":[{\"id\":1,\"title\":\"Inception Behind\",\"release_date\":\"2011-01-01\"},"
+                                                      "{\"id\":27205,\"title\":\"Inception\",\"release_date\":\"2010-07-15\"}]}",
+                                                      BRO_METADATA_TMDB, "INCEPTION");
+    g_assert_cmpstr (m->title, ==, "Inception");
+    g_assert_cmpint (m->year, ==, 2010);
+    g_assert_cmpint (m->tmdb_id, ==, 27205);
+  }
+  {
+    g_autoptr (BroMediaMatch) m = bro_metadata_parse ("{\"results\":[{\"id\":37854,\"name\":\"One Piece\",\"first_air_date\":\"1999-10-20\"}]}",
+                                                      BRO_METADATA_TMDB, "One Piece");
+    g_assert_cmpint (m->year, ==, 1999);
+  }
+  {
+    g_autoptr (BroMediaMatch) m = bro_metadata_parse ("{\"Title\":\"Friends\",\"Year\":\"1994–2004\",\"imdbID\":\"tt0108778\",\"Response\":\"True\"}",
+                                                      BRO_METADATA_OMDB, "Friends");
+    g_assert_cmpint (m->year, ==, 1994);
+    g_assert_cmpstr (m->imdb_id, ==, "tt0108778");
+  }
+  g_assert_null (bro_metadata_parse ("{\"Response\":\"False\"}", BRO_METADATA_OMDB, "x"));
+  g_assert_null (bro_metadata_parse ("not json", BRO_METADATA_TMDB, "x"));
+  g_assert_true (bro_metadata_request ("One Piece", BRO_KIND_TV, &c, &url, &bearer));
+  g_assert_true (g_str_has_prefix (url, "https://api.themoviedb.org/3/search/tv?query=One%20Piece"));
+  g_assert_nonnull (strstr (url, "api_key=0123"));
+  g_assert_null (bearer);
+  g_clear_pointer (&url, g_free);
+  long_key = g_strconcat ("eyJ", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", NULL);
+  c.api_key = long_key;
+  g_assert_true (bro_metadata_request ("One Piece", BRO_KIND_MOVIE, &c, &url, &bearer));
+  g_assert_true (g_str_has_prefix (bearer, "eyJ"));
+  g_assert_null (strstr (url, "api_key"));
+  g_assert_nonnull (strstr (url, "/3/search/movie"));
+  g_clear_pointer (&url, g_free);
+  g_clear_pointer (&bearer, g_free);
+  c.provider = BRO_METADATA_OMDB;
+  c.api_key = (char *) "k";
+  g_assert_true (bro_metadata_request ("Friends", BRO_KIND_TV, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "omdbapi.com/?apikey=k&t=Friends&type=series"));
+  g_clear_pointer (&url, g_free);
+  c.api_key = (char *) "";
+  g_assert_false (bro_metadata_request ("Friends", BRO_KIND_TV, &c, &url, &bearer));
+}
+
+static BroDiscContent probe_audio (const char *d) { return BRO_CONTENT_AUDIO; }
+static BroDiscContent probe_data (const char *d) { return BRO_CONTENT_DATA; }
+static BroDiscContent probe_video (const char *d) { return BRO_CONTENT_VIDEO; }
+
+static void
+test_modes_and_keys (void)
+{
+  g_autoptr (BroDriveConfig) d = bro_drive_config_new ();
+  BroRipMode m;
+  d->rip.mode = BRO_MODE_BACKUP_THEN_MKV;
+  g_assert_true (bro_disc_mode_for (BRO_DISC_BLURAY, probe_data, "/dev/sr0", d, &m));
+  g_assert_cmpint (m, ==, BRO_MODE_BACKUP_THEN_MKV);
+  g_assert_true (bro_disc_mode_for (0, probe_video, "/dev/sr0", d, &m));
+  g_assert_cmpint (m, ==, BRO_MODE_BACKUP_THEN_MKV);
+  g_assert_true (bro_disc_mode_for (0, probe_audio, "/dev/sr0", d, &m));
+  g_assert_cmpint (m, ==, BRO_MODE_AUDIO_CD);
+  g_assert_true (bro_disc_mode_for (0, probe_data, "/dev/sr0", d, &m));
+  g_assert_cmpint (m, ==, BRO_MODE_DATA_IMAGE);
+  d->other.rip_audio_cds = FALSE;
+  d->other.image_data_discs = FALSE;
+  g_assert_false (bro_disc_mode_for (0, probe_audio, "/dev/sr0", d, &m));
+  g_assert_false (bro_disc_mode_for (0, probe_data, "/dev/sr0", d, &m));
+  g_assert_true (bro_beta_key_may_replace (NULL) && bro_beta_key_may_replace ("") && bro_beta_key_may_replace ("T-abc"));
+  g_assert_false (bro_beta_key_may_replace ("M-purchasedkey"));
+  d->rip.format_modes[BRO_FORMAT_KEY_BLURAY] = BRO_MODE_BACKUP;
+  g_assert_cmpint (bro_rip_config_mode_for (&d->rip, bro_format_key (BRO_FORMAT_BLURAY)), ==, BRO_MODE_BACKUP);
+  g_assert_cmpint (bro_rip_config_mode_for (&d->rip, bro_format_key (BRO_FORMAT_DVD)), ==, BRO_MODE_BACKUP_THEN_MKV);
+  g_assert_cmpint (bro_rip_config_mode_for (&d->rip, bro_format_key (BRO_FORMAT_UNKNOWN)), ==, BRO_MODE_BACKUP_THEN_MKV);
+  {
+    g_autoptr (BroAppConfig) c = bro_app_config_new ();
+    g_autoptr (BroAppConfig) back = NULL;
+    g_autoptr (BroAppConfig) empty = bro_app_config_parse ("{}", NULL);
+    g_autofree char *json = NULL, *again = NULL;
+    BroNotificationTarget *t = bro_notification_target_new ();
+    BroDriveConfig *dc;
+    g_free (t->url);
+    t->url = g_strdup ("ntfy://x");
+    t->only_problems = TRUE;
+    g_ptr_array_add (c->notifications, t);
+    c->web_ui.enabled = TRUE;
+    c->metadata.provider = BRO_METADATA_OMDB;
+    c->auto_update_beta_key = TRUE;
+    c->default_drive->output.layout = BRO_LAYOUT_MEDIA_SERVER;
+    c->default_drive->rip.format_modes[BRO_FORMAT_KEY_UHD] = BRO_MODE_BACKUP_DECRYPTED;
+    c->default_drive->automation.wait_for_mount_seconds = 12;
+    g_free (c->default_drive->other.audio_command);
+    c->default_drive->other.audio_command = g_strdup ("abcde -d {device}");
+    json = bro_app_config_serialize (c);
+    g_assert_nonnull (strstr (json, "\"webUI\""));
+    g_assert_nonnull (strstr (json, "\"audioCommand\""));
+    g_assert_nonnull (strstr (json, "\"mediaServer\""));
+    g_assert_nonnull (strstr (json, "\"uhd\" : \"backupDecrypted\""));
+    back = bro_app_config_parse (json, NULL);
+    dc = back->default_drive;
+    g_assert_cmpint (dc->output.layout, ==, BRO_LAYOUT_MEDIA_SERVER);
+    g_assert_cmpint (dc->rip.format_modes[BRO_FORMAT_KEY_UHD], ==, BRO_MODE_BACKUP_DECRYPTED);
+    g_assert_cmpint (dc->rip.format_modes[BRO_FORMAT_KEY_DVD], ==, -1);
+    g_assert_cmpint (dc->automation.wait_for_mount_seconds, ==, 12);
+    g_assert_cmpstr (dc->other.audio_command, ==, "abcde -d {device}");
+    g_assert_cmpuint (back->notifications->len, ==, 1);
+    g_assert_true (((BroNotificationTarget *) back->notifications->pdata[0])->only_problems);
+    g_assert_true (back->web_ui.enabled);
+    g_assert_cmpint (back->metadata.provider, ==, BRO_METADATA_OMDB);
+    g_assert_true (back->auto_update_beta_key);
+    again = bro_app_config_serialize (back);
+    g_assert_cmpstr (again, ==, json);
+    g_assert_cmpint (empty->background_jobs, ==, 1);
+    g_assert_cmpint (empty->web_ui.port, ==, 51280);
+    g_assert_cmpstr (empty->web_ui.address, ==, "127.0.0.1");
+    g_assert_true (empty->default_drive->other.rip_audio_cds);
+    g_assert_cmpint (empty->default_drive->automation.wait_for_mount_seconds, ==, 30);
+    g_assert_cmpstr (bro_rip_mode_to_string (BRO_MODE_AUDIO_CD), ==, "audioCD");
+    g_assert_cmpstr (bro_rip_mode_to_string (BRO_MODE_DATA_IMAGE), ==, "dataImage");
+  }
+}
+
+static BroHttpRequest *
+request (const char *method, const char *target, const char *host, const char *extra)
+{
+  g_autofree char *text = g_strdup_printf ("%s %s HTTP/1.1\r\nHost: %s\r\n%s\r\n", method, target, host, extra ? extra : "");
+  return bro_http_request_parse (text, strlen (text));
+}
+
+static int
+access_of (const char *method, const char *target, const char *host, const char *extra, const BroWebUIConfig *c)
+{
+  g_autoptr (BroHttpRequest) r = request (method, target, host, extra);
+  const char *why;
+  g_assert_nonnull (r);
+  return bro_web_access (r, c, &why);
+}
+
+static void
+test_web_access (void)
+{
+  BroWebUIConfig c = { TRUE, (char *) "127.0.0.1", 51280, (char *) "" };
+  g_autofree char *p1 = NULL, *p2 = NULL;
+  g_autoptr (GBytes) page = bro_web_page ();
+  g_assert_null (bro_http_request_parse ("GET / HTTP/1.1\r\nHost: x\r\n", 25));
+  {
+    g_autoptr (BroHttpRequest) r = request ("get", "/api/status?token=a%20b&x", "localhost", "X-Bromelia:  1\r\n");
+    g_assert_cmpstr (r->method, ==, "GET");
+    g_assert_cmpstr (r->path, ==, "/api/status");
+    g_assert_cmpstr (g_hash_table_lookup (r->query, "token"), ==, "a b");
+    g_assert_cmpstr (g_hash_table_lookup (r->headers, "x-bromelia"), ==, "1");
+  }
+  g_assert_cmpint (access_of ("GET", "/", "localhost:51280", NULL, &c), ==, 200);
+  g_assert_cmpint (access_of ("GET", "/", "[::1]:51280", NULL, &c), ==, 200);
+  g_assert_cmpint (access_of ("GET", "/", "attacker.example:51280", NULL, &c), ==, 403);
+  g_assert_cmpint (access_of ("POST", "/api/jobs/x/cancel", "127.0.0.1:51280", NULL, &c), ==, 403);
+  g_assert_cmpint (access_of ("POST", "/api/jobs/x/cancel", "127.0.0.1:51280", "X-Bromelia: 1\r\n", &c), ==, 200);
+  c.token = (char *) "s3cret";
+  g_assert_cmpint (access_of ("GET", "/?token=s3cret", "attacker.example", NULL, &c), ==, 200);
+  g_assert_cmpint (access_of ("GET", "/", "localhost", NULL, &c), ==, 401);
+  g_assert_cmpint (access_of ("GET", "/", "x", "Authorization: Bearer s3cret\r\n", &c), ==, 200);
+  g_assert_cmpint (access_of ("GET", "/", "x", "Authorization: Bearer wrong\r\n", &c), ==, 401);
+  c.token = (char *) "";
+  c.address = (char *) "0.0.0.0";
+  g_assert_nonnull ((p1 = bro_web_start_problem (&c)));
+  c.token = (char *) "t";
+  g_assert_null ((p2 = bro_web_start_problem (&c)));
+  g_assert_nonnull (page);
+  g_assert_nonnull (strstr (g_bytes_get_data (page, NULL), "<title>Bromelia</title>"));
+}
+
+static void
+test_web_server (void)
+{
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  BroWebUIConfig c = { TRUE, (char *) "127.0.0.1", g_random_int_range (52000, 58000), (char *) "" };
+  const char *type;
+  bro_web_server_apply (st->web, &c);
+  g_assert_null (bro_web_server_last_error (st->web));
+  g_assert_true (bro_web_server_running (st->web));
+  {
+    g_autoptr (BroHttpRequest) r = request ("GET", "/api/status", "127.0.0.1:1", NULL);
+    g_autoptr (GBytes) body = NULL;
+    g_autoptr (JsonParser) p = json_parser_new ();
+    JsonObject *o;
+    g_assert_cmpint (bro_web_server_handle (st->web, r, &type, &body), ==, 200);
+    g_assert_cmpstr (type, ==, "application/json");
+    g_assert_true (json_parser_load_from_data (p, g_bytes_get_data (body, NULL), g_bytes_get_size (body), NULL));
+    o = json_node_get_object (json_parser_get_root (p));
+    g_assert_true (JSON_NODE_HOLDS_ARRAY (json_object_get_member (o, "drives")));
+    g_assert_true (JSON_NODE_HOLDS_ARRAY (json_object_get_member (o, "background")));
+    g_assert_true (JSON_NODE_HOLDS_ARRAY (json_object_get_member (o, "history")));
+    g_assert_cmpstr (json_object_get_string_member (o, "app"), ==, "Bromelia");
+  }
+  {
+    g_autoptr (BroHttpRequest) r = request ("GET", "/", "localhost", NULL);
+    g_autoptr (GBytes) body = NULL;
+    g_assert_cmpint (bro_web_server_handle (st->web, r, &type, &body), ==, 200);
+    g_assert_nonnull (g_strstr_len (g_bytes_get_data (body, NULL), g_bytes_get_size (body), "<title>Bromelia</title>"));
+  }
+  {
+    g_autoptr (BroHttpRequest) r = request ("POST", "/api/jobs/nope/cancel", "localhost", NULL);
+    g_autoptr (GBytes) body = NULL;
+    g_assert_cmpint (bro_web_server_handle (st->web, r, &type, &body), ==, 403);
+  }
+  {
+    g_autoptr (BroHttpRequest) r = request ("POST", "/api/jobs/nope/cancel", "localhost", "X-Bromelia: 1\r\n");
+    g_autoptr (GBytes) body = NULL;
+    g_assert_cmpint (bro_web_server_handle (st->web, r, &type, &body), ==, 400);
+    g_assert_cmpmem (g_bytes_get_data (body, NULL), g_bytes_get_size (body), "No such job", 11);
+  }
+  {
+    g_autoptr (BroHttpRequest) r = request ("POST", "/api/drives/dev%3A%2Fdev%2Fsr7/rip", "localhost", "X-Bromelia: 1\r\n");
+    g_autoptr (GBytes) body = NULL;
+    g_assert_cmpint (bro_web_server_handle (st->web, r, &type, &body), ==, 400);
+    g_assert_cmpmem (g_bytes_get_data (body, NULL), g_bytes_get_size (body), "No such drive", 13);
+  }
+  bro_web_server_stop (st->web);
+  {
+    g_autoptr (BroHttpRequest) r = request ("GET", "/api/status", "localhost", NULL);
+    g_autoptr (GBytes) body = NULL;
+    g_assert_cmpint (bro_web_server_handle (st->web, r, &type, &body), ==, 404);
+  }
+}
+
+typedef void (*Configure) (BroRunRequest *req, gpointer data);
+
+/* Runs a job against the fake with its own configuration. */
+static BroRunResult *
+run_with (Fake *f, BroSource *source, BroRipMode mode, Configure configure, gpointer data)
+{
+  BroRunRequest *req = bro_run_request_new ();
+  BroRunResult *res;
+  req->job_id = g_uuid_string_random ();
+  req->job_dir = g_build_filename (f->dir, "job", req->job_id, NULL);
+  req->config = bro_app_config_new ();
+  g_free (req->config->output_root);
+  req->config->output_root = g_strdup (f->root);
+  req->drive = bro_drive_config_new ();
+  req->drive->automation.notify = FALSE;
+  req->drive->rip.titles.skip_duplicates = FALSE;
+  req->source = source ? source : bro_source_new_path (BRO_SOURCE_ISO, "/nonexistent/test.iso");
+  req->mode = mode;
+  req->makemkvcon = g_strdup (f->exe);
+  req->skip_eject = TRUE;
+  if (configure)
+    configure (req, data);
+  res = bro_run_job (req);
+  bro_run_request_free (req);
+  return res;
+}
+
+/* Files under dir (relative, '/' separated), leaving out hidden items. */
+static void
+walk (const char *dir, const char *rel, GPtrArray *out)
+{
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  const char *n;
+  while (d && (n = g_dir_read_name (d)))
+    {
+      g_autofree char *full = g_build_filename (dir, n, NULL);
+      g_autofree char *r = *rel ? g_strconcat (rel, "/", n, NULL) : g_strdup (n);
+      if (n[0] == '.')
+        continue;
+      if (g_file_test (full, G_FILE_TEST_IS_DIR))
+        walk (full, r, out);
+      else
+        g_ptr_array_add (out, g_steal_pointer (&r));
+    }
+}
+
+static int
+cmp_str_ptr (gconstpointer a, gconstpointer b)
+{
+  return g_strcmp0 (*(char *const *) a, *(char *const *) b);
+}
+
+static char *
+mkv_list (const char *root, const char *prefix)
+{
+  g_autoptr (GPtrArray) all = g_ptr_array_new_with_free_func (g_free);
+  GString *s = g_string_new (NULL);
+  walk (root, "", all);
+  g_ptr_array_sort (all, cmp_str_ptr);
+  for (guint i = 0; i < all->len; i++)
+    if (g_str_has_suffix (all->pdata[i], ".mkv") && g_str_has_prefix (all->pdata[i], prefix))
+      g_string_append_printf (s, "%s\n", (char *) all->pdata[i]);
+  return g_string_free (s, FALSE);
+}
+
+static void
+media_server_layout (BroRunRequest *req, gpointer data)
+{
+  req->drive->output.layout = BRO_LAYOUT_MEDIA_SERVER;
+  if (data)
+    req->first_episode = GPOINTER_TO_INT (data);
+}
+
+static void
+test_media_server_names (void)
+{
+  g_autofree char *movie = listing ("SAMPLE_MOVIE", "1:50:00,1;0:05:00,2");
+  g_autofree char *show1 = listing ("SAMPLE_SHOW_S2_D1", "0:22:00,1;0:22:30,2;0:21:40,3");
+  g_autofree char *show2 = listing ("SAMPLE_SHOW_S2_D2", "0:22:00,1;0:22:30,2;0:21:40,3");
+  g_autofree char *m = writes_file (SAVED);
+  Fake *f = fake_new (movie, m);
+  {
+    g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, media_server_layout, NULL);
+    g_autofree char *files = mkv_list (f->root, "");
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("%s", res->error);
+    g_assert_cmpstr (files, ==, "Movies/Sample Movie/Other/Sample Movie - Playlist 00002.mkv\nMovies/Sample Movie/Sample Movie.mkv\n");
+  }
+  {
+    /* The second disc of the season goes into the same show and Season folders. */
+    Fake *f1 = fake_new (show1, m), *f2 = fake_new (show2, m);
+    g_autoptr (BroRunResult) r1 = NULL;
+    g_autoptr (BroRunResult) r2 = NULL;
+    g_autofree char *files = NULL;
+    g_free (f2->root);
+    f2->root = g_strdup (f1->root);
+    r1 = run_with (f1, NULL, BRO_MODE_MKV, media_server_layout, NULL);
+    g_assert_cmpint (r1->status, ==, BRO_JOB_SUCCEEDED);
+    r2 = run_with (f2, NULL, BRO_MODE_MKV, media_server_layout, GINT_TO_POINTER (4));
+    if (r2->status != BRO_JOB_SUCCEEDED)
+      g_error ("%s", r2->error);
+    files = mkv_list (f1->root, "");
+    g_assert_cmpstr (files, ==,
+                     "TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv\nTV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv\n"
+                     "TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv\nTV Shows/Sample Show/Season 02/Sample Show - S02E04.mkv\n"
+                     "TV Shows/Sample Show/Season 02/Sample Show - S02E05.mkv\nTV Shows/Sample Show/Season 02/Sample Show - S02E06.mkv\n");
+    {
+      /* Every file in the archive record and the checksums points to the merged place. */
+      g_autofree char *show_dir = g_build_filename (f1->root, "TV Shows", "Sample Show", NULL);
+      g_autoptr (GPtrArray) bad = bro_checksums_verify (show_dir, NULL);
+      g_assert_nonnull (bad);
+      g_assert_cmpuint (bad->len, ==, 0);
+      for (guint i = 0; i < r2->files->len; i++)
+        g_assert_true (g_file_test (r2->files->pdata[i], G_FILE_TEST_EXISTS));
+    }
+    fake_free (f1);
+    fake_free (f2);
+  }
+  fake_free (f);
+}
+
+static void
+background_step (BroRunRequest *req, gpointer marker)
+{
+  BroPostStep *s = bro_post_step_new ();
+  g_free (s->executable);
+  s->executable = g_strdup ("/bin/sh");
+  g_free (s->arguments);
+  s->arguments = g_strdup_printf ("-c 'sleep 0.3; echo \"$BROMELIA_STATUS\" > \"$0\"' %s", (char *) marker);
+  s->background = TRUE;
+  g_ptr_array_add (req->drive->post_process, s);
+}
+
+static void
+test_background_steps (void)
+{
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:30:00,1"), *m = writes_file (SAVED);
+  Fake *f = fake_new (l, m);
+  g_autofree char *marker = g_build_filename (f->dir, "background.txt", NULL);
+  g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, background_step, marker);
+  g_autofree char *text = NULL, *failed = NULL;
+  int ran = 0;
+  g_assert_cmpint (res->status, ==, BRO_JOB_SUCCEEDED);
+  g_assert_false (g_file_test (marker, G_FILE_TEST_EXISTS));
+  g_assert_nonnull (res->background);
+  g_assert_cmpuint (res->background->steps->len, ==, 1);
+  failed = bro_background_work_run (res->background, &ran, NULL);
+  g_assert_null (failed);
+  g_assert_cmpint (ran, ==, 1);
+  g_assert_true (g_file_get_contents (marker, &text, NULL, NULL));
+  g_assert_cmpstr (text, ==, "success\n");
+  fake_free (f);
+}
+
+static void
+blu_ray_scan_only (BroRunRequest *req, gpointer data)
+{
+  req->drive->rip.format_modes[BRO_FORMAT_KEY_BLURAY] = BRO_MODE_INFO_ONLY;
+  req->uses_configured_mode = TRUE;
+}
+
+static void
+test_format_modes (void)
+{
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:30:00,1"), *m = writes_file (SAVED);
+  Fake *f = fake_new (l, m);
+  g_autoptr (BroRunResult) res = run_with (f, NULL, BRO_MODE_MKV, blu_ray_scan_only, NULL);
+  g_autofree char *calls = fake_calls (f);
+  g_autofree char *base = NULL;
+  if (res->status != BRO_JOB_SUCCEEDED)
+    g_error ("%s", res->error);
+  g_assert_cmpint (res->mode, ==, BRO_MODE_INFO_ONLY);
+  g_assert_cmpuint (res->files->len, ==, 1);
+  base = g_path_get_basename (res->files->pdata[0]);
+  g_assert_cmpstr (base, ==, "disc-info.json");
+  g_assert_null (strstr (calls, " mkv "));
+  fake_free (f);
+}
+
+static void
+audio_command (BroRunRequest *req, gpointer cmd)
+{
+  g_free (req->drive->other.audio_command);
+  req->drive->other.audio_command = g_strdup (cmd);
+}
+
+static void
+test_audio_cds (void)
+{
+  Fake *f = fake_new ("", ":");
+  {
+    g_autoptr (BroRunResult) res = run_with (f, bro_source_new_drive (0, "/dev/fake9"), BRO_MODE_AUDIO_CD, audio_command,
+                                             "/bin/sh -c 'mkdir -p \"Artist - Album\" && printf \"%s\" \"$0\" > \"Artist - Album/01 - Track.flac\"' {device}");
+    g_autoptr (GPtrArray) all = g_ptr_array_new_with_free_func (g_free);
+    g_autofree char *calls = fake_calls (f);
+    g_autofree char *text = NULL, *full = NULL;
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("%s", res->error);
+    walk (f->root, "", all);
+    g_assert_cmpuint (all->len, >=, 1);
+    for (guint i = 0; i < all->len; i++)
+      if (g_str_has_suffix (all->pdata[i], ".flac"))
+        full = g_build_filename (f->root, all->pdata[i], NULL);
+    g_assert_nonnull (full);
+    g_assert_true (g_str_has_suffix (full, "Artist - Album/01 - Track.flac"));
+    g_assert_true (g_file_get_contents (full, &text, NULL, NULL));
+    g_assert_cmpstr (text, ==, "/dev/fake9");
+    g_assert_null (strstr (calls, "info"));
+  }
+  {
+    g_autoptr (BroRunResult) res = run_with (f, bro_source_new_drive (0, "/dev/fake9"), BRO_MODE_AUDIO_CD, audio_command,
+                                             "no-such-ripper-xyz {device}");
+    g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
+    g_assert_nonnull (strstr (res->error, "cyanrip or abcde"));
+  }
+  fake_free (f);
+}
+
+/* A file stands in for the disc device; set BROMELIA_TEST_DVD_ISO to copy a real disc image. */
+static void
+test_data_discs (void)
+{
+  const char *iso = g_getenv ("BROMELIA_TEST_DVD_ISO");
+  Fake *f = fake_new ("", ":");
+  g_autofree char *source = NULL, *want = NULL, *have = NULL, *base = NULL;
+  g_autoptr (BroRunResult) res = NULL;
+  if (iso && *iso)
+    source = g_strdup (iso);
+  else
+    {
+      gsize n = 3 * 1024 * 1024 + 2048;
+      g_autofree guint8 *image = g_malloc (n);
+      GRand *r = g_rand_new_with_seed (7);
+      for (gsize i = 0; i < n; i++)
+        image[i] = (guint8) g_rand_int_range (r, 0, 256);
+      g_rand_free (r);
+      memcpy (image + 32769, "CD001", 5);
+      source = g_build_filename (f->dir, "disc.bin", NULL);
+      g_assert_true (g_file_set_contents (source, (const char *) image, (gssize) n, NULL));
+    }
+  res = run_with (f, bro_source_new_drive (0, source), BRO_MODE_DATA_IMAGE, NULL, NULL);
+  if (res->status != BRO_JOB_SUCCEEDED)
+    g_error ("%s", res->error);
+  g_assert_cmpuint (res->files->len, ==, 1);
+  base = g_path_get_basename (res->files->pdata[0]);
+  g_assert_true (g_str_has_suffix (base, ".iso"));
+  want = bro_sha256_file (source, NULL, NULL, NULL);
+  have = bro_sha256_file (res->files->pdata[0], NULL, NULL, NULL);
+  g_assert_cmpstr (have, ==, want);
+  {
+    g_autoptr (GPtrArray) bad = bro_checksums_verify (res->output_dir, NULL);
+    g_assert_nonnull (bad);
+    g_assert_cmpuint (bad->len, ==, 0);
+  }
+  fake_free (f);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -2177,5 +2719,15 @@ main (int argc, char **argv)
   g_test_add_func ("/parity/one-pass-jobs", test_one_pass_jobs);
   g_test_add_func ("/parity/notices-in-jobs", test_notices_in_jobs);
   g_test_add_func ("/parity/one-pass-integration", test_one_pass_integration);
+  g_test_add_func ("/integrations/notifications", test_notification_deliveries);
+  g_test_add_func ("/integrations/metadata", test_metadata_results);
+  g_test_add_func ("/integrations/modes-and-keys", test_modes_and_keys);
+  g_test_add_func ("/integrations/web-access", test_web_access);
+  g_test_add_func ("/integrations/web-server", test_web_server);
+  g_test_add_func ("/integrations/media-server-names", test_media_server_names);
+  g_test_add_func ("/integrations/background-steps", test_background_steps);
+  g_test_add_func ("/integrations/format-modes", test_format_modes);
+  g_test_add_func ("/integrations/audio-cds", test_audio_cds);
+  g_test_add_func ("/integrations/data-discs", test_data_discs);
   return g_test_run ();
 }

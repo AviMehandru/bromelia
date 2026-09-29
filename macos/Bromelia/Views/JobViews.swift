@@ -108,7 +108,7 @@ struct QueueView: View {
 
     var body: some View {
         Group {
-            if model.jobs.isEmpty {
+            if model.jobs.isEmpty && model.background.items.isEmpty {
                 ContentUnavailableView {
                     Label("No jobs", systemImage: "tray")
                 } description: {
@@ -117,6 +117,9 @@ struct QueueView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
+                        if !model.background.items.isEmpty {
+                            BackgroundList()
+                        }
                         ForEach(model.jobs) { job in
                             JobCard(job: job)
                                 .contextMenu {
@@ -273,5 +276,31 @@ struct LogView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Background post-processing (encoding, uploads) of finished jobs.
+struct BackgroundList: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Background").font(.headline)
+                Spacer()
+                Button("Clear Finished") { model.background.clearFinished() }.buttonStyle(.borderless)
+            }
+            ForEach(model.background.items) { item in
+                HStack {
+                    Image(systemName: item.state == .done ? "checkmark.circle" : item.state == .failed ? "xmark.octagon" : item.state == .running ? "gearshape.2" : "clock")
+                        .foregroundStyle(item.state == .failed ? .red : item.state == .done ? .green : .secondary)
+                    Text(item.work.title).lineLimit(1)
+                    Spacer()
+                    Text(item.message.isEmpty ? item.state.rawValue.capitalized : item.message).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
     }
 }

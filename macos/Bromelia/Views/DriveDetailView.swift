@@ -70,7 +70,7 @@ struct DriveDetailView: View {
                         .disabled(e.state != .inserted || session?.isLoading == true || job?.state == .running)
 
                         Menu {
-                            ForEach(RipMode.allCases) { mode in
+                            ForEach(RipMode.videoModes) { mode in
                                 Button(mode.label) { model.quickRip(item, mode: mode) }
                             }
                         } label: {
@@ -84,6 +84,8 @@ struct DriveDetailView: View {
 
                         Button { model.eject(lane: item.laneKey) } label: { Label("Eject", systemImage: "eject") }
                             .disabled(job?.state == .running)
+                        Button { model.closeTray(lane: item.laneKey) } label: { Label("Close Tray", systemImage: "arrow.down.to.line") }
+                            .disabled(e.state == .inserted)
                     }
                 }
                 HStack {

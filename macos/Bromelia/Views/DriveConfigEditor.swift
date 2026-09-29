@@ -144,6 +144,21 @@ private struct GeneralTab: View {
                 Toggle("Show a notification when the job finishes", isOn: $config.automation.notify)
                 Toggle("Play a sound", isOn: $config.automation.playSound)
                     .disabled(!config.automation.notify)
+                LabeledContent("Before an automatic rip, wait for the disc to be mounted for up to") {
+                    IntField(title: "Seconds", value: $config.automation.waitForMountSeconds, suffix: "seconds")
+                }
+            }
+            Section {
+                Toggle("Rip audio CDs", isOn: $config.other.ripAudioCDs)
+                if config.other.ripAudioCDs {
+                    TextField("Audio CD command", text: $config.other.audioCommand, prompt: Text("Empty: cyanrip -d {device} -o flac, else abcde"))
+                }
+                Toggle("Save data discs as ISO images", isOn: $config.other.imageDataDiscs)
+            } header: {
+                Text("Other discs")
+            } footer: {
+                Text("For discs without a DVD or Blu-ray structure, when ripped automatically or with Rip. Audio CDs are ripped by cyanrip or abcde (both look up the album in MusicBrainz and write FLAC; install one with Homebrew). Data discs are copied sector by sector with hdiutil.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -160,7 +175,7 @@ struct RipTab: View {
         Form {
             Section("What to do with a disc") {
                 Picker("Mode", selection: $config.rip.mode) {
-                    ForEach(RipMode.allCases) { Text($0.label).tag($0) }
+                    ForEach(RipMode.videoModes) { Text($0.label).tag($0) }
                 }
                 if config.rip.mode.makesBackup {
                     Picker("Backup format", selection: $config.rip.backupFormat) {
@@ -171,6 +186,14 @@ struct RipTab: View {
                     Toggle("Keep the backup after the MKV files are made", isOn: $config.rip.keepBackupAfterMKV)
                 }
                 Text(modeHelp).font(.caption).foregroundStyle(.secondary)
+                ForEach([("dvd", "DVDs"), ("bluray", "Blu-rays"), ("uhd", "4K UHD discs")], id: \.0) { key, label in
+                    Picker(label, selection: Binding(get: { config.rip.formatModes[key] }, set: { config.rip.formatModes[key] = $0 })) {
+                        Text("Same as above").tag(RipMode?.none)
+                        ForEach(RipMode.videoModes) { Text($0.label).tag(RipMode?.some($0)) }
+                    }
+                }
+                Text("Automatic and quick rips can use a different mode for each kind of disc, for example a backup of every Blu-ray and MKV files of DVDs.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Toggle("Split “play all” titles of TV shows into episodes", isOn: $config.episodes.splitPlayAll)
@@ -206,6 +229,8 @@ struct RipTab: View {
         case .backupDecrypted: return "The whole disc is copied and video files are decrypted, keeping menus and extras."
         case .backupThenMkv: return "A decrypted backup is made first (fast sequential read), then MKV files are made from the backup. Safest for scratched discs."
         case .infoOnly: return "Only reads the disc and stores disc-info.json. Useful for cataloguing or for scripts."
+        case .audioCD: return "Audio CDs are ripped with the audio CD command."
+        case .dataImage: return "Data discs are saved as ISO images."
         }
     }
 }
@@ -321,6 +346,13 @@ struct OutputTab: View {
             Section("Location") {
                 PathField(title: "Output folder", path: $config.output.rootOverride, kind: .directory,
                           placeholder: "Global default: \(model.config.outputRoot)")
+                Picker("Layout", selection: $config.output.layout) {
+                    ForEach(LibraryLayout.allCases) { Text($0.label).tag($0) }
+                }
+                if config.output.layout == .mediaServer {
+                    Text("Movies/Name (Year)/Name (Year).mkv, TV Shows/Name (Year)/Season 02/Name (Year) - S02E05.mkv; other titles go to Other/ and backups to Backup/ (hidden from Plex and Jellyfin). Turn on the online lookup for years. The templates below aren't used.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 TextField("Folder name", text: $config.output.folderTemplate, prompt: Text(OutputConfig.defaultFolderTemplate))
                 Text("Preview: \(preview(config.output.folderTemplate, file: false))")
                     .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)

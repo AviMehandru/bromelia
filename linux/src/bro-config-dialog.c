@@ -16,6 +16,10 @@ static const char *const run_labels[] = { "When the rip succeeds", "When the rip
 static const char *const profile_labels[] = { "MakeMKV default profile", "Bromelia profile (edit below)", "Custom profile file (.mmcp.xml)", NULL };
 static const char *const lpcm_labels[] = { "Copy as is", "Raw LPCM", "LPCM in WAV container", "FLAC (best compression)", "FLAC (fast compression)", NULL };
 static const char *const directio_labels[] = { "MakeMKV default", "Off", "On", NULL };
+static const char *const format_mode_labels[] = {
+  "Same as the mode above", "Rip titles to MKV", "Backup (encrypted, 1:1)", "Backup (decrypted)", "Decrypted backup, then MKV from backup",
+  "Scan only (save disc information)", NULL };
+static const char *const layout_labels[] = { "Folder and file name templates", "Plex / Jellyfin / Emby library", NULL };
 
 typedef struct {
   BroDriveConfig *config;
@@ -30,6 +34,7 @@ typedef struct {
   GtkWidget *folder_row, *file_row;
   AdwPreferencesDialog *dialog;
   int direct_io_choice;
+  int format_choice[BRO_FORMAT_KEY_COUNT]; /* 0 = the drive's mode, else BroRipMode + 1 */
 } Ctx;
 
 static void
@@ -56,7 +61,9 @@ static AdwPreferencesPage *
 page_new (const char *title, const char *icon)
 {
   GtkWidget *p = adw_preferences_page_new ();
+  g_autofree char *name = g_ascii_strdown (title, -1);
   adw_preferences_page_set_title (ADW_PREFERENCES_PAGE (p), title);
+  adw_preferences_page_set_name (ADW_PREFERENCES_PAGE (p), name);
   adw_preferences_page_set_icon_name (ADW_PREFERENCES_PAGE (p), icon);
   return ADW_PREFERENCES_PAGE (p);
 }
@@ -115,6 +122,7 @@ general_page (Ctx *c)
   g = group (page, "Automation", NULL);
   ADD (g, bro_switch_row ("Rip automatically when a disc is inserted", NULL, &d->automation.auto_rip_on_insert, ctx_changed, c));
   ADD (g, bro_spin_row ("Start automatic rips after", "seconds (gives time to cancel)", &d->automation.auto_rip_delay_seconds, 0, 3600, ctx_changed, c));
+  ADD (g, bro_spin_row ("Wait for the disc to be mounted", "seconds, before an automatic rip (0 = don't wait)", &d->automation.wait_for_mount_seconds, 0, 600, ctx_changed, c));
   ADD (g, bro_switch_row ("Eject the disc when the job succeeds", NULL, &d->automation.eject_when_done, ctx_changed, c));
   ADD (g, bro_switch_row ("Eject the disc when the job fails", NULL, &d->automation.eject_on_failure, ctx_changed, c));
   ADD (g, bro_switch_row ("Show a notification when the job finishes", NULL, &d->automation.notify, ctx_changed, c));
@@ -176,6 +184,8 @@ ripping_changed (gpointer data)
 {
   Ctx *c = data;
   c->config->rip.direct_io = c->direct_io_choice == 0 ? -1 : c->direct_io_choice == 2 ? 1 : 0;
+  for (int i = 0; i < BRO_FORMAT_KEY_COUNT; i++)
+    c->config->rip.format_modes[i] = c->format_choice[i] - 1;
   ctx_changed (c);
   refresh_preview (c);
 }
@@ -190,6 +200,24 @@ ripping_page (Ctx *c)
   ADD (g, bro_combo_row ("Mode", rip_mode_labels, (int *) &d->rip.mode, ripping_changed, c));
   ADD (g, bro_combo_row ("Backup format", backup_format_labels, (int *) &d->rip.backup_format, ripping_changed, c));
   ADD (g, bro_switch_row ("Keep the backup after the MKV files are made", "Backup + MKV mode", &d->rip.keep_backup_after_mkv, ripping_changed, c));
+
+  g = group (page, "Modes by disc format", "Used for automatic rips and “Rip”: for example backups of DVDs but MKV files of Blu-rays.");
+  {
+    static const char *const names[BRO_FORMAT_KEY_COUNT] = { "DVDs", "Blu-rays", "4K Ultra HD Blu-rays" };
+    for (int i = 0; i < BRO_FORMAT_KEY_COUNT; i++)
+      {
+        c->format_choice[i] = d->rip.format_modes[i] >= 0 && d->rip.format_modes[i] < BRO_VIDEO_MODE_COUNT ? d->rip.format_modes[i] + 1 : 0;
+        ADD (g, bro_combo_row (names[i], format_mode_labels, &c->format_choice[i], ripping_changed, c));
+      }
+  }
+
+  g = group (page, "Other discs", "Discs without a DVD or Blu-ray structure, when ripped automatically or with “Rip”. Audio CDs are "
+                                  "ripped with cyanrip or abcde, which look the album up in MusicBrainz; data discs are copied byte for "
+                                  "byte to an ISO image.");
+  ADD (g, bro_switch_row ("Rip audio CDs", NULL, &d->other.rip_audio_cds, ctx_changed, c));
+  ADD (g, bro_switch_row ("Save data discs as ISO images", NULL, &d->other.image_data_discs, ctx_changed, c));
+  ADD (g, bro_entry_row ("Audio CD command (optional)", &d->other.audio_command,
+                         "Runs in the output folder; {device} is the drive. Empty: cyanrip, else abcde", ctx_changed, c));
 
   g = group (page, "TV episodes", "DVDs often store several episodes in one title. Bromelia reads the disc's menu navigation to find where "
                                   "each episode starts and splits the MKV with mkvmerge, without re-encoding. Episode numbers are read "
@@ -206,7 +234,7 @@ ripping_page (Ctx *c)
   ADD (g, bro_combo_row ("Index numbers refer to", index_base_labels, (int *) &t->index_base, ripping_changed, c));
 
   g = group (page, "Filters", "0 or empty means no limit. Patterns are regular expressions matched against the title name, comment, source file "
-                              "(e.g. 00800.mpls), output file name, segment map and “#<source id>”.");
+                              "(e.g. 00800.mpls), output file name, segment map and “#&lt;source id&gt;”.");
   ADD (g, bro_duration_row ("Minimum duration (h:mm:ss)", &t->min_duration_seconds, ripping_changed, c));
   ADD (g, bro_duration_row ("Maximum duration (h:mm:ss)", &t->max_duration_seconds, ripping_changed, c));
   ADD (g, bro_spin_row ("Minimum chapters", NULL, &t->min_chapters, 0, 999, ripping_changed, c));
@@ -256,6 +284,14 @@ output_page (Ctx *c)
   c->folder_row = bro_entry_row ("Folder name template", &d->output.folder_template, NULL, ctx_changed, c);
   ADD (g, c->folder_row);
   ADD (g, bro_combo_row ("If the folder already exists", conflict_labels, (int *) &d->output.conflict_policy, ctx_changed, c));
+  ADD (g, bro_combo_row ("Name output for", layout_labels, (int *) &d->output.layout, ctx_changed, c));
+  {
+    GtkWidget *note = bro_caption ("Plex / Jellyfin / Emby: Movies/Name (Year)/Name (Year).mkv and TV Shows/Name (Year)/Season 02/"
+                                   "Name (Year) - S02E05.mkv, other titles in Other/, backups in Backup/ (ignored by the server). "
+                                   "The templates below are not used then; set up online lookup in Preferences for the year.");
+    gtk_widget_set_margin_top (note, 6);
+    ADD (g, note);
+  }
   g = group (page, "File names", "Used for MKV files and backups. Standard naming: {name} - {episode} - {discLabel} - {rip} - {track} - "
                                  "{format}, leaving out parts that don't apply. Format codes: DVD, BR (Blu-ray), 4K (Ultra HD Blu-ray); "
                                  "DVDe, BRe, 4Ke for backups that are not decrypted. Leave empty to keep MakeMKV's own file names.");
@@ -325,7 +361,7 @@ selection_help (void)
 {
   BroCatalog *cat = bro_catalog_get ();
   GString *s = g_string_new ("Comma separated ‘action:condition’ items applied in order: +sel / -sel select or deselect, "
-                             "+N / -N / =N change a track's weight. Conditions combine tokens with | (or), & (and), ! (not) "
+                             "+N / -N / =N change a track's weight. Conditions combine tokens with | (or), &amp; (and), ! (not) "
                              "and parentheses. Tokens: ");
   for (guint i = 0; i < cat->token_names->len; i++)
     g_string_append_printf (s, "%s%s", i ? ", " : "", (char *) cat->token_names->pdata[i]);
@@ -657,6 +693,9 @@ rebuild_post (Ctx *c)
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Working folder (default: output folder)", &s->working_directory, NULL, post_step_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_spin_row ("Time limit", "seconds (0 = none)", &s->timeout_seconds, 0, 86400, post_step_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Mark the job as failed if this step fails", NULL, &s->fail_job_on_error, post_step_changed, c));
+      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Run in the background",
+                                                                       "After the job, once the disc is out (encoding, uploads); can't fail the job",
+                                                                       &s->background, post_step_changed, c));
 
       for (GList *l = keys; l; l = l->next)
         g_string_append_printf (env_text, "%s=%s\n", (char *) l->data, (char *) g_hash_table_lookup (s->environment, l->data));
@@ -967,6 +1006,8 @@ bro_config_dialog_present (GtkWidget *parent, const char *config_id)
         }
       adw_preferences_page_add (general, g);
     }
+  if (g_getenv ("BROMELIA_SNAPSHOT_PAGE")) /* developer aid, see main.c */
+    adw_preferences_dialog_set_visible_page_name (ADW_PREFERENCES_DIALOG (dialog), g_getenv ("BROMELIA_SNAPSHOT_PAGE"));
   adw_dialog_present (dialog, parent);
 }
 

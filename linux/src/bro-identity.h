@@ -16,6 +16,7 @@ char         *bro_format_code (BroDiscFormat f, gboolean encrypted);
 const char   *bro_format_label (BroDiscFormat f);
 const char   *bro_format_token (BroDiscFormat f); /* dvd, bluray, uhd, hddvd, unknown */
 const char   *bro_kind_label (BroMediaKind k);    /* Movie, TV show */
+int           bro_format_key (BroDiscFormat f);   /* BroFormatKey for rip.formatModes, -1 for other formats */
 const char   *bro_kind_token (BroMediaKind k);    /* movie, tv */
 extern const char *const bro_format_codes[];      /* NULL terminated: DVD, DVDe, BR, BRe, 4K, 4Ke */
 

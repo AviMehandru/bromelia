@@ -77,6 +77,7 @@ public sealed partial class MainWindow : Window
         Nav.FooterMenuItems.Clear();
         Nav.FooterMenuItems.Add(new NavigationViewItem { Content = "Open image or folder…", Icon = new SymbolIcon(Symbol.OpenFile), Tag = "action:open", SelectsOnInvoked = false });
         Nav.FooterMenuItems.Add(new NavigationViewItem { Content = "Rescan drives", Icon = new SymbolIcon(Symbol.Refresh), Tag = "action:rescan", SelectsOnInvoked = false });
+        Nav.FooterMenuItems.Add(new NavigationViewItem { Content = "Close all trays", Icon = new SymbolIcon(Symbol.Download), Tag = "action:close-trays", SelectsOnInvoked = false });
         Nav.FooterMenuItems.Add(new NavigationViewItem { Content = "Drive tools", Icon = new SymbolIcon(Symbol.Repair), Tag = "tools" });
 
         var selected = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(i => (i.Tag as string) == _selectedTag);
@@ -164,6 +165,9 @@ public sealed partial class MainWindow : Window
                 break;
             case "action:rescan":
                 await State.RefreshDrivesAsync(true);
+                break;
+            case "action:close-trays":
+                await State.CloseAllTraysAsync();
                 break;
         }
     }

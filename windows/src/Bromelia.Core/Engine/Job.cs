@@ -50,7 +50,7 @@ public sealed class RipJob : ObservableObject
     public DriveConfig Drive { get; }
     public string LaneKey { get; }
     public string SourceLabel { get; }
-    public RipMode Mode { get; }
+    public RipMode Mode { get; set; }
     public DiscInfo? PreloadedInfo { get; set; }
     public List<int>? ManualTitles { get; set; }
     public Dictionary<int, HashSet<int>> TrackSelections { get; set; } = new();
@@ -121,6 +121,12 @@ public sealed class RipJob : ObservableObject
     public MakeMKVNotice? MakemkvProblem { get; set; }
     /// <summary>The listing the titles were ripped from (the disc's, a backup's, or a one-pass listing).</summary>
     public DiscInfo? RipInfo { get; set; }
+    /// <summary>Started with the drive's configured mode (automatic and quick rips), so the mode may follow the disc's format.</summary>
+    public bool UsesConfiguredMode { get; set; }
+    /// <summary>The movie / show found online.</summary>
+    public MediaMatch? Metadata { get; set; }
+    /// <summary>Post-processing steps that run after the job, in the background queue.</summary>
+    public BackgroundWork? Background { get; set; }
 
     public string Title => $"{(DiscLabel.Length == 0 ? "Disc" : DiscLabel)} — {SourceLabel}";
 
@@ -236,3 +242,6 @@ public sealed class JobManifest
     public DateTime? FinishedAt { get; set; }
     public string? Error { get; set; }
 }
+
+/// <summary>Post-processing steps to run after a job has finished (and the disc is out), in the background queue.</summary>
+public sealed record BackgroundWork(Guid JobId, string Title, List<PostProcessStep> Steps, PostProcessor.Context Context, string LogFile);

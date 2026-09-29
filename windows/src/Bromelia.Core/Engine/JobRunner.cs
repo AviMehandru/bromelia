@@ -15,6 +15,11 @@ public sealed class JobException : Exception
 /// <summary>Platform services the engine needs from the host application.</summary>
 public interface IPlatformServices
 {
+    /// <summary>What kind of disc is in the drive, when MakeMKV reports no DVD / Blu-ray structure.</summary>
+    DiscContent ProbeDisc(string devicePath) => DiscContent.Unknown;
+    Task<bool> CloseTrayAsync(string devicePath) => Task.FromResult(false);
+    /// <summary>Whether the system has mounted (can read) the disc in the drive.</summary>
+    bool IsDiscMounted(string devicePath) => true;
     Task<bool> EjectAsync(string devicePath);
     void Notify(string title, string body, bool sound);
     /// <summary>Keeps the computer from sleeping while <paramref name="on"/> (called on the UI thread).</summary>
@@ -76,6 +81,8 @@ public sealed class JobRunner
     /// <summary>Error messages of the running makemkvcon count as read errors (rips and backups, not listings).</summary>
     bool _collectDataErrors;
     bool _reportedMissingVerifier;
+    /// <summary>The main feature of a movie (the longest title ripped), for media server names.</summary>
+    int? _mainTitle;
 
     /// <summary>Name prefix of the hidden staging folder a job writes to inside its output folder.</summary>
     public const string StagingPrefix = ".bromelia-incomplete-";
@@ -145,7 +152,10 @@ public sealed class JobRunner
         status = await FinishOutputAsync(status);
 
         WriteManifest(status);
-        var steps = ApplicableSteps(status);
+        // Background steps run later, in the background queue, once the disc is out.
+        var allSteps = ApplicableSteps(status);
+        var steps = allSteps.Where(s => !s.Background).ToList();
+        var backgroundSteps = allSteps.Where(s => s.Background).ToList();
         if (steps.Count > 0 && !CancelRequested)
         {
             _job.Phase = "Post-processing";
@@ -182,6 +192,19 @@ public sealed class JobRunner
         _job.CurrentOperation = "";
         if (status == JobState.Succeeded) { _job.TotalProgress = 1; _job.CurrentProgress = 1; }
         WriteManifest(status);
+        if (backgroundSteps.Count > 0 && !CancelRequested)
+        {
+            _job.Background = new BackgroundWork(_job.Id, _job.Title, backgroundSteps,
+                new PostProcessor.Context(status, TemplateValues(status), _job.OutputDirectory, _job.ProducedFiles.ToList(), ScriptEnvironment(status)),
+                Path.Combine(_job.LogDirectory, "background.txt"));
+            _job.AppendLog($"{backgroundSteps.Count} post-processing step(s) queued to run in the background");
+        }
+        var (title, body) = NotificationText(status);
+        if (_config.Notifications.Count > 0)
+        {
+            await NotificationSender.SendAsync(_config.Notifications, title, body, status.StatusWord(), t => _ui.Post(() => _job.AppendLog(t, Severity.Warning)));
+            await _ui.Barrier();
+        }
         _job.AppendLog($"Finished: {status.Label()} in {FormatElapsed(_job.Elapsed)}");
         _job.CloseLogFile();
         _videoTs?.Dispose();
@@ -190,20 +213,22 @@ public sealed class JobRunner
             try { File.Copy(_job.LogFile, Paths.UniquePath(Path.Combine(archiveDir, "bromelia-log.txt"))); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
 
-        if (_job.Drive.Automation.Notify)
-        {
-            var body = status switch
-            {
-                JobState.Succeeded => $"{_job.ProducedFiles.Count} item(s) saved to {_job.OutputDirectory}",
-                JobState.CompletedWithErrors => $"Read errors: the files were kept in {_job.OutputDirectory}",
-                JobState.Cancelled => "Cancelled",
-                _ => _job.ErrorMessage ?? "Failed",
-            };
-            var what = _job.DiscLabel.Length == 0 ? _job.SourceLabel : _job.DiscLabel;
-            _platform.Notify($"{_job.Mode.ShortLabel()} {(status == JobState.Succeeded ? "finished" : status.Label().ToLowerInvariant())}: {what}",
-                body, _job.Drive.Automation.PlaySound);
-        }
+        if (_job.Drive.Automation.Notify) _platform.Notify(title, body, _job.Drive.Automation.PlaySound);
         Finished?.Invoke(_job);
+    }
+
+    /// <summary>Title and text of the notification for a finished job.</summary>
+    (string Title, string Body) NotificationText(JobState status)
+    {
+        var body = status switch
+        {
+            JobState.Succeeded => $"{_job.ProducedFiles.Count} item(s) saved to {_job.OutputDirectory}",
+            JobState.CompletedWithErrors => $"Read errors: the files were kept in {_job.OutputDirectory}",
+            JobState.Cancelled => "Cancelled",
+            _ => _job.ErrorMessage ?? "Failed",
+        };
+        var what = _job.Identity?.Name ?? (_job.DiscLabel.Length == 0 ? _job.SourceLabel : _job.DiscLabel);
+        return ($"{_job.Mode.ShortLabel()} {(status == JobState.Succeeded ? "finished" : status.Label().ToLowerInvariant())}: {what}", body);
     }
 
     public static string FormatElapsed(TimeSpan t) =>
@@ -213,6 +238,21 @@ public sealed class JobRunner
 
     async Task ExecuteAsync()
     {
+        if (_job.Source is DiscSource.Drive { DevicePath.Length: > 0 } md && _job.IsAutomatic && _job.Drive.Automation.WaitForMountSeconds > 0)
+        {
+            _job.Phase = "Waiting for the disc to be mounted";
+            var deadline = DateTime.Now.AddSeconds(_job.Drive.Automation.WaitForMountSeconds);
+            bool mounted;
+            while (!(mounted = _platform.IsDiscMounted(md.DevicePath)) && DateTime.Now < deadline && !CancelRequested)
+                await Task.Delay(2000);
+            if (CancelRequested) throw new OperationCanceledException();
+            _job.AppendLog(mounted ? "The disc is mounted" : $"The disc wasn't mounted after {_job.Drive.Automation.WaitForMountSeconds} s; continuing");
+        }
+        if (_job.Mode is RipMode.AudioCD or RipMode.DataImage)
+        {
+            await ExecuteOtherDiscAsync();
+            return;
+        }
         bool needsAllTracks = _job.Mode.MakesMkv() && _job.TrackSelections.Count > 0;
         if (needsAllTracks && _mkvmerge == null)
             throw new JobException("Choosing individual tracks requires mkvmerge (MKVToolNix). Install MKVToolNix or reset the track choices.");
@@ -255,17 +295,16 @@ public sealed class JobRunner
         _job.DiscInfo = info;
         if (info is { Name.Length: > 0 }) _job.DiscLabel = info.Name;
         ResolveIdentity(info);
+        // Separate modes for DVDs, Blu-rays and 4K UHD discs (automatic and quick rips).
+        if (_job.UsesConfiguredMode && _job.Drive.Rip.ModeFor(_job.Identity?.Format) is var m && m != _job.Mode)
+        {
+            _job.AppendLog($"{_job.Identity?.Format.Label() ?? "This disc"}: {m.Label()}");
+            _job.Mode = m;
+            ResolveIdentity(info);
+        }
+        await LookUpMetadataAsync();
 
-        var finalDir = ResolveOutputDirectory();
-        _outputDir = finalDir;
-        _job.OutputDirectory = finalDir;
-        // Everything is written to a hidden staging folder first and only moved into the output folder
-        // once the job has finished and passed its checks.
-        var outDir = Path.Combine(finalDir, StagingPrefix + JobShortId);
-        _workDir = outDir;
-        var stage = Directory.CreateDirectory(outDir);
-        try { stage.Attributes |= FileAttributes.Hidden; } catch (IOException) { }
-        _job.AppendLog($"Output folder: {finalDir} (files are moved there once the job has finished and been checked)");
+        var outDir = PrepareOutput();
 
         switch (_job.Mode)
         {
@@ -282,6 +321,8 @@ public sealed class JobRunner
                 _job.StepCount = 1;
                 _job.ProducedFiles.Add(await BackupAsync(_job.Mode == RipMode.BackupDecrypted, outDir, false));
                 break;
+            case RipMode.AudioCD or RipMode.DataImage:
+                break; // handled by ExecuteOtherDiscAsync
             case RipMode.BackupThenMkv:
                 _job.StepCount = 2;
                 var dest = await BackupAsync(true, outDir, true);
@@ -299,6 +340,92 @@ public sealed class JobRunner
                 }
                 break;
         }
+    }
+
+    /// <summary>Reserves the output folder and creates the hidden staging folder inside it, where everything is written
+    /// until the job has finished and passed its checks.</summary>
+    string PrepareOutput()
+    {
+        var finalDir = ResolveOutputDirectory();
+        _outputDir = finalDir;
+        _job.OutputDirectory = finalDir;
+        var outDir = Path.Combine(finalDir, StagingPrefix + JobShortId);
+        _workDir = outDir;
+        var stage = Directory.CreateDirectory(outDir);
+        try { stage.Attributes |= FileAttributes.Hidden; } catch (IOException) { }
+        _job.AppendLog($"Output folder: {finalDir} (files are moved there once the job has finished and been checked)");
+        return outDir;
+    }
+
+    /// <summary>The canonical title and year from TMDb or OMDb, when a provider is set up. Failures only log.</summary>
+    async Task LookUpMetadataAsync()
+    {
+        var m = _config.Metadata;
+        if (m.Provider == MetadataProvider.None || m.ApiKey.Length == 0 || _job.Identity is not { Name.Length: > 0 } id) return;
+        _job.Phase = $"Looking up “{id.Name}”";
+        try
+        {
+            if (await MetadataLookup.LookupAsync(id.Name, id.Kind, m) is { } match)
+            {
+                _job.Metadata = match;
+                _job.AppendLog($"{match.Provider}: “{match.Title}”{(match.Year is { } y ? $" ({y})" : "")}{(match.TmdbId is { } t ? $", TMDb {t}" : "")}{(match.ImdbId is { } i ? $", {i}" : "")}");
+                ResolveIdentity(_job.DiscInfo);
+            }
+            else _job.AppendLog($"{m.Provider} found nothing for “{id.Name}”", Severity.Warning);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            _job.AppendLog($"Looking up “{id.Name}” failed: {e.Message}", Severity.Warning);
+        }
+    }
+
+    /// <summary>Audio CDs (ripped with cyanrip / abcde) and data discs (copied sector by sector to an ISO image).</summary>
+    async Task ExecuteOtherDiscAsync()
+    {
+        if (_job.Source is not DiscSource.Drive { DevicePath.Length: > 0 } drive) throw new JobException($"{_job.Mode.Label()} needs a disc in a drive");
+        ResolveIdentity(null);
+        var work = PrepareOutput();
+        _job.StepCount = 1;
+        if (_job.Mode == RipMode.DataImage)
+        {
+            var name = BackupName(true);
+            var dest = Path.Combine(work, (name.Length > 0 ? name : "disc") + ".iso");
+            _job.Phase = "Copying the disc to an ISO image";
+            _job.AppendLog($"Copying {drive.DevicePath} to {Path.GetFileName(dest)}");
+            try
+            {
+                await OtherDiscTools.CopyDiscAsync(drive.DevicePath, dest, n => _ui.Post(() => _job.CurrentOperation = TitleInfo.FormatBytes(n)), _cts.Token);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                throw new JobException($"Could not read the disc: {e.Message}");
+            }
+            await _ui.Barrier();
+            _job.ProducedFiles.Add(dest);
+            if (_job.Drive.Archive.VerifyRips && BackupVerifier.Problem(dest, true) is { } problem)
+                throw new JobException($"The disc image failed the check: {problem}");
+            return;
+        }
+        if (OtherDiscTools.AudioCommand(_job.Drive.Other, drive.DevicePath) is not { } cmd)
+            throw new JobException("Ripping audio CDs needs cyanrip or abcde (both look up the album in MusicBrainz). Install one, or set an audio CD command.");
+        _job.Phase = "Ripping the audio CD";
+        var runner = new ProcessRunner(cmd.Exe, cmd.Args, null, work);
+        _job.Commands.Add(runner.CommandLine);
+        _job.AppendLog("$ " + runner.CommandLine);
+        _active = runner;
+        ProcessRunner.Result r;
+        try { r = await runner.RunAsync(l => _ui.Post(() => _job.AppendLog(l)), default, _cts.Token, TimeSpan.FromMinutes(Math.Max(0, _config.StallTimeoutMinutes))); }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or FileNotFoundException)
+        {
+            throw new JobException($"Could not start {Path.GetFileName(cmd.Exe)}: {e.Message}");
+        }
+        finally { _active = null; }
+        await _ui.Barrier();
+        if (CancelRequested || r.Cancelled) throw new OperationCanceledException();
+        if (r.Stalled) throw new JobException($"{Path.GetFileName(cmd.Exe)} printed nothing for {_config.StallTimeoutMinutes} minutes and was stopped");
+        if (r.ExitCode != 0) throw new JobException($"{Path.GetFileName(cmd.Exe)} failed (exit status {r.ExitCode})");
+        foreach (var n in VisibleItems(work)) _job.ProducedFiles.Add(Path.Combine(work, n));
+        if (_job.ProducedFiles.Count == 0) throw new JobException($"{Path.GetFileName(cmd.Exe)} saved nothing");
     }
 
     /// <summary>Moves title and track choices made on one listing to the title numbers of another (the listing read
@@ -321,6 +448,7 @@ public sealed class JobRunner
     {
         var id = MediaIdentity.Resolve(info, _job.DiscLabel, _job.Mode == RipMode.Backup, _job.DiscFlags, format ?? _job.Identity?.Format,
             _job.MediaName, _job.MediaKind, playAllEpisodes);
+        if (_job.Metadata is { } meta) id = id with { Name = TemplateRenderer.SanitizeComponent(meta.Title) };
         if (id != _job.Identity)
         {
             var set = id.Label.SetDescription;
@@ -448,7 +576,8 @@ public sealed class JobRunner
             else (firstCh, lastCh) = (plan.Tail[0], plan.Tail[^1]);
             values["track"] = $"{MediaIdentity.TrackLabel(title)} Ch {(firstCh == lastCh ? $"{firstCh}" : $"{firstCh}-{lastCh}")}";
             var fallback = $"{Path.GetFileNameWithoutExtension(file)} - {(i < plan.EpisodeCount ? $"Episode {_firstEpisode + i}" : "after last episode")}";
-            var final = RenameTo(parts[i], values, _job.Drive.Output.FileNameTemplate, fallback, outDir);
+            var template = _job.Drive.Output.Layout == LibraryLayout.MediaServer ? MediaServerNaming.FileTemplate(values, false) : _job.Drive.Output.FileNameTemplate;
+            var final = RenameTo(parts[i], values, template, fallback, outDir);
             outputs.Add(final);
             if (i < plan.EpisodeCount)
                 _job.Episodes.Add(new ArchiveRecord.EpisodeEntry { File = RelativePath(final, outDir), Episode = _firstEpisode + i, SourceTitleId = plan.Title, FirstChapter = firstCh, LastChapter = lastCh });
@@ -527,23 +656,33 @@ public sealed class JobRunner
         if (tag != null) (dest, from) = MarkedFolder(outDir, stage, tag);
 
         _job.Phase = "Moving files";
+        // Keys are paths relative to the staging folder ('/' separated); folders merged into existing ones have an entry per item.
         var moved = new Dictionary<string, string>(StringComparer.Ordinal);
         bool left = false;
-        foreach (var name in VisibleItems(from))
+        // A media server library keeps adding to the show's folders (Season 02, Other, Backup) instead of making new ones.
+        bool merge = tag == null && _job.Drive.Output.Layout == LibraryLayout.MediaServer;
+        void Move(string rel)
         {
-            var source = Path.Combine(from, name);
-            var target = Paths.UniquePath(Path.Combine(dest, name));
+            var source = Path.Combine(from, rel);
+            var want = Path.Combine(dest, rel);
+            if (merge && Directory.Exists(source) && Directory.Exists(want))
+            {
+                foreach (var name in VisibleItems(source)) Move(rel + "/" + name);
+                return;
+            }
+            var target = Paths.UniquePath(want);
             try
             {
                 if (Directory.Exists(source)) Directory.Move(source, target); else File.Move(source, target);
-                moved[name] = target;
+                moved[rel] = target;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 left = true;
-                _job.AppendLog($"Could not move {name} out of {from}: {e.Message}", Severity.Error);
+                _job.AppendLog($"Could not move {rel} out of {from}: {e.Message}", Severity.Error);
             }
         }
+        foreach (var name in VisibleItems(from)) Move(name);
         if (left)
         {
             if (status == JobState.Succeeded)
@@ -560,11 +699,15 @@ public sealed class JobRunner
         {
             var full = Path.GetFullPath(p);
             if (!full.StartsWith(stagePath, StringComparison.OrdinalIgnoreCase)) return p;
-            var rest = full[stagePath.Length..];
-            var cut = rest.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
-            var first = cut < 0 ? rest : rest[..cut];
-            if (!moved.TryGetValue(first, out var top)) return p;
-            return cut < 0 ? top : Path.Combine(top, rest[(cut + 1)..]);
+            var rest = full[stagePath.Length..].Replace(Path.DirectorySeparatorChar, '/');
+            for (var key = rest; ;)
+            {
+                if (moved.TryGetValue(key, out var top))
+                    return key.Length == rest.Length ? top : Path.Combine(top, rest[(key.Length + 1)..].Replace('/', Path.DirectorySeparatorChar));
+                var slash = key.LastIndexOf('/');
+                if (slash < 0) return p;
+                key = key[..slash];
+            }
         }
         string RelocateRelative(string r) => RelativePath(Relocate(Path.Combine(stage, r.Replace('/', Path.DirectorySeparatorChar))), dest);
         for (int i = 0; i < _job.ProducedFiles.Count; i++) _job.ProducedFiles[i] = Relocate(_job.ProducedFiles[i]);
@@ -597,6 +740,15 @@ public sealed class JobRunner
     /// Returns that folder and the staging folder's (possibly new) location.</summary>
     (string Dest, string Stage) MarkedFolder(string outDir, string stage, string tag)
     {
+        // Kept outside a media server library, where the server would pick the files up.
+        if (_job.Drive.Output.Layout == LibraryLayout.MediaServer)
+        {
+            var root = Paths.ExpandUser(_config.OutputRootFor(_job.Drive));
+            if (root.Length == 0) root = Paths.DefaultOutputRoot;
+            var d = Paths.UniquePath(Path.Combine(root, TemplateRenderer.SanitizeComponent($"{Path.GetFileName(outDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))} [{tag} {JobShortId}]")));
+            Directory.CreateDirectory(d);
+            return (d, stage);
+        }
         if (_ownsOutputDir && VisibleItems(outDir).Count == 0)
         {
             var parent = Path.GetDirectoryName(Path.GetFullPath(outDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))!;
@@ -902,6 +1054,7 @@ public sealed class JobRunner
         }
         _job.RipInfo = info;
         _job.RipTitles = indices;
+        _mainTitle = indices.Select(info.Title).OfType<TitleInfo>().OrderByDescending(t => t.DurationSeconds).FirstOrDefault()?.Index;
         _fileTitles.Clear();
         await PrepareEpisodesAsync(source, info, indices);
         CheckFreeSpace(indices.Select(info.Title).OfType<TitleInfo>().ToList(), outDir);
@@ -971,7 +1124,14 @@ public sealed class JobRunner
     {
         if (_job.Source is not DiscSource.Drive drive) throw new JobException("Backups can only be made from a disc in a drive");
         var dest = outDir;
-        if (inSubfolder)
+        if (_job.Drive.Output.Layout == LibraryLayout.MediaServer)
+        {
+            // Kept out of the media server's scan (.plexignore for Plex, .ignore for Jellyfin / Emby).
+            dest = Path.Combine(outDir, "Backup");
+            Directory.CreateDirectory(dest);
+            try { File.WriteAllText(Path.Combine(dest, ".plexignore"), "*\n"); File.WriteAllText(Path.Combine(dest, ".ignore"), ""); } catch (IOException) { }
+        }
+        else if (inSubfolder)
         {
             var sub = TemplateRenderer.RenderPath(_job.Drive.Output.BackupSubfolder, TemplateValues(JobState.Running));
             dest = Path.Combine(outDir, sub.Length == 0 ? "backup" : sub);
@@ -1036,7 +1196,7 @@ public sealed class JobRunner
     /// <summary>File / folder name of a backup from the file name template (rip = Backup, no episode or track).</summary>
     string BackupName(bool decrypt)
     {
-        var template = _job.Drive.Output.FileNameTemplate.Trim();
+        var template = _job.Drive.Output.Layout == LibraryLayout.MediaServer ? MediaServerNaming.BackupName : _job.Drive.Output.FileNameTemplate.Trim();
         if (template.Length == 0) return "";
         var values = TemplateValues(JobState.Running);
         values["rip"] = "Backup";
@@ -1147,7 +1307,6 @@ public sealed class JobRunner
     string Rename(string file, TitleInfo title, int ordinal, DiscInfo info, string outDir)
     {
         var explicitName = _job.TitleNameOverrides.TryGetValue(title.Index, out var o) ? o.Trim() : "";
-        var template = explicitName.Length > 0 ? explicitName : _job.Drive.Output.FileNameTemplate.Trim();
         var values = TemplateValues(JobState.Running);
         foreach (var kv in TitleValues(title, ordinal, info, file)) values[kv.Key] = kv.Value;
         values["track"] = MediaIdentity.TrackLabel(title);
@@ -1157,6 +1316,9 @@ public sealed class JobRunner
             values["episode"] = MediaIdentity.EpisodeLabel(_firstEpisode + k, _episodeWidth);
             values["episodeNumber"] = (_firstEpisode + k).ToString(CultureInfo.InvariantCulture);
         }
+        var template = explicitName.Length > 0 ? explicitName
+            : _job.Drive.Output.Layout == LibraryLayout.MediaServer ? MediaServerNaming.FileTemplate(values, title.Index == _mainTitle)
+            : _job.Drive.Output.FileNameTemplate.Trim();
         var final = RenameTo(file, values, template, null, outDir);
         if (episode)
             _job.Episodes.Add(new ArchiveRecord.EpisodeEntry { File = RelativePath(final, outDir), Episode = _firstEpisode + k,
@@ -1193,8 +1355,16 @@ public sealed class JobRunner
     {
         var root = Paths.ExpandUser(_config.OutputRootFor(_job.Drive));
         if (root.Length == 0) root = Paths.DefaultOutputRoot;
-        var rel = TemplateRenderer.RenderPath(_job.Drive.Output.FolderTemplate, TemplateValues(JobState.Running));
+        bool mediaServer = _job.Drive.Output.Layout == LibraryLayout.MediaServer;
+        var rel = TemplateRenderer.RenderPath(mediaServer ? MediaServerNaming.FolderTemplate : _job.Drive.Output.FolderTemplate, TemplateValues(JobState.Running));
         var dir = rel.Length == 0 ? root : Path.Combine(root, rel);
+        // A media server library keeps one folder per movie / show: later discs are added to it.
+        if (mediaServer)
+        {
+            Directory.CreateDirectory(dir);
+            _ownsOutputDir = false;
+            return dir;
+        }
         // A staging folder of a running job counts as content, so two jobs never both take a folder as new.
         bool occupied = Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir)
             .Select(e => Path.GetFileName(e)!).Any(n => !n.StartsWith('.') || n.StartsWith(StagingPrefix, StringComparison.Ordinal));
@@ -1266,6 +1436,11 @@ public sealed class JobRunner
         var id = _job.Identity ?? MediaIdentity.Resolve(info, _job.DiscLabel, _job.Mode == RipMode.Backup, _job.DiscFlags, null, _job.MediaName, _job.MediaKind);
         foreach (var kv in id.TemplateValues(_job.Mode.MakesMkv() ? "Rip" : "Backup")) v[kv.Key] = kv.Value;
         v["checksums"] = _job.ChecksumFile ?? "";
+        v["releaseYear"] = _job.Metadata?.Year?.ToString(CultureInfo.InvariantCulture) ?? "";
+        v["tmdb"] = _job.Metadata?.TmdbId?.ToString(CultureInfo.InvariantCulture) ?? "";
+        v["imdb"] = _job.Metadata?.ImdbId ?? "";
+        v["libraryFolder"] = id.Kind == MediaKind.Tv ? "TV Shows" : "Movies";
+        v["seasonOr1"] = id.Label.Season?.ToString(CultureInfo.InvariantCulture) ?? "1";
         return v;
     }
 

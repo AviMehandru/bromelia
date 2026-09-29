@@ -334,6 +334,8 @@ action_open_folder (GSimpleAction *a, GVariant *p, gpointer self)
 static void
 action_rescan (GSimpleAction *a, GVariant *p, gpointer self) { bro_state_refresh_drives (bro_app_state (), TRUE); }
 static void
+action_close_trays (GSimpleAction *a, GVariant *p, gpointer self) { bro_state_close_all_trays (bro_app_state ()); }
+static void
 action_queue (GSimpleAction *a, GVariant *p, gpointer self) { bro_window_navigate (self, "queue"); }
 static void
 action_history (GSimpleAction *a, GVariant *p, gpointer self) { bro_window_navigate (self, "history"); }
@@ -406,6 +408,7 @@ bro_window_init (BroWindow *self)
     { "open", action_open, NULL, NULL, NULL, { 0 } },
     { "open-folder", action_open_folder, NULL, NULL, NULL, { 0 } },
     { "rescan", action_rescan, NULL, NULL, NULL, { 0 } },
+    { "close-trays", action_close_trays, NULL, NULL, NULL, { 0 } },
     { "queue", action_queue, NULL, NULL, NULL, { 0 } },
     { "history", action_history, NULL, NULL, NULL, { 0 } },
     { "tools", action_tools, NULL, NULL, NULL, { 0 } },
@@ -443,6 +446,7 @@ bro_window_init (BroWindow *self)
   g_menu_append (menu, "Open Disc Image…", "win.open");
   g_menu_append (menu, "Open BDMV / VIDEO_TS Folder…", "win.open-folder");
   g_menu_append (menu, "Rescan Drives", "win.rescan");
+  g_menu_append (menu, "Close All Trays", "win.close-trays");
   g_menu_append (menu, "Drive Tools", "win.tools");
   g_menu_append (menu, "Preferences", "win.preferences");
   g_menu_append (menu, "About Bromelia", "win.about");

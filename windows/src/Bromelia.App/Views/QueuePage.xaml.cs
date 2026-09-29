@@ -25,20 +25,28 @@ public sealed partial class QueuePage : Page
     {
         InitializeComponent();
         PageTitle.Text = "Queue";
-        HeaderButtons.Children.Add(PageHelpers.Button("Clear finished", () => App.State.ClearFinishedJobs()));
+        HeaderButtons.Children.Add(PageHelpers.Button("Clear finished", () => { App.State.ClearFinishedJobs(); App.State.Background.ClearFinished(); Rebuild(); }));
         var sp = new StackPanel { Spacing = 10 };
+        sp.Children.Add(_background);
         sp.Children.Add(_empty);
         sp.Children.Add(_list);
         Body.Content = new ScrollViewer { Content = sp };
     }
 
+    readonly StackPanel _background = new() { Spacing = 4 };
+
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         App.State.Jobs.CollectionChanged += OnChanged;
+        App.State.Background.Items.CollectionChanged += OnChanged;
         Rebuild();
     }
 
-    protected override void OnNavigatedFrom(NavigationEventArgs e) => App.State.Jobs.CollectionChanged -= OnChanged;
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        App.State.Jobs.CollectionChanged -= OnChanged;
+        App.State.Background.Items.CollectionChanged -= OnChanged;
+    }
 
     void OnChanged(object? sender, NotifyCollectionChangedEventArgs e) => Rebuild();
 
@@ -46,6 +54,17 @@ public sealed partial class QueuePage : Page
     {
         _list.Children.Clear();
         foreach (var j in App.State.Jobs) _list.Children.Add(new JobCard(j));
+        _background.Children.Clear();
+        if (App.State.Background.Items.Count > 0)
+            _background.Children.Add(new TextBlock { Text = "Background", Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"] });
+        foreach (var b in App.State.Background.Items)
+        {
+            var line = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis };
+            void Update() => line.Text = $"{b.Work.Title} — {(b.Message.Length > 0 ? b.Message : b.State)}";
+            Update();
+            b.PropertyChanged += (_, _) => DispatcherQueue.TryEnqueue(Update);
+            _background.Children.Add(line);
+        }
         _empty.Visibility = App.State.Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 }
