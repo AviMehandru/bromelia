@@ -142,6 +142,8 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **Audio CDs** ripped with cyanrip or abcde (MusicBrainz tags, FLAC) and **data discs** saved as exact ISO images,
   chosen automatically from what is in the drive.
 - **Separate modes for DVDs, Blu-rays and 4K discs** (e.g. backups of DVDs, MKVs of Blu-rays).
+- **Built-in transcoding** (as in ARM): a *Transcode with HandBrake* step encodes every ripped MKV with a HandBrake
+  preset (or one exported from HandBrake) in the background queue, into its own files next to the untouched archive.
 - **Notifications** to Discord, Slack, ntfy, any webhook, or any Apprise service (Telegram, Pushover, e-mail, …).
 - **Background post-processing**: encoding or upload steps run after the disc is out, in their own queue, so the
   drive is free for the next disc.

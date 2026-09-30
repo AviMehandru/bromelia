@@ -38,11 +38,7 @@ public sealed class PostProcessEditor : UserControl
             Arguments = "-NoProfile -Command \"Move-Item -LiteralPath $env:BROMELIA_OUTPUT_DIR -Destination 'D:\\Library'\"",
             FailJobOnError = true,
         });
-        AddExample(examples, "Encode with HandBrakeCLI", new PostProcessStep
-        {
-            Name = "Encode with HandBrake", Executable = @"C:\Program Files\HandBrake\HandBrakeCLI.exe",
-            Arguments = "-i {file} -o \"{outputDir}\\{stem}.mp4\" --preset \"Fast 1080p30\"", PerFile = true, Background = true,
-        });
+        AddExample(examples, "Transcode with HandBrake (built in)", PostProcessStep.HandBrake());
         AddExample(examples, "Rename for Plex with FileBot", new PostProcessStep
         {
             Name = "Rename for Plex with FileBot", Executable = @"C:\Program Files\FileBot\filebot.exe",
@@ -139,7 +135,7 @@ public sealed class PostProcessEditor : UserControl
 
     static string Summary(PostProcessStep s)
     {
-        var parts = new List<string> { s.RunOn.Label() + (s.PerFile ? " · per file" : "") };
+        var parts = new List<string> { (s.Kind == StepKind.Handbrake ? "HandBrake · " : "") + s.RunOn.Label() + (s.PerFile && s.Kind == StepKind.Command ? " · per file" : "") };
         if (s.MatchName.Trim().Length > 0) parts.Add($"“{s.MatchName}”");
         if (s.MatchFormats.Count > 0) parts.Add(string.Join(", ", s.MatchFormats));
         return string.Join(" · ", parts);
@@ -169,8 +165,14 @@ public sealed class PostProcessEditor : UserControl
         f.Section("Step");
         f.Text("Name", () => s.Name, v => s.Name = v);
         f.Toggle("Enabled", () => s.Enabled, v => s.Enabled = v);
+        f.Choice("Type", new[] { (StepKind.Command, "Program or script"), (StepKind.Handbrake, "Transcode with HandBrake") }, () => s.Kind, v =>
+        {
+            if (s.Kind == v) return;
+            s.Kind = v;
+            DispatcherQueue.TryEnqueue(ShowEditor);
+        });
         f.Choice("Run", Enum.GetValues<RunCondition>().Select(r => (r, r.Label())), () => s.RunOn, v => s.RunOn = v);
-        f.Toggle("Run once for every produced file", () => s.PerFile, v => s.PerFile = v);
+        if (s.Kind == StepKind.Command) f.Toggle("Run once for every produced file", () => s.PerFile, v => s.PerFile = v);
         f.Toggle("Run in the background after the disc is ejected (encoding, uploads)", () => s.Background, v => s.Background = v);
         f.Section("Applies to", "Leave both empty to run for every disc. The name is the movie or show name used for file names; the disc label (e.g. ONE_PIECE_S2_P7_D2) lets a step target one specific disc. No format ticked = all formats; the e codes are backups that are not decrypted.");
         var nameError = Form.Help(PluginMatcher.Validate(s.MatchName) ?? "");
@@ -191,13 +193,36 @@ public sealed class PostProcessEditor : UserControl
             formats.Children.Add(cb);
         }
         f.Row("Formats", formats);
-        f.Section("Command", "Arguments are split like a command line and then {tokens} are filled in, so values with spaces stay a single argument. A lone {files} expands to one argument per file. .ps1, .bat, .cmd and .py scripts are started with the matching interpreter.");
-        f.PathPicker("Program or script", () => s.Executable, v => s.Executable = v, folder: false, placeholder: @"C:\Scripts\after-rip.ps1");
-        f.Text("Interpreter", () => s.Interpreter, v => s.Interpreter = v, "Optional, e.g. python.exe");
-        f.Text("Arguments", () => s.Arguments, v => s.Arguments = v, "{outputDir}", width: 460, monospace: true);
-        f.Text("Working folder", () => s.WorkingDirectory, v => s.WorkingDirectory = v, "Default: the job's output folder");
-        f.Number("Time limit (0 = none)", () => s.TimeoutSeconds, v => s.TimeoutSeconds = v, 0, 86400, suffix: "seconds");
-        f.Toggle("Mark the job as failed if this step fails", () => s.FailJobOnError, v => s.FailJobOnError = v);
+        if (s.Kind == StepKind.Handbrake)
+        {
+            f.Section("HandBrake", "Encodes every ripped MKV (not backups or disc images) with HandBrakeCLI. The archive is never changed: encodes go to their own files, numbered when one exists. The extension of the path picks the container (.mkv or .mp4); {stem}, {name}, {outputDir} and the other tokens work. Run it in the background so the drive is free for the next disc. Progress is logged at every 10 %.");
+            var preset = f.Text("Preset", () => s.Preset, v => s.Preset = v, PostProcessStep.DefaultPreset, width: 320);
+            var presets = new MenuFlyout();
+            foreach (var p in HandBrakePresets.Common)
+            {
+                var item = new MenuFlyoutItem { Text = p };
+                item.Click += (_, _) => preset.Text = p;
+                presets.Items.Add(item);
+            }
+            f.Add(new DropDownButton { Content = "Built-in presets", Flyout = presets });
+            f.PathPicker("Preset file", () => s.PresetFile, v => s.PresetFile = v, folder: false, placeholder: "Optional: a preset exported from HandBrake (.json)");
+            f.Text("Save encodes to", () => s.OutputPath, v => s.OutputPath = v, PostProcessStep.DefaultEncodePath, width: 460, monospace: true);
+            f.Text("More arguments", () => s.ExtraArguments, v => s.ExtraArguments = v, "Optional, e.g. --all-subtitles", width: 460, monospace: true);
+            f.PathPicker("HandBrakeCLI", () => s.Executable, v => s.Executable = v, folder: false,
+                placeholder: HandBrake.Tool(new PostProcessStep()) ?? "Not found: download HandBrakeCLI from handbrake.fr");
+            f.Number("Time limit per file (0 = none)", () => s.TimeoutSeconds, v => s.TimeoutSeconds = v, 0, 604800, suffix: "seconds");
+            f.Toggle("Mark the job as failed if an encode fails", () => s.FailJobOnError, v => s.FailJobOnError = v);
+        }
+        else
+        {
+            f.Section("Command", "Arguments are split like a command line and then {tokens} are filled in, so values with spaces stay a single argument. A lone {files} expands to one argument per file. .ps1, .bat, .cmd and .py scripts are started with the matching interpreter.");
+            f.PathPicker("Program or script", () => s.Executable, v => s.Executable = v, folder: false, placeholder: @"C:\Scripts\after-rip.ps1");
+            f.Text("Interpreter", () => s.Interpreter, v => s.Interpreter = v, "Optional, e.g. python.exe");
+            f.Text("Arguments", () => s.Arguments, v => s.Arguments = v, "{outputDir}", width: 460, monospace: true);
+            f.Text("Working folder", () => s.WorkingDirectory, v => s.WorkingDirectory = v, "Default: the job's output folder");
+            f.Number("Time limit (0 = none)", () => s.TimeoutSeconds, v => s.TimeoutSeconds = v, 0, 86400, suffix: "seconds");
+            f.Toggle("Mark the job as failed if this step fails", () => s.FailJobOnError, v => s.FailJobOnError = v);
+        }
 
         f.Section("Environment variables", "Always set: BROMELIA_JOB_ID, BROMELIA_STATUS, BROMELIA_MODE, BROMELIA_DRIVE_NAME, BROMELIA_DRIVE_ID, BROMELIA_DEVICE, BROMELIA_DISC_NAME, BROMELIA_DISC_TYPE, BROMELIA_OUTPUT_DIR, BROMELIA_FILES (newline separated), BROMELIA_FILE_COUNT, BROMELIA_FILE (per-file steps), BROMELIA_MANIFEST (JSON), BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR, BROMELIA_NAME, BROMELIA_KIND (movie / tv), BROMELIA_FORMAT (DVD, BRe, 4K, …), BROMELIA_ENCRYPTED (1 / 0), BROMELIA_SEASON, BROMELIA_DISC_NUMBER, BROMELIA_DISC_SET, BROMELIA_CHECKSUMS (SHA256SUMS path).");
         var env = new StackPanel { Spacing = 6 };

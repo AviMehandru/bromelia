@@ -232,9 +232,24 @@ name, source file name (e.g. `00800.mpls`), segment map, `#<source id>` and dura
   "failJobOnError": false,
   "matchName": "",                             // regular expression on the name or disc label; "" = every disc
   "matchFormats": [],                          // e.g. ["DVD", "DVDe"] or ["BR*"]; [] = every format
-  "background": false                          // run after the job, in the background queue (see below)
+  "background": false,                         // run after the job, in the background queue (see below)
+  "kind": "command",                           // command | handbrake (see "HandBrake steps")
+  "preset": "H.265 MKV 1080p30",               // handbrake: HandBrake preset name
+  "presetFile": "",                            // handbrake: a preset exported from HandBrake (--preset-import-file)
+  "outputPath": "{outputDir}/Encoded/{stem}.mkv", // handbrake: where each encode goes; the extension picks the container
+  "extraArguments": ""                         // handbrake: more HandBrakeCLI arguments
 }
 ```
+
+**HandBrake steps** (`"kind": "handbrake"`) transcode every MKV the job produced (not backups, ISO images or other
+files) with `HandBrakeCLI`, one run per file: `[--preset-import-file <presetFile>] --preset <preset> -i <file> -o
+<outputPath> <extraArguments>`. `executable` is the HandBrakeCLI to use (empty = found on `PATH`, in
+`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, or `Program Files\HandBrake` on Windows); `arguments`, `interpreter`,
+`workingDirectory` and `perFile` are not used. `outputPath` takes the same tokens as arguments (`{stem}`, `{name}`,
+`{outputDir}`, …); an encode never replaces a file (`A.mkv` becomes `A (2).mkv`), so the archive and earlier encodes
+stay as they are. Encodes aren't in `SHA256SUMS`. The timeout applies to each file. Progress lines are logged at every
+10 %. New HandBrake steps run in the background queue, so the drive is free for the next disc; the editor offers
+HandBrake's built-in presets (`HandBrakeCLI --preset-list` lists them all).
 
 **Background steps** (`"background": true`) run after the job has finished and the disc is out, in a queue
 of their own (`backgroundJobs` at a time), so a slow encode or upload doesn't hold up the next disc. They

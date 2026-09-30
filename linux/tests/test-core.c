@@ -2242,6 +2242,112 @@ rm_rf (const char *path)
     g_unlink (path);
 }
 
+static void
+test_handbrake_arguments (void)
+{
+  g_autoptr (BroPostStep) s = bro_post_step_new_handbrake ();
+  g_autoptr (GHashTable) v = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  g_autofree char *out = NULL, *joined = NULL;
+  g_autoptr (GPtrArray) args = NULL;
+  BroProgressFilter f = { -1, -1 };
+  const char *lines[] = { "Encoding: task 1 of 2, 0.50 % (0.0 fps)", "Encoding: task 1 of 2, 3.00 %", "Encoding: task 1 of 2, 10.01 %",
+                          "Encoding: task 1 of 2, 19.99 %", "x264 [info]: done", "Encoding: task 2 of 2, 1.00 %", "Encoding: task 2 of 2, 95.00 %", NULL };
+  GString *kept = g_string_new (NULL);
+  g_assert_cmpint (s->kind, ==, BRO_STEP_HANDBRAKE);
+  g_assert_true (s->background);
+  g_assert_cmpstr (s->preset, ==, "H.265 MKV 1080p30");
+  g_assert_true (bro_post_step_should_run (s, BRO_JOB_SUCCEEDED));
+  g_assert_false (bro_post_step_should_run (s, BRO_JOB_FAILED));
+  g_free (s->preset_file);
+  s->preset_file = g_strdup ("/p/archive.json");
+  g_free (s->extra_arguments);
+  s->extra_arguments = g_strdup ("--all-subtitles --subtitle-burned=none");
+  g_hash_table_insert (v, g_strdup ("outputDir"), g_strdup ("/out/Show"));
+  g_hash_table_insert (v, g_strdup ("stem"), g_strdup ("Show - S01E01"));
+  out = bro_handbrake_output (s, v);
+  g_assert_cmpstr (out, ==, "/out/Show/Encoded/Show - S01E01.mkv");
+  args = bro_handbrake_arguments (s, "/out/Show/Show - S01E01.mkv", out);
+  g_ptr_array_add (args, NULL);
+  joined = g_strjoinv ("|", (char **) args->pdata);
+  g_assert_cmpstr (joined, ==, "--preset-import-file|/p/archive.json|--preset|H.265 MKV 1080p30|-i|/out/Show/Show - S01E01.mkv|-o|"
+                               "/out/Show/Encoded/Show - S01E01.mkv|--all-subtitles|--subtitle-burned=none");
+  g_assert_true (bro_handbrake_is_source ("/x/a.MKV"));
+  g_assert_false (bro_handbrake_is_source ("/x/a.iso"));
+  for (int i = 0; lines[i]; i++)
+    if (bro_handbrake_keep_line (&f, lines[i]))
+      g_string_append_printf (kept, "%s|", lines[i]);
+  g_assert_cmpstr (kept->str, ==, "Encoding: task 1 of 2, 0.50 % (0.0 fps)|Encoding: task 1 of 2, 10.01 %|x264 [info]: done|"
+                                  "Encoding: task 2 of 2, 1.00 %|Encoding: task 2 of 2, 95.00 %|");
+  g_string_free (kept, TRUE);
+  {
+    g_autoptr (BroPostStep) copy = bro_post_step_copy (s);
+    g_assert_cmpint (copy->kind, ==, BRO_STEP_HANDBRAKE);
+    g_assert_cmpstr (copy->extra_arguments, ==, "--all-subtitles --subtitle-burned=none");
+  }
+}
+
+/* A stand-in HandBrakeCLI copies the input to the output: each MKV gets an encode, an existing one is kept. */
+static void
+test_handbrake_encodes (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-hb-XXXXXX", NULL);
+  g_autofree char *enc = g_build_filename (dir, "Encoded", NULL);
+  g_autofree char *tool = g_build_filename (dir, "HandBrakeCLI", NULL);
+  g_autofree char *a = g_build_filename (dir, "A.mkv", NULL), *b = g_build_filename (dir, "B.mkv", NULL), *iso = g_build_filename (dir, "C.iso", NULL);
+  g_autofree char *old = g_build_filename (enc, "A.mkv", NULL), *a2 = g_build_filename (enc, "A (2).mkv", NULL);
+  g_autofree char *b2 = g_build_filename (enc, "B.mkv", NULL), *c2 = g_build_filename (enc, "C.mkv", NULL);
+  g_autofree char *logf = g_build_filename (dir, "background.txt", NULL);
+  g_autofree char *text = NULL, *failed = NULL;
+  BroBackgroundWork *w = g_new0 (BroBackgroundWork, 1);
+  BroPostStep *s = bro_post_step_new_handbrake ();
+  int ran = 0;
+  g_mkdir_with_parents (enc, 0755);
+  g_assert_true (g_file_set_contents (tool, "#!/bin/sh\nwhile [ $# -gt 0 ]; do case $1 in -i) i=$2;; -o) o=$2;; esac; shift; done\n"
+                                            "printf 'Encoding: task 1 of 1, 50.00 %%\\r'\ncp \"$i\" \"$o\"\n", -1, NULL));
+  g_chmod (tool, 0755);
+  g_file_set_contents (a, "a", -1, NULL);
+  g_file_set_contents (b, "b", -1, NULL);
+  g_file_set_contents (iso, "c", -1, NULL);
+  g_file_set_contents (old, "old", -1, NULL);
+  g_free (s->executable);
+  s->executable = g_strdup (tool);
+  w->job_id = g_strdup ("hb");
+  w->title = g_strdup ("hb");
+  w->steps = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_post_step_free);
+  g_ptr_array_add (w->steps, s);
+  w->values = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  g_hash_table_insert (w->values, g_strdup ("outputDir"), g_strdup (dir));
+  w->environ = g_get_environ ();
+  w->files = g_ptr_array_new_with_free_func (g_free);
+  g_ptr_array_add (w->files, g_strdup (a));
+  g_ptr_array_add (w->files, g_strdup (b));
+  g_ptr_array_add (w->files, g_strdup (iso));
+  w->output_dir = g_strdup (dir);
+  w->log_file = g_strdup (logf);
+  w->status = BRO_JOB_SUCCEEDED;
+  failed = bro_background_work_run (w, &ran, NULL);
+  g_assert_null (failed);
+  g_assert_true (g_file_get_contents (old, &text, NULL, NULL));
+  g_assert_cmpstr (text, ==, "old");
+  g_clear_pointer (&text, g_free);
+  g_assert_true (g_file_get_contents (a2, &text, NULL, NULL));
+  g_assert_cmpstr (text, ==, "a");
+  g_clear_pointer (&text, g_free);
+  g_assert_true (g_file_get_contents (b2, &text, NULL, NULL));
+  g_assert_cmpstr (text, ==, "b");
+  g_clear_pointer (&text, g_free);
+  g_assert_false (g_file_test (c2, G_FILE_TEST_EXISTS));
+  g_assert_true (g_file_get_contents (logf, &text, NULL, NULL));
+  g_assert_nonnull (strstr (text, "Encoding: task 1 of 1, 50.00 %"));
+  g_free (s->executable);
+  s->executable = g_build_filename (dir, "missing", NULL);
+  g_clear_pointer (&failed, g_free);
+  failed = bro_background_work_run (w, &ran, NULL);
+  g_assert_cmpstr (failed, ==, "Transcode with HandBrake");
+  bro_background_work_free (w);
+  rm_rf (dir);
+}
+
 /* shared/fixtures/lookup: recorded TMDb / OMDb answers and what every platform must make of them. */
 static char *
 lookup_fixture (const char *name)
@@ -3594,6 +3700,8 @@ main (int argc, char **argv)
   g_test_add_func ("/lookup/episode-titles-in-names", test_episode_titles_in_names);
   g_test_add_func ("/lookup/episode-continuation", test_episode_continuation);
   g_test_add_func ("/lookup/nfo-files", test_nfo_files);
+  g_test_add_func ("/post/handbrake-arguments", test_handbrake_arguments);
+  g_test_add_func ("/post/handbrake-encodes", test_handbrake_encodes);
   g_test_add_func ("/robot/parse-events", test_parse_events);
   g_test_add_func ("/robot/drive-scan-fixture", test_drive_scan_fixture);
   g_test_add_func ("/robot/disc-info-fixture", test_disc_info_fixture);

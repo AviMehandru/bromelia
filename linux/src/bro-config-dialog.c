@@ -2,6 +2,7 @@
 #include "bro-pages.h"
 #include "bro-identity.h"
 #include "bro-logic.h"
+#include "bro-runner.h"
 
 #include <string.h>
 
@@ -13,6 +14,7 @@ static const char *const index_base_labels[] = { "MakeMKV title number (0-based)
 static const char *const backup_format_labels[] = { "Folder (BDMV / VIDEO_TS)", "ISO image", NULL };
 static const char *const conflict_labels[] = { "Add a number (Disc (2))", "Reuse the existing folder", "Skip the job", NULL };
 static const char *const run_labels[] = { "When the rip succeeds", "When the rip fails", "Always", NULL };
+static const char *const step_kind_labels[] = { "Program or script", "Transcode with HandBrake", NULL };
 static const char *const profile_labels[] = { "MakeMKV default profile", "Bromelia profile (edit below)", "Custom profile file (.mmcp.xml)", NULL };
 static const char *const lpcm_labels[] = { "Copy as is", "Raw LPCM", "LPCM in WAV container", "FLAC (best compression)", "FLAC (fast compression)", NULL };
 static const char *const directio_labels[] = { "MakeMKV default", "Off", "On", NULL };
@@ -606,11 +608,29 @@ post_step_changed (gpointer data)
   ctx_changed (data);
 }
 
+static void rebuild_post (Ctx *c);
+
+static gboolean
+rebuild_post_idle (gpointer data)
+{
+  rebuild_post (data);
+  return G_SOURCE_REMOVE;
+}
+
+/* The step's type changed: its rows change too. */
+static void
+post_kind_changed (gpointer data)
+{
+  ctx_changed (data);
+  g_idle_add (rebuild_post_idle, data);
+}
+
 static char *
 step_summary (BroPostStep *s)
 {
-  GString *out = g_string_new (bro_run_condition_label (s->run_on));
-  if (s->per_file)
+  GString *out = g_string_new (s->kind == BRO_STEP_HANDBRAKE ? "HandBrake · " : "");
+  g_string_append (out, bro_run_condition_label (s->run_on));
+  if (s->per_file && s->kind == BRO_STEP_COMMAND)
     g_string_append (out, " · per file");
   if (s->match_name && *s->match_name)
     g_string_append_printf (out, " · “%s”", s->match_name);
@@ -674,8 +694,10 @@ rebuild_post (Ctx *c)
 
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Name", &s->name, NULL, post_step_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Enabled", NULL, &s->enabled, post_step_changed, c));
+      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_combo_row ("Type", step_kind_labels, (int *) &s->kind, post_kind_changed, c));
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_combo_row ("Run", run_labels, (int *) &s->run_on, post_step_changed, c));
-      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Run once for every produced file", NULL, &s->per_file, post_step_changed, c));
+      if (s->kind == BRO_STEP_COMMAND)
+        adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Run once for every produced file", NULL, &s->per_file, post_step_changed, c));
       {
         GtkWidget *name_row = bro_entry_row ("Only for names or disc labels matching (regular expression)", &s->match_name,
                                              "e.g. ^One Piece$ for a show, or S2_P7 for one disc; empty = every disc", post_step_changed, c);
@@ -693,12 +715,43 @@ rebuild_post (Ctx *c)
         adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), name_row);
         adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), formats);
       }
-      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_path_row ("Program or script", &s->executable, FALSE, post_step_changed, c));
-      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Interpreter (optional, e.g. /usr/bin/python3)", &s->interpreter, NULL, post_step_changed, c));
-      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Arguments ({tokens} allowed)", &s->arguments, NULL, post_step_changed, c));
-      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Working folder (default: output folder)", &s->working_directory, NULL, post_step_changed, c));
-      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_spin_row ("Time limit", "seconds (0 = none)", &s->timeout_seconds, 0, 86400, post_step_changed, c));
-      adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Mark the job as failed if this step fails", NULL, &s->fail_job_on_error, post_step_changed, c));
+      if (s->kind == BRO_STEP_HANDBRAKE)
+        {
+          g_autofree char *presets = g_strjoinv (", ", (char **) bro_handbrake_presets);
+          g_autofree char *preset_tip = g_strdup_printf ("Any HandBrake preset (HandBrakeCLI --preset-list). Built in: %s", presets);
+          g_autofree char *found = bro_handbrake_tool (&(BroPostStep) { .executable = (char *) "" });
+          g_autofree char *tool_title = g_strdup_printf ("HandBrakeCLI (empty = %s)", found ? found : "not found: install handbrake-cli");
+          GtkWidget *preset = bro_entry_row ("HandBrake preset", &s->preset, NULL, post_step_changed, c);
+          GtkWidget *note = bro_caption ("Encodes every ripped MKV (not backups or disc images). The archive is never changed: encodes go to their "
+                                         "own files, numbered when one exists. The extension of the path picks the container (.mkv or .mp4). "
+                                         "Run it in the background so the drive is free for the next disc. Progress is logged at every 10 %.");
+          GtkWidget *note_row = gtk_list_box_row_new ();
+          gtk_widget_set_tooltip_text (preset, preset_tip);
+          gtk_label_set_wrap (GTK_LABEL (note), TRUE);
+          gtk_widget_set_margin_start (note, 12);
+          gtk_widget_set_margin_end (note, 12);
+          gtk_widget_set_margin_top (note, 8);
+          gtk_widget_set_margin_bottom (note, 8);
+          gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (note_row), note);
+          gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (note_row), FALSE);
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), note_row);
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), preset);
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_path_row ("Preset file exported from HandBrake (optional)", &s->preset_file, FALSE, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Save encodes to ({tokens} allowed)", &s->output_path, NULL, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("More HandBrakeCLI arguments", &s->extra_arguments, NULL, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_path_row (tool_title, &s->executable, FALSE, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_spin_row ("Time limit per file", "seconds (0 = none)", &s->timeout_seconds, 0, 604800, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Mark the job as failed if an encode fails", NULL, &s->fail_job_on_error, post_step_changed, c));
+        }
+      else
+        {
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_path_row ("Program or script", &s->executable, FALSE, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Interpreter (optional, e.g. /usr/bin/python3)", &s->interpreter, NULL, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Arguments ({tokens} allowed)", &s->arguments, NULL, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_entry_row ("Working folder (default: output folder)", &s->working_directory, NULL, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_spin_row ("Time limit", "seconds (0 = none)", &s->timeout_seconds, 0, 86400, post_step_changed, c));
+          adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Mark the job as failed if this step fails", NULL, &s->fail_job_on_error, post_step_changed, c));
+        }
       adw_expander_row_add_row (ADW_EXPANDER_ROW (exp), bro_switch_row ("Run in the background",
                                                                        "After the job, once the disc is out (encoding, uploads); can't fail the job",
                                                                        &s->background, post_step_changed, c));
@@ -751,7 +804,11 @@ on_add_step (GtkButton *b, Ctx *c)
   if (g_strcmp0 (kind, "move") == 0)
     add_step (c, "Move to library", "/bin/mv", "-n {files} ~/Videos/Library/", BRO_RUN_SUCCESS, FALSE);
   else if (g_strcmp0 (kind, "handbrake") == 0)
-    add_step (c, "Encode with HandBrake", "/usr/bin/HandBrakeCLI", "-i {file} -o \"{outputDir}/{stem}.mp4\" --preset \"Fast 1080p30\"", BRO_RUN_SUCCESS, TRUE);
+    {
+      g_ptr_array_add (c->steps, bro_post_step_new_handbrake ());
+      ctx_changed (c);
+      rebuild_post (c);
+    }
   else if (g_strcmp0 (kind, "log") == 0)
     add_step (c, "Append to rip log", "/bin/sh", "-c 'echo \"$(date) $BROMELIA_STATUS $BROMELIA_DISC_NAME $BROMELIA_OUTPUT_DIR\" >> ~/rips.log'", BRO_RUN_ALWAYS, FALSE);
   else if (g_strcmp0 (kind, "notify") == 0)
@@ -779,7 +836,7 @@ post_page (Ctx *c, const char *title, const char *icon, const char *intro)
                                 "BROMELIA_FILE (per-file), BROMELIA_MANIFEST, BROMELIA_LOG, BROMELIA_SOURCE, BROMELIA_ERROR, BROMELIA_NAME, "
                                 "BROMELIA_KIND, BROMELIA_FORMAT, BROMELIA_ENCRYPTED, BROMELIA_SEASON, BROMELIA_DISC_NUMBER, BROMELIA_DISC_SET, "
                                 "BROMELIA_CHECKSUMS.\nTokens: ");
-  const char *kinds[][2] = { { "empty", "Empty step" }, { "move", "Move files to a library folder" }, { "handbrake", "Encode with HandBrakeCLI" },
+  const char *kinds[][2] = { { "empty", "Empty step" }, { "move", "Move files to a library folder" }, { "handbrake", "Transcode with HandBrake (built in)" },
                              { "log", "Append to a log file" }, { "notify", "Desktop notification" } };
   for (int i = 0; bro_script_tokens[i].token; i++)
     g_string_append_printf (help, "%s{%s}", i ? ", " : "", bro_script_tokens[i].token);

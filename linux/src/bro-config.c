@@ -51,6 +51,10 @@ static const EnumEntry conflicts[] = {
   { BRO_CONFLICT_OVERWRITE, "overwrite", "Reuse the existing folder" },
   { BRO_CONFLICT_SKIP, "skip", "Skip the job" },
   { 0, NULL, NULL } };
+static const EnumEntry step_kinds[] = {
+  { BRO_STEP_COMMAND, "command", "Program or script" },
+  { BRO_STEP_HANDBRAKE, "handbrake", "Transcode with HandBrake" },
+  { 0, NULL, NULL } };
 static const EnumEntry run_conditions[] = {
   { BRO_RUN_SUCCESS, "success", "When the rip succeeds" },
   { BRO_RUN_FAILURE, "failure", "When the rip fails" },
@@ -244,6 +248,25 @@ bro_post_step_new (void)
   s->environment = str_table_new ();
   s->match_name = g_strdup ("");
   s->match_formats = g_ptr_array_new_with_free_func (g_free);
+  s->kind = BRO_STEP_COMMAND;
+  s->preset = g_strdup (BRO_HANDBRAKE_DEFAULT_PRESET);
+  s->preset_file = g_strdup ("");
+  s->output_path = g_strdup (BRO_HANDBRAKE_DEFAULT_OUTPUT);
+  s->extra_arguments = g_strdup ("");
+  return s;
+}
+
+BroPostStep *
+bro_post_step_new_handbrake (void)
+{
+  BroPostStep *s = bro_post_step_new ();
+  g_free (s->name);
+  s->name = g_strdup ("Transcode with HandBrake");
+  g_free (s->arguments);
+  s->arguments = g_strdup ("");
+  s->kind = BRO_STEP_HANDBRAKE;
+  s->per_file = TRUE;
+  s->background = TRUE;
   return s;
 }
 
@@ -261,6 +284,10 @@ bro_post_step_free (BroPostStep *s)
   g_hash_table_unref (s->environment);
   g_free (s->match_name);
   g_ptr_array_unref (s->match_formats);
+  g_free (s->preset);
+  g_free (s->preset_file);
+  g_free (s->output_path);
+  g_free (s->extra_arguments);
   g_free (s);
 }
 
@@ -287,6 +314,11 @@ post_step_to_json (JsonBuilder *b, const BroPostStep *s)
     json_builder_add_string_value (b, s->match_formats->pdata[i]);
   json_builder_end_array (b);
   B ("background", s->background);
+  S ("kind", enum_find (step_kinds, s->kind)->json);
+  S ("preset", s->preset);
+  S ("presetFile", s->preset_file);
+  S ("outputPath", s->output_path);
+  S ("extraArguments", s->extra_arguments);
   json_builder_end_object (b);
 }
 
@@ -319,6 +351,11 @@ post_step_from_json (JsonObject *o)
       }
   }
   s->background = get_bool (o, "background", FALSE);
+  s->kind = enum_parse (step_kinds, get_str (o, "kind", NULL), BRO_STEP_COMMAND);
+  s->preset = dup_str (o, "preset", BRO_HANDBRAKE_DEFAULT_PRESET);
+  s->preset_file = dup_str (o, "presetFile", "");
+  s->output_path = dup_str (o, "outputPath", BRO_HANDBRAKE_DEFAULT_OUTPUT);
+  s->extra_arguments = dup_str (o, "extraArguments", "");
   return s;
 }
 

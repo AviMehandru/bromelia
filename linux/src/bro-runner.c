@@ -8,6 +8,7 @@
 
 #include <glib/gstdio.h>
 #include <json-glib/json-glib.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -3530,7 +3531,7 @@ execute (Ctx *c, GError **error)
 gboolean
 bro_post_step_should_run (const BroPostStep *step, BroJobState status)
 {
-  if (!step->enabled || !step->executable || !*g_strstrip (step->executable))
+  if (!step->enabled || (step->kind == BRO_STEP_COMMAND && (!step->executable || !*g_strstrip (step->executable))))
     return FALSE;
   switch (step->run_on)
     {
@@ -3585,12 +3586,91 @@ bro_post_step_argv (const BroPostStep *step, GHashTable *values, GPtrArray *file
   return argv;
 }
 
+const char *const bro_handbrake_presets[] = { "H.265 MKV 1080p30", "H.265 MKV 2160p60 4K", "H.264 MKV 1080p30", "H.264 MKV 480p30",
+                                               "Fast 1080p30", "HQ 1080p30 Surround", "Super HQ 1080p30 Surround", "Fast 2160p60 4K HEVC",
+                                               NULL };
+
+char *
+bro_handbrake_tool (const BroPostStep *step)
+{
+  g_autofree char *set = g_strstrip (g_strdup (step->executable ? step->executable : ""));
+  if (*set)
+    {
+      char *exe = expand_home (set);
+      if (g_file_test (exe, G_FILE_TEST_IS_EXECUTABLE) && !g_file_test (exe, G_FILE_TEST_IS_DIR))
+        return exe;
+      g_free (exe);
+      return NULL;
+    }
+  return find_tool ("HandBrakeCLI", NULL);
+}
+
+gboolean
+bro_handbrake_is_source (const char *file)
+{
+  g_autofree char *lower = g_ascii_strdown (file, -1);
+  return g_str_has_suffix (lower, ".mkv") && !g_file_test (file, G_FILE_TEST_IS_DIR);
+}
+
+char *
+bro_handbrake_output (const BroPostStep *step, GHashTable *values)
+{
+  g_autofree char *t = g_strstrip (g_strdup (step->output_path ? step->output_path : ""));
+  g_autofree char *r = bro_template_render (*t ? t : BRO_HANDBRAKE_DEFAULT_OUTPUT, values, FALSE);
+  return expand_home (r);
+}
+
+GPtrArray *
+bro_handbrake_arguments (const BroPostStep *step, const char *input, const char *output)
+{
+  GPtrArray *args = g_ptr_array_new_with_free_func (g_free);
+  g_autofree char *file_t = g_strstrip (g_strdup (step->preset_file ? step->preset_file : ""));
+  g_autofree char *preset = g_strstrip (g_strdup (step->preset ? step->preset : ""));
+  g_autoptr (GPtrArray) extra = bro_split_arguments (step->extra_arguments ? step->extra_arguments : "");
+  if (*file_t)
+    {
+      g_ptr_array_add (args, g_strdup ("--preset-import-file"));
+      g_ptr_array_add (args, expand_home (file_t));
+    }
+  if (*preset)
+    {
+      g_ptr_array_add (args, g_strdup ("--preset"));
+      g_ptr_array_add (args, g_strdup (preset));
+    }
+  g_ptr_array_add (args, g_strdup ("-i"));
+  g_ptr_array_add (args, g_strdup (input));
+  g_ptr_array_add (args, g_strdup ("-o"));
+  g_ptr_array_add (args, g_strdup (output));
+  for (guint i = 0; i < extra->len; i++)
+    g_ptr_array_add (args, g_strdup (extra->pdata[i]));
+  return args;
+}
+
+gboolean
+bro_handbrake_keep_line (BroProgressFilter *f, const char *line)
+{
+  const char *at = strstr (line, "Encoding: task ");
+  int task = 0, percent = 0;
+  if (!at || sscanf (at, "Encoding: task %d of %*d, %d.", &task, &percent) != 2)
+    return TRUE;
+  if (task != f->task)
+    {
+      f->task = task;
+      f->last = -1;
+    }
+  if (percent / 10 <= f->last)
+    return FALSE;
+  f->last = percent / 10;
+  return TRUE;
+}
+
 typedef void (*StepLogFunc) (BroSeverity sev, const char *text, gpointer data);
 
 typedef struct {
   StepLogFunc log;
   gpointer data;
   const char *name;
+  BroProgressFilter *filter; /* HandBrake progress, or NULL */
 } StepLog;
 
 static void
@@ -3611,7 +3691,103 @@ static void
 on_step_line (const char *line, gpointer data)
 {
   StepLog *sl = data;
+  if (sl->filter)
+    {
+      /* HandBrakeCLI ends its progress lines with \r. */
+      g_auto (GStrv) parts = g_strsplit (line, "\r", -1);
+      for (int i = 0; parts[i]; i++)
+        if (*parts[i] && bro_handbrake_keep_line (sl->filter, parts[i]))
+          step_log (sl, BRO_SEV_INFO, "  [%s] %s", sl->name, parts[i]);
+      return;
+    }
   step_log (sl, BRO_SEV_INFO, "  [%s] %s", sl->name, line);
+}
+
+static GHashTable *copy_values (GHashTable *v);
+
+/* Encodes every MKV of files with HandBrakeCLI (a HandBrake step). Returns whether an encode failed. */
+static gboolean
+run_handbrake (BroPostStep *step, GHashTable *base_vals, char **base_env, GPtrArray *files, GCancellable *cancellable, StepLogFunc log,
+               gpointer log_data)
+{
+  StepLog sl = { log, log_data, step->name, NULL };
+  g_autofree char *tool = bro_handbrake_tool (step);
+  gboolean failed = FALSE, any = FALSE;
+  BroSeverity bad = step->fail_job_on_error ? BRO_SEV_ERROR : BRO_SEV_WARNING;
+  if (!tool)
+    {
+      step_log (&sl, bad, "%s: HandBrakeCLI was not found. Install HandBrake's command line version (handbrake-cli), or set its location "
+                "in the step.", step->name);
+      return TRUE;
+    }
+  for (guint t = 0; t < files->len; t++)
+    {
+      const char *file = files->pdata[t];
+      g_autoptr (GHashTable) values = NULL;
+      g_auto (GStrv) envp = NULL;
+      g_autoptr (GPtrArray) argv = NULL, args = NULL;
+      g_autoptr (GError) err = NULL;
+      g_autofree char *fname = NULL, *stem = NULL, *wanted = NULL, *output = NULL, *dir = NULL, *cmd = NULL, *oname = NULL;
+      BroProgressFilter filter = { -1, -1 };
+      int exit_status = -1;
+      gboolean timed_out = FALSE;
+      GHashTableIter it;
+      gpointer k, v;
+      if (!bro_handbrake_is_source (file))
+        continue;
+      if (g_cancellable_is_cancelled (cancellable))
+        return failed;
+      any = TRUE;
+      values = copy_values (base_vals);
+      envp = g_environ_setenv (g_strdupv (base_env), "BROMELIA_FILE", file, TRUE);
+      fname = g_path_get_basename (file);
+      stem = g_strdup (fname);
+      if (strrchr (stem, '.')) *strrchr (stem, '.') = '\0';
+      bro_template_values_set (values, "file", file);
+      bro_template_values_set (values, "filename", fname);
+      bro_template_values_set (values, "stem", stem);
+      g_hash_table_iter_init (&it, step->environment);
+      while (g_hash_table_iter_next (&it, &k, &v))
+        {
+          g_autofree char *rv = bro_template_render (v, values, FALSE);
+          envp = g_environ_setenv (envp, k, rv, TRUE);
+        }
+      wanted = bro_handbrake_output (step, values);
+      output = bro_unique_path (wanted);
+      dir = g_path_get_dirname (output);
+      oname = g_path_get_basename (output);
+      if (g_mkdir_with_parents (dir, 0755) != 0)
+        {
+          step_log (&sl, bad, "%s: can't create %s: %s", step->name, dir, g_strerror (errno));
+          failed = TRUE;
+          continue;
+        }
+      args = bro_handbrake_arguments (step, file, output);
+      argv = g_ptr_array_new_with_free_func (g_free);
+      g_ptr_array_add (argv, g_strdup (tool));
+      for (guint i = 0; i < args->len; i++)
+        g_ptr_array_add (argv, g_strdup (args->pdata[i]));
+      g_ptr_array_add (argv, NULL);
+      cmd = bro_command_line ((const char *const *) argv->pdata);
+      sl.filter = &filter;
+      step_log (&sl, BRO_SEV_INFO, "▶ %s (%s → %s): %s", step->name, fname, oname, cmd);
+      if (!bro_process_run ((const char *const *) argv->pdata, (const char *const *) envp, dir, step->timeout_seconds, cancellable,
+                            on_step_line, &sl, &exit_status, NULL, &timed_out, &err))
+        {
+          step_log (&sl, bad, "%s could not be started: %s", step->name, err ? err->message : "unknown error");
+          failed = TRUE;
+          continue;
+        }
+      if (timed_out)
+        step_log (&sl, BRO_SEV_WARNING, "%s (%s) timed out after %d s", step->name, fname, step->timeout_seconds);
+      else
+        step_log (&sl, exit_status == 0 ? BRO_SEV_INFO : bad, "%s (%s) exited with status %d", step->name, fname, exit_status);
+      if (exit_status != 0 || timed_out)
+        failed = TRUE;
+    }
+  if (!any)
+    step_log (&sl, BRO_SEV_INFO, "%s: no MKV files to transcode", step->name);
+  return failed;
 }
 
 static GHashTable *
@@ -3639,6 +3815,21 @@ run_steps (GPtrArray *steps_arr, GHashTable *base_vals, char **base_env, GPtrArr
       guint targets = step->per_file ? files->len : 1;
       if (!bro_post_step_should_run (step, status))
         continue;
+      if (step->kind == BRO_STEP_HANDBRAKE)
+        {
+          if (ran)
+            (*ran)++;
+          if (g_cancellable_is_cancelled (cancellable))
+            return failed;
+          if (run_handbrake (step, base_vals, base_env, files, cancellable, log, log_data))
+            {
+              if (step->fail_job_on_error)
+                failed = TRUE;
+              if (any_failed && !*any_failed)
+                *any_failed = g_strdup (step->name);
+            }
+          continue;
+        }
       if (!targets)
         continue;
       if (ran)
@@ -3656,7 +3847,7 @@ run_steps (GPtrArray *steps_arr, GHashTable *base_vals, char **base_env, GPtrArr
           gboolean timed_out = FALSE;
           GHashTableIter it;
           gpointer k, v;
-          StepLog sl = { log, log_data, step->name };
+          StepLog sl = { log, log_data, step->name, NULL };
 
           if (g_cancellable_is_cancelled (cancellable))
             return failed;

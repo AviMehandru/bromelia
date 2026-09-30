@@ -272,8 +272,15 @@ public sealed class EpisodeConfig
     public bool ReadMenuNumbers { get; set; } = true;
 }
 
+/// <summary>What a post-processing step runs: a program or script, or HandBrakeCLI with a preset.</summary>
+public enum StepKind { Command, Handbrake }
+
 public sealed class PostProcessStep
 {
+    /// <summary>HandBrake's preset for new HandBrake steps: HEVC in MKV, 1080p.</summary>
+    public const string DefaultPreset = "H.265 MKV 1080p30";
+    public const string DefaultEncodePath = "{outputDir}/Encoded/{stem}.mkv";
+
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Post-processing script";
     public bool Enabled { get; set; } = true;
@@ -292,6 +299,20 @@ public sealed class PostProcessStep
     public List<string> MatchFormats { get; set; } = new();
     /// <summary>Run after the job has finished and the disc is out, in a queue of its own (encoding, uploads).</summary>
     public bool Background { get; set; }
+    public StepKind Kind { get; set; } = StepKind.Command;
+    /// <summary>HandBrake steps: a preset name (HandBrakeCLI --preset-list), optionally from a preset file exported from HandBrake.</summary>
+    public string Preset { get; set; } = DefaultPreset;
+    public string PresetFile { get; set; } = "";
+    /// <summary>HandBrake steps: where each encode goes (a template; the extension picks the container).</summary>
+    public string OutputPath { get; set; } = DefaultEncodePath;
+    /// <summary>HandBrake steps: more HandBrakeCLI arguments, split like a command line.</summary>
+    public string ExtraArguments { get; set; } = "";
+
+    /// <summary>A HandBrake step that encodes every MKV in the background queue.</summary>
+    public static PostProcessStep HandBrake() => new()
+    {
+        Name = "Transcode with HandBrake", Kind = StepKind.Handbrake, Executable = "", Arguments = "", PerFile = true, Background = true,
+    };
 }
 
 public sealed class GeneratedProfile

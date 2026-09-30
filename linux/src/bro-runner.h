@@ -131,6 +131,19 @@ GPtrArray *bro_remux_arguments (const char *mkvmerge, GPtrArray *layout_types, B
                                 const char *input, const char *output);
 GPtrArray *bro_post_step_argv (const BroPostStep *step, GHashTable *values, GPtrArray *files);
 gboolean   bro_post_step_should_run (const BroPostStep *step, BroJobState status);
+
+/* HandBrake steps: HandBrakeCLI with a preset, one encode per ripped MKV, next to the archive (never over it). */
+extern const char *const bro_handbrake_presets[]; /* presets built into HandBrake 1.6 and later, NULL terminated */
+char      *bro_handbrake_tool (const BroPostStep *step);        /* the step's HandBrakeCLI, or the one installed; NULL */
+gboolean   bro_handbrake_is_source (const char *file);          /* MKV files only (not backups or disc images) */
+char      *bro_handbrake_output (const BroPostStep *step, GHashTable *values); /* the encode's path for one file */
+/* [--preset-import-file F] --preset P -i input -o output [extra arguments] (without the tool). */
+GPtrArray *bro_handbrake_arguments (const BroPostStep *step, const char *input, const char *output);
+/* Keeps HandBrakeCLI's progress lines (Encoding: task 1 of 1, 45.12 %) at every 10 % of each task, and other lines. */
+typedef struct {
+  int task, last;
+} BroProgressFilter;
+gboolean   bro_handbrake_keep_line (BroProgressFilter *f, const char *line);
 char      *bro_unique_path (const char *path);
 
 /* Name prefix of the hidden staging folder a job writes to inside its output folder. */

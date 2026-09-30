@@ -99,6 +99,12 @@ typedef struct {
   gboolean read_menu_numbers; /* OCR episode numbers from the menus (ffmpeg + tesseract) */
 } BroEpisodeConfig;
 
+/* What a post-processing step runs: a program or script, or HandBrakeCLI with a preset. */
+typedef enum { BRO_STEP_COMMAND, BRO_STEP_HANDBRAKE } BroStepKind;
+
+#define BRO_HANDBRAKE_DEFAULT_PRESET "H.265 MKV 1080p30"
+#define BRO_HANDBRAKE_DEFAULT_OUTPUT "{outputDir}/Encoded/{stem}.mkv"
+
 typedef struct {
   char *id;
   char *name;
@@ -115,6 +121,11 @@ typedef struct {
   char *match_name;        /* regular expression on the name / disc label; "" = all */
   GPtrArray *match_formats; /* char*: DVD, DVDe, BR, BRe, 4K, 4Ke, "BR*"…; empty = all */
   gboolean background;      /* run after the job, once the disc is out, in the background queue; can't fail the job */
+  BroStepKind kind;
+  char *preset;             /* HandBrake: a preset name (HandBrakeCLI --preset-list) */
+  char *preset_file;        /* HandBrake: a preset file exported from HandBrake, or "" */
+  char *output_path;        /* HandBrake: where each encode goes (template; the extension picks the container) */
+  char *extra_arguments;    /* HandBrake: more HandBrakeCLI arguments */
 } BroPostStep;
 
 typedef struct {
@@ -232,6 +243,7 @@ BroNotificationTarget *bro_notification_target_new (void);
 void                   bro_notification_target_free (BroNotificationTarget *t);
 
 BroPostStep    *bro_post_step_new (void);
+BroPostStep    *bro_post_step_new_handbrake (void); /* encodes every MKV in the background queue */
 void            bro_post_step_free (BroPostStep *s);
 BroPostStep    *bro_post_step_copy (const BroPostStep *s);
 
@@ -269,6 +281,7 @@ char           *bro_normalize_drive_name (const char *s);
 char           *bro_json_to_string (JsonNode *node, gboolean pretty);
 gboolean        bro_write_file_atomic (const char *path, const char *contents, GError **error);
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroPostStep, bro_post_step_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroDriveConfig, bro_drive_config_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroAppConfig, bro_app_config_free)
 

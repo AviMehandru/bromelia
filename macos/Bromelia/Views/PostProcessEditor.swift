@@ -12,7 +12,7 @@ struct PostProcessTab: View {
                 List(selection: $selected) {
                     ForEach(steps) { step in
                         HStack {
-                            Image(systemName: step.enabled ? "terminal.fill" : "terminal")
+                            Image(systemName: step.kind == .handbrake ? (step.enabled ? "film.fill" : "film") : (step.enabled ? "terminal.fill" : "terminal"))
                                 .foregroundStyle(step.enabled ? Color.accentColor : .secondary)
                             VStack(alignment: .leading) {
                                 Text(step.name)
@@ -31,7 +31,7 @@ struct PostProcessTab: View {
                     Spacer()
                     Menu("Examples") {
                         Button("Move files to a library folder") { addExample(.move) }
-                        Button("Encode with HandBrakeCLI") { addExample(.handbrake) }
+                        Button("Transcode with HandBrake (built in)") { addExample(.handbrake) }
                         Button("Rename for Plex with FileBot") { addExample(.filebot) }
                         Button("Log to a file") { addExample(.log) }
                         Button("Run a shell command") { addExample(.shell) }
@@ -91,11 +91,7 @@ struct PostProcessTab: View {
             s.arguments = "-n {files} ~/Movies/Library/"
             s.failJobOnError = true
         case .handbrake:
-            s.name = "Encode with HandBrake"
-            s.executable = "/opt/homebrew/bin/HandBrakeCLI"
-            s.arguments = "-i {file} -o \"{outputDir}/{stem}.mp4\" --preset \"Fast 1080p30\""
-            s.perFile = true
-            s.background = true
+            s = PostProcessStep.handbrake()
         case .filebot:
             s.name = "Rename for Plex with FileBot"
             s.executable = "/opt/homebrew/bin/filebot"
@@ -126,10 +122,13 @@ private struct PostStepEditor: View {
             Section {
                 TextField("Name", text: $step.name)
                 Toggle("Enabled", isOn: $step.enabled)
+                Picker("Type", selection: $step.kind) {
+                    ForEach(StepKind.allCases) { Text($0.label).tag($0) }
+                }
                 Picker("Run", selection: $step.runOn) {
                     ForEach(RunCondition.allCases) { Text($0.label).tag($0) }
                 }
-                Toggle("Run once for every produced file", isOn: $step.perFile)
+                if step.kind == .command { Toggle("Run once for every produced file", isOn: $step.perFile) }
                 Toggle("Run in the background after the disc is ejected (encoding, uploads)", isOn: $step.background)
             }
             Section {
@@ -154,20 +153,7 @@ private struct PostStepEditor: View {
                 Text("Leave both empty to run for every disc. The name is the movie or show name used for file names; the disc label (e.g. ONE_PIECE_S2_P7_D2) lets a step target one specific disc. No format selected = all formats; the e codes are backups that are not decrypted.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Command") {
-                PathField(title: "Program or script", path: $step.executable, kind: .file, placeholder: "/path/to/script.sh")
-                TextField("Interpreter", text: $step.interpreter, prompt: Text("Optional, e.g. /usr/bin/python3"))
-                TextField("Arguments", text: $step.arguments, prompt: Text("{outputDir}"))
-                    .font(.system(.body, design: .monospaced))
-                TextField("Working folder", text: $step.workingDirectory, prompt: Text("Default: the job's output folder"))
-                LabeledContent("Time limit") {
-                    IntField(title: "Timeout", value: $step.timeoutSeconds, suffix: "seconds (0 = none)")
-                }
-                Toggle("Mark the job as failed if this step fails", isOn: $step.failJobOnError)
-                Text("Arguments are split like a shell command line and then {tokens} are filled in, so values with spaces stay a single argument. A lone {files} expands to one argument per file. No shell expansion is done unless you run a shell.")
-                    .font(.caption).foregroundStyle(.secondary)
-                TokenReference(tokens: TemplateRenderer.scriptTokens)
-            }
+            if step.kind == .handbrake { handbrakeSection } else { commandSection }
             Section {
                 KeyValueEditor(values: $step.environment, keyPlaceholder: "VARIABLE", valuePlaceholder: "value ({tokens} allowed)")
             } header: {
@@ -179,7 +165,7 @@ private struct PostStepEditor: View {
             Section("Test") {
                 HStack {
                     Button(testing ? "Running…" : "Run with Sample Values") { Task { await test() } }
-                        .disabled(testing || step.executable.isEmpty)
+                        .disabled(testing || (step.kind == .command && step.executable.isEmpty))
                     Text("Runs the step now with a sample job (status success, no files).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -195,6 +181,50 @@ private struct PostStepEditor: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var commandSection: some View {
+        Section("Command") {
+            PathField(title: "Program or script", path: $step.executable, kind: .file, placeholder: "/path/to/script.sh")
+            TextField("Interpreter", text: $step.interpreter, prompt: Text("Optional, e.g. /usr/bin/python3"))
+            TextField("Arguments", text: $step.arguments, prompt: Text("{outputDir}"))
+                .font(.system(.body, design: .monospaced))
+            TextField("Working folder", text: $step.workingDirectory, prompt: Text("Default: the job's output folder"))
+            LabeledContent("Time limit") {
+                IntField(title: "Timeout", value: $step.timeoutSeconds, suffix: "seconds (0 = none)")
+            }
+            Toggle("Mark the job as failed if this step fails", isOn: $step.failJobOnError)
+            Text("Arguments are split like a shell command line and then {tokens} are filled in, so values with spaces stay a single argument. A lone {files} expands to one argument per file. No shell expansion is done unless you run a shell.")
+                .font(.caption).foregroundStyle(.secondary)
+            TokenReference(tokens: TemplateRenderer.scriptTokens)
+        }
+    }
+
+    private var handbrakeSection: some View {
+        Section {
+            HStack {
+                TextField("Preset", text: $step.preset, prompt: Text(PostProcessStep.defaultPreset))
+                Menu("Presets") {
+                    ForEach(HandBrakePresets.common, id: \.self) { p in Button(p) { step.preset = p } }
+                }
+                .fixedSize()
+            }
+            PathField(title: "Preset file", path: $step.presetFile, kind: .file, placeholder: "Optional: a preset exported from HandBrake (.json)")
+            TextField("Save encodes to", text: $step.outputPath, prompt: Text(PostProcessStep.defaultEncodePath))
+                .font(.system(.body, design: .monospaced))
+            TextField("More arguments", text: $step.extraArguments, prompt: Text("Optional, e.g. --all-subtitles"))
+                .font(.system(.body, design: .monospaced))
+            PathField(title: "HandBrakeCLI", path: $step.executable, kind: .file, placeholder: HandBrake.tool(PostProcessStep())?.path ?? "Not found: brew install handbrake")
+            LabeledContent("Time limit") {
+                IntField(title: "Timeout", value: $step.timeoutSeconds, suffix: "seconds per file (0 = none)")
+            }
+            Toggle("Mark the job as failed if an encode fails", isOn: $step.failJobOnError)
+        } header: {
+            Text("HandBrake")
+        } footer: {
+            Text("Encodes every ripped MKV (not backups or disc images) with HandBrakeCLI. The archive is never changed: encodes go to their own files, numbered when one exists. The extension of the path picks the container (.mkv or .mp4); {stem}, {name}, {outputDir} and the other tokens work. Run it in the background so the drive is free for the next disc. Progress is logged at every 10 %.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private func test() async {

@@ -560,6 +560,9 @@ public static class EpisodeSplitter
                 dirs.Add(System.IO.Path.Combine(pf, "MKVToolNix"));
                 dirs.Add(System.IO.Path.Combine(pf, "Tesseract-OCR"));
                 dirs.Add(System.IO.Path.Combine(pf, "ffmpeg", "bin"));
+                dirs.Add(System.IO.Path.Combine(pf, "HandBrake"));
+                dirs.Add(System.IO.Path.Combine(pf, "HandBrakeCLI"));
+                dirs.Add(System.IO.Path.Combine(pf, "cyanrip"));
             }
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (local.Length > 0) dirs.Add(System.IO.Path.Combine(local, "Microsoft", "WinGet", "Links"));

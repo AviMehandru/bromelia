@@ -359,7 +359,18 @@ enum RunCondition: String, Codable, CaseIterable, Sendable, Identifiable {
     }
 }
 
+/// What a post-processing step runs: a program or script, or HandBrakeCLI with a preset.
+enum StepKind: String, Codable, CaseIterable, Sendable, Identifiable {
+    case command, handbrake
+    var id: String { rawValue }
+    var label: String { self == .command ? "Program or script" : "Transcode with HandBrake" }
+}
+
 struct PostProcessStep: Codable, Hashable, Sendable, Identifiable {
+    /// HandBrake's preset for new HandBrake steps: HEVC in MKV, 1080p.
+    static let defaultPreset = "H.265 MKV 1080p30"
+    static let defaultEncodePath = "{outputDir}/Encoded/{stem}.mkv"
+
     var id = UUID()
     var name: String = "Post-processing script"
     var enabled: Bool = true
@@ -385,12 +396,32 @@ struct PostProcessStep: Codable, Hashable, Sendable, Identifiable {
     /// Run after the job has finished and the disc is out, in a queue of its own (encoding, uploads), so the
     /// drive is free for the next disc. Such steps can't fail the job.
     var background: Bool = false
+    var kind: StepKind = .command
+    /// HandBrake steps: a preset name (HandBrakeCLI --preset-list), optionally from a preset file exported from HandBrake.
+    var preset: String = PostProcessStep.defaultPreset
+    var presetFile: String = ""
+    /// HandBrake steps: where each encode goes (a template; the extension picks the container).
+    var outputPath: String = PostProcessStep.defaultEncodePath
+    /// HandBrake steps: more HandBrakeCLI arguments, split like a command line.
+    var extraArguments: String = ""
 
     init() {}
 
+    /// A HandBrake step that encodes every MKV in the background queue.
+    static func handbrake() -> PostProcessStep {
+        var s = PostProcessStep()
+        s.name = "Transcode with HandBrake"
+        s.kind = .handbrake
+        s.executable = ""
+        s.arguments = ""
+        s.perFile = true
+        s.background = true
+        return s
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, name, enabled, executable, interpreter, arguments, workingDirectory, runOn, perFile, timeoutSeconds, environment, failJobOnError,
-             matchName, matchFormats, background
+             matchName, matchFormats, background, kind, preset, presetFile, outputPath, extraArguments
     }
 
     init(from decoder: Decoder) throws {
@@ -411,6 +442,11 @@ struct PostProcessStep: Codable, Hashable, Sendable, Identifiable {
         matchName = c.value(.matchName, d.matchName)
         matchFormats = c.value(.matchFormats, d.matchFormats)
         background = c.value(.background, d.background)
+        kind = c.value(.kind, d.kind)
+        preset = c.value(.preset, d.preset)
+        presetFile = c.value(.presetFile, d.presetFile)
+        outputPath = c.value(.outputPath, d.outputPath)
+        extraArguments = c.value(.extraArguments, d.extraArguments)
     }
 }
 
