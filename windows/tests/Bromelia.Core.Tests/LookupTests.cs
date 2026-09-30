@@ -112,11 +112,13 @@ public class LookupTests
         var v = MediaIdentity.Resolve(null, "FRIENDS_S2_D1", false).TemplateValues("Rip");
         v["releaseYear"] = "1994"; v["seasonOr1"] = "2"; v["track"] = "Title 1";
         v["episode"] = "Episode 02"; v["episodeNumber"] = "2"; v["episodeTitle"] = "The One with the Breast Milk";
-        Assert.Equal("Season 02/Friends (1994) - S02E02 - The One with the Breast Milk", TemplateRenderer.RenderPath(MediaServerNaming.EpisodeTemplate, v));
+        // RenderPath joins folders with the system's separator.
+        string Render(string t) => TemplateRenderer.RenderPath(t, v).Replace('\\', '/');
+        Assert.Equal("Season 02/Friends (1994) - S02E02 - The One with the Breast Milk", Render(MediaServerNaming.EpisodeTemplate));
         Assert.Equal("Friends - Episode 02 - The One with the Breast Milk - Season 2 Disc 1 - Rip - Title 1 - DISC",
-            TemplateRenderer.RenderPath(OutputConfig.DefaultFileNameTemplate, v));
+            Render(OutputConfig.DefaultFileNameTemplate));
         v["episodeTitle"] = "";
-        Assert.Equal("Season 02/Friends (1994) - S02E02", TemplateRenderer.RenderPath(MediaServerNaming.EpisodeTemplate, v));
+        Assert.Equal("Season 02/Friends (1994) - S02E02", Render(MediaServerNaming.EpisodeTemplate));
     }
 
     [Fact]
