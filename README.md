@@ -235,7 +235,23 @@ BROMELIA_TEST_ISO=/path/disc.iso meson test -C builddir
 ```
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds and tests all three platforms,
-including the full WinUI 3 build on a Windows runner.
+including the full WinUI 3 build on a Windows runner. It also checks what the unit tests can't:
+
+- **Web page in a browser:** [`shared/web/test/check-web-page.mjs`](shared/web/test/check-web-page.mjs) opens the page
+  in Chromium against `bromelia-daemon` and a stand-in `makemkvcon` (drives, rip and cancel, eject, close tray, the
+  token, 401 and 403, the archive check, dark mode, phone width) and keeps screenshots.
+- **Windows screens:** the app started with `BROMELIA_SNAPSHOT=<folder>` and its own `BROMELIA_DATA_DIR` shows
+  every page and tab in the light and dark theme, saves each as a PNG and quits.
+- **Docker image:** it is built and checked by [`docker/smoke-test.sh`](docker/smoke-test.sh) (see
+  [docs/docker.md](docs/docker.md)).
+
+The screenshots are kept as the run's artifacts.
+
+```bash
+# Web page (needs Node; any OS where the daemon builds)
+npm install --no-save playwright && npx playwright install chromium
+node shared/web/test/check-web-page.mjs linux/build-headless/src/bromelia-daemon screenshots
+```
 
 ## Repository layout
 

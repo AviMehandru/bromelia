@@ -60,5 +60,7 @@ public partial class App : Application
         _watcher.Start();
 
         _ = State.RefreshDrivesAsync(true);
+
+        if (Snapshots.Folder is { } shots) _ = Snapshots.RunAsync(shots);
     }
 }

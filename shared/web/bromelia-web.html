@@ -49,9 +49,15 @@ const token = new URLSearchParams(location.search).get("token") || "";
 const headers = token ? { "Authorization": "Bearer " + token } : {};
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
+// The last action's error stays until the next action (the refresh after it would otherwise clear it at once).
+let actionError = "";
 async function call(path) {
-  const r = await fetch(path, { method: "POST", headers: { ...headers, "X-Bromelia": "1" } });
-  if (!r.ok) document.getElementById("error").textContent = (await r.text()) || ("HTTP " + r.status);
+  try {
+    const r = await fetch(path, { method: "POST", headers: { ...headers, "X-Bromelia": "1" } });
+    actionError = r.ok ? "" : (await r.text()) || ("HTTP " + r.status);
+  } catch (e) {
+    actionError = "Bromelia is not reachable: " + e.message;
+  }
   refresh();
 }
 const button = (label, path) => { const b = el("button", null, label); b.onclick = () => call(path); return b; };
@@ -140,9 +146,9 @@ function render(s) {
 async function refresh() {
   try {
     const r = await fetch("/api/status", { headers });
-    if (!r.ok) throw new Error(r.status === 401 ? "Add ?token=… to the address." : "HTTP " + r.status);
+    if (!r.ok) throw new Error(r.status === 401 ? "Add ?token=… to the address." : (await r.text()) || "HTTP " + r.status);
     render(await r.json());
-    document.getElementById("error").textContent = "";
+    document.getElementById("error").textContent = actionError;
   } catch (e) {
     document.getElementById("error").textContent = "Bromelia is not reachable: " + e.message;
   }

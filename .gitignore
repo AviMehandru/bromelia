@@ -9,3 +9,4 @@ obj/
 .vs/
 builddir*/
 _build/
+node_modules/

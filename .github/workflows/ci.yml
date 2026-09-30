@@ -43,6 +43,29 @@ jobs:
         with:
           name: Bromelia-windows-x64
           path: windows/publish
+      # Every page as a PNG (Snapshots.cs), with a stand-in for makemkvcon that lists the fixture's drives.
+      - name: Screenshots
+        shell: pwsh
+        run: |
+          $data = "$env:RUNNER_TEMP\bromelia-data"; $fake = "$env:RUNNER_TEMP\fake-makemkvcon"; $shots = "$env:GITHUB_WORKSPACE\windows-screenshots"
+          New-Item -ItemType Directory -Force $data, $fake, $shots | Out-Null
+          Copy-Item shared\fixtures\drive-scan.txt $fake
+          Get-Content shared\fixtures\info-dvd.txt | Where-Object { $_ -notmatch '^DRV:' } | Set-Content $fake\listing.txt
+          Set-Content $fake\makemkvcon.cmd "@echo off`r`necho %* | findstr /c:`"disc:9999`" >nul && (type `"%~dp0drive-scan.txt`" & exit /b 0)`r`ntype `"%~dp0listing.txt`"`r`nexit /b 0"
+          @{ version = 2; makemkvconPath = "$fake\makemkvcon.cmd"; outputRoot = "$env:RUNNER_TEMP\rips"; pollIntervalSeconds = 0; preventSleep = $false } |
+            ConvertTo-Json | Set-Content $data\config.json
+          $env:BROMELIA_DATA_DIR = $data; $env:BROMELIA_SNAPSHOT = $shots
+          $p = Start-Process windows\publish\Bromelia.exe -PassThru
+          if (-not $p.WaitForExit(300000)) { $p.Kill(); throw "The app did not finish its screenshots in 5 minutes" }
+          if (Test-Path $shots\errors.txt) { Get-Content $shots\errors.txt; throw "Screenshot mode failed" }
+          $n = (Get-ChildItem $shots -Filter *.png).Count
+          "$n screenshots"
+          if ($n -lt 20) { throw "Too few screenshots" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-screenshots
+          path: windows-screenshots
 
   linux:
     name: Linux (GTK 4 / libadwaita)
@@ -67,3 +90,28 @@ jobs:
           meson setup build-headless -Dui=false
           ninja -C build-headless
           ./build-headless/src/bromelia-daemon --version
+      # The web page in a real browser, against the daemon and a stand-in for makemkvcon.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Web page in Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.55
+          npx playwright install --with-deps chromium
+          node shared/web/test/check-web-page.mjs linux/build-headless/src/bromelia-daemon web-page-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-page-screenshots
+          path: web-page-screenshots
+
+  docker:
+    name: Docker image (bromelia-daemon + MakeMKV)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # MakeMKV's binary part is under its own EULA; the owner accepts it for these builds (docs/docker.md).
+      - name: Build image
+        run: docker build -f docker/Dockerfile --build-arg ACCEPT_MAKEMKV_EULA=yes -t bromelia .
+      - name: Smoke test
+        run: docker/smoke-test.sh bromelia

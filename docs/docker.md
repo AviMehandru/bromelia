@@ -19,6 +19,17 @@ docker build -f docker/Dockerfile --build-arg ACCEPT_MAKEMKV_EULA=yes -t bromeli
 The image also has `mkvmerge`, `ffmpeg` + `tesseract` (episode numbers from DVD menus), `abcde` (and `cyanrip` when
 the distribution has it) for audio CDs, `eject` and `curl`.
 
+### Check a build
+
+```bash
+docker/smoke-test.sh bromelia
+```
+
+This checks the image without a drive: every program the daemon calls is there and finds its libraries, `makemkvcon`
+starts, the first start writes the configuration, the web page answers with its token (401 without it, 403 for an
+action without the `X-Bromelia` header), and `docker stop` ends the daemon cleanly. CI runs it on every push. It
+can't check ripping; do that once with a real drive (below).
+
 ## Run
 
 ```bash
