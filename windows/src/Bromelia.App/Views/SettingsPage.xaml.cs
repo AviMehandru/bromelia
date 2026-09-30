@@ -81,11 +81,14 @@ public sealed partial class SettingsPage : Page
         };
         f.Add(urls);
 
-        f.Section("Web page", "Shows the drives, jobs and background steps and lets you rip, eject, close trays and cancel from a browser. 127.0.0.1 keeps it on this computer; 0.0.0.0 opens it to the network, needs a token and may need “netsh http add urlacl”.");
+        f.Section("Web page", "Shows the drives, jobs, logs, history and background steps, opens discs to pick titles, and lets you rip, eject, close trays, cancel and switch automatic rips from a browser. 127.0.0.1 keeps it on this computer; 0.0.0.0 opens it to the network and needs a token (and a Windows Firewall rule). With a certificate and key (PEM files) the page is served over HTTPS.");
         f.Toggle("Serve a web page", () => c.WebUI.Enabled, v => c.WebUI.Enabled = v);
         f.Text("Address", () => c.WebUI.Address, v => c.WebUI.Address = v, "127.0.0.1");
         f.Number("Port", () => c.WebUI.Port, v => c.WebUI.Port = v, 1, 65535);
         f.Text("Token", () => c.WebUI.Token, v => c.WebUI.Token = v, "Required for other computers");
+        f.PathPicker("HTTPS certificate", () => c.WebUI.TlsCertificate, v => c.WebUI.TlsCertificate = v, folder: false, placeholder: "Optional: certificate (PEM)");
+        f.PathPicker("HTTPS key", () => c.WebUI.TlsKey, v => c.WebUI.TlsKey = v, folder: false, placeholder: "Optional: its private key (PEM)");
+        if (State.Web.LastError is { } webError) f.Note(webError);
 
         f.Section("MakeMKV");
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };

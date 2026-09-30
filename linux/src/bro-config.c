@@ -94,6 +94,13 @@ enum_parse (const EnumEntry *table, const char *s, int fallback)
 }
 
 const char *bro_rip_mode_to_string (BroRipMode m) { return enum_find (rip_modes, m)->json; }
+int bro_rip_mode_parse (const char *s)
+{
+  for (const EnumEntry *e = rip_modes; e->json; e++)
+    if (g_strcmp0 (e->json, s) == 0)
+      return e->value;
+  return -1;
+}
 const char *bro_rip_mode_label (BroRipMode m) { return enum_find (rip_modes, m)->label; }
 const char *bro_strategy_label (BroStrategy s) { return enum_find (strategies, s)->label; }
 const char *bro_run_condition_label (BroRunCondition r) { return enum_find (run_conditions, r)->label; }
@@ -865,6 +872,8 @@ bro_app_config_new (void)
   c->web_ui.address = g_strdup ("127.0.0.1");
   c->web_ui.port = 51280;
   c->web_ui.token = g_strdup ("");
+  c->web_ui.tls_certificate = g_strdup ("");
+  c->web_ui.tls_key = g_strdup ("");
   return c;
 }
 
@@ -907,6 +916,8 @@ bro_app_config_free (BroAppConfig *c)
   g_ptr_array_unref (c->notifications);
   g_free (c->web_ui.address);
   g_free (c->web_ui.token);
+  g_free (c->web_ui.tls_certificate);
+  g_free (c->web_ui.tls_key);
   g_free (c);
 }
 
@@ -988,6 +999,8 @@ bro_app_config_to_json (const BroAppConfig *c)
   S ("address", c->web_ui.address);
   I ("port", c->web_ui.port);
   S ("token", c->web_ui.token);
+  S ("tlsCertificate", c->web_ui.tls_certificate);
+  S ("tlsKey", c->web_ui.tls_key);
   json_builder_end_object (b);
   json_builder_end_object (b);
   return json_builder_get_root (b);
@@ -1068,6 +1081,8 @@ bro_app_config_from_json (JsonNode *node)
     REPLACE (c->web_ui.address, dup_str (w, "address", "127.0.0.1"));
     c->web_ui.port = get_int (w, "port", 51280);
     REPLACE (c->web_ui.token, dup_str (w, "token", ""));
+    REPLACE (c->web_ui.tls_certificate, dup_str (w, "tlsCertificate", ""));
+    REPLACE (c->web_ui.tls_key, dup_str (w, "tlsKey", ""));
   }
   /* Version 1 kept MakeMKV's file names and named folders after the disc label; version 2 names
    * everything "{name} - … - {format}". Only untouched defaults are replaced. */

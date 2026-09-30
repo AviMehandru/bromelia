@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Security
 
 /// A parsed HTTP request (enough of HTTP/1.1 for the web page and its JSON API).
 struct HTTPRequest: Equatable {
@@ -54,7 +55,78 @@ enum WebAccess {
             return "The web page is reachable from the network only with a token. Set a token or use 127.0.0.1."
         }
         if !(1...65535).contains(config.port) { return "Port \(config.port) is not valid" }
+        if config.tlsCertificate.trimmingCharacters(in: .whitespaces).isEmpty != config.tlsKey.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "HTTPS needs both the certificate and its key"
+        }
         return nil
+    }
+}
+
+/// HTTPS for the web page: the certificate and key are PEM files (as on Windows and Linux). openssl (part of macOS)
+/// packs them into a PKCS #12 with a random passphrase, which is imported into memory (macOS 15) or a keychain of
+/// Bromelia's own, never the login keychain.
+enum WebTLS {
+    static func identity(certificate: String, key: String) throws -> SecIdentity {
+        let cert = Paths.expandTilde(certificate.trimmingCharacters(in: .whitespaces))
+        let keyPath = Paths.expandTilde(key.trimmingCharacters(in: .whitespaces))
+        let fm = FileManager.default
+        for p in [cert, keyPath] where !fm.isReadableFile(atPath: p) { throw JobError.message("can't read \(p)") }
+        let dir = fm.temporaryDirectory.appendingPathComponent("bromelia-tls-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? fm.removeItem(at: dir) }
+        let p12 = dir.appendingPathComponent("identity.p12")
+        let pass = UUID().uuidString
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+        // The passphrase goes through the environment, not the command line.
+        p.arguments = ["pkcs12", "-export", "-in", cert, "-inkey", keyPath, "-out", p12.path, "-passout", "env:BROMELIA_P12", "-name", "Bromelia"]
+        p.environment = ["BROMELIA_P12": pass]
+        let err = Pipe()
+        p.standardError = err
+        p.standardOutput = FileHandle.nullDevice
+        try p.run()
+        let message = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        guard p.terminationStatus == 0, let data = try? Data(contentsOf: p12) else {
+            throw JobError.message("openssl can't use the certificate and key: \(message.split(separator: "\n").first ?? "")")
+        }
+        var options: [String: Any] = [kSecImportExportPassphrase as String: pass]
+        if #available(macOS 15.0, *) {
+            options[kSecImportToMemoryOnly as String] = true
+        } else {
+            options[kSecImportExportKeychain as String] = try ownKeychain()
+        }
+        var items: CFArray?
+        let status = SecPKCS12Import(data as CFData, options as CFDictionary, &items)
+        guard status == errSecSuccess, let first = (items as? [[String: Any]])?.first, let id = first[kSecImportItemIdentity as String] else {
+            throw JobError.message("the certificate can't be imported (\(SecCopyErrorMessageString(status, nil) as String? ?? "error \(status)"))")
+        }
+        return id as! SecIdentity
+    }
+
+    /// A keychain file of Bromelia's own for the imported key (before macOS 15), made again each time.
+    private static func ownKeychain() throws -> SecKeychain {
+        let path = Paths.appSupport.appendingPathComponent("web-tls.keychain-db").path
+        try? FileManager.default.removeItem(atPath: path)
+        let pass = UUID().uuidString
+        var keychain: SecKeychain?
+        let status = SecKeychainCreate(path, UInt32(pass.utf8.count), pass, false, nil, &keychain)
+        guard status == errSecSuccess, let keychain else { throw JobError.message("can't make a keychain for the certificate (error \(status))") }
+        return keychain
+    }
+}
+
+/// The end of a log file for the web page: at most `limit` bytes, from the start of a line.
+enum WebLog {
+    static func tail(_ path: String, limit: Int = 256 * 1024) -> String {
+        guard let h = FileHandle(forReadingAtPath: path) else { return "" }
+        defer { try? h.close() }
+        let size = (try? h.seekToEnd()) ?? 0
+        let start = size > UInt64(limit) ? size - UInt64(limit) : 0
+        try? h.seek(toOffset: start)
+        var data = (try? h.readToEnd()) ?? Data()
+        if start > 0, let nl = data.firstIndex(of: 0x0A) { data = data[data.index(after: nl)...] }
+        return (start > 0 ? "…\n" : "") + String(decoding: data, as: UTF8.self)
     }
 }
 
@@ -74,7 +146,16 @@ final class WebServer {
         guard config.enabled else { return }
         if let p = WebAccess.startProblem(config) { lastError = p; return }
         do {
-            let params = NWParameters.tcp
+            let params: NWParameters
+            if !config.tlsCertificate.trimmingCharacters(in: .whitespaces).isEmpty {
+                let identity = try WebTLS.identity(certificate: config.tlsCertificate, key: config.tlsKey)
+                let tls = NWProtocolTLS.Options()
+                guard let secIdentity = sec_identity_create(identity) else { throw JobError.message("the certificate can't be used") }
+                sec_protocol_options_set_local_identity(tls.securityProtocolOptions, secIdentity)
+                params = NWParameters(tls: tls)
+            } else {
+                params = .tcp
+            }
             params.allowLocalEndpointReuse = true
             params.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(config.address), port: NWEndpoint.Port(integerLiteral: UInt16(config.port)))
             let l = try NWListener(using: params)
@@ -146,11 +227,14 @@ final class WebServer {
         case ("GET", 2) where parts == ["api", "status"]:
             let json = (try? JSONSerialization.data(withJSONObject: model.webStatus(), options: [.sortedKeys])) ?? Data("{}".utf8)
             return (200, "application/json", json)
+        case ("GET", 4) where parts[0] == "api" && parts[1] == "jobs" && parts[3] == "log":
+            guard let text = model.webLog(id: parts[2]) else { return (404, "text/plain; charset=utf-8", Data("No such job".utf8)) }
+            return (200, "text/plain; charset=utf-8", Data(text.utf8))
         case ("POST", 2...4) where parts[0] == "api" && (parts.count == 4 || parts[1] == "verify"):
             // /api/<kind>/<id>/<action>, and /api/verify (check the output folder's archives) · /api/verify/cancel.
             let id = parts.count == 4 ? parts[2] : ""
             let action = parts.count == 4 ? parts[3] : parts.count == 3 ? parts[2] : "start"
-            let message = model.webAction(kind: parts[1], id: id, action: action)
+            let message = model.webAction(kind: parts[1], id: id, action: action, query: r.query)
             return message == nil ? (204, "text/plain", Data()) : (400, "text/plain; charset=utf-8", Data(message!.utf8))
         default:
             return (404, "text/plain", Data("Not found".utf8))

@@ -843,10 +843,13 @@ struct WebUIConfig: Codable, Hashable, Sendable {
     var port: Int = 51280
     /// Required for everything when set (header `Authorization: Bearer <token>` or `?token=`).
     var token: String = ""
+    /// HTTPS: the certificate (PEM, with its chain) and its private key (PEM). Empty = plain HTTP.
+    var tlsCertificate: String = ""
+    var tlsKey: String = ""
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case enabled, address, port, token }
+    enum CodingKeys: String, CodingKey { case enabled, address, port, token, tlsCertificate, tlsKey }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -855,5 +858,7 @@ struct WebUIConfig: Codable, Hashable, Sendable {
         address = c.value(.address, d.address)
         port = c.value(.port, d.port)
         token = c.value(.token, d.token)
+        tlsCertificate = c.value(.tlsCertificate, d.tlsCertificate)
+        tlsKey = c.value(.tlsKey, d.tlsKey)
     }
 }

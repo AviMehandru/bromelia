@@ -27,14 +27,19 @@ int   bro_web_access (const BroHttpRequest *r, const BroWebUIConfig *config, con
 char *bro_web_start_problem (const BroWebUIConfig *config);
 GBytes *bro_web_page (void); /* the page, from the resources */
 
-/* status: the JSON for GET /api/status (new reference). action: runs drives/<lane>/rip|eject|close or
- * jobs/<id>/cancel and returns an error message, or NULL. */
+/* status: the JSON for GET /api/status (new reference). action: runs drives/<lane>/open|rip|eject|close,
+ * jobs/<id>/cancel, settings/<id>/set or verify (query: the request's parameters) and returns an error message, or NULL.
+ * log: the end of a job's log for GET /api/jobs/<id>/log, or NULL for an unknown job. */
 typedef JsonNode *(*BroWebStatusFunc) (gpointer user_data);
-typedef char *(*BroWebActionFunc) (const char *kind, const char *id, const char *action, gpointer user_data);
+typedef char *(*BroWebActionFunc) (const char *kind, const char *id, const char *action, GHashTable *query, gpointer user_data);
+typedef char *(*BroWebLogFunc) (const char *id, gpointer user_data);
 
 typedef struct _BroWebServer BroWebServer;
 
-BroWebServer *bro_web_server_new (BroWebStatusFunc status, BroWebActionFunc action, gpointer user_data);
+/* The end of a log file: at most limit bytes, from the start of a line ("…" first when cut). */
+char         *bro_web_log_tail (const char *path, gsize limit);
+
+BroWebServer *bro_web_server_new (BroWebStatusFunc status, BroWebActionFunc action, BroWebLogFunc log, gpointer user_data);
 void          bro_web_server_free (BroWebServer *s);
 /* Starts, restarts or stops the server to match config (on the main thread). */
 void          bro_web_server_apply (BroWebServer *s, const BroWebUIConfig *config);

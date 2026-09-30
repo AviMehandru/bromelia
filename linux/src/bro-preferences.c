@@ -565,7 +565,7 @@ refresh_web_status (Services *sv)
   if (w->enabled && !err)
     {
       const char *host = g_str_equal (w->address, "0.0.0.0") ? "localhost" : w->address;
-      text = g_strdup_printf ("http://%s:%d/%s%s", host, w->port, *w->token ? "?token=" : "", w->token);
+      text = g_strdup_printf ("%s://%s:%d/%s%s", w->tls_certificate && *w->tls_certificate ? "https" : "http", host, w->port, *w->token ? "?token=" : "", w->token);
     }
   gtk_label_set_text (GTK_LABEL (sv->web_status), err && w->enabled ? err : (text ? text : ""));
   gtk_label_set_selectable (GTK_LABEL (sv->web_status), TRUE);
@@ -628,8 +628,9 @@ services_page (void)
   adw_preferences_group_add (g, sv->result);
 
   g = group (ADW_PREFERENCES_PAGE (page), "Web page",
-             "Shows the drives, jobs and background steps and lets you rip, eject, close trays and cancel from a browser. "
-             "127.0.0.1 keeps it on this computer; 0.0.0.0 opens it to your network and needs a token.");
+             "Shows the drives, jobs, logs, history and background steps, opens discs to pick titles, and lets you rip, eject, close "
+             "trays, cancel and switch automatic rips from a browser. 127.0.0.1 keeps it on this computer; 0.0.0.0 opens it to your "
+             "network and needs a token. With a certificate and key (PEM files) the page is served over HTTPS (needs glib-networking).");
   sv->web_status = bro_caption ("");
   adw_preferences_group_add (g, bro_switch_row ("Serve a web page", NULL, &c->web_ui.enabled, web_changed_cb, sv));
   adw_preferences_group_add (g, bro_entry_row ("Address", &c->web_ui.address, "127.0.0.1", web_changed_cb, sv));
@@ -637,6 +638,8 @@ services_page (void)
   row = secret_row ("Token (required for other computers)", &c->web_ui.token);
   g_signal_connect_swapped (row, "changed", G_CALLBACK (refresh_web_status), sv);
   adw_preferences_group_add (g, row);
+  adw_preferences_group_add (g, bro_path_row ("HTTPS certificate (PEM, optional)", &c->web_ui.tls_certificate, FALSE, web_changed_cb, sv));
+  adw_preferences_group_add (g, bro_path_row ("HTTPS key (PEM)", &c->web_ui.tls_key, FALSE, web_changed_cb, sv));
   gtk_widget_set_margin_top (sv->web_status, 6);
   adw_preferences_group_add (g, sv->web_status);
   refresh_web_status (sv);

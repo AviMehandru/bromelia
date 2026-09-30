@@ -151,7 +151,32 @@ bro_web_start_problem (const BroWebUIConfig *config)
     return g_strdup ("The web page is reachable from the network only with a token. Set a token or use 127.0.0.1.");
   if (config->port < 1 || config->port > 65535)
     return g_strdup_printf ("Port %d is not valid", config->port);
+  {
+    g_autofree char *cert = g_strstrip (g_strdup (config->tls_certificate ? config->tls_certificate : ""));
+    g_autofree char *key = g_strstrip (g_strdup (config->tls_key ? config->tls_key : ""));
+    if (!*cert != !*key)
+      return g_strdup ("HTTPS needs both the certificate and its key");
+  }
   return NULL;
+}
+
+char *
+bro_web_log_tail (const char *path, gsize limit)
+{
+  g_autofree char *text = NULL;
+  gsize len = 0;
+  const char *start;
+  if (!path || !g_file_get_contents (path, &text, &len, NULL))
+    return g_strdup ("");
+  if (len <= limit)
+    return g_steal_pointer (&text);
+  start = text + len - limit;
+  {
+    const char *nl = memchr (start, '\n', limit);
+    if (nl)
+      start = nl + 1;
+  }
+  return g_strconcat ("…\n", start, NULL);
 }
 
 GBytes *
@@ -165,15 +190,17 @@ bro_web_page (void)
 struct _BroWebServer {
   GSocketService *service;
   BroWebUIConfig running; /* copy of the config it runs with (valid while service != NULL) */
+  GTlsCertificate *certificate; /* HTTPS, or NULL */
   char *last_error;
   BroWebStatusFunc status;
   BroWebActionFunc action;
+  BroWebLogFunc log;
   gpointer user_data;
 };
 
 typedef struct {
   BroWebServer *server;
-  GSocketConnection *conn;
+  GIOStream *conn; /* the socket connection, or the TLS connection around it */
   GByteArray *buf;
   char chunk[4096];
   GBytes *out;
@@ -195,14 +222,17 @@ config_clear (BroWebUIConfig *c)
 {
   g_clear_pointer (&c->address, g_free);
   g_clear_pointer (&c->token, g_free);
+  g_clear_pointer (&c->tls_certificate, g_free);
+  g_clear_pointer (&c->tls_key, g_free);
 }
 
 BroWebServer *
-bro_web_server_new (BroWebStatusFunc status, BroWebActionFunc action, gpointer user_data)
+bro_web_server_new (BroWebStatusFunc status, BroWebActionFunc action, BroWebLogFunc log, gpointer user_data)
 {
   BroWebServer *s = g_new0 (BroWebServer, 1);
   s->status = status;
   s->action = action;
+  s->log = log;
   s->user_data = user_data;
   return s;
 }
@@ -216,6 +246,7 @@ bro_web_server_stop (BroWebServer *s)
       g_socket_listener_close (G_SOCKET_LISTENER (s->service));
       g_clear_object (&s->service);
     }
+  g_clear_object (&s->certificate);
   config_clear (&s->running);
 }
 
@@ -315,13 +346,25 @@ bro_web_server_handle (BroWebServer *s, const BroHttpRequest *r, const char **co
       *body = g_bytes_new_take (text, len);
       return 200;
     }
+  if (g_str_equal (r->method, "GET") && parts->len == 4 && g_str_equal (parts->pdata[0], "api") && g_str_equal (parts->pdata[1], "jobs")
+      && g_str_equal (parts->pdata[3], "log"))
+    {
+      char *text = s->log ? s->log (parts->pdata[2], s->user_data) : NULL;
+      if (!text)
+        {
+          *body = text_bytes ("No such job");
+          return 404;
+        }
+      *body = g_bytes_new_take (text, strlen (text));
+      return 200;
+    }
   /* POST /api/<kind>/<id>/<action>, and /api/verify (check the output folder's archives) · /api/verify/cancel. */
   if (g_str_equal (r->method, "POST") && parts->len >= 2 && parts->len <= 4 && g_str_equal (parts->pdata[0], "api")
       && (parts->len == 4 || g_str_equal (parts->pdata[1], "verify")))
     {
       const char *id = parts->len == 4 ? parts->pdata[2] : "";
       const char *action = parts->len == 4 ? parts->pdata[3] : parts->len == 3 ? parts->pdata[2] : "start";
-      g_autofree char *err = s->action ? s->action (parts->pdata[1], id, action, s->user_data)
+      g_autofree char *err = s->action ? s->action (parts->pdata[1], id, action, r->query, s->user_data)
                                        : g_strdup ("Unknown action");
       if (!err)
         {
@@ -361,8 +404,7 @@ respond (Conn *c, const BroHttpRequest *r)
   {
     gsize n = 0;
     const void *p = g_bytes_get_data (c->out, &n);
-    g_output_stream_write_all_async (g_io_stream_get_output_stream (G_IO_STREAM (c->conn)), p, n, G_PRIORITY_DEFAULT, NULL,
-                                     on_written, c);
+    g_output_stream_write_all_async (g_io_stream_get_output_stream (c->conn), p, n, G_PRIORITY_DEFAULT, NULL, on_written, c);
   }
 }
 
@@ -391,19 +433,44 @@ on_read (GObject *stream, GAsyncResult *res, gpointer data)
 static gboolean
 on_incoming (GSocketService *service, GSocketConnection *conn, GObject *source, gpointer data)
 {
-  Conn *c = g_new0 (Conn, 1);
-  c->server = data;
-  c->conn = g_object_ref (conn);
+  BroWebServer *s = data;
+  Conn *c;
+  GIOStream *stream = g_object_ref (G_IO_STREAM (conn));
+  if (s->certificate)
+    {
+      /* HTTPS: the handshake happens on the first read. */
+      g_autoptr (GError) error = NULL;
+      GIOStream *tls = g_tls_server_connection_new (stream, s->certificate, &error);
+      g_object_unref (stream);
+      if (!tls)
+        {
+          g_warning ("Web page: %s", error->message);
+          return TRUE;
+        }
+      stream = tls;
+    }
+  c = g_new0 (Conn, 1);
+  c->server = s;
+  c->conn = stream;
   c->buf = g_byte_array_new ();
-  g_input_stream_read_async (g_io_stream_get_input_stream (G_IO_STREAM (conn)), c->chunk, sizeof c->chunk, G_PRIORITY_DEFAULT,
-                             NULL, on_read, c);
+  g_input_stream_read_async (g_io_stream_get_input_stream (c->conn), c->chunk, sizeof c->chunk, G_PRIORITY_DEFAULT, NULL, on_read, c);
   return TRUE;
 }
 
 static gboolean
 same_config (const BroWebUIConfig *a, const BroWebUIConfig *b)
 {
-  return a->enabled == b->enabled && a->port == b->port && g_strcmp0 (a->address, b->address) == 0 && g_strcmp0 (a->token, b->token) == 0;
+  return a->enabled == b->enabled && a->port == b->port && g_strcmp0 (a->address, b->address) == 0 && g_strcmp0 (a->token, b->token) == 0
+         && g_strcmp0 (a->tls_certificate, b->tls_certificate) == 0 && g_strcmp0 (a->tls_key, b->tls_key) == 0;
+}
+
+static char *
+expand_path (const char *p)
+{
+  g_autofree char *t = g_strstrip (g_strdup (p ? p : ""));
+  if (g_str_equal (t, "~") || g_str_has_prefix (t, "~/"))
+    return g_build_filename (g_get_home_dir (), t + 1, NULL);
+  return g_steal_pointer (&t);
 }
 
 void
@@ -432,10 +499,20 @@ bro_web_server_apply (BroWebServer *s, const BroWebUIConfig *config)
       g_free (address);
       address = g_strdup ("127.0.0.1");
     }
+  if (config->tls_certificate && *config->tls_certificate)
+    {
+      g_autofree char *cert = expand_path (config->tls_certificate), *key = expand_path (config->tls_key);
+      if (!(s->certificate = g_tls_certificate_new_from_files (cert, key, &error)))
+        {
+          s->last_error = g_strdup_printf ("Web page: can't use the certificate: %s", error->message);
+          return;
+        }
+    }
   addr = g_inet_socket_address_new_from_string (address, (guint) config->port);
   if (!addr)
     {
       s->last_error = g_strdup_printf ("Web page: “%s” is not an IP address", address);
+      g_clear_object (&s->certificate);
       return;
     }
   service = g_socket_service_new ();
@@ -443,6 +520,7 @@ bro_web_server_apply (BroWebServer *s, const BroWebUIConfig *config)
     {
       s->last_error = g_strdup_printf ("Web page: %s", error->message);
       g_object_unref (service);
+      g_clear_object (&s->certificate);
       return;
     }
   g_signal_connect (service, "incoming", G_CALLBACK (on_incoming), s);
@@ -452,4 +530,6 @@ bro_web_server_apply (BroWebServer *s, const BroWebUIConfig *config)
   s->running.address = g_strdup (config->address);
   s->running.port = config->port;
   s->running.token = g_strdup (config->token ? config->token : "");
+  s->running.tls_certificate = g_strdup (config->tls_certificate ? config->tls_certificate : "");
+  s->running.tls_key = g_strdup (config->tls_key ? config->tls_key : "");
 }

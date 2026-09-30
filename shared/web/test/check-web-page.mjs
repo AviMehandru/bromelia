@@ -1,13 +1,14 @@
 // Opens the web page in a real browser (Chromium, through Playwright) against bromelia-daemon and a stand-in for
-// makemkvcon, and checks what the owner would check by hand: drives, rip / cancel / eject / close tray, the token
-// (?token=, 401), requests from another computer without a token (403), the archive check, dark mode and phone width.
+// makemkvcon, and checks what the owner would check by hand: drives, rip / cancel / eject / close tray, opening a disc and
+// ripping chosen titles, job logs, history details, settings, the token (?token=, 401), requests from another computer
+// without a token (403), the archive check, HTTPS, dark mode and phone width.
 //
 //   node shared/web/test/check-web-page.mjs <path to bromelia-daemon> [screenshot folder]
 //
 // Needs `npm install playwright` and `npx playwright install --with-deps chromium`. CI runs it on Linux; the page is
 // the same file on macOS and Windows.
 import { chromium } from "playwright";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -42,27 +43,27 @@ exit 0
 `, { mode: 0o755 });
 
 const output = path.join(work, "output");
-function writeConfig(dir, port, webToken) {
+function writeConfig(dir, port, webToken, tls) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "config.json");
   fs.writeFileSync(file, JSON.stringify({
     version: 2, makemkvconPath: fake, outputRoot: output, pollIntervalSeconds: 2, preventSleep: false,
-    webUI: { enabled: true, address: "127.0.0.1", port, token: webToken },
+    webUI: { enabled: true, address: "127.0.0.1", port, token: webToken, tlsCertificate: tls?.cert ?? "", tlsKey: tls?.key ?? "" },
   }));
   return file;
 }
 
 const children = [];
-function start(name, port, webToken) {
+function start(name, port, webToken, tls) {
   const home = path.join(work, name);
-  const config = writeConfig(path.join(home, "config"), port, webToken);
+  const config = writeConfig(path.join(home, "config"), port, webToken, tls);
   const log = fs.openSync(path.join(shots, `${name}.log`), "w");
   const child = spawn(daemon, ["--config", config], {
     env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, "config"), XDG_DATA_HOME: path.join(home, "data") },
     stdio: ["ignore", log, log],
   });
   children.push(child);
-  return `http://127.0.0.1:${port}`;
+  return `${tls ? "https" : "http"}://127.0.0.1:${port}`;
 }
 
 // A raw request, so the Host header and missing X-Bromelia header can be chosen.
@@ -153,6 +154,53 @@ try {
   assert.equal(await page.locator("#history .card").count(), 1, "the cancelled job is listed once");
   assert.equal(await error.textContent(), "", "a successful action clears the earlier error");
 
+  // --- Open the disc, pick titles, rip them; the job's log; the history's details. ---
+  await discCard.getByRole("button", { name: "Open" }).click();
+  const titles = discCard.locator(".titles label");
+  await titles.first().waitFor({ timeout: 20000 });
+  const boxes = discCard.locator(".titles input[type=checkbox]");
+  const count = await boxes.count();
+  assert.ok(count >= 2, "the opened disc lists its titles");
+  for (let i = 0; i < count; i++) {
+    const want = i < 2;
+    if ((await boxes.nth(i).isChecked()) !== want) await boxes.nth(i).click();
+  }
+  const make = discCard.getByRole("button", { name: "Make MKV (2 titles)" });
+  await make.waitFor();
+  await page.screenshot({ path: path.join(shots, "titles.png"), fullPage: true });
+  const callsBefore = fs.readFileSync(path.join(work, "calls.txt"), "utf8").split("\n").length;
+  await make.click();
+  const titleJob = page.locator("#jobs .card").first();
+  await titleJob.getByRole("button", { name: "Cancel" }).waitFor({ timeout: 20000 });
+  await titleJob.getByRole("button", { name: "Log" }).click();
+  await titleJob.locator("pre.log", { hasText: "Bromelia job" }).waitFor({ timeout: 20000 });
+  await page.locator("#jobs progress").waitFor({ timeout: 20000 });
+  const calls = fs.readFileSync(path.join(work, "calls.txt"), "utf8").split("\n").slice(callsBefore - 1);
+  assert.ok(calls.some(l => / mkv /.test(" " + l + " ")), "the chosen titles are ripped: " + calls.join(" | "));
+  await page.screenshot({ path: path.join(shots, "log.png"), fullPage: true });
+  await titleJob.getByRole("button", { name: "Cancel" }).click();
+  await page.locator("#jobs .empty").waitFor({ timeout: 20000 });
+  await page.waitForTimeout(2500);
+  assert.equal(await page.locator("#history .card").count(), 2, "both jobs are in Recent");
+  await page.locator("#history .card .clickable").first().click();
+  await page.locator("#history .details", { hasText: "file(s)" }).first().waitFor();
+  assert.equal(await error.textContent(), "", "no error after ripping chosen titles");
+
+  // --- Settings: switch automatic rips and the mode of the default configuration. ---
+  const defaults = page.locator("#settings .card").first();
+  await defaults.locator("select").selectOption("backup");
+  await defaults.locator("input[type=checkbox]").check();
+  for (let i = 0; i < 50; i++) {
+    const st = JSON.parse((await request(base, "GET", `/api/status?token=${token}`)).body).settings.drives[0];
+    if (st.mode === "backup" && st.autoRip) break;
+    assert.ok(i < 49, "the settings were saved");
+    await page.waitForTimeout(100);
+  }
+  await defaults.locator("input[type=checkbox]").uncheck();
+  await defaults.locator("select").selectOption("mkv");
+  await page.waitForTimeout(500);
+  assert.equal(await error.textContent(), "", "no error after changing the settings");
+
   // --- Eject and close tray answer without an error (the devices don't exist here, as with an absent drive). ---
   await discCard.getByRole("button", { name: "Eject" }).click();
   await page.getByRole("button", { name: "Close tray" }).first().click();
@@ -191,6 +239,23 @@ try {
   await phone.screenshot({ path: path.join(shots, "phone.png"), fullPage: true });
   await phone.emulateMedia({ colorScheme: "dark" });
   await phone.screenshot({ path: path.join(shots, "phone-dark.png"), fullPage: true });
+
+  // --- HTTPS with a certificate and key (PEM). ---
+  const tlsDir = path.join(work, "tls");
+  fs.mkdirSync(tlsDir);
+  const cert = path.join(tlsDir, "cert.pem"), key = path.join(tlsDir, "key.pem");
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "2", "-subj", "/CN=localhost"],
+               { stdio: "ignore" });
+  const secure = start("https", 51393, token, { cert, key });
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const tlsPage = await context.newPage();
+  for (let i = 0; i < 100; i++) {
+    try { await tlsPage.goto(`${secure}/?token=${token}`, { timeout: 2000 }); break; } catch { await new Promise(r => setTimeout(r, 100)); }
+  }
+  await tlsPage.locator("#drives .card", { hasText: "MOVIE_DISC" }).waitFor({ timeout: 20000 });
+  assert.equal(new URL(tlsPage.url()).protocol, "https:", "the page is served over HTTPS");
+  await tlsPage.screenshot({ path: path.join(shots, "https.png"), fullPage: true });
+  await context.close();
 
   console.log("Web page checks passed; screenshots in " + shots);
 } catch (e) {

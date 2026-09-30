@@ -50,7 +50,7 @@ FROM debian:${DEBIAN}-slim
 # udev (disc types), curl (notifications, online lookup, beta key), abcde / cyanrip (audio CDs).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl eject udev mkvtoolnix ffmpeg tesseract-ocr tesseract-ocr-eng \
-      libjson-glib-1.0-0 libexpat1 zlib1g \
+      libjson-glib-1.0-0 libexpat1 zlib1g glib-networking \
       abcde cd-discid cdparanoia flac libmusicbrainz-discid-perl libwebservice-musicbrainz-perl \
     && (apt-get install -y --no-install-recommends cyanrip || echo "cyanrip is not available; abcde rips audio CDs") \
     && rm -rf /var/lib/apt/lists/*

@@ -79,7 +79,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build libgtk-4-dev libadwaita-1-dev libjson-glib-dev
+          sudo apt-get install -y meson ninja-build libgtk-4-dev libadwaita-1-dev libjson-glib-dev glib-networking openssl
       - name: Build
         working-directory: linux
         run: |

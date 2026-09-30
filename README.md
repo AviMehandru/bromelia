@@ -147,8 +147,9 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **Notifications** to Discord, Slack, ntfy, any webhook, or any Apprise service (Telegram, Pushover, e-mail, …).
 - **Background post-processing**: encoding or upload steps run after the disc is out, in their own queue, so the
   drive is free for the next disc.
-- **Web page** for watching and controlling Bromelia from a browser (rip, eject, close tray, cancel), with a JSON
-  API, local-only by default and token-protected on a network.
+- **Web page** for watching and controlling Bromelia from a browser: rip, eject, close tray, cancel; open a disc and
+  rip the titles you tick; job logs and history details; automatic rips and modes per drive; with a JSON API,
+  local-only by default, token-protected on a network, and HTTPS with a PEM certificate and key.
 - **Headless**: `bromelia-daemon` and a Docker image for servers and NAS boxes ([docs/docker.md](docs/docker.md)).
 - **Beta key kept current** automatically (at startup and when it expires; purchased keys are never replaced).
 - **Trays**: close one drive's tray or all trays; automatic rips wait for the system to mount the disc first.

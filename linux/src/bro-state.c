@@ -906,9 +906,15 @@ web_status (gpointer data)
 }
 
 static char *
-web_action (const char *kind, const char *id, const char *action, gpointer data)
+web_action (const char *kind, const char *id, const char *action, GHashTable *query, gpointer data)
 {
-  return bro_state_web_action (data, kind, id, action);
+  return bro_state_web_action (data, kind, id, action, query);
+}
+
+static char *
+web_log (const char *id, gpointer data)
+{
+  return bro_state_web_log (data, id);
 }
 
 static BroState *
@@ -918,7 +924,7 @@ state_new_at (GApplication *app, const char *config_path)
   self->app = app;
   self->config_path = config_path ? g_strdup (config_path)
                                   : g_build_filename (g_get_user_config_dir (), "bromelia", "config.json", NULL);
-  self->web = bro_web_server_new (web_status, web_action, self);
+  self->web = bro_web_server_new (web_status, web_action, web_log, self);
   if (g_file_test (self->config_path, G_FILE_TEST_EXISTS))
     self->config = bro_app_config_load (self->config_path);
   else
@@ -3131,6 +3137,53 @@ word_label (const char *word)
 
 #define JS(k, v) do { json_builder_set_member_name (b, k); json_builder_add_string_value (b, (v) ? (v) : ""); } while (0)
 
+
+static void
+web_time (JsonBuilder *b, const char *name, gint64 when)
+{
+  g_autoptr (GDateTime) t = when ? g_date_time_new_from_unix_utc (when) : NULL;
+  g_autofree char *text = t ? g_date_time_format_iso8601 (t) : g_strdup ("");
+  JS (name, text);
+}
+
+/* An opened disc for the web page: reading, the error, or its titles with the ones chosen on the disc page. */
+static void
+web_opened (JsonBuilder *b, BroSession *s)
+{
+  json_builder_begin_object (b);
+  json_builder_set_member_name (b, "loading");
+  json_builder_add_boolean_value (b, s->loading);
+  if (!s->loading)
+    {
+      JS ("error", s->info ? "" : s->error);
+      if (s->info)
+        {
+          JS ("name", bro_disc_info_name (s->info));
+          json_builder_set_member_name (b, "titles");
+          json_builder_begin_array (b);
+          for (guint i = 0; i < s->info->titles->len; i++)
+            {
+              BroTitle *t = s->info->titles->pdata[i];
+              json_builder_begin_object (b);
+              json_builder_set_member_name (b, "index");
+              json_builder_add_int_value (b, t->index);
+              JS ("name", bro_title_str (t, BRO_ATTR_NAME));
+              JS ("duration", bro_title_str (t, BRO_ATTR_DURATION));
+              json_builder_set_member_name (b, "chapters");
+              json_builder_add_int_value (b, bro_title_chapters (t));
+              json_builder_set_member_name (b, "size");
+              json_builder_add_int_value (b, bro_title_size (t));
+              json_builder_set_member_name (b, "selected");
+              json_builder_add_boolean_value (b, g_hash_table_contains (s->selected, GINT_TO_POINTER (t->index)));
+              json_builder_end_object (b);
+            }
+          json_builder_end_array (b);
+        }
+    }
+  json_builder_end_object (b);
+}
+
+
 JsonNode *
 bro_state_web_status (BroState *self)
 {
@@ -3160,6 +3213,15 @@ bro_state_web_status (BroState *self)
       JS ("disc", d->entry->disc_name);
       json_builder_set_member_name (b, "busy");
       json_builder_add_boolean_value (b, bro_state_active_job (self, d->lane) != NULL);
+      JS ("config", d->config ? d->config->id : self->config->default_drive->id);
+      {
+        BroSession *s = g_hash_table_lookup (self->sessions, d->lane);
+        if (s && (s->loading || s->info || s->error))
+          {
+            json_builder_set_member_name (b, "opened");
+            web_opened (b, s);
+          }
+      }
       json_builder_end_object (b);
     }
   json_builder_end_array (b);
@@ -3180,6 +3242,16 @@ bro_state_web_status (BroState *self)
       JS ("error", j->error);
       JS ("outputDirectory", j->output_dir);
       JS ("lane", j->lane);
+      JS ("mode", bro_rip_mode_label (j->mode));
+      JS ("drive", j->drive->name);
+      web_time (b, "startedAt", j->started_at);
+      web_time (b, "finishedAt", j->finished_at);
+      json_builder_set_member_name (b, "files");
+      json_builder_add_int_value (b, j->files->len);
+      json_builder_set_member_name (b, "warnings");
+      json_builder_add_int_value (b, j->warnings);
+      json_builder_set_member_name (b, "errors");
+      json_builder_add_int_value (b, j->errors);
       json_builder_end_object (b);
     }
   json_builder_end_array (b);
@@ -3210,6 +3282,18 @@ bro_state_web_status (BroState *self)
       JS ("error", h->error);
       JS ("outputDirectory", h->output_dir);
       JS ("finishedAt", when);
+      web_time (b, "startedAt", h->started_at);
+      {
+        int m = bro_rip_mode_parse (h->mode);
+        JS ("mode", m >= 0 ? bro_rip_mode_label (m) : (h->mode ? h->mode : ""));
+      }
+      JS ("drive", h->drive_name);
+      json_builder_set_member_name (b, "files");
+      json_builder_add_int_value (b, h->files ? h->files->len : 0);
+      json_builder_set_member_name (b, "warnings");
+      json_builder_add_int_value (b, h->warnings);
+      json_builder_set_member_name (b, "errors");
+      json_builder_add_int_value (b, h->errors);
       json_builder_end_object (b);
     }
   json_builder_end_array (b);
@@ -3247,6 +3331,35 @@ bro_state_web_status (BroState *self)
     json_builder_end_array (b);
   }
   json_builder_end_object (b);
+  json_builder_set_member_name (b, "settings");
+  json_builder_begin_object (b);
+  json_builder_set_member_name (b, "drives");
+  json_builder_begin_array (b);
+  for (guint i = 0; i <= self->config->drives->len; i++)
+    {
+      BroDriveConfig *d = i == 0 ? self->config->default_drive : self->config->drives->pdata[i - 1];
+      json_builder_begin_object (b);
+      JS ("id", d->id);
+      JS ("name", d->name);
+      json_builder_set_member_name (b, "autoRip");
+      json_builder_add_boolean_value (b, d->automation.auto_rip_on_insert);
+      JS ("mode", bro_rip_mode_to_string (d->rip.mode));
+      json_builder_set_member_name (b, "isDefault");
+      json_builder_add_boolean_value (b, i == 0);
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  json_builder_set_member_name (b, "modes");
+  json_builder_begin_array (b);
+  for (int m = BRO_MODE_MKV; m <= BRO_MODE_INFO_ONLY; m++)
+    {
+      json_builder_begin_object (b);
+      JS ("value", bro_rip_mode_to_string (m));
+      JS ("label", bro_rip_mode_label (m));
+      json_builder_end_object (b);
+    }
+  json_builder_end_array (b);
+  json_builder_end_object (b);
   json_builder_end_object (b);
   return json_builder_get_root (b);
 }
@@ -3254,8 +3367,61 @@ bro_state_web_status (BroState *self)
 #undef JS
 
 char *
-bro_state_web_action (BroState *self, const char *kind, const char *id, const char *action)
+bro_state_web_log (BroState *self, const char *id)
 {
+  for (guint i = 0; i < self->jobs->len; i++)
+    {
+      BroJob *j = self->jobs->pdata[i];
+      if (g_str_equal (j->id, id))
+        {
+          g_autofree char *path = bro_job_log_path (j);
+          return bro_web_log_tail (path, 256 * 1024);
+        }
+    }
+  for (guint i = 0; i < self->history->len; i++)
+    {
+      BroHistoryRecord *h = self->history->pdata[i];
+      if (g_strcmp0 (h->id, id) == 0)
+        return bro_web_log_tail (h->log_path, 256 * 1024);
+    }
+  return NULL;
+}
+
+char *
+bro_state_web_action (BroState *self, const char *kind, const char *id, const char *action, GHashTable *query)
+{
+  const char *titles = query ? g_hash_table_lookup (query, "titles") : NULL;
+  if (g_str_equal (kind, "drives") && g_str_equal (action, "open"))
+    {
+      BroDriveEntry *e = bro_state_entry_for_lane (self, id);
+      BroSession *s = g_hash_table_lookup (self->sessions, id);
+      BroJob *busy = bro_state_active_job (self, id);
+      if (!e || !s)
+        return g_strdup ("No such drive");
+      if (e->state != BRO_DRIVE_INSERTED)
+        return g_strdup ("There is no disc in the drive");
+      if (busy && busy->state == BRO_JOB_RUNNING)
+        return g_strdup ("The drive is busy");
+      bro_state_load_disc (self, s);
+      return NULL;
+    }
+  if (g_str_equal (kind, "settings") && g_str_equal (action, "set"))
+    {
+      BroDriveConfig *d = bro_app_config_drive_by_id (self->config, id);
+      const char *a = query ? g_hash_table_lookup (query, "autoRip") : NULL;
+      const char *m = query ? g_hash_table_lookup (query, "mode") : NULL;
+      int mode = m ? bro_rip_mode_parse (m) : -1;
+      if (!d)
+        return g_strdup ("No such drive configuration");
+      if (m && (mode < BRO_MODE_MKV || mode > BRO_MODE_INFO_ONLY))
+        return g_strdup_printf ("Unknown mode “%s”", m);
+      if (a)
+        d->automation.auto_rip_on_insert = g_str_equal (a, "1") || g_str_equal (a, "true");
+      if (m)
+        d->rip.mode = mode;
+      bro_state_config_changed (self);
+      return NULL;
+    }
   if (g_str_equal (kind, "drives") && (g_str_equal (action, "rip") || g_str_equal (action, "eject") || g_str_equal (action, "close")))
     {
       g_autoptr (GPtrArray) items = bro_state_drive_items (self);
@@ -3271,7 +3437,31 @@ bro_state_web_action (BroState *self, const char *kind, const char *id, const ch
           if (bro_state_active_job (self, id))
             return g_strdup ("The drive is busy");
           g_clear_pointer (&self->last_error, g_free);
-          bro_state_quick_rip (self, item, -1);
+          if (titles)
+            {
+              BroSession *s = g_hash_table_lookup (self->sessions, id);
+              g_auto (GStrv) parts = g_strsplit (titles, ",", -1);
+              guint n = 0;
+              if (!s || !s->info)
+                return g_strdup ("Open the disc first");
+              g_hash_table_remove_all (s->selected);
+              for (int p = 0; parts[p]; p++)
+                {
+                  char *end = NULL;
+                  g_strstrip (parts[p]);
+                  long v = strtol (parts[p], &end, 10);
+                  if (*parts[p] && end && !*end && bro_disc_info_title (s->info, (int) v))
+                    {
+                      g_hash_table_add (s->selected, GINT_TO_POINTER ((int) v));
+                      n++;
+                    }
+                }
+              if (!n)
+                return g_strdup ("No titles chosen");
+              bro_state_rip_session (self, s, BRO_MODE_MKV);
+            }
+          else
+            bro_state_quick_rip (self, item, -1);
           if (self->jobs->len > before)
             return NULL;
           return g_strdup (self->last_error ? self->last_error : "Nothing to rip");

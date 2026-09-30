@@ -956,21 +956,34 @@ extension AppModel {
 
     /// The JSON the web page shows (see shared/web/bromelia-web.html).
     func webStatus() -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        func time(_ d: Date?) -> String { d.map { iso.string(from: $0) } ?? "" }
         var drives: [[String: Any]] = []
         for item in driveItems {
             guard let e = item.entry else { continue }
-            drives.append(["lane": item.laneKey, "name": item.displayName, "device": e.devicePath, "state": e.state.displayName,
-                           "hasDisc": e.state.hasDisc, "disc": e.discName, "busy": activeJob(lane: item.laneKey) != nil])
+            var d: [String: Any] = ["lane": item.laneKey, "name": item.displayName, "device": e.devicePath, "state": e.state.displayName,
+                                    "hasDisc": e.state.hasDisc, "disc": e.discName, "busy": activeJob(lane: item.laneKey) != nil,
+                                    "config": (item.config ?? config.defaultDrive).id.uuidString]
+            if let s = sessions[item.laneKey], s.isLoading || s.info != nil || s.loadError != nil { d["opened"] = Self.webOpened(s) }
+            drives.append(d)
         }
         let jobList: [[String: Any]] = jobs.map { j in
             ["id": j.id.uuidString, "title": j.title, "state": Self.webState(j.state), "stateLabel": j.state.label, "phase": j.phase,
-             "progress": j.overallProgress, "error": j.errorMessage ?? "", "outputDirectory": j.outputDirectory?.path ?? "", "lane": j.laneKey]
+             "progress": j.overallProgress, "error": j.errorMessage ?? "", "outputDirectory": j.outputDirectory?.path ?? "", "lane": j.laneKey,
+             "mode": j.mode.label, "drive": j.drive.name, "startedAt": time(j.startedAt), "finishedAt": time(j.finishedAt),
+             "files": j.producedFiles.count, "warnings": j.warningCount, "errors": j.errorCount]
         }
         let bg: [[String: Any]] = background.items.map { ["id": $0.id.uuidString, "title": $0.work.title, "state": $0.state.rawValue] }
         let hist: [[String: Any]] = history.prefix(20).map {
             ["id": $0.id.uuidString, "title": $0.title, "state": Self.webState($0.state), "stateLabel": $0.state.label, "error": $0.errorMessage ?? "",
-             "outputDirectory": $0.outputDirectory ?? "", "finishedAt": $0.finishedAt.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
+             "outputDirectory": $0.outputDirectory ?? "", "finishedAt": time($0.finishedAt), "startedAt": time($0.startedAt),
+             "mode": $0.mode.label, "drive": $0.driveName, "files": $0.files.count, "warnings": $0.warnings, "errors": $0.errors]
         }
+        let configs = [config.defaultDrive] + config.drives
+        let settings: [String: Any] = [
+            "drives": configs.map { ["id": $0.id.uuidString, "name": $0.name, "autoRip": $0.automation.autoRipOnInsert, "mode": $0.rip.mode.rawValue,
+                                     "isDefault": $0.id == config.defaultDrive.id] },
+            "modes": RipMode.videoModes.map { ["value": $0.rawValue, "label": $0.label] }]
         let v = verify
         let damaged: [[String: Any]] = v.results.filter { !$0.ok }.map { ["folder": $0.folder, "summary": $0.summary] }
         let verifyStatus: [String: Any] = [
@@ -979,18 +992,51 @@ extension AppModel {
             "folders": v.results.count, "damaged": damaged]
         return ["app": "Bromelia", "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
                 "makemkv": makemkvVersion, "problem": makemkvProblem?.explanation ?? "",
-                "drives": drives, "jobs": jobList, "background": bg, "history": hist, "verify": verifyStatus]
+                "drives": drives, "jobs": jobList, "background": bg, "history": hist, "verify": verifyStatus, "settings": settings]
     }
 
-    /// Runs an action from the web page: drives/<lane>/rip|eject|close, jobs/<id>/cancel. Returns an error, or nil.
-    func webAction(kind: String, id: String, action: String) -> String? {
+    /// An opened disc for the web page: reading, the error, or its titles with the ones chosen on the disc page.
+    private static func webOpened(_ s: DiscSession) -> [String: Any] {
+        if s.isLoading { return ["loading": true] }
+        guard let info = s.info else { return ["loading": false, "error": s.loadError ?? ""] }
+        return ["loading": false, "error": "", "name": info.name,
+                "titles": info.titles.map { t in
+                    ["index": t.index, "name": t.name, "duration": t.durationText, "chapters": t.chapterCount, "size": t.sizeBytes,
+                     "selected": s.selectedTitles.contains(t.index)] as [String: Any]
+                }]
+    }
+
+    /// The end of a job's log (running or in the history), for GET /api/jobs/<id>/log; nil for an unknown job.
+    func webLog(id: String) -> String? {
+        let path = jobs.first { $0.id.uuidString == id }?.logFile.path ?? history.first { $0.id.uuidString == id }?.logPath
+        return path.map { WebLog.tail($0) }
+    }
+
+    /// Runs an action from the web page: drives/<lane>/open|rip|eject|close (rip?titles=0,2 rips those titles of the opened
+    /// disc), jobs/<id>/cancel, settings/<configuration id>/set?autoRip=1&mode=mkv. Returns an error, or nil.
+    func webAction(kind: String, id: String, action: String, query: [String: String] = [:]) -> String? {
         switch (kind, action) {
+        case ("drives", "open"):
+            guard let item = driveItems.first(where: { $0.laneKey == id }), let e = item.entry, let s = sessions[id] else { return "No such drive" }
+            if !e.state.hasDisc { return "There is no disc in the drive" }
+            if activeJob(lane: id)?.state == .running { return "The drive is busy" }
+            Task { await loadDisc(s) }
+            return nil
         case ("drives", "rip"), ("drives", "eject"), ("drives", "close"):
             guard let item = driveItems.first(where: { $0.laneKey == id }), item.entry != nil else { return "No such drive" }
             if action == "rip" {
                 if activeJob(lane: id) != nil { return "The drive is busy" }
                 let before = jobs.count
-                quickRip(item)
+                if let list = query["titles"] {
+                    guard let s = sessions[id], let info = s.info else { return "Open the disc first" }
+                    let chosen = Set(list.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) })
+                        .intersection(info.titles.map(\.index))
+                    if chosen.isEmpty { return "No titles chosen" }
+                    s.selectedTitles = chosen
+                    ripSession(s, mode: .mkv)
+                } else {
+                    quickRip(item)
+                }
                 return jobs.count > before ? nil : (lastError ?? "Nothing to rip")
             }
             if action == "eject" { eject(lane: id) } else { closeTray(lane: id) }
@@ -1001,6 +1047,15 @@ extension AppModel {
             return nil
         case ("verify", "cancel"):
             cancelVerify()
+            return nil
+        case ("settings", "set"):
+            guard var cfg = config.driveConfig(id: UUID(uuidString: id) ?? UUID()) else { return "No such drive configuration" }
+            if let a = query["autoRip"] { cfg.automation.autoRipOnInsert = a == "1" || a == "true" }
+            if let m = query["mode"] {
+                guard let mode = RipMode(rawValue: m), RipMode.videoModes.contains(mode) else { return "Unknown mode “\(m)”" }
+                cfg.rip.mode = mode
+            }
+            updateDrive(cfg)
             return nil
         case ("verify", "start"):
             if verify.running { return "A check is already running" }

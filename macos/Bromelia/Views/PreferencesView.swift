@@ -275,16 +275,19 @@ private struct ServicesPreferences: View {
                 TextField("Address", text: $model.config.webUI.address, prompt: Text("127.0.0.1"))
                 LabeledContent("Port") { IntField(title: "Port", value: $model.config.webUI.port, suffix: "") }
                 SecureField("Token", text: $model.config.webUI.token, prompt: Text("Required for other computers"))
+                PathField(title: "HTTPS certificate", path: $model.config.webUI.tlsCertificate, kind: .file, placeholder: "Optional: certificate (PEM)")
+                PathField(title: "HTTPS key", path: $model.config.webUI.tlsKey, kind: .file, placeholder: "Optional: its private key (PEM)")
                 if model.config.webUI.enabled {
                     let host = model.config.webUI.address == "0.0.0.0" ? "localhost" : model.config.webUI.address
-                    let url = "http://\(host):\(model.config.webUI.port)/" + (model.config.webUI.token.isEmpty ? "" : "?token=\(model.config.webUI.token)")
+                    let scheme = model.config.webUI.tlsCertificate.isEmpty ? "http" : "https"
+                    let url = "\(scheme)://\(host):\(model.config.webUI.port)/" + (model.config.webUI.token.isEmpty ? "" : "?token=\(model.config.webUI.token)")
                     Link(url, destination: URL(string: url) ?? URL(string: "http://localhost")!).font(.caption)
                 }
                 if let e = model.web.lastError { Text(e).font(.caption).foregroundStyle(.red) }
             } header: {
                 Text("Web page")
             } footer: {
-                Text("Shows the drives, jobs and background steps and lets you rip, eject, close trays and cancel from a browser. 127.0.0.1 keeps it on this Mac; 0.0.0.0 opens it to your network and needs a token.")
+                Text("Shows the drives, jobs, logs, history and background steps, opens discs to pick titles, and lets you rip, eject, close trays, cancel and switch automatic rips from a browser. 127.0.0.1 keeps it on this Mac; 0.0.0.0 opens it to your network and needs a token. With a certificate and key (PEM files) the page is served over HTTPS.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

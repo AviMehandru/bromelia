@@ -247,22 +247,41 @@ public sealed class AppState : ObservableObject
         ["version"] = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "",
         ["makemkv"] = MakemkvVersion,
         ["problem"] = MakemkvProblem?.Explanation ?? "",
-        ["drives"] = DriveItems.Where(i => i.Entry != null).Select(i => new Dictionary<string, object>
+        ["drives"] = DriveItems.Where(i => i.Entry != null).Select(i =>
         {
-            ["lane"] = i.LaneKey, ["name"] = i.DisplayName, ["device"] = i.Entry!.DevicePath, ["state"] = i.Entry.State.DisplayName(),
-            ["hasDisc"] = i.Entry.State == DriveState.Inserted, ["disc"] = i.Entry.DiscName, ["busy"] = ActiveJob(i.LaneKey) != null,
+            var d = new Dictionary<string, object>
+            {
+                ["lane"] = i.LaneKey, ["name"] = i.DisplayName, ["device"] = i.Entry!.DevicePath, ["state"] = i.Entry.State.DisplayName(),
+                ["hasDisc"] = i.Entry.State == DriveState.Inserted, ["disc"] = i.Entry.DiscName, ["busy"] = ActiveJob(i.LaneKey) != null,
+                ["config"] = (i.Config ?? Config.DefaultDrive).Id.ToString(),
+            };
+            if (Sessions.TryGetValue(i.LaneKey, out var s) && (s.IsLoading || s.Info != null || s.LoadError != null)) d["opened"] = WebOpened(s);
+            return d;
         }).ToList(),
         ["jobs"] = Jobs.Select(j => new Dictionary<string, object>
         {
             ["id"] = j.Id.ToString(), ["title"] = j.Title, ["state"] = WebState(j.State), ["stateLabel"] = j.State.Label(), ["phase"] = j.Phase,
             ["progress"] = j.OverallProgress, ["error"] = j.ErrorMessage ?? "", ["outputDirectory"] = j.OutputDirectory ?? "", ["lane"] = j.LaneKey,
+            ["mode"] = j.Mode.Label(), ["drive"] = j.Drive.Name, ["startedAt"] = WebTime(j.StartedAt), ["finishedAt"] = WebTime(j.FinishedAt),
+            ["files"] = j.ProducedFiles.Count, ["warnings"] = j.WarningCount, ["errors"] = j.ErrorCount,
         }).ToList(),
         ["background"] = Background.Items.Select(b => new Dictionary<string, object> { ["id"] = b.Id.ToString(), ["title"] = b.Work.Title, ["state"] = b.State }).ToList(),
         ["history"] = History.Take(20).Select(h => new Dictionary<string, object>
         {
             ["id"] = h.Id.ToString(), ["title"] = h.Title, ["state"] = WebState(h.State), ["stateLabel"] = h.State.Label(), ["error"] = h.ErrorMessage ?? "",
             ["outputDirectory"] = h.OutputDirectory ?? "", ["finishedAt"] = h.FinishedAt?.ToString("o") ?? "",
+            ["startedAt"] = h.StartedAt?.ToString("o") ?? "", ["mode"] = h.Mode.Label(), ["drive"] = h.DriveName, ["files"] = h.Files.Count,
+            ["warnings"] = h.Warnings, ["errors"] = h.Errors,
         }).ToList(),
+        ["settings"] = new Dictionary<string, object>
+        {
+            ["drives"] = new[] { Config.DefaultDrive }.Concat(Config.Drives).Select(d => new Dictionary<string, object>
+            {
+                ["id"] = d.Id.ToString(), ["name"] = d.Name, ["autoRip"] = d.Automation.AutoRipOnInsert,
+                ["mode"] = JsonNamingPolicy.CamelCase.ConvertName(d.Rip.Mode.ToString()), ["isDefault"] = d.Id == Config.DefaultDrive.Id,
+            }).ToList(),
+            ["modes"] = EnumLabels.VideoModes.Select(m => new Dictionary<string, object> { ["value"] = JsonNamingPolicy.CamelCase.ConvertName(m.ToString()), ["label"] = m.Label() }).ToList(),
+        },
         ["verify"] = new Dictionary<string, object>
         {
             ["running"] = Verify.Running, ["path"] = Verify.Path, ["progress"] = Verify.Total > 0 ? (double)Verify.Done / Verify.Total : 0.0,
@@ -272,18 +291,61 @@ public sealed class AppState : ObservableObject
         },
     };
 
-    /// <summary>Runs an action from the web page: drives/&lt;lane&gt;/rip|eject|close, jobs/&lt;id&gt;/cancel. Returns an error, or null.</summary>
-    public string? WebAction(string kind, string id, string action)
+    static string WebTime(DateTime? t) => t?.ToUniversalTime().ToString("o") ?? "";
+
+    /// <summary>An opened disc for the web page: reading, the error, or its titles with the ones chosen on the disc page.</summary>
+    static Dictionary<string, object> WebOpened(DiscSession s)
     {
+        if (s.IsLoading) return new() { ["loading"] = true };
+        if (s.Info is not { } info) return new() { ["loading"] = false, ["error"] = s.LoadError ?? "" };
+        return new()
+        {
+            ["loading"] = false, ["error"] = "", ["name"] = info.Name,
+            ["titles"] = info.Titles.Select(t => new Dictionary<string, object>
+            {
+                ["index"] = t.Index, ["name"] = t.Name, ["duration"] = t.DurationText, ["chapters"] = t.ChapterCount, ["size"] = t.SizeBytes,
+                ["selected"] = s.SelectedTitles.Contains(t.Index),
+            }).ToList(),
+        };
+    }
+
+    /// <summary>The end of a job's log (running or in the history), for GET /api/jobs/&lt;id&gt;/log; null for an unknown job.</summary>
+    public string? WebLog(string id)
+    {
+        var path = Jobs.FirstOrDefault(j => j.Id.ToString() == id)?.LogFile ?? History.FirstOrDefault(h => h.Id.ToString() == id)?.LogPath;
+        return path == null ? null : Engine.WebLog.Tail(path);
+    }
+
+    /// <summary>Runs an action from the web page: drives/&lt;lane&gt;/open|rip|eject|close (rip?titles=0,2 rips those titles of the
+    /// opened disc), jobs/&lt;id&gt;/cancel, settings/&lt;configuration id&gt;/set?autoRip=1&amp;mode=mkv. Returns an error, or null.</summary>
+    public string? WebAction(string kind, string id, string action, IReadOnlyDictionary<string, string>? query = null)
+    {
+        query ??= new Dictionary<string, string>();
         switch (kind, action)
         {
+            case ("drives", "open"):
+                if (DriveItems.FirstOrDefault(d => d.LaneKey == id) is not { Entry: not null } drive || !Sessions.TryGetValue(id, out var opened)) return "No such drive";
+                if (drive.Entry.State != DriveState.Inserted) return "There is no disc in the drive";
+                if (ActiveJob(id)?.State == JobState.Running) return "The drive is busy";
+                _ = LoadDiscAsync(opened);
+                return null;
             case ("drives", "rip" or "eject" or "close"):
                 if (DriveItems.FirstOrDefault(d => d.LaneKey == id) is not { Entry: not null } item) return "No such drive";
                 if (action == "rip")
                 {
                     if (ActiveJob(id) != null) return "The drive is busy";
                     var before = Jobs.Count;
-                    QuickRip(item);
+                    if (query.TryGetValue("titles", out var list))
+                    {
+                        if (!Sessions.TryGetValue(id, out var s) || s.Info is not { } info) return "Open the disc first";
+                        var chosen = list.Split(',').Select(x => int.TryParse(x.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : -1)
+                            .Where(n => info.Titles.Any(t => t.Index == n)).ToHashSet();
+                        if (chosen.Count == 0) return "No titles chosen";
+                        s.SelectedTitles.Clear();
+                        s.SelectedTitles.UnionWith(chosen);
+                        RipSession(s, RipMode.Mkv);
+                    }
+                    else QuickRip(item);
                     return Jobs.Count > before ? null : LastError ?? "Nothing to rip";
                 }
                 _ = action == "eject" ? EjectAsync(id) : CloseTrayAsync(id);
@@ -294,6 +356,18 @@ public sealed class AppState : ObservableObject
                 return null;
             case ("verify", "cancel"):
                 CancelVerify();
+                return null;
+            case ("settings", "set"):
+                if (!Guid.TryParse(id, out var gid) || Config.DriveConfigById(gid) is not { } found) return "No such drive configuration";
+                var cfg = found.Clone();
+                if (query.TryGetValue("autoRip", out var a)) cfg.Automation.AutoRipOnInsert = a is "1" or "true";
+                if (query.TryGetValue("mode", out var m))
+                {
+                    var mode = EnumLabels.VideoModes.FirstOrDefault(v => JsonNamingPolicy.CamelCase.ConvertName(v.ToString()) == m, (RipMode)(-1));
+                    if ((int)mode < 0) return $"Unknown mode “{m}”";
+                    cfg.Rip.Mode = mode;
+                }
+                UpdateDrive(cfg);
                 return null;
             case ("verify", "start"):
                 if (Verify.Running) return "A check is already running";

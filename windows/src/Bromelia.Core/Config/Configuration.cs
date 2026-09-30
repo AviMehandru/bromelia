@@ -250,6 +250,9 @@ public sealed class WebUIConfig
     public int Port { get; set; } = 51280;
     /// <summary>Required for everything when set (Authorization: Bearer or ?token=).</summary>
     public string Token { get; set; } = "";
+    /// <summary>HTTPS: the certificate (PEM, with its chain) and its private key (PEM). Empty = plain HTTP.</summary>
+    public string TlsCertificate { get; set; } = "";
+    public string TlsKey { get; set; } = "";
 }
 
 public sealed class ArchiveConfig

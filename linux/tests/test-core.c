@@ -2821,6 +2821,139 @@ test_web_server (void)
   }
 }
 
+/* The web page's titles, settings and logs. */
+static void
+test_web_api (void)
+{
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  g_autofree char *text = fixture ("info-dvd");
+  g_autoptr (GHashTable) q = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  g_autoptr (JsonNode) status = NULL;
+  BroSession *s;
+  const char *lane = "dev:/dev/sr99";
+  char *err;
+  guint before;
+  /* No makemkvcon: a job fails at once instead of touching a drive. */
+  g_free (st->config->makemkvcon_path);
+  st->config->makemkvcon_path = g_strdup ("/nonexistent/makemkvcon");
+  scan (st, entry (0, BRO_DRIVE_INSERTED, "BD-RE TEST DRIVE", "/dev/sr99", "MOVIE_DISC"), NULL);
+  scan (st, entry (0, BRO_DRIVE_INSERTED, "BD-RE TEST DRIVE", "/dev/sr99", "MOVIE_DISC"), NULL);
+  g_hash_table_insert (q, g_strdup ("titles"), g_strdup ("1"));
+  err = bro_state_web_action (st, "drives", lane, "rip", q);
+  g_assert_cmpstr (err, ==, "Open the disc first");
+  g_free (err);
+  s = g_hash_table_lookup (st->sessions, lane);
+  g_assert_nonnull (s);
+  s->info = bro_disc_info_from_output (text);
+  g_hash_table_add (s->selected, GINT_TO_POINTER (0));
+  status = bro_state_web_status (st);
+  {
+    JsonObject *d = json_array_get_object_element (json_object_get_array_member (json_node_get_object (status), "drives"), 0);
+    JsonArray *titles = json_object_get_array_member (json_object_get_object_member (d, "opened"), "titles");
+    g_assert_cmpuint (json_array_get_length (titles), ==, s->info->titles->len);
+    g_assert_true (json_object_get_boolean_member (json_array_get_object_element (titles, 0), "selected"));
+    g_assert_true (json_object_has_member (json_node_get_object (status), "settings"));
+  }
+  g_hash_table_replace (q, g_strdup ("titles"), g_strdup ("999"));
+  err = bro_state_web_action (st, "drives", lane, "rip", q);
+  g_assert_cmpstr (err, ==, "No titles chosen");
+  g_free (err);
+  {
+    int a = ((BroTitle *) s->info->titles->pdata[s->info->titles->len - 2])->index;
+    int b = ((BroTitle *) s->info->titles->pdata[s->info->titles->len - 1])->index;
+    g_hash_table_replace (q, g_strdup ("titles"), g_strdup_printf ("%d, %d", a, b));
+    before = st->jobs->len;
+    g_assert_null (bro_state_web_action (st, "drives", lane, "rip", q));
+    g_assert_cmpuint (st->jobs->len, ==, before + 1);
+    {
+      BroJob *j = st->jobs->pdata[st->jobs->len - 1];
+      g_autofree char *log = NULL;
+      g_assert_cmpint (j->mode, ==, BRO_MODE_MKV);
+      g_assert_cmpuint (j->manual_titles->len, ==, 2);
+      log = bro_state_web_log (st, j->id);
+      g_assert_nonnull (log);
+    }
+  }
+  g_assert_null (bro_state_web_log (st, "nope"));
+  g_hash_table_remove_all (q);
+  g_hash_table_insert (q, g_strdup ("autoRip"), g_strdup ("1"));
+  g_hash_table_insert (q, g_strdup ("mode"), g_strdup ("backup"));
+  g_assert_null (bro_state_web_action (st, "settings", st->config->default_drive->id, "set", q));
+  g_assert_true (st->config->default_drive->automation.auto_rip_on_insert);
+  g_assert_cmpint (st->config->default_drive->rip.mode, ==, BRO_MODE_BACKUP);
+  g_hash_table_replace (q, g_strdup ("mode"), g_strdup ("audioCD"));
+  err = bro_state_web_action (st, "settings", st->config->default_drive->id, "set", q);
+  g_assert_cmpstr (err, ==, "Unknown mode “audioCD”");
+  g_free (err);
+  err = bro_state_web_action (st, "settings", "nope", "set", q);
+  g_assert_cmpstr (err, ==, "No such drive configuration");
+  g_free (err);
+  st->config->default_drive->automation.auto_rip_on_insert = FALSE;
+}
+
+/* HTTPS: a PEM certificate and key are loaded; the web page test in CI makes the requests. */
+static void
+test_web_tls (void)
+{
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  g_autofree char *openssl = g_find_program_in_path ("openssl");
+  g_autofree char *dir = NULL, *cert = NULL, *key = NULL;
+  BroWebUIConfig c = { TRUE, (char *) "127.0.0.1", g_random_int_range (52000, 58000), (char *) "", (char *) "", (char *) "" };
+  int status = -1;
+  c.tls_certificate = (char *) "/nonexistent/cert.pem";
+  {
+    g_autofree char *p = bro_web_start_problem (&c);
+    g_assert_cmpstr (p, ==, "HTTPS needs both the certificate and its key");
+  }
+  if (!openssl || !g_tls_backend_supports_tls (g_tls_backend_get_default ()))
+    {
+      g_test_skip ("needs openssl and a GLib TLS backend (glib-networking)");
+      return;
+    }
+  dir = g_dir_make_tmp ("bromelia-tls-XXXXXX", NULL);
+  cert = g_build_filename (dir, "cert.pem", NULL);
+  key = g_build_filename (dir, "key.pem", NULL);
+  {
+    const char *argv[] = { openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "2",
+                           "-subj", "/CN=localhost", NULL };
+    g_assert_true (bro_process_run (argv, NULL, NULL, 60, NULL, NULL, NULL, &status, NULL, NULL, NULL));
+    g_assert_cmpint (status, ==, 0);
+  }
+  c.tls_certificate = cert;
+  c.tls_key = (char *) "/nonexistent/key.pem";
+  bro_web_server_apply (st->web, &c);
+  g_assert_nonnull (bro_web_server_last_error (st->web));
+  g_assert_false (bro_web_server_running (st->web));
+  c.tls_key = key;
+  bro_web_server_apply (st->web, &c);
+  g_assert_null (bro_web_server_last_error (st->web));
+  g_assert_true (bro_web_server_running (st->web));
+  bro_web_server_stop (st->web);
+  rm_rf (dir);
+}
+
+static void
+test_web_log_tail (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-tail-XXXXXX", NULL);
+  g_autofree char *file = g_build_filename (dir, "log.txt", NULL);
+  g_autofree char *all = NULL, *tail = NULL, *none = NULL;
+  GString *t = g_string_new (NULL);
+  for (int i = 1; i <= 1000; i++)
+    g_string_append_printf (t, "line %d\n", i);
+  g_file_set_contents (file, t->str, -1, NULL);
+  g_string_free (t, TRUE);
+  all = bro_web_log_tail (file, 256 * 1024);
+  g_assert_true (g_str_has_prefix (all, "line 1\n"));
+  tail = bro_web_log_tail (file, 100);
+  g_assert_true (g_str_has_prefix (tail, "…\nline "));
+  g_assert_true (g_str_has_suffix (tail, "line 1000\n"));
+  g_assert_cmpuint (strlen (tail), <, 110);
+  none = bro_web_log_tail ("/nonexistent/log.txt", 100);
+  g_assert_cmpstr (none, ==, "");
+  rm_rf (dir);
+}
+
 typedef void (*Configure) (BroRunRequest *req, gpointer data);
 
 /* Runs a job against the fake with its own configuration. */
@@ -3576,7 +3709,7 @@ test_verify_in_state (void)
   }
   /* The web page can start a check of the output folder. */
   {
-    g_autofree char *err = bro_state_web_action (st, "verify", "", "start");
+    g_autofree char *err = bro_state_web_action (st, "verify", "", "start", NULL);
     g_assert_null (err);
     g_assert_true (st->verify.running);
     while (st->verify.running && g_get_monotonic_time () < until)
@@ -3702,6 +3835,9 @@ main (int argc, char **argv)
   g_test_add_func ("/lookup/nfo-files", test_nfo_files);
   g_test_add_func ("/post/handbrake-arguments", test_handbrake_arguments);
   g_test_add_func ("/post/handbrake-encodes", test_handbrake_encodes);
+  g_test_add_func ("/web/api", test_web_api);
+  g_test_add_func ("/web/log-tail", test_web_log_tail);
+  g_test_add_func ("/web/tls", test_web_tls);
   g_test_add_func ("/robot/parse-events", test_parse_events);
   g_test_add_func ("/robot/drive-scan-fixture", test_drive_scan_fixture);
   g_test_add_func ("/robot/disc-info-fixture", test_disc_info_fixture);

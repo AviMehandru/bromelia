@@ -27,10 +27,19 @@
   .running { color: var(--accent); }
   button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
   button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
   progress { width: 100%; height: 8px; accent-color: var(--accent); }
   .banner { background: var(--card); border: 1px solid var(--warn); color: var(--text); border-radius: 10px; padding: 10px 14px; margin-top: 12px; }
   .empty { color: var(--muted); font-size: 13px; padding: 4px 2px; }
   #error { color: var(--bad); font-size: 13px; min-height: 1em; }
+  .titles { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .titles label { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 14px; cursor: pointer; }
+  .titles label span { color: var(--muted); font-size: 13px; }
+  .details { margin-top: 8px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  pre.log { margin: 8px 0 0; max-height: 320px; overflow: auto; font: 12px/1.35 ui-monospace, "Cascadia Mono", Menlo, monospace;
+            white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px; }
+  .clickable { cursor: pointer; }
+  select { font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--text); max-width: 100%; }
 </style>
 </head>
 <body>
@@ -43,6 +52,7 @@
   <h2>Background</h2><div id="background"></div>
   <h2>Recent</h2><div id="history"></div>
   <h2>Archive check</h2><div id="verify"></div>
+  <h2>Settings</h2><div id="settings"></div>
 </main>
 <script>
 const token = new URLSearchParams(location.search).get("token") || "";
@@ -76,10 +86,12 @@ function render(s) {
     t.append(el("div", null, d.name), el("div", "muted", [d.state, d.disc, d.device].filter(Boolean).join(" · ")));
     r.append(t);
     const lane = encodeURIComponent(d.lane);
+    if (d.hasDisc && !d.busy) r.append(button("Open", `/api/drives/${lane}/open`));
     if (d.hasDisc && !d.busy) r.append(button("Rip", `/api/drives/${lane}/rip`));
     if (d.hasDisc && !d.busy) r.append(button("Eject", `/api/drives/${lane}/eject`));
     if (!d.hasDisc) r.append(button("Close tray", `/api/drives/${lane}/close`));
     c.append(r);
+    if (d.opened && d.hasDisc) c.append(titleList(d, lane));
     drives.append(c);
   }
 
@@ -90,10 +102,11 @@ function render(s) {
   for (const j of live) {
     const c = el("div", "card"), r = el("div", "row"), t = el("div", "grow");
     t.append(el("div", null, j.title), el("div", "muted", j.phase || ""));
-    r.append(t, el("span", "state " + j.state, j.stateLabel));
+    r.append(t, el("span", "state " + j.state, j.stateLabel), logButton(j.id));
     if (j.state !== "done") r.append(button("Cancel", `/api/jobs/${encodeURIComponent(j.id)}/cancel`));
     c.append(r);
     if (j.state === "running") { const p = el("progress"); p.max = 1; p.value = j.progress || 0; c.append(p); }
+    addLog(c, j.id, j.state === "running");
     jobs.append(c);
   }
 
@@ -115,10 +128,15 @@ function render(s) {
   const done = finished.concat(s.history.filter(h => !h.id || !shown.has(h.id))).slice(0, 20);
   if (!done.length) history.append(el("div", "empty", "No finished jobs yet."));
   for (const h of done) {
-    const c = el("div", "card"), r = el("div", "row"), t = el("div", "grow");
+    const c = el("div", "card"), r = el("div", "row"), t = el("div", "grow clickable");
     t.append(el("div", null, h.title), el("div", "muted", h.error || h.outputDirectory || ""));
+    t.title = "Show the details";
+    t.onclick = () => { if (expanded.has(h.id)) expanded.delete(h.id); else expanded.add(h.id); render(last); };
     r.append(t, el("span", "state " + h.state, h.stateLabel || h.state));
+    if (h.id) r.append(logButton(h.id));
     c.append(r);
+    if (h.id && expanded.has(h.id)) c.append(details(h));
+    if (h.id) addLog(c, h.id, false);
     history.append(c);
   }
 
@@ -144,13 +162,112 @@ function render(s) {
     }
     verify.append(c);
   }
+  renderSettings(s.settings);
 }
 
+// --- Opened discs: the titles, picked like on the disc page (the drive's rules preselect them). ---
+const picked = {};   // lane → { disc, titles: Set of title numbers }
+function titleList(d, lane) {
+  const box = el("div", "titles"), o = d.opened;
+  if (o.loading) { box.append(el("div", "muted", "Reading the disc…")); return box; }
+  if (o.error) { box.append(el("div", "muted", o.error)); return box; }
+  const titles = o.titles || [];
+  let p = picked[d.lane];
+  if (!p || p.disc !== o.name) p = picked[d.lane] = { disc: o.name, titles: new Set(titles.filter(x => x.selected).map(x => x.index)) };
+  for (const x of titles) {
+    const l = el("label"), cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = p.titles.has(x.index);
+    cb.onchange = () => { if (cb.checked) p.titles.add(x.index); else p.titles.delete(x.index); render(last); };
+    l.append(cb, el("div", null, (x.name || "Title " + x.index)),
+             el("span", null, [x.duration, x.chapters + " ch", size(x.size)].filter(Boolean).join(" · ")));
+    box.append(l);
+  }
+  const chosen = titles.filter(x => p.titles.has(x.index)).map(x => x.index);
+  const r = el("div", "row");
+  r.append(el("div", "grow muted", `${chosen.length} of ${titles.length} title(s) · ${size(titles.filter(x => p.titles.has(x.index)).reduce((a, x) => a + (x.size || 0), 0))}`));
+  const b = button(`Make MKV (${chosen.length} title${chosen.length === 1 ? "" : "s"})`, `/api/drives/${lane}/rip?titles=${chosen.join(",")}`);
+  b.disabled = !chosen.length;
+  r.append(b);
+  box.append(r);
+  return box;
+}
+function size(bytes) {
+  if (!bytes) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0, n = bytes;
+  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+  return (i ? n.toFixed(1) : n) + " " + u[i];
+}
+
+// --- Job logs (running jobs are read again at every refresh) and history details. ---
+const expanded = new Set(), logs = new Map();   // id → text shown, or "" while it is read
+function logButton(id) {
+  const b = el("button", null, logs.has(id) ? "Hide log" : "Log");
+  b.onclick = () => { if (logs.has(id)) logs.delete(id); else { logs.set(id, ""); readLog(id); } render(last); };
+  return b;
+}
+async function readLog(id) {
+  try {
+    const r = await fetch(`/api/jobs/${encodeURIComponent(id)}/log`, { headers });
+    const text = r.ok ? await r.text() : "The log can't be read: " + ((await r.text()) || "HTTP " + r.status);
+    if (logs.has(id)) { logs.set(id, text || "(empty)"); render(last); }
+  } catch (e) { if (logs.has(id)) { logs.set(id, "The log can't be read: " + e.message); render(last); } }
+}
+function addLog(card, id, live) {
+  if (!logs.has(id)) return;
+  const pre = el("pre", "log", logs.get(id) || "Reading the log…");
+  card.append(pre);
+  requestAnimationFrame(() => { pre.scrollTop = pre.scrollHeight; });
+  if (live) pending.add(id);
+}
+const pending = new Set();
+function details(h) {
+  const box = el("div", "details");
+  const when = t => t ? new Date(t).toLocaleString() : "";
+  box.append(el("div", null, [h.mode, h.drive].filter(Boolean).join(" · ")));
+  if (h.startedAt || h.finishedAt) box.append(el("div", null, [when(h.startedAt), when(h.finishedAt)].filter(Boolean).join(" → ")));
+  box.append(el("div", null, `${h.files || 0} file(s) · ${h.warnings || 0} warning(s) · ${h.errors || 0} error(s)`));
+  if (h.outputDirectory) box.append(el("div", null, h.outputDirectory));
+  if (h.error) box.append(el("div", null, h.error));
+  return box;
+}
+
+// --- Settings: automatic rips and the mode of each drive configuration. Drawn again only when they change, so an
+// open menu isn't closed by the refresh. ---
+let settingsShown = "";
+function renderSettings(st) {
+  const box = document.getElementById("settings"), key = JSON.stringify(st || null);
+  if (key === settingsShown) return;
+  settingsShown = key;
+  box.replaceChildren();
+  if (!st || !st.drives || !st.drives.length) { box.append(el("div", "empty", "No settings to change here.")); return; }
+  for (const d of st.drives) {
+    const c = el("div", "card"), r = el("div", "row"), t = el("div", "grow");
+    t.append(el("div", null, d.name), el("div", "muted", d.isDefault ? "Drives without their own configuration" : "Drive configuration"));
+    const auto = el("label", "muted"), cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = !!d.autoRip;
+    cb.onchange = () => call(`/api/settings/${encodeURIComponent(d.id)}/set?autoRip=${cb.checked ? 1 : 0}`);
+    auto.append(cb, " Rip when a disc is inserted");
+    const mode = el("select");
+    for (const m of st.modes || []) { const o = el("option", null, m.label); o.value = m.value; o.selected = m.value === d.mode; mode.append(o); }
+    mode.onchange = () => call(`/api/settings/${encodeURIComponent(d.id)}/set?mode=${encodeURIComponent(mode.value)}`);
+    r.append(t, auto, mode);
+    c.append(r);
+    box.append(c);
+  }
+}
+
+let last = null;
 async function refresh() {
   try {
     const r = await fetch("/api/status", { headers });
     if (!r.ok) throw new Error(r.status === 401 ? "Add ?token=… to the address." : (await r.text()) || "HTTP " + r.status);
-    render(await r.json());
+    last = await r.json();
+    pending.clear();
+    render(last);
+    for (const id of pending) readLog(id);
     document.getElementById("error").textContent = actionError;
   } catch (e) {
     document.getElementById("error").textContent = "Bromelia is not reachable: " + e.message;

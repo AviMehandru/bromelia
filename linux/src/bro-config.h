@@ -192,6 +192,8 @@ typedef struct {
   char *address; /* 127.0.0.1 = this computer only; 0.0.0.0 = the network (needs a token) */
   int port;
   char *token;   /* required for everything when set (Authorization: Bearer <token> or ?token=) */
+  char *tls_certificate; /* HTTPS: the certificate (PEM, with its chain); "" = plain HTTP */
+  char *tls_key;         /* HTTPS: its private key (PEM) */
 } BroWebUIConfig;
 
 typedef struct {
@@ -221,6 +223,7 @@ typedef struct {
 
 /* Enum <-> JSON string helpers (also used by labels in the UI). */
 const char *bro_rip_mode_to_string (BroRipMode m);
+int         bro_rip_mode_parse (const char *s); /* a BroRipMode, or -1 */
 const char *bro_rip_mode_label (BroRipMode m);
 const char *bro_rip_mode_short (BroRipMode m);
 gboolean    bro_rip_mode_makes_mkv (BroRipMode m);

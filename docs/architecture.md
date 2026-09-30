@@ -199,9 +199,12 @@ turns on and off.
 - **Background queue.** Steps marked `background` are handed from the finished job to a queue in the app state
   that runs them `backgroundJobs` at a time on worker threads, with the job's tokens and variables captured when
   the job ended.
-- **Web page.** A small HTTP/1.1 server (Network.framework, `HttpListener`, `GSocketService`) answers one request
+- **Web page.** A small HTTP/1.1 server (Network.framework, `TcpListener`, `GSocketService`) answers one request
   per connection on the UI thread: the page itself (`shared/web/bromelia-web.html`, bundled as a resource), a
-  status document built from the app state, and four actions that call the same functions as the UI.
+  status document built from the app state, the end of a job's log, and actions that call the same functions as the
+  UI (opening a disc fills the drive's disc session, as the disc page does). HTTPS wraps the same connections in
+  TLS: `NWProtocolTLS` with an identity imported from a PKCS #12 that `openssl` makes of the PEM files, `SslStream`,
+  and `GTlsServerConnection`.
 - **Media server layout** swaps the folder and file templates for fixed ones and makes the show / movie folder
   shared between jobs: when files are moved out of the staging folder, folders that exist already (`Season 02`,
   `Other`, `Backup`) are merged item by item instead of getting a numbered name.

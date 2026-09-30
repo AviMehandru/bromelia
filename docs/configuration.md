@@ -51,7 +51,9 @@ between versions and platforms freely. Paths may start with `~`.
     "enabled": false,
     "address": "127.0.0.1",        // 127.0.0.1 = this computer only; 0.0.0.0 = the network (needs a token)
     "port": 51280,
-    "token": ""                    // required for every request when set
+    "token": "",                   // required for every request when set
+    "tlsCertificate": "",          // HTTPS: certificate (PEM); "" = plain HTTP (see "Web page")
+    "tlsKey": ""                   // HTTPS: its private key (PEM)
   }
 }
 ```
@@ -505,20 +507,35 @@ didn't succeed):
 
 ## Web page
 
-With `webUI.enabled` Bromelia serves a page at `http://<address>:<port>/` showing drives, jobs,
-background steps, recent history and the last archive check, with *Rip*, *Eject*, *Close tray*, *Cancel* and
-*Check output folder*. The same data is
-available as JSON:
+With `webUI.enabled` Bromelia serves a page at `http://<address>:<port>/` (`https://` with a certificate) showing
+drives, jobs, background steps, recent history and the last archive check, with *Open*, *Rip*, *Eject*, *Close tray*,
+*Cancel* and *Check output folder*. *Open* reads the disc's titles; they are ticked as the drive's title rules pick
+them, and *Make MKV* rips the ticked ones (like the disc page). Every job and history entry has a *Log*; a history
+entry shows its details when clicked. *Settings* switches automatic rips and the mode of each drive configuration.
+The same data is available as JSON:
 
 | Request | Result |
 | --- | --- |
-| `GET /api/status` | `{app, makemkv, problem, drives[{lane, name, device, state, hasDisc, disc, busy}], jobs[{id, title, state, stateLabel, phase, progress, error, outputDirectory, lane}], background[{id, title, state}], history[{title, state, stateLabel, error, outputDirectory, finishedAt}], verify{running, path, progress, folder, stopped, finishedAt, folders, damaged[{folder, summary}]}}` |
-| `POST /api/drives/<lane>/rip` · `eject` · `close` | 204, or 400 with the reason |
+| `GET /api/status` | `{app, version, makemkv, problem, drives[{lane, name, device, state, hasDisc, disc, busy, config, opened?}], jobs[{id, title, state, stateLabel, phase, progress, error, outputDirectory, lane, mode, drive, startedAt, finishedAt, files, warnings, errors}], background[{id, title, state}], history[{id, title, state, stateLabel, error, outputDirectory, startedAt, finishedAt, mode, drive, files, warnings, errors}], verify{running, path, progress, folder, stopped, finishedAt, folders, damaged[{folder, summary}]}, settings{drives[{id, name, autoRip, mode, isDefault}], modes[{value, label}]}}` |
+| | `opened` (a disc opened here or on the disc page): `{loading, error, name, titles[{index, name, duration, chapters, size, selected}]}` |
+| `POST /api/drives/<lane>/open` | Read the disc's titles; 204, or 400 with the reason |
+| `POST /api/drives/<lane>/rip` | Rip with the drive's mode and title rules; `?titles=0,2,5` rips those titles of the opened disc as MKV files. 204, or 400 with the reason (`Open the disc first`, `No titles chosen`, …) |
+| `POST /api/drives/<lane>/eject` · `close` | 204, or 400 with the reason |
 | `POST /api/jobs/<id>/cancel` | 204, or 400 (`No such job`) |
+| `GET /api/jobs/<id>/log` | The end of the job's log (a running job or one in the history; at most 256 KB, from a line start), or 404 |
+| `POST /api/settings/<configuration id>/set?autoRip=1&mode=backup` | Change `automation.autoRipOnInsert` and / or `rip.mode` (`mkv`, `backup`, `backupDecrypted`, `backupThenMkv`, `infoOnly`) of a drive configuration (the ids are in `settings`; the default configuration is the first); 204, or 400 |
 | `POST /api/verify` · `/api/verify/cancel` | Verify the output folder's archives (see "Archive check") · stop; 204, or 400 with the reason |
 
 Access rules: with a `token`, every request needs `Authorization: Bearer <token>` or `?token=<token>`
 (the page passes it on). Without one, only pages on this computer are served (the `Host` header must be
 `localhost`, `127.0.0.1` or `[::1]`, which also stops DNS rebinding), and an `address` other than
 `127.0.0.1` / `localhost` / `::1` is refused. `POST` requests need the header `X-Bromelia: 1`, which other
-web sites can't send. There is no TLS: put a reverse proxy in front of it for access over the internet.
+web sites can't send.
+
+**HTTPS.** Set `webUI.tlsCertificate` (the certificate, PEM, with its chain) and `webUI.tlsKey` (its private key,
+PEM) to serve the page over HTTPS only; both or neither. A self-signed one:
+`openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 825 -subj /CN=bromelia.local`.
+On Linux this needs GLib's TLS backend (`glib-networking`, in the Docker image); on macOS the key is imported into
+memory (macOS 15) or a keychain file of Bromelia's own (`web-tls.keychain-db`), never the login keychain; on Windows
+the server no longer uses `HttpListener`, so neither `netsh` nor administrator rights are needed (open the port in
+the firewall for other computers). A reverse proxy works too.

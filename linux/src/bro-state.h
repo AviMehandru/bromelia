@@ -276,7 +276,10 @@ void            bro_state_update_beta_key_if_needed (BroState *self, const char 
 /* The web page: the JSON for /api/status, and actions (drives/<lane>/rip|eject|close, jobs/<id>/cancel; returns an
  * error or NULL). */
 JsonNode       *bro_state_web_status (BroState *self);
-char           *bro_state_web_action (BroState *self, const char *kind, const char *id, const char *action);
+/* query: the request's parameters (may be NULL). */
+char           *bro_state_web_action (BroState *self, const char *kind, const char *id, const char *action, GHashTable *query);
+/* The end of a job's log (running or in the history), or NULL for an unknown job. */
+char           *bro_state_web_log (BroState *self, const char *id);
 const char     *bro_state_web_error (BroState *self);
 /* A state for a headless process (no GApplication), with its configuration at config_path (NULL = the default). */
 BroState       *bro_state_new_headless (const char *config_path);
