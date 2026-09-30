@@ -70,7 +70,9 @@ public static class DriveConfigEditor
             },
             () => c.Automation.AlreadyArchived, v => c.Automation.AlreadyArchived = v,
             "Automatic rips. A disc is recognised by its fingerprint, in the history or a bromelia.json under the output folder. Manual rips ask first.");
-        f.Section("Other discs", "For discs without a DVD or Blu-ray structure, when ripped automatically or with Rip. Audio CDs are ripped by cyanrip or abcde (both look up the album in MusicBrainz and write FLAC). Data discs are copied sector by sector to an ISO image.");
+        var audioTool = OtherDiscTools.AudioCommand(new OtherDiscsConfig(), "D:");
+        var cyanripNote = audioTool == null ? " (not found)" : " (found: " + audioTool.Value.Exe + ")";
+        f.Section("Other discs", $"For discs without a DVD or Blu-ray structure, when ripped automatically or with Rip. Audio CDs are ripped by cyanrip (it looks up the album in MusicBrainz and writes FLAC): download cyanrip.exe from github.com/cyanreg/cyanrip/releases and put it next to Bromelia.exe or on the PATH{cyanripNote}. Data discs are copied sector by sector to an ISO image.");
         f.Toggle("Rip audio CDs", () => c.Other.RipAudioCDs, v => c.Other.RipAudioCDs = v);
         f.Text("Audio CD command", () => c.Other.AudioCommand, v => c.Other.AudioCommand = v, "Empty: cyanrip -d {device} -o flac, else abcde");
         f.Toggle("Save data discs as ISO images", () => c.Other.ImageDataDiscs, v => c.Other.ImageDataDiscs = v);

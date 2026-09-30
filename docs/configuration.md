@@ -454,8 +454,10 @@ Automatic rips and *Rip* look at what is in the drive. DVDs and Blu-rays use the
 `formatModes`). Other discs:
 
 - **Audio CDs** (`ripAudioCDs`) are ripped with `audioCommand`, run in the output folder with `{device}` set
-  to the drive. Empty uses `cyanrip -d <device> -o flac`, else `abcde -d <device> -o flac -N`; both look the
-  album up in MusicBrainz.
+  to the drive. Empty uses `cyanrip -d <device> -o flac`, else `abcde -d <device> -o flac -N` (not on Windows);
+  both look the album up in MusicBrainz. On Windows, download `cyanrip.exe` from
+  [its releases](https://github.com/cyanreg/cyanrip/releases) and put it next to `Bromelia.exe`, on the `PATH`, or in
+  `Program Files\cyanrip`; the drive editor says whether it was found.
 - **Data discs** (`imageDataDiscs`) are copied to `<name> - Backup - DISC.iso`: byte for byte on Linux and
   Windows, with `hdiutil` (2048-byte sectors) on macOS. A read error fails the job; with `verifyRips` the
   image must contain an ISO 9660 or UDF file system.
@@ -500,10 +502,15 @@ didn't succeed):
 | `https://discord.com/api/webhooks/…` | Discord webhook (`content`) |
 | `https://hooks.slack.com/services/…` | Slack webhook (`text`) |
 | `ntfy://topic`, `ntfy://host/topic`, `ntfys://host/topic`, `https://ntfy.sh/topic` | ntfy (title, tags) |
+| `tgram://<bot token>/<chat id>` | Telegram Bot API `sendMessage` (`chat_id`, `text`); several chats: Apprise |
+| `pover://<user key>@<app token>[/<device>]` | Pushover `messages.json` (`token`, `user`, `title`, `message`, `device`) |
+| `gotify://<host>[:port][/path]/<app token>`, `gotifys://…` (HTTPS) | Gotify `/message` (`X-Gotify-Key`; priority 5, 8 for problems) |
 | any other `http(s)://` URL | JSON `{"app", "title", "body", "status"}` |
-| anything else (`tgram://…`, `pover://…`, `mailto://…`) | the [`apprise`](https://github.com/caronc/apprise) command, when installed |
+| anything else (`mailto://…`, `discord://…`, …) | the [`apprise`](https://github.com/caronc/apprise) command, else `python3 -m apprise` (`py -m apprise` or `python -m apprise` on Windows), when installed |
 
-`status` is `success`, `errors`, `failed` or `cancelled`. Failures are written to the job log.
+`status` is `success`, `errors`, `failed` or `cancelled`. Failures are written to the job log. The Telegram, Pushover
+and Gotify forms are Apprise's, so the same URLs work with or without Apprise installed.
+`shared/fixtures/notifications.json` holds the requests every platform's tests expect.
 
 ## Web page
 

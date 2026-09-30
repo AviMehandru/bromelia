@@ -566,6 +566,8 @@ public static class EpisodeSplitter
             }
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (local.Length > 0) dirs.Add(System.IO.Path.Combine(local, "Microsoft", "WinGet", "Links"));
+            // Tools put next to Bromelia.exe (cyanrip.exe, for instance).
+            dirs.Add(AppContext.BaseDirectory);
         }
         else dirs.AddRange(new[] { "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin" });
         foreach (var d in dirs.Where(d => d.Length > 0))

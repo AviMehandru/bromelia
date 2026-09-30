@@ -168,3 +168,27 @@ struct MediaServerMetadataTests {
         #expect(!MediaServerMetadata.isMetadataFile("Friends (1994) - S02E01.mkv"))
     }
 }
+
+/// shared/fixtures/notifications.json: how every notification URL is sent.
+@Suite("Notification deliveries")
+struct NotificationFixtureTests {
+    @Test func sharedCases() throws {
+        let fixture = try json(shared.appendingPathComponent("notifications.json"))
+        for c in fixture["cases"] as! [[String: Any]] {
+            let url = c["url"] as! String, expect = c["expect"] as! [String: Any]
+            let d = NotificationSender.delivery(for: url, title: "T", body: "B", status: c["status"] as! String)
+            if let apprise = expect["apprise"] as? String {
+                #expect(d == .apprise(url: apprise), "\(url)")
+                continue
+            }
+            guard case let .http(u, headers, data)? = d else { Issue.record("\(url): not HTTP"); continue }
+            #expect(u.absoluteString == expect["url"] as? String, "\(url)")
+            #expect(headers == expect["headers"] as? [String: String], "\(url)")
+            if let want = expect["json"] as? NSDictionary {
+                #expect((try? JSONSerialization.jsonObject(with: data)) as? NSDictionary == want, "\(url)")
+            } else {
+                #expect(String(decoding: data, as: UTF8.self) == expect["text"] as? String, "\(url)")
+            }
+        }
+    }
+}

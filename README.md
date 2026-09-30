@@ -144,7 +144,8 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **Separate modes for DVDs, Blu-rays and 4K discs** (e.g. backups of DVDs, MKVs of Blu-rays).
 - **Built-in transcoding** (as in ARM): a *Transcode with HandBrake* step encodes every ripped MKV with a HandBrake
   preset (or one exported from HandBrake) in the background queue, into its own files next to the untouched archive.
-- **Notifications** to Discord, Slack, ntfy, any webhook, or any Apprise service (Telegram, Pushover, e-mail, …).
+- **Notifications** to Discord, Slack, ntfy, Telegram, Pushover, Gotify, any webhook, or any other Apprise service
+  (e-mail, …).
 - **Background post-processing**: encoding or upload steps run after the disc is out, in their own queue, so the
   drive is free for the next disc.
 - **Web page** for watching and controlling Bromelia from a browser: rip, eject, close tray, cancel; open a disc and
@@ -301,7 +302,7 @@ See [docs/architecture.md](docs/architecture.md) for how the pieces fit together
 - Without an online lookup the name comes from the disc itself; change it on the disc page when the label is
   cryptic. Episode titles need the show's season numbering to match the disc's: a disc numbered across seasons
   (absolute numbers such as 138) gets titles only when the online season lists those numbers.
-- Audio CDs need cyanrip or abcde (not on Windows by default: set an audio CD command); `apprise` URLs need the
-  `apprise` command.
+- Audio CDs need cyanrip or abcde (on Windows: cyanrip.exe next to Bromelia.exe or on the PATH). Notifications other
+  than webhooks, ntfy, Telegram, Pushover and Gotify need Apprise (Python).
 - The `e` format codes mean “not decrypted by Bromelia”: a DVD without CSS backed up without decryption
   is still labelled `DVDe`.

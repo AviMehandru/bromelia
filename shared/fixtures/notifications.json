@@ -1,0 +1,30 @@
+{
+  "comment": "How each notification URL is sent (see docs/configuration.md, Notifications), for title T, body B and the status. json: the body as JSON; text: the body as it is; apprise: sent with the apprise command.",
+  "cases": [
+    {"url": "https://discord.com/api/webhooks/1/x", "status": "success",
+     "expect": {"url": "https://discord.com/api/webhooks/1/x", "headers": {"Content-Type": "application/json"}, "json": {"content": "**T**\nB"}}},
+    {"url": "ntfy://alerts", "status": "success",
+     "expect": {"url": "https://ntfy.sh/alerts", "headers": {"Title": "T", "Tags": "white_check_mark"}, "text": "B"}},
+    {"url": "tgram://123456:ABC-def_gh/987654", "status": "success",
+     "expect": {"url": "https://api.telegram.org/bot123456:ABC-def_gh/sendMessage", "headers": {"Content-Type": "application/json"},
+                "json": {"chat_id": "987654", "text": "T\nB"}}},
+    {"url": "tgram://123456:ABC-def_gh/-100200300/", "status": "failed",
+     "expect": {"url": "https://api.telegram.org/bot123456:ABC-def_gh/sendMessage", "headers": {"Content-Type": "application/json"},
+                "json": {"chat_id": "-100200300", "text": "T\nB"}}},
+    {"url": "tgram://123456:ABC-def_gh/111/222", "status": "success", "expect": {"apprise": "tgram://123456:ABC-def_gh/111/222"}},
+    {"url": "pover://uKey123@aToken456", "status": "success",
+     "expect": {"url": "https://api.pushover.net/1/messages.json", "headers": {"Content-Type": "application/json"},
+                "json": {"token": "aToken456", "user": "uKey123", "title": "T", "message": "B"}}},
+    {"url": "pover://uKey123@aToken456/phone", "status": "errors",
+     "expect": {"url": "https://api.pushover.net/1/messages.json", "headers": {"Content-Type": "application/json"},
+                "json": {"token": "aToken456", "user": "uKey123", "title": "T", "message": "B", "device": "phone"}}},
+    {"url": "gotify://gotify.example/AbCdEf", "status": "success",
+     "expect": {"url": "http://gotify.example/message", "headers": {"Content-Type": "application/json", "X-Gotify-Key": "AbCdEf"},
+                "json": {"title": "T", "message": "B", "priority": 5}}},
+    {"url": "gotifys://example.org:8443/gotify/AbCdEf", "status": "failed",
+     "expect": {"url": "https://example.org:8443/gotify/message", "headers": {"Content-Type": "application/json", "X-Gotify-Key": "AbCdEf"},
+                "json": {"title": "T", "message": "B", "priority": 8}}},
+    {"url": "pover://missing-token", "status": "success", "expect": {"apprise": "pover://missing-token"}},
+    {"url": "mailto://user:pass@example.org", "status": "success", "expect": {"apprise": "mailto://user:pass@example.org"}}
+  ]
+}

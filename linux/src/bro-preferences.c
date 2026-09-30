@@ -606,9 +606,9 @@ services_page (void)
                                                 &c->metadata.nfo, changed_cb, NULL));
 
   g = group (ADW_PREFERENCES_PAGE (page), "Notifications",
-             "Sent when a job finishes. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook "
-             "(JSON) work directly with curl; other Apprise URLs (Telegram, Pushover, e-mail, …) need the apprise command "
-             "(pip install apprise).");
+             "Sent when a job finishes. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic), Telegram "
+             "(tgram://bot_token/chat_id), Pushover (pover://user_key@app_token), Gotify (gotify://host/app_token) and any https "
+             "webhook (JSON) work directly with curl; other Apprise URLs (e-mail, …) need Apprise (pip install apprise).");
   sv->group = g;
   sv->result = bro_caption ("");
   {

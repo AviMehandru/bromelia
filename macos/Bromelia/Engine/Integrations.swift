@@ -15,7 +15,12 @@ enum NotificationSender {
     /// How `target` is reached. Returns nil for an empty or malformed URL.
     static func delivery(for target: String, title: String, body: String, status: String) -> Delivery? {
         let raw = target.trimmingCharacters(in: .whitespaces)
-        guard let comps = URLComponents(string: raw), let scheme = comps.scheme?.lowercased() else { return nil }
+        guard let sep = raw.range(of: "://"), sep.lowerBound > raw.startIndex else { return nil }
+        let scheme = raw[..<sep.lowerBound].lowercased()
+        if ["tgram", "pover", "gotify", "gotifys"].contains(scheme) {
+            return appriseStyle(scheme: scheme, rest: String(raw[sep.upperBound...]), title: title, body: body, status: status) ?? .apprise(url: raw)
+        }
+        guard let comps = URLComponents(string: raw) else { return scheme == "http" || scheme == "https" ? nil : .apprise(url: raw) }
         func json(_ o: [String: Any]) -> Data { (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? Data() }
         switch scheme {
         case "http", "https":
@@ -46,6 +51,40 @@ enum NotificationSender {
         }
     }
 
+    /// Apprise URLs sent directly, without Python: Telegram with one chat (`tgram://bot_token/chat_id`), Pushover
+    /// (`pover://user_key@app_token[/device]`) and Gotify (`gotify://host[:port][/path]/app_token`, `gotifys://` for
+    /// HTTPS). nil for the other forms, which go to the apprise command.
+    static func appriseStyle(scheme: String, rest: String, title: String, body: String, status: String) -> Delivery? {
+        func json(_ o: [String: Any]) -> Data { (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? Data() }
+        let parts = rest.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let path = parts.last == "" ? Array(parts.dropLast()) : parts
+        switch scheme {
+        case "tgram":
+            guard path.count == 2, path[0].contains(":"), !path[1].isEmpty,
+                  let url = URL(string: "https://api.telegram.org/bot\(path[0])/sendMessage") else { return nil }
+            return .http(url: url, headers: ["Content-Type": "application/json"], body: json(["chat_id": path[1], "text": "\(title)\n\(body)"]))
+        case "pover":
+            guard (1...2).contains(path.count), let at = path[0].firstIndex(of: "@") else { return nil }
+            let user = String(path[0][..<at]), token = String(path[0][path[0].index(after: at)...])
+            guard !user.isEmpty, !token.isEmpty, let url = URL(string: "https://api.pushover.net/1/messages.json") else { return nil }
+            var o: [String: Any] = ["token": token, "user": user, "title": title, "message": body]
+            if path.count == 2, !path[1].isEmpty { o["device"] = path[1] }
+            return .http(url: url, headers: ["Content-Type": "application/json"], body: json(o))
+        default:
+            guard path.count >= 2, !path[0].isEmpty, let token = path.last, !token.isEmpty,
+                  let url = URL(string: "\(scheme == "gotifys" ? "https" : "http")://" + path.dropLast().joined(separator: "/") + "/message") else { return nil }
+            return .http(url: url, headers: ["Content-Type": "application/json", "X-Gotify-Key": token],
+                         body: json(["title": title, "message": body, "priority": status == "success" ? 5 : 8]))
+        }
+    }
+
+    /// The apprise command, else Python with the apprise module (`python3 -m apprise`).
+    static func appriseCommand() -> (URL, [String])? {
+        if let a = EpisodeSplitter.findTool("apprise") { return (a, []) }
+        if let py = EpisodeSplitter.findTool("python3") { return (py, ["-m", "apprise"]) }
+        return nil
+    }
+
     /// Sends to every enabled target that wants this status. Failures are reported through `log`.
     static func send(_ targets: [NotificationTarget], title: String, body: String, status: String,
                      log: @escaping @Sendable (String) -> Void) async {
@@ -70,11 +109,11 @@ enum NotificationSender {
                     log("Notification to \(url.host ?? "") failed: \(error.localizedDescription)")
                 }
             case .apprise(let url):
-                guard let apprise = EpisodeSplitter.findTool("apprise") else {
-                    log("Notification: “\(url)” needs the apprise command (pip install apprise)")
+                guard let (apprise, prefix) = appriseCommand() else {
+                    log("Notification: “\(url)” needs Apprise (pip install apprise)")
                     continue
                 }
-                let out = try? await ProcessRunner(executable: apprise, arguments: ["-t", title, "-b", body, url]).run(timeout: 60) { _ in }
+                let out = try? await ProcessRunner(executable: apprise, arguments: prefix + ["-t", title, "-b", body, url]).run(timeout: 60) { _ in }
                 if out?.exitCode != 0 { log("Notification with apprise failed (exit status \(out?.exitCode ?? -1))") }
             }
         }

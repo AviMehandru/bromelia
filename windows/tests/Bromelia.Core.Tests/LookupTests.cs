@@ -180,4 +180,36 @@ public class LookupTests
         Assert.True(MediaServerMetadata.IsMetadataFile("Friends (1994) - S02E01.NFO") && MediaServerMetadata.IsMetadataFile("poster.jpg"));
         Assert.False(MediaServerMetadata.IsMetadataFile("Friends (1994) - S02E01.mkv"));
     }
+
+    [Fact]
+    public void NotificationDeliveries()
+    {
+        var fixture = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "notifications.json"))).RootElement;
+        foreach (var c in fixture.GetProperty("cases").EnumerateArray())
+        {
+            var url = c.GetProperty("url").GetString()!;
+            var expect = c.GetProperty("expect");
+            var d = NotificationSender.For(url, "T", "B", c.GetProperty("status").GetString()!);
+            Assert.True(d != null, url);
+            if (expect.TryGetProperty("apprise", out var apprise))
+            {
+                Assert.Equal(apprise.GetString(), d!.AppriseUrl);
+                continue;
+            }
+            Assert.Null(d!.AppriseUrl);
+            Assert.Equal(expect.GetProperty("url").GetString(), d.Url!.ToString());
+            Assert.Equal(expect.GetProperty("headers").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!), d.Headers);
+            if (expect.TryGetProperty("json", out var json))
+                Assert.Equal(Canon(json), Canon(JsonDocument.Parse(d.Body).RootElement));
+            else Assert.Equal(expect.GetProperty("text").GetString(), System.Text.Encoding.UTF8.GetString(d.Body));
+        }
+    }
+
+    /// <summary>JSON with sorted keys, to compare documents.</summary>
+    static string Canon(JsonElement e) => e.ValueKind switch
+    {
+        JsonValueKind.Object => "{" + string.Join(",", e.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal).Select(p => $"{p.Name}:{Canon(p.Value)}")) + "}",
+        JsonValueKind.Array => "[" + string.Join(",", e.EnumerateArray().Select(Canon)) + "]",
+        _ => e.GetRawText(),
+    };
 }

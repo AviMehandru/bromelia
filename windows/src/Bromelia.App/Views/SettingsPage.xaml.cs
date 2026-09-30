@@ -81,7 +81,7 @@ public sealed partial class SettingsPage : Page
         f.Toggle("Write .nfo files and the poster in media server libraries", () => c.Metadata.Nfo, v => c.Metadata.Nfo = v,
             "Kodi / Jellyfin / Emby: tvshow.nfo or the movie's .nfo, an .nfo per episode, and poster.jpg, next to the files");
 
-        f.Section("Notifications", "Sent when a job finishes, one URL per line. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook (JSON) work directly; other Apprise URLs need the apprise command. Add “ !” at the end of a line to be told only about problems.");
+        f.Section("Notifications", "Sent when a job finishes, one URL per line. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic), Telegram (tgram://bot_token/chat_id), Pushover (pover://user_key@app_token), Gotify (gotify://host/app_token) and any https webhook (JSON) work directly, without Python; other Apprise URLs (e-mail, …) need Apprise (pip install apprise, then apprise.exe or py -m apprise). Add “ !” at the end of a line to be told only about problems.");
         var urls = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 80,
             Text = string.Join("\r", c.Notifications.Select(n => n.Url + (n.OnlyProblems ? " !" : ""))) };
         urls.LostFocus += (_, _) =>

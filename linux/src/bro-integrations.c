@@ -174,6 +174,88 @@ ntfy_delivery (const char *url, const char *title, const char *body, const char 
   return d;
 }
 
+/* Apprise URLs sent directly, without Python: Telegram with one chat (tgram://bot_token/chat_id), Pushover
+ * (pover://user_key@app_token[/device]) and Gotify (gotify://host[:port][/path]/app_token, gotifys:// for HTTPS). NULL for
+ * the other forms, which go to the apprise command. */
+static BroDelivery *
+apprise_style (const char *scheme, const char *rest, const char *title, const char *body, const char *status)
+{
+  g_auto (GStrv) path = g_strsplit (rest, "/", -1);
+  guint n = g_strv_length (path);
+  g_autoptr (JsonBuilder) b = json_builder_new ();
+  g_autoptr (JsonNode) root = NULL;
+  BroDelivery *d;
+  if (n && !*path[n - 1])
+    {
+      g_free (path[n - 1]);
+      path[--n] = NULL;
+    }
+  json_builder_begin_object (b);
+  if (g_str_equal (scheme, "tgram"))
+    {
+      g_autofree char *url = NULL, *text = NULL;
+      if (n != 2 || !strchr (path[0], ':') || !*path[1])
+        return NULL;
+      url = g_strdup_printf ("https://api.telegram.org/bot%s/sendMessage", path[0]);
+      text = g_strdup_printf ("%s\n%s", title, body);
+      json_builder_set_member_name (b, "chat_id");
+      json_builder_add_string_value (b, path[1]);
+      json_builder_set_member_name (b, "text");
+      json_builder_add_string_value (b, text);
+      json_builder_end_object (b);
+      root = json_builder_get_root (b);
+      return json_delivery (url, bro_json_to_string (root, FALSE));
+    }
+  if (g_str_equal (scheme, "pover"))
+    {
+      const char *at = n >= 1 && n <= 2 ? strchr (path[0], '@') : NULL;
+      g_autofree char *user = NULL;
+      if (!at || at == path[0] || !at[1])
+        return NULL;
+      user = g_strndup (path[0], at - path[0]);
+      json_builder_set_member_name (b, "token");
+      json_builder_add_string_value (b, at + 1);
+      json_builder_set_member_name (b, "user");
+      json_builder_add_string_value (b, user);
+      json_builder_set_member_name (b, "title");
+      json_builder_add_string_value (b, title);
+      json_builder_set_member_name (b, "message");
+      json_builder_add_string_value (b, body);
+      if (n == 2 && *path[1])
+        {
+          json_builder_set_member_name (b, "device");
+          json_builder_add_string_value (b, path[1]);
+        }
+      json_builder_end_object (b);
+      root = json_builder_get_root (b);
+      return json_delivery ("https://api.pushover.net/1/messages.json", bro_json_to_string (root, FALSE));
+    }
+  /* gotify, gotifys */
+  {
+    g_autofree char *base = NULL, *url = NULL;
+    if (n < 2 || !*path[0] || !*path[n - 1])
+      return NULL;
+    {
+      char *last = path[n - 1];
+      path[n - 1] = NULL;
+      base = g_strjoinv ("/", path);
+      path[n - 1] = last;
+    }
+    url = g_strdup_printf ("%s://%s/message", g_str_equal (scheme, "gotifys") ? "https" : "http", base);
+    json_builder_set_member_name (b, "title");
+    json_builder_add_string_value (b, title);
+    json_builder_set_member_name (b, "message");
+    json_builder_add_string_value (b, body);
+    json_builder_set_member_name (b, "priority");
+    json_builder_add_int_value (b, g_strcmp0 (status, "success") == 0 ? 5 : 8);
+    json_builder_end_object (b);
+    root = json_builder_get_root (b);
+    d = json_delivery (url, bro_json_to_string (root, FALSE));
+    g_ptr_array_add (d->headers, g_strdup_printf ("X-Gotify-Key: %s", path[n - 1]));
+    return d;
+  }
+}
+
 BroDelivery *
 bro_delivery_for (const char *target, const char *title, const char *body, const char *status)
 {
@@ -211,7 +293,13 @@ bro_delivery_for (const char *target, const char *title, const char *body, const
         return json_delivery (raw, json_object_text (pairs));
       }
     }
-  if (g_str_equal (scheme, "ntfy") || g_str_equal (scheme, "ntfys"))
+  if (g_str_equal (scheme, "tgram") || g_str_equal (scheme, "pover") || g_str_equal (scheme, "gotify") || g_str_equal (scheme, "gotifys"))
+    {
+      BroDelivery *d = apprise_style (scheme, sep + 3, title, body, status);
+      if (d)
+        return d;
+    }
+  else if (g_str_equal (scheme, "ntfy") || g_str_equal (scheme, "ntfys"))
     {
       /* Apprise's form: ntfy://topic (ntfy.sh), ntfy://host/topic, ntfys://host/topic. */
       g_autofree char *rest = g_strdup (sep + 3);
@@ -271,12 +359,16 @@ bro_notifications_send (GPtrArray *targets, const char *title, const char *body,
         }
       if (d->apprise_url)
         {
+          /* The apprise command, else Python with the apprise module. */
           g_autofree char *apprise = bro_find_tool ("", "apprise");
-          const char *argv[] = { apprise, "-t", title, "-b", body, d->apprise_url, NULL };
+          g_autofree char *python = apprise ? NULL : bro_find_tool ("", "python3");
+          const char *direct[] = { apprise, "-t", title, "-b", body, d->apprise_url, NULL };
+          const char *module[] = { python, "-m", "apprise", "-t", title, "-b", body, d->apprise_url, NULL };
+          const char *const *argv = apprise ? direct : module;
           int st = -1;
           g_autoptr (GError) err = NULL;
-          if (!apprise)
-            say (log, data, "Notification: “%s” needs the apprise command (pip install apprise)", d->apprise_url);
+          if (!apprise && !python)
+            say (log, data, "Notification: “%s” needs Apprise (pip install apprise)", d->apprise_url);
           else if (!bro_process_run (argv, NULL, NULL, 60, NULL, NULL, NULL, &st, NULL, NULL, &err))
             say (log, data, "Notification with apprise failed: %s", err ? err->message : "unknown error");
           else if (st != 0)

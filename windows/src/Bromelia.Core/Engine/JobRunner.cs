@@ -479,7 +479,9 @@ public sealed class JobRunner
             return;
         }
         if (OtherDiscTools.AudioCommand(_job.Drive.Other, drive.DevicePath) is not { } cmd)
-            throw new JobException("Ripping audio CDs needs cyanrip or abcde (both look up the album in MusicBrainz). Install one, or set an audio CD command.");
+            throw new JobException(OperatingSystem.IsWindows()
+                ? "Ripping audio CDs needs cyanrip (it looks up the album in MusicBrainz): download it from https://github.com/cyanreg/cyanrip/releases and put cyanrip.exe next to Bromelia.exe or on the PATH, or set an audio CD command."
+                : "Ripping audio CDs needs cyanrip or abcde (both look up the album in MusicBrainz). Install one, or set an audio CD command.");
         _job.Phase = "Ripping the audio CD";
         var runner = new ProcessRunner(cmd.Exe, cmd.Args, null, work);
         _job.Commands.Add(runner.CommandLine);

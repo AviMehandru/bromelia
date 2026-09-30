@@ -46,9 +46,48 @@ public static class NotificationSender
                 var target2 = slash < 0 ? $"https://ntfy.sh/{rest}" : $"{(scheme == "ntfys" ? "https" : "http")}://{rest}";
                 return Uri.TryCreate(target2, UriKind.Absolute, out var u)
                     ? new(u, new() { ["Title"] = title, ["Tags"] = tags }, Encoding.UTF8.GetBytes(body), null) : null;
+            case "tgram" or "pover" or "gotify" or "gotifys":
+                return AppriseStyle(scheme, raw[(colon + 3)..], title, body, status) ?? new(null, new(), Array.Empty<byte>(), raw);
             default:
                 return new(null, new(), Array.Empty<byte>(), raw);
         }
+    }
+
+    /// <summary>Apprise URLs sent directly, without Python: Telegram with one chat (tgram://bot_token/chat_id), Pushover
+    /// (pover://user_key@app_token[/device]) and Gotify (gotify://host[:port][/path]/app_token, gotifys:// for HTTPS). Null for
+    /// the other forms, which go to the apprise command.</summary>
+    public static Delivery? AppriseStyle(string scheme, string rest, string title, string body, string status)
+    {
+        var path = rest.Split('/').ToList();
+        if (path.Count > 0 && path[^1].Length == 0) path.RemoveAt(path.Count - 1);
+        var json = new Dictionary<string, string> { ["Content-Type"] = "application/json" };
+        switch (scheme)
+        {
+            case "tgram":
+                if (path.Count != 2 || !path[0].Contains(':') || path[1].Length == 0) return null;
+                return new(new Uri($"https://api.telegram.org/bot{path[0]}/sendMessage"), json,
+                    Json(new Dictionary<string, string> { ["chat_id"] = path[1], ["text"] = $"{title}\n{body}" }), null);
+            case "pover":
+                var at = path.Count is >= 1 and <= 2 ? path[0].IndexOf('@') : -1;
+                if (at <= 0 || at == path[0].Length - 1) return null;
+                var o = new Dictionary<string, string> { ["token"] = path[0][(at + 1)..], ["user"] = path[0][..at], ["title"] = title, ["message"] = body };
+                if (path.Count == 2 && path[1].Length > 0) o["device"] = path[1];
+                return new(new Uri("https://api.pushover.net/1/messages.json"), json, Json(o), null);
+            default:
+                if (path.Count < 2 || path[0].Length == 0 || path[^1].Length == 0) return null;
+                if (!Uri.TryCreate($"{(scheme == "gotifys" ? "https" : "http")}://{string.Join("/", path.Take(path.Count - 1))}/message", UriKind.Absolute, out var url)) return null;
+                json["X-Gotify-Key"] = path[^1];
+                return new(url, json, Json(new Dictionary<string, object> { ["title"] = title, ["message"] = body, ["priority"] = status == "success" ? 5 : 8 }), null);
+        }
+    }
+
+    /// <summary>The apprise command, else Python with the apprise module (py -m apprise, python -m apprise).</summary>
+    public static (string Exe, string[] Prefix)? AppriseCommand()
+    {
+        if (EpisodeSplitter.FindTool("apprise") is { } a) return (a, Array.Empty<string>());
+        foreach (var py in OperatingSystem.IsWindows() ? new[] { "py", "python" } : new[] { "python3" })
+            if (EpisodeSplitter.FindTool(py) is { } p) return (p, new[] { "-m", "apprise" });
+        return null;
     }
 
     /// <summary>Sends to every enabled target that wants this status. Failures are reported through <paramref name="log"/>.</summary>
@@ -61,11 +100,11 @@ public static class NotificationSender
             if (d == null) { log($"Notification: can't use “{t.Url}”"); continue; }
             if (d.AppriseUrl != null)
             {
-                var apprise = EpisodeSplitter.FindTool("apprise");
-                if (apprise == null) { log($"Notification: “{d.AppriseUrl}” needs the apprise command (pip install apprise)"); continue; }
+                if (AppriseCommand() is not { } apprise) { log($"Notification: “{d.AppriseUrl}” needs Apprise (pip install apprise)"); continue; }
                 try
                 {
-                    var r = await new ProcessRunner(apprise, new[] { "-t", title, "-b", body, d.AppriseUrl }).RunAsync(_ => { }, TimeSpan.FromMinutes(1));
+                    var r = await new ProcessRunner(apprise.Exe, apprise.Prefix.Concat(new[] { "-t", title, "-b", body, d.AppriseUrl }).ToList())
+                        .RunAsync(_ => { }, TimeSpan.FromMinutes(1));
                     if (r.ExitCode != 0) log($"Notification with apprise failed (exit status {r.ExitCode})");
                 }
                 catch (Exception e) { log($"Notification with apprise failed: {e.Message}"); }
@@ -428,7 +467,8 @@ public static class OtherDiscTools
             return exe == null ? null : (exe, parts.Skip(1).ToList());
         }
         if (EpisodeSplitter.FindTool("cyanrip") is { } cyanrip) return (cyanrip, new() { "-d", device, "-o", "flac" });
-        if (EpisodeSplitter.FindTool("abcde") is { } abcde) return (abcde, new() { "-d", device, "-o", "flac", "-N" });
+        // abcde is a shell script: not on Windows.
+        if (!OperatingSystem.IsWindows() && EpisodeSplitter.FindTool("abcde") is { } abcde) return (abcde, new() { "-d", device, "-o", "flac", "-N" });
         return null;
     }
 

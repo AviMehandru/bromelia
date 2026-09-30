@@ -2921,6 +2921,67 @@ test_web_api (void)
   st->config->default_drive->automation.auto_rip_on_insert = FALSE;
 }
 
+/* shared/fixtures/notifications.json: how every notification URL is sent. */
+static char *
+canonical_json (JsonNode *n)
+{
+  if (JSON_NODE_HOLDS_OBJECT (n))
+    {
+      JsonObject *o = json_node_get_object (n);
+      g_autoptr (GList) keys = g_list_sort (json_object_get_members (o), (GCompareFunc) g_strcmp0);
+      GString *out = g_string_new ("{");
+      for (GList *l = keys; l; l = l->next)
+        {
+          g_autofree char *v = canonical_json (json_object_get_member (o, l->data));
+          g_string_append_printf (out, "%s%s:%s", l == keys ? "" : ",", (char *) l->data, v);
+        }
+      g_string_append (out, "}");
+      return g_string_free (out, FALSE);
+    }
+  return bro_json_to_string (n, FALSE);
+}
+
+static void
+test_notification_fixtures (void)
+{
+  g_autofree char *path = fixture_path ("notifications.json");
+  g_autoptr (JsonNode) root = load_json (path);
+  JsonArray *a = json_object_get_array_member (json_node_get_object (root), "cases");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i), *e = json_object_get_object_member (c, "expect");
+      const char *url = json_object_get_string_member (c, "url");
+      g_autoptr (BroDelivery) d = bro_delivery_for (url, "T", "B", json_object_get_string_member (c, "status"));
+      g_assert_nonnull (d);
+      if (json_object_has_member (e, "apprise"))
+        {
+          g_assert_cmpstr (d->apprise_url, ==, json_object_get_string_member (e, "apprise"));
+          continue;
+        }
+      g_assert_null (d->apprise_url);
+      g_assert_cmpstr (d->url, ==, json_object_get_string_member (e, "url"));
+      {
+        JsonObject *h = json_object_get_object_member (e, "headers");
+        g_assert_cmpuint (d->headers->len, ==, json_object_get_size (h));
+        for (guint k = 0; k < d->headers->len; k++)
+          {
+            g_auto (GStrv) kv = g_strsplit (d->headers->pdata[k], ": ", 2);
+            g_assert_cmpstr (json_object_get_string_member (h, kv[0]), ==, kv[1]);
+          }
+      }
+      if (json_object_has_member (e, "json"))
+        {
+          g_autoptr (JsonParser) p = json_parser_new ();
+          g_autofree char *want = canonical_json (json_object_get_member (e, "json")), *got = NULL;
+          g_assert_true (json_parser_load_from_data (p, d->body, -1, NULL));
+          got = canonical_json (json_parser_get_root (p));
+          g_assert_cmpstr (got, ==, want);
+        }
+      else
+        g_assert_cmpstr (d->body, ==, json_object_get_string_member (e, "text"));
+    }
+}
+
 /* HTTPS: a PEM certificate and key are loaded; the web page test in CI makes the requests. */
 static void
 test_web_tls (void)
@@ -3869,6 +3930,7 @@ main (int argc, char **argv)
   g_test_add_func ("/state/automation-lock", test_automation_lock);
   g_test_add_func ("/web/log-tail", test_web_log_tail);
   g_test_add_func ("/web/tls", test_web_tls);
+  g_test_add_func ("/notifications/fixtures", test_notification_fixtures);
   g_test_add_func ("/robot/parse-events", test_parse_events);
   g_test_add_func ("/robot/drive-scan-fixture", test_drive_scan_fixture);
   g_test_add_func ("/robot/disc-info-fixture", test_disc_info_fixture);
