@@ -2821,6 +2821,36 @@ test_web_server (void)
   }
 }
 
+/* Only one Bromelia rips inserted discs: the one holding automation.lock. */
+static void
+test_automation_lock (void)
+{
+  g_autoptr (BroState) first = bro_state_new (NULL);
+  g_autoptr (BroState) second = bro_state_new_headless (NULL);
+  g_autofree char *holder = NULL;
+  for (BroState *st = first; st; st = st == first ? second : NULL)
+    {
+      g_free (st->config->makemkvcon_path);
+      st->config->makemkvcon_path = g_strdup ("/nonexistent/makemkvcon");
+    }
+  g_assert_true (first->owns_automation);
+  bro_state_start (first);
+  g_assert_true (first->owns_automation);
+  bro_state_start (second);
+  g_assert_false (second->owns_automation);
+  holder = bro_state_automation_holder (second);
+  g_assert_true (g_str_has_prefix (holder, "the app "));
+  /* The one without the lock doesn't rip an inserted disc. */
+  {
+    BroDriveConfig *d = second->config->default_drive;
+    d->automation.auto_rip_on_insert = TRUE;
+    scan (second, entry (0, BRO_DRIVE_EMPTY_OPEN, "BD-RE LOCK TEST", "/dev/sr98", ""), NULL);
+    scan (second, entry (0, BRO_DRIVE_INSERTED, "BD-RE LOCK TEST", "/dev/sr98", "DISC"), NULL);
+    g_assert_cmpuint (second->jobs->len, ==, 0);
+    d->automation.auto_rip_on_insert = FALSE;
+  }
+}
+
 /* The web page's titles, settings and logs. */
 static void
 test_web_api (void)
@@ -3836,6 +3866,7 @@ main (int argc, char **argv)
   g_test_add_func ("/post/handbrake-arguments", test_handbrake_arguments);
   g_test_add_func ("/post/handbrake-encodes", test_handbrake_encodes);
   g_test_add_func ("/web/api", test_web_api);
+  g_test_add_func ("/state/automation-lock", test_automation_lock);
   g_test_add_func ("/web/log-tail", test_web_log_tail);
   g_test_add_func ("/web/tls", test_web_tls);
   g_test_add_func ("/robot/parse-events", test_parse_events);

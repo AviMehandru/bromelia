@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-@main
 struct BromeliaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()

@@ -195,9 +195,25 @@ public sealed class AppState : ObservableObject
     public BackgroundQueue Background { get; }
     public WebServer Web { get; }
 
-    /// <summary>Starts the web page and, when enabled, the automatic beta key update. Call once at startup.</summary>
-    public void StartServices()
+    /// <summary>Written to the configuration file instead of Config.WebUI (web settings from the daemon's command line).</summary>
+    public WebUIConfig? SavedWebUI { get; set; }
+
+    readonly AutomationLock _automation = new();
+    string? _automationWho;
+    DateTime _nextAutomationTry = DateTime.MaxValue;
+    /// <summary>Whether this process rips inserted discs and runs the scheduled archive check: only one Bromelia at a time does
+    /// (see <see cref="AutomationLock"/>). True until StartServices has asked.</summary>
+    public bool OwnsAutomation { get; private set; } = true;
+    public string AutomationHolder => _automation.Holder;
+
+    /// <summary>Starts the web page and, when enabled, the automatic beta key update. Call once at startup; <paramref name="who"/>
+    /// ("the app", "the daemon") is written into the automation lock.</summary>
+    public void StartServices(string who = "the app")
     {
+        _automationWho = who;
+        TakeAutomation();
+        if (!OwnsAutomation && who == "the app")
+            LastError = $"Bromelia is also running in the background ({AutomationHolder}): it rips inserted discs and runs the scheduled archive check, so this window doesn't.";
         Web.Apply(Config.WebUI);
         if (Config.AutoUpdateBetaKey) _ = UpdateBetaKeyIfNeededAsync("at startup");
     }
@@ -407,6 +423,16 @@ public sealed class AppState : ObservableObject
 
     // --- configuration -----------------------------------------------------------------------
 
+    /// <summary>The configuration as it is saved: the file keeps its own web settings when the command line changed them.</summary>
+    string SavedSnapshot()
+    {
+        if (SavedWebUI is not { } saved) return ConfigJson.Serialize(Config);
+        var running = Config.WebUI;
+        Config.WebUI = saved;
+        try { return ConfigJson.Serialize(Config); }
+        finally { Config.WebUI = running; }
+    }
+
     /// <summary>Call after changing Config; saves (debounced) and refreshes drive items.</summary>
     public void ConfigChanged()
     {
@@ -416,7 +442,7 @@ public sealed class AppState : ObservableObject
         DrivesChanged?.Invoke();
         _saveCts?.Cancel();
         var cts = _saveCts = new CancellationTokenSource();
-        var snapshot = ConfigJson.Serialize(Config);
+        var snapshot = SavedSnapshot();
         _ = Task.Delay(400, cts.Token).ContinueWith(t =>
         {
             if (!t.IsCanceled) ConfigStore.SaveRaw(ConfigPath, snapshot);
@@ -426,7 +452,7 @@ public sealed class AppState : ObservableObject
     public void SaveNow()
     {
         _saveCts?.Cancel();
-        ConfigStore.Save(ConfigPath, Config);
+        ConfigStore.SaveRaw(ConfigPath, SavedSnapshot());
         ConfigStore.SaveHistory(History);
     }
 
@@ -607,7 +633,7 @@ public sealed class AppState : ObservableObject
     void DiscInserted(DriveScanEntry e)
     {
         Sessions.GetValueOrDefault(e.LaneKey)?.Reset();
-        if (Config.DriveConfigFor(e) is not { Enabled: true, Automation.AutoRipOnInsert: true } cfg) return;
+        if (!OwnsAutomation || Config.DriveConfigFor(e) is not { Enabled: true, Automation.AutoRipOnInsert: true } cfg) return;
         if (Jobs.Any(j => j.LaneKey == e.LaneKey && !j.State.IsFinished())) return;
         if (DiscContentRules.ModeFor(e.Flags, () => Platform.ProbeDisc(e.DevicePath), cfg) is not { } mode) return;
         var job = MakeJob(e, cfg, mode);
@@ -882,9 +908,21 @@ public sealed class AppState : ObservableObject
         Jobs.FirstOrDefault(j => j.LaneKey == lane && j.State is JobState.Running or JobState.Waiting or JobState.Queued);
 
     /// <summary>Starts queued jobs whose lane is free. Call periodically (once a second).</summary>
+    void TakeAutomation()
+    {
+        if (_automationWho == null) return;
+        OwnsAutomation = _automation.Acquire(_automationWho);
+        _nextAutomationTry = DateTime.Now.AddSeconds(60);
+    }
+
     public void Pump()
     {
         var now = DateTime.Now;
+        if (!OwnsAutomation && now >= _nextAutomationTry)
+        {
+            TakeAutomation();
+            if (OwnsAutomation && LastError?.StartsWith("Bromelia is also running in the background", StringComparison.Ordinal) == true) LastError = null;
+        }
         foreach (var j in Jobs.Where(j => j.State == JobState.Waiting && j.StartAt is { } t && t <= now).ToList()) j.State = JobState.Queued;
         foreach (var j in Jobs.Where(j => j.State == JobState.Running)) j.Tick();
         foreach (var job in Jobs.Where(j => j.State == JobState.Queued).ToList())
@@ -1015,7 +1053,7 @@ public sealed class AppState : ObservableObject
         if (_nextScheduleCheck == DateTime.MaxValue) { _nextScheduleCheck = now.AddSeconds(60); return; }
         if (now < _nextScheduleCheck) return;
         _nextScheduleCheck = now.AddHours(1);
-        if (VerifyDue(now) && ActiveJobCount == 0) StartVerify(OutputRootPath, scheduled: true);
+        if (OwnsAutomation && VerifyDue(now) && ActiveJobCount == 0) StartVerify(OutputRootPath, scheduled: true);
     }
 
     /// <summary>Verifies every SHA256SUMS folder under <paramref name="path"/> on a worker thread. False when a check is already running.</summary>

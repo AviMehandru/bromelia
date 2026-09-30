@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- bromelia-daemon.exe: Bromelia without a window (automatic rips, post-processing, the archive check, the web page),
+       like bromelia-daemon on Linux. Platform-neutral like the engine, so it builds and runs its tests anywhere. -->
+  <PropertyGroup>
+    <!-- No console window when Task Scheduler starts it at logon; from a terminal it writes to that terminal (AttachConsole). -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <RootNamespace>Bromelia.Daemon</RootNamespace>
+    <AssemblyName>bromelia-daemon</AssemblyName>
+    <Version>1.0.0</Version>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bromelia.Core\Bromelia.Core.csproj" />
+  </ItemGroup>
+
+</Project>

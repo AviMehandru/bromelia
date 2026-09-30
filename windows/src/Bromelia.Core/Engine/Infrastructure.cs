@@ -379,3 +379,48 @@ public static class UnfinishedJobs
         catch (UnauthorizedAccessException) { return Directory.Exists(stage) ? stage : null; }
     }
 }
+
+/// <summary>Only one Bromelia process at a time rips inserted discs and runs the scheduled archive check: the one that holds
+/// automation.lock in the data folder open (the app, or bromelia-daemon); automation.owner says which. The other one asks
+/// again every minute, so it takes over when the first one quits.</summary>
+public sealed class AutomationLock : IDisposable
+{
+    readonly string _path;
+    FileStream? _file;
+
+    public AutomationLock(string? path = null) => _path = path ?? Path.Combine(Paths.AppData, "automation.lock");
+
+    public bool IsHeld => _file != null;
+
+    string OwnerPath => Path.ChangeExtension(_path, ".owner");
+
+    /// <summary>Takes the lock unless another process has it; <paramref name="who"/> is written into automation.owner.</summary>
+    public bool Acquire(string who)
+    {
+        if (_file != null) return true;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            _file = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+        try { File.WriteAllText(OwnerPath, $"{who} {Environment.ProcessId}\n"); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return true;
+    }
+
+    /// <summary>Who holds the lock ("the daemon 1234"), or "".</summary>
+    public string Holder
+    {
+        get
+        {
+            try { return File.ReadAllText(OwnerPath).Trim(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
+        }
+    }
+
+    public void Dispose()
+    {
+        _file?.Dispose();
+        _file = null;
+    }
+}

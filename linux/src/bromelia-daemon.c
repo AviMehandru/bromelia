@@ -123,6 +123,14 @@ main (int argc, char **argv)
   if (listen || port || token)
     {
       BroWebUIConfig *w = &st->config->web_ui;
+      /* The file keeps its own web settings (saved when the web page changes a setting). */
+      static BroWebUIConfig saved;
+      saved = *w;
+      saved.address = g_strdup (w->address);
+      saved.token = g_strdup (w->token);
+      saved.tls_certificate = g_strdup (w->tls_certificate);
+      saved.tls_key = g_strdup (w->tls_key);
+      st->saved_web_ui = &saved;
       w->enabled = TRUE;
       if (listen)
         {
@@ -150,13 +158,19 @@ main (int argc, char **argv)
   say ("Output folder: %s", st->config->output_root);
   on_status_changed (st); /* e.g. jobs that were interrupted when it last stopped */
   bro_state_start (st);
+  if (!st->owns_automation)
+    {
+      g_autofree char *holder = bro_state_automation_holder (st);
+      say ("Another Bromelia (%s) rips inserted discs; this one takes over when it quits", holder);
+    }
   if (st->config->web_ui.enabled)
     {
       const char *err = bro_state_web_error (st);
       if (err)
         say ("Web page: %s", err);
       else
-        say ("Web page: http://%s:%d/", st->config->web_ui.address, st->config->web_ui.port);
+        say ("Web page: %s://%s:%d/", st->config->web_ui.tls_certificate && *st->config->web_ui.tls_certificate ? "https" : "http",
+             st->config->web_ui.address, st->config->web_ui.port);
     }
   g_main_loop_run (loop);
   /* Command-line web settings are not saved; history is saved as jobs finish. */

@@ -1,5 +1,7 @@
 /* bro-state.c — application state, drive scanning, disc sessions, job queue and history. */
 #include "bro-state.h"
+#include <fcntl.h>
+#include <sys/file.h>
 #include "bro-integrations.h"
 #include "bro-logic.h"
 
@@ -466,6 +468,8 @@ static void
 bro_state_finalize (GObject *obj)
 {
   BroState *self = BRO_STATE (obj);
+  if (self->automation_fd >= 0)
+    close (self->automation_fd);
   g_clear_handle_id (&self->save_source, g_source_remove);
   g_clear_handle_id (&self->tick_source, g_source_remove);
   g_clear_handle_id (&self->poll_source, g_source_remove);
@@ -519,6 +523,8 @@ static void add_history (BroState *self, BroHistoryRecord *r);
 static void
 bro_state_init (BroState *self)
 {
+  self->owns_automation = TRUE;
+  self->automation_fd = -1;
   self->drives = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_drive_entry_free);
   self->known_states = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->sessions = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
@@ -833,12 +839,28 @@ bro_state_recover_unfinished (BroState *self)
 
 /* ---- config ---- */
 
+/* Saves the configuration; web settings given on the daemon's command line stay out of the file. */
+static void
+save_config (BroState *self)
+{
+  BroWebUIConfig running;
+  if (!self->saved_web_ui)
+    {
+      bro_app_config_save (self->config, self->config_path, NULL);
+      return;
+    }
+  running = self->config->web_ui;
+  self->config->web_ui = *self->saved_web_ui;
+  bro_app_config_save (self->config, self->config_path, NULL);
+  self->config->web_ui = running;
+}
+
 static gboolean
 save_timeout (gpointer data)
 {
   BroState *self = data;
   self->save_source = 0;
-  bro_app_config_save (self->config, self->config_path, NULL);
+  save_config (self);
   return G_SOURCE_REMOVE;
 }
 
@@ -862,7 +884,7 @@ void
 bro_state_save_now (BroState *self)
 {
   g_clear_handle_id (&self->save_source, g_source_remove);
-  bro_app_config_save (self->config, self->config_path, NULL);
+  save_config (self);
   save_history (self);
 }
 
@@ -967,6 +989,7 @@ bro_state_new_headless (const char *config_path)
 {
   BroState *self = state_new_at (NULL, config_path);
   BroSleepInhibitor *logind = bro_sleep_inhibitor_logind_new ();
+  self->headless = TRUE;
   logind->problem = inhibitor_problem;
   logind->problem_data = self;
   bro_state_set_sleep_inhibitor (self, logind);
@@ -1110,7 +1133,7 @@ disc_inserted (BroState *self, BroDriveEntry *e)
   BroJob *job;
   if (s)
     bro_session_reset (s);
-  if (!cfg || !cfg->enabled || !cfg->automation.auto_rip_on_insert)
+  if (!self->owns_automation || !cfg || !cfg->enabled || !cfg->automation.auto_rip_on_insert)
     return;
   for (guint i = 0; i < self->jobs->len; i++)
     {
@@ -2506,11 +2529,62 @@ bro_state_clear_problem (BroState *self)
 
 /* ---- start ---- */
 
+static char *
+automation_path (void)
+{
+  g_autofree char *data = bro_data_dir ();
+  return g_build_filename (data, "automation.lock", NULL);
+}
+
+char *
+bro_state_automation_holder (BroState *self)
+{
+  g_autofree char *path = automation_path ();
+  char *text = NULL;
+  if (!g_file_get_contents (path, &text, NULL, NULL))
+    return g_strdup ("");
+  return g_strstrip (text);
+}
+
+/* Takes automation.lock when no other Bromelia holds it. */
+static void
+take_automation (BroState *self)
+{
+  g_autofree char *path = automation_path ();
+  g_autofree char *data = g_path_get_dirname (path);
+  int fd;
+  self->next_automation_try = g_get_real_time () / G_USEC_PER_SEC + 60;
+  if (self->automation_fd >= 0)
+    return;
+  g_mkdir_with_parents (data, 0700);
+  fd = g_open (path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+  if (fd < 0 || flock (fd, LOCK_EX | LOCK_NB) != 0)
+    {
+      if (fd >= 0)
+        close (fd);
+      self->owns_automation = FALSE;
+      return;
+    }
+  {
+    g_autofree char *text = g_strdup_printf ("%s %d\n", self->headless ? "bromelia-daemon" : "the app", (int) getpid ());
+    if (ftruncate (fd, 0) == 0 && write (fd, text, strlen (text)) < 0)
+      g_debug ("automation.lock: %s", g_strerror (errno));
+  }
+  self->automation_fd = fd;
+  self->owns_automation = TRUE;
+}
+
 static gboolean
 tick (gpointer data)
 {
   BroState *self = data;
   gboolean busy = FALSE;
+  if (!self->owns_automation && g_get_real_time () / G_USEC_PER_SEC >= self->next_automation_try)
+    {
+      take_automation (self);
+      if (self->owns_automation && self->last_error && g_str_has_prefix (self->last_error, "Bromelia is also running in the background"))
+        bro_state_set_error (self, NULL);
+    }
   pump (self);
   for (guint i = 0; i < self->jobs->len; i++)
     {
@@ -2524,7 +2598,7 @@ tick (gpointer data)
     if (now >= self->next_schedule_check)
       {
         self->next_schedule_check = now + 3600;
-        if (bro_state_verify_due (self, now) && bro_state_active_count (self) == 0)
+        if (self->owns_automation && bro_state_verify_due (self, now) && bro_state_active_count (self) == 0)
           {
             g_autofree char *root = bro_state_output_root (self);
             bro_state_verify_start (self, root, TRUE);
@@ -2555,6 +2629,14 @@ bro_state_start (BroState *self)
 {
   if (self->tick_source)
     return;
+  take_automation (self);
+  if (!self->owns_automation && !self->headless)
+    {
+      g_autofree char *holder = bro_state_automation_holder (self);
+      g_autofree char *msg = g_strdup_printf ("Bromelia is also running in the background (%s): it rips inserted discs and runs the scheduled "
+                                              "archive check, so this window doesn't.", holder);
+      bro_state_set_error (self, msg);
+    }
   self->tick_source = g_timeout_add_seconds (1, tick, self);
   /* The first scheduled archive check (archiveCheck.intervalDays) a minute after starting, then hourly. */
   self->next_schedule_check = g_get_real_time () / G_USEC_PER_SEC + 60;

@@ -75,9 +75,20 @@ final class AppModel {
     let catalog = SettingsCatalog.load()
     /// When false (tests, previews) nothing is read from or written to disk.
     @ObservationIgnored let persistent: Bool
+    /// Running without a window (`--headless`).
+    @ObservationIgnored let headless: Bool
+    /// Written to the configuration file instead of `config.webUI` (web settings from the headless command line).
+    @ObservationIgnored var savedWebUI: WebUIConfig?
+    /// Whether this process rips inserted discs and runs the scheduled archive check (see AutomationLock).
+    @ObservationIgnored let automationLock = AutomationLock()
+    private(set) var ownsAutomation = false
+    @ObservationIgnored private var nextAutomationTry = Date.distantFuture
 
-    init(persistent: Bool = true) {
+    init(persistent: Bool = true, headless: Bool = false) {
         self.persistent = persistent
+        self.headless = headless
+        // Without files (tests) there is no other process to share the drives with.
+        ownsAutomation = !persistent
         config = persistent ? ConfigStore.load() : AppConfig()
         history = persistent ? ConfigStore.loadHistory() : []
         keepAwakeSwitch = { [weak self] on in self?.setProcessActivity(on) }
@@ -92,6 +103,10 @@ final class AppModel {
 
     func start() {
         guard pollTask == nil else { return }
+        takeAutomation()
+        if !ownsAutomation && !headless {
+            lastError = "Bromelia is also running in the background (\(automationLock.holder)): it rips inserted discs and runs the scheduled archive check, so this window doesn't."
+        }
         Notifier.requestAuthorization()
         importFromMakeMKVIfFirstRun()
         watcher = OpticalMediaWatcher { [weak self] _ in self?.scheduleRescan(after: 2) }
@@ -111,6 +126,7 @@ final class AppModel {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 self?.pump()
+                self?.takeAutomationIfDue()
                 self?.startScheduledCheckIfDue()
             }
         }
@@ -152,10 +168,30 @@ final class AppModel {
 
     // MARK: - Persistence
 
+    /// Takes the automation lock when no other Bromelia holds it.
+    private func takeAutomation() {
+        guard persistent else { return }
+        ownsAutomation = automationLock.acquire(who: headless ? "headless" : "the app")
+        nextAutomationTry = Date().addingTimeInterval(60)
+    }
+
+    private func takeAutomationIfDue() {
+        guard !ownsAutomation, Date() >= nextAutomationTry else { return }
+        takeAutomation()
+        if ownsAutomation && lastError?.hasPrefix("Bromelia is also running in the background") == true { lastError = nil }
+    }
+
+    /// The configuration as it is saved (the file keeps its own web settings when the command line changed them).
+    private var configToSave: AppConfig {
+        var c = config
+        if let w = savedWebUI { c.webUI = w }
+        return c
+    }
+
     private func scheduleSave() {
         guard persistent else { return }
         saveTask?.cancel()
-        let snapshot = config
+        let snapshot = configToSave
         saveTask = Task {
             try? await Task.sleep(nanoseconds: 400_000_000)
             if Task.isCancelled { return }
@@ -166,7 +202,7 @@ final class AppModel {
     func saveNow() {
         guard persistent else { return }
         saveTask?.cancel()
-        ConfigStore.save(config)
+        ConfigStore.save(configToSave)
         ConfigStore.saveHistory(history)
     }
 
@@ -269,7 +305,7 @@ final class AppModel {
     private func discInserted(_ e: DriveScanEntry) {
         let lane = DriveItem.laneKey(for: e)
         sessions[lane]?.reset()
-        guard let cfg = config.driveConfig(for: e), cfg.enabled, cfg.automation.autoRipOnInsert else { return }
+        guard ownsAutomation, let cfg = config.driveConfig(for: e), cfg.enabled, cfg.automation.autoRipOnInsert else { return }
         guard !jobs.contains(where: { $0.laneKey == lane && !$0.state.isFinished }) else { return }
         guard let mode = DiscContent.mode(flags: e.flags, content: { DiscContentProbe.probe(device: e.devicePath) }, drive: cfg) else { return }
         let job = makeJob(for: e, config: cfg, mode: mode)
@@ -745,7 +781,7 @@ final class AppModel {
         let now = Date()
         guard now >= nextScheduleCheck else { return }
         nextScheduleCheck = now.addingTimeInterval(3600)
-        if verifyDue(at: now) && activeJobCount == 0 { startVerify(outputRootURL, scheduled: true) }
+        if ownsAutomation && verifyDue(at: now) && activeJobCount == 0 { startVerify(outputRootURL, scheduled: true) }
     }
 
     /// Verifies every SHA256SUMS folder under `path` in the background. False when a check is already running.

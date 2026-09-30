@@ -202,8 +202,21 @@ sudo ninja -C builddir install   # optional: desktop file, icon, AppStream metad
 `-Dui=false` builds only the core library, `bromelia-daemon` and the tests (no GTK needed).
 
 ### Headless / Docker
-`bromelia-daemon` runs Bromelia without a window (automatic rips, post-processing, notifications, web page).
-`docker/Dockerfile` builds it together with MakeMKV:
+Bromelia runs without a window on every platform (automatic rips, post-processing, the archive check, notifications,
+the web page), with the same options (`--config`, `--listen`, `--port`, `--token` or `BROMELIA_WEB_TOKEN`), one line
+per job change, and a clean stop on SIGTERM / Ctrl+C (running jobs are cancelled; a second signal quits at once):
+
+| Platform | Command | At login |
+| --- | --- | --- |
+| Linux | `bromelia-daemon` | a systemd user service, or Docker (below) |
+| macOS | `/Applications/Bromelia.app/Contents/MacOS/Bromelia --headless` | *Settings → General → Run Bromelia in the background at login*, or `Bromelia --install-agent` (a launchd agent; log in `~/Library/Logs/Bromelia/headless.log`) |
+| Windows | `bromelia-daemon.exe` (next to `Bromelia.exe`) | *Settings → Run bromelia-daemon at every logon*, or `bromelia-daemon --install-task` (Task Scheduler; log in `daemon.log` in the data folder) |
+
+Only one Bromelia at a time rips inserted discs and runs the scheduled archive check: the one holding
+`automation.lock` in the data folder. The app says so when a background Bromelia has it, and takes over a minute after
+that one quits (and the other way round). Web settings given on the command line are not written to the configuration.
+
+`docker/Dockerfile` builds `bromelia-daemon` together with MakeMKV:
 
 ```bash
 docker build -f docker/Dockerfile --build-arg ACCEPT_MAKEMKV_EULA=yes -t bromelia .

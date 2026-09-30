@@ -167,6 +167,7 @@ struct _BroState {
   GApplication *app;
   BroAppConfig *config;
   char *config_path;
+  BroWebUIConfig *saved_web_ui; /* written to the file instead of config->web_ui (the daemon's command-line web settings), or NULL */
   GPtrArray *drives;         /* BroDriveEntry* (present only) */
   GHashTable *known_states;  /* lane -> state */
   gboolean first_scan_done;
@@ -192,10 +193,18 @@ struct _BroState {
   gpointer verify_task;      /* the running verification (internal) */
   GHashTable *check_records; /* folder -> BroCheckRecord*: when each folder was last verified */
   gint64 next_schedule_check;
+  /* Only one Bromelia at a time rips inserted discs and runs the scheduled archive check: the one holding automation.lock
+   * in the data folder (the app, or bromelia-daemon). The other one asks again every minute. */
+  gboolean headless;
+  gboolean owns_automation; /* TRUE until bro_state_start has asked */
+  int automation_fd;        /* the lock, or -1 */
+  gint64 next_automation_try;
 };
 
 BroState       *bro_state_new (GApplication *app);
 void            bro_state_start (BroState *self);
+/* Who holds automation.lock ("bromelia-daemon 1234"), or "". */
+char           *bro_state_automation_holder (BroState *self);
 void            bro_state_config_changed (BroState *self);
 void            bro_state_save_now (BroState *self);
 char           *bro_state_makemkvcon (BroState *self);

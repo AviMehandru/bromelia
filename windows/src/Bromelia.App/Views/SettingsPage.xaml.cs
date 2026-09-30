@@ -55,6 +55,17 @@ public sealed partial class SettingsPage : Page
         f.Number("Keep history for", () => c.HistoryLimit, v => c.HistoryLimit = v, 10, 100000, suffix: "jobs");
         f.Number("Stop a stuck rip after (0 = never)", () => c.StallTimeoutMinutes, v => c.StallTimeoutMinutes = v, 0, 1440, suffix: "minutes without output");
         f.Toggle("Keep the computer awake while jobs run", () => c.PreventSleep, v => { c.PreventSleep = v; State.UpdateKeepAwake(); });
+        var daemon = Path.Combine(AppContext.BaseDirectory, "bromelia-daemon.exe");
+        if (File.Exists(daemon))
+        {
+            var status = Form.Help("");
+            f.Toggle("Run bromelia-daemon at every logon (without the window)", DaemonTask.IsInstalled, v =>
+            {
+                var code = DaemonTask.Run(daemon, v ? "--install-task" : "--uninstall-task");
+                status.Text = code == 0 ? "" : $"Task Scheduler answered {code}";
+            }, "Rips inserted discs as configured, runs post-processing and the archive check, and serves the web page from logon on; its log is daemon.log in the data folder. While it runs, this window leaves automatic rips to it.");
+            f.Add(status);
+        }
         f.Number("Background post-processing steps at a time", () => c.BackgroundJobs, v => c.BackgroundJobs = v, 1, 16,
             "Sequential ripping (for hard disks that slow down with parallel writes): set the maximum simultaneous jobs to 1.");
 

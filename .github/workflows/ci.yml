@@ -39,6 +39,35 @@ jobs:
         run: >-
           msbuild src/Bromelia.App/Bromelia.App.csproj -restore -m -t:Publish -p:Configuration=Release -p:Platform=x64
           -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:PublishDir=${{ github.workspace }}/windows/publish/
+      - name: Publish bromelia-daemon (x64, one file)
+        working-directory: windows
+        run: >-
+          dotnet publish src/Bromelia.Daemon/Bromelia.Daemon.csproj -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ${{ github.workspace }}/windows/publish/
+      # The daemon starts, finds the stand-in makemkvcon, serves the web page and writes its log.
+      - name: bromelia-daemon smoke test
+        shell: pwsh
+        run: |
+          $data = "$env:RUNNER_TEMP\daemon-data"; $fake = "$env:RUNNER_TEMP\daemon-fake"
+          New-Item -ItemType Directory -Force $data, $fake | Out-Null
+          Copy-Item shared\fixtures\drive-scan.txt $fake
+          Set-Content $fake\makemkvcon.cmd "@echo off`r`ntype `"%~dp0drive-scan.txt`"`r`nexit /b 0"
+          @{ version = 2; makemkvconPath = "$fake\makemkvcon.cmd"; outputRoot = "$env:RUNNER_TEMP\daemon-rips"; pollIntervalSeconds = 2; preventSleep = $false } |
+            ConvertTo-Json | Set-Content $data\config.json
+          $env:BROMELIA_DATA_DIR = $data
+          $v = Start-Process windows\publish\bromelia-daemon.exe -ArgumentList "--version" -Wait -NoNewWindow -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\version.txt"
+          Get-Content "$env:RUNNER_TEMP\version.txt"
+          if ($v.ExitCode -ne 0) { throw "bromelia-daemon --version failed" }
+          $p = Start-Process windows\publish\bromelia-daemon.exe -ArgumentList "--port", "51395" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 60 -and -not $ok; $i++) {
+            Start-Sleep 1
+            try { $s = Invoke-RestMethod http://127.0.0.1:51395/api/status; $ok = $s.drives.Count -ge 1 } catch { }
+          }
+          Stop-Process $p
+          Get-Content $data\daemon.log
+          if (-not $ok) { throw "bromelia-daemon's web page didn't list the drives" }
+          if (-not (Select-String -Path $data\daemon.log -Pattern "makemkvcon: ")) { throw "no daemon.log" }
       - uses: actions/upload-artifact@v4
         with:
           name: Bromelia-windows-x64

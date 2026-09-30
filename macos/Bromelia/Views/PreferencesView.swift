@@ -31,10 +31,24 @@ struct PreferencesView: View {
 
 private struct GeneralPreferences: View {
     @Environment(AppModel.self) private var model
+    @State private var agentInstalled = LaunchAgent.isInstalled
+    @State private var agentMessage: String?
 
     var body: some View {
         @Bindable var model = model
         Form {
+            Section {
+                Toggle("Run Bromelia in the background at login", isOn: Binding(get: { agentInstalled }, set: { on in
+                    agentMessage = on ? LaunchAgent.install() : LaunchAgent.uninstall()
+                    agentInstalled = LaunchAgent.isInstalled
+                }))
+                if let agentMessage { Text(agentMessage).font(.caption).foregroundStyle(.red) }
+            } header: {
+                Text("Background")
+            } footer: {
+                Text("Without a window, like bromelia-daemon on Linux: rips inserted discs as configured, runs post-processing and the archive check, and serves the web page, from login on. While it runs, this window leaves automatic rips to it. Log: ~/Library/Logs/Bromelia/headless.log. On the command line: Bromelia --headless (see --help).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Tools") {
                 PathField(title: "makemkvcon", path: $model.config.makemkvconPath, kind: .file,
                           placeholder: model.makemkvcon?.path ?? "Not found — install MakeMKV")

@@ -17,7 +17,7 @@ matches across platforms:
 | Notifications, online lookup, media server names, other discs | `Engine/Integrations.swift` | `Engine/Integrations.cs` | `bro-integrations.c` |
 | App state: drives, sessions, queue, history | `App/AppModel.swift` | `Engine/AppState.cs` | `bro-state.c` |
 | Background queue, web page | `App/BackgroundQueue.swift`, `App/WebServer.swift` | `Engine/Services.cs` | `bro-state.c`, `bro-web.c` |
-| UI | SwiftUI views | WinUI 3 pages | GTK 4 / libadwaita widgets (`bromelia`); none (`bromelia-daemon`) |
+| UI | SwiftUI views; none (`--headless`, `App/Headless.swift`) | WinUI 3 pages; none (`Bromelia.Daemon`, `bromelia-daemon.exe`) | GTK 4 / libadwaita widgets (`bromelia`); none (`bromelia-daemon`) |
 
 ## makemkvcon
 
@@ -208,6 +208,12 @@ turns on and off.
 - **Media server layout** swaps the folder and file templates for fixed ones and makes the show / movie folder
   shared between jobs: when files are moved out of the staging folder, folders that exist already (`Season 02`,
   `Other`, `Backup`) are merged item by item instead of getting a numbered name.
-- **`bromelia-daemon`** (Linux) is the app state without a window: it scans drives, starts automatic rips, runs
-  the background queue and serves the web page, logging job changes to stdout. `docker/Dockerfile` builds it
+- **Without a window**: `bromelia-daemon` (Linux), `Bromelia --headless` (macOS: the same binary, which starts
+  `NSApplication` without windows instead of the SwiftUI app) and `bromelia-daemon.exe` (Windows: a console project on
+  the engine, with its own single-thread `SynchronizationContext` and a one-second timer for the queue, the media
+  check and drive polling) are the app state without a window: they scan drives, start automatic rips, run the
+  background queue and serve the web page, logging job changes to stdout. Automatic rips and the scheduled archive
+  check happen only in the process that holds `automation.lock` (`flock` on macOS and Linux, a file opened without
+  sharing on Windows); the others try again every minute. Command-line web settings are kept out of the saved
+  configuration. `docker/Dockerfile` builds it
   together with MakeMKV (see [docker.md](docker.md)).

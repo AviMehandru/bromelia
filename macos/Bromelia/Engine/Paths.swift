@@ -10,7 +10,9 @@ enum Paths {
         return base.appendingPathComponent("Bromelia", isDirectory: true)
     }
 
-    static var configFile: URL { appSupport.appendingPathComponent("config.json") }
+    /// Another configuration file (`--config` of the headless mode).
+    nonisolated(unsafe) static var configOverride: URL?
+    static var configFile: URL { configOverride ?? appSupport.appendingPathComponent("config.json") }
     static var historyFile: URL { appSupport.appendingPathComponent("history.json") }
     static var jobsDirectory: URL { appSupport.appendingPathComponent("jobs", isDirectory: true) }
     static var drivesDirectory: URL { appSupport.appendingPathComponent("drives", isDirectory: true) }

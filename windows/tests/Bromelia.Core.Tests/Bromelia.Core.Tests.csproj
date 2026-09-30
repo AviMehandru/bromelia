@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Bromelia.Core\Bromelia.Core.csproj" />
+    <ProjectReference Include="..\..\src\Bromelia.Daemon\Bromelia.Daemon.csproj" />
   </ItemGroup>
 
   <ItemGroup>
