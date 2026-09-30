@@ -225,6 +225,7 @@ public sealed class AppState : ObservableObject
     public Dictionary<string, object> WebStatus() => new()
     {
         ["app"] = "Bromelia",
+        ["version"] = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "",
         ["makemkv"] = MakemkvVersion,
         ["problem"] = MakemkvProblem?.Explanation ?? "",
         ["drives"] = DriveItems.Where(i => i.Entry != null).Select(i => new Dictionary<string, object>

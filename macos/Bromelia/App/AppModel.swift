@@ -943,7 +943,8 @@ extension AppModel {
             "running": v.running, "path": v.path, "progress": v.total > 0 ? Double(v.done) / Double(v.total) : 0, "folder": v.folder ?? "",
             "stopped": v.stopped, "finishedAt": v.finishedAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
             "folders": v.results.count, "damaged": damaged]
-        return ["app": "Bromelia", "makemkv": makemkvVersion, "problem": makemkvProblem?.explanation ?? "",
+        return ["app": "Bromelia", "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+                "makemkv": makemkvVersion, "problem": makemkvProblem?.explanation ?? "",
                 "drives": drives, "jobs": jobList, "background": bg, "history": hist, "verify": verifyStatus]
     }
 

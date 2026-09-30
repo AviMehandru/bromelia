@@ -3027,6 +3027,7 @@ bro_state_web_status (BroState *self)
   g_autoptr (GPtrArray) items = bro_state_drive_items (self);
   json_builder_begin_object (b);
   JS ("app", "Bromelia");
+  JS ("version", PACKAGE_VERSION);
   JS ("makemkv", self->makemkv_version);
   JS ("problem", self->makemkv_problem != BRO_NOTICE_NONE ? bro_notice_explanation (self->makemkv_problem) : "");
   json_builder_set_member_name (b, "drives");
