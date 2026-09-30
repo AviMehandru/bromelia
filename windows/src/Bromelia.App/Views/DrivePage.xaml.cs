@@ -182,12 +182,16 @@ public sealed partial class DrivePage : Page
 
     void AddChip(string text, Windows.UI.Color color)
     {
+        // The colours are dark: on the dark theme the text is lightened halfway to white to stay readable.
+        var fore = ActualTheme == ElementTheme.Dark
+            ? Windows.UI.Color.FromArgb(255, (byte)((color.R + 255) / 2), (byte)((color.G + 255) / 2), (byte)((color.B + 255) / 2))
+            : color;
         Chips.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(8, 2, 8, 2),
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(40, color.R, color.G, color.B)),
-            Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(color) },
+            Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(fore) },
         });
     }
 

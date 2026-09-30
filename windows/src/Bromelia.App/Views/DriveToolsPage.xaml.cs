@@ -35,7 +35,8 @@ public sealed partial class DriveToolsPage : Page
             if (d.Length > 0) Run("f", "-d", d, "help");
         }));
         bar.Children.Add(PageHelpers.Button("SDF info", () => Run("f", "--info")));
-        bar.Children.Add(PageHelpers.Button("Open folder as source…", async () =>
+        // In the header: the toolbar is for makemkvcon f, and with it a narrow window cut the last button off.
+        HeaderButtons.Children.Add(PageHelpers.Button("Open folder as source…", async () =>
         {
             if (await Pickers.PickFolderAsync() is { } folder) App.MainWindow.OpenSource(folder);
         }));

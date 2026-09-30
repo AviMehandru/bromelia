@@ -3092,6 +3092,7 @@ bro_state_web_status (BroState *self)
       g_autoptr (GDateTime) t = h->finished_at ? g_date_time_new_from_unix_utc (h->finished_at) : NULL;
       g_autofree char *when = t ? g_date_time_format_iso8601 (t) : g_strdup ("");
       json_builder_begin_object (b);
+      JS ("id", h->id);
       JS ("title", h->title);
       JS ("state", h->state);
       JS ("stateLabel", word_label (h->state));

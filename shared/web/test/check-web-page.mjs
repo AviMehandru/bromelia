@@ -149,6 +149,8 @@ try {
   await job.getByRole("button", { name: "Cancel" }).click();
   await page.locator("#jobs .empty").waitFor({ timeout: 20000 });
   await page.locator("#history .card .state.cancelled").first().waitFor({ timeout: 20000 });
+  await page.waitForTimeout(2500); // a refresh after the job reached the history
+  assert.equal(await page.locator("#history .card").count(), 1, "the cancelled job is listed once");
   assert.equal(await error.textContent(), "", "a successful action clears the earlier error");
 
   // --- Eject and close tray answer without an error (the devices don't exist here, as with an absent drive). ---

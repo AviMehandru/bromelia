@@ -178,7 +178,8 @@ public sealed partial class MainWindow : Window
     public void Navigate(string tag)
     {
         _selectedTag = tag;
-        var sel = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(i => (i.Tag as string) == tag);
+        var sel = tag == "settings" ? Nav.SettingsItem as NavigationViewItem
+            : Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(i => (i.Tag as string) == tag);
         if (sel != null && !ReferenceEquals(Nav.SelectedItem, sel))
         {
             _rebuilding = true;

@@ -109,7 +109,10 @@ function render(s) {
 
   const history = document.getElementById("history");
   history.replaceChildren();
-  const done = s.jobs.filter(j => !["running", "queued", "waiting"].includes(j.state)).concat(s.history).slice(0, 20);
+  // A finished job is also in the history (by the same id) once it has been recorded: show it once.
+  const finished = s.jobs.filter(j => !["running", "queued", "waiting"].includes(j.state));
+  const shown = new Set(finished.map(j => j.id));
+  const done = finished.concat(s.history.filter(h => !h.id || !shown.has(h.id))).slice(0, 20);
   if (!done.length) history.append(el("div", "empty", "No finished jobs yet."));
   for (const h of done) {
     const c = el("div", "card"), r = el("div", "row"), t = el("div", "grow");

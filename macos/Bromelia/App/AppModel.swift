@@ -934,7 +934,7 @@ extension AppModel {
         }
         let bg: [[String: Any]] = background.items.map { ["id": $0.id.uuidString, "title": $0.work.title, "state": $0.state.rawValue] }
         let hist: [[String: Any]] = history.prefix(20).map {
-            ["title": $0.title, "state": Self.webState($0.state), "stateLabel": $0.state.label, "error": $0.errorMessage ?? "",
+            ["id": $0.id.uuidString, "title": $0.title, "state": Self.webState($0.state), "stateLabel": $0.state.label, "error": $0.errorMessage ?? "",
              "outputDirectory": $0.outputDirectory ?? "", "finishedAt": $0.finishedAt.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
         }
         let v = verify

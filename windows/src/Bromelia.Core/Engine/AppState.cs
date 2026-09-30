@@ -241,7 +241,7 @@ public sealed class AppState : ObservableObject
         ["background"] = Background.Items.Select(b => new Dictionary<string, object> { ["id"] = b.Id.ToString(), ["title"] = b.Work.Title, ["state"] = b.State }).ToList(),
         ["history"] = History.Take(20).Select(h => new Dictionary<string, object>
         {
-            ["title"] = h.Title, ["state"] = WebState(h.State), ["stateLabel"] = h.State.Label(), ["error"] = h.ErrorMessage ?? "",
+            ["id"] = h.Id.ToString(), ["title"] = h.Title, ["state"] = WebState(h.State), ["stateLabel"] = h.State.Label(), ["error"] = h.ErrorMessage ?? "",
             ["outputDirectory"] = h.OutputDirectory ?? "", ["finishedAt"] = h.FinishedAt?.ToString("o") ?? "",
         }).ToList(),
         ["verify"] = new Dictionary<string, object>
