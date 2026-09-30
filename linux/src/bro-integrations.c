@@ -305,52 +305,67 @@ bro_media_match_free (BroMediaMatch *m)
     return;
   g_free (m->title);
   g_free (m->imdb_id);
+  g_free (m->overview);
+  g_free (m->poster);
   g_free (m);
 }
 
-gboolean
-bro_metadata_request (const char *name, BroMediaKind kind, const BroMetadataConfig *config, char **url, char **bearer)
+static BroMediaMatch *
+media_match_new (const char *title, const char *provider, int kind)
 {
-  g_autofree char *key = g_strstrip (g_strdup (config->api_key ? config->api_key : ""));
-  g_autofree char *q = NULL;
-  *url = NULL;
-  *bearer = NULL;
-  if (!*key || !name || !*name)
-    return FALSE;
-  q = g_uri_escape_string (name, NULL, FALSE);
-  switch (config->provider)
-    {
-    case BRO_METADATA_TMDB:
-      {
-        g_autofree char *lang = g_uri_escape_string (config->language && *config->language ? config->language : "en-US", NULL, FALSE);
-        g_autofree char *base = g_strdup_printf ("https://api.themoviedb.org/3/search/%s?query=%s&language=%s",
-                                                 kind == BRO_KIND_TV ? "tv" : "movie", q, lang);
-        /* A v3 API key is 32 characters; a read access token is a long JWT sent as a bearer token. */
-        if (strlen (key) <= 40)
-          {
-            g_autofree char *k = g_uri_escape_string (key, NULL, FALSE);
-            *url = g_strdup_printf ("%s&api_key=%s", base, k);
-          }
-        else
-          {
-            *url = g_steal_pointer (&base);
-            *bearer = g_strdup (key);
-          }
-        return TRUE;
-      }
-    case BRO_METADATA_OMDB:
-      {
-        g_autofree char *k = g_uri_escape_string (key, NULL, FALSE);
-        *url = g_strdup_printf ("https://www.omdbapi.com/?apikey=%s&t=%s&type=%s", k, q, kind == BRO_KIND_TV ? "series" : "movie");
-        return TRUE;
-      }
-    default:
-      return FALSE;
-    }
+  BroMediaMatch *m = g_new0 (BroMediaMatch, 1);
+  m->title = g_strdup (title);
+  m->provider = provider;
+  m->kind = kind;
+  m->overview = g_strdup ("");
+  m->poster = g_strdup ("");
+  return m;
 }
 
-static char *
-normalize (const char *s)
+BroMediaMatch *
+bro_media_match_copy (const BroMediaMatch *m)
+{
+  BroMediaMatch *c;
+  if (!m)
+    return NULL;
+  c = media_match_new (m->title, m->provider, m->kind);
+  c->year = m->year;
+  c->tmdb_id = m->tmdb_id;
+  c->imdb_id = g_strdup (m->imdb_id);
+  g_free (c->overview);
+  c->overview = g_strdup (m->overview ? m->overview : "");
+  g_free (c->poster);
+  c->poster = g_strdup (m->poster ? m->poster : "");
+  return c;
+}
+
+char *
+bro_media_match_label (const BroMediaMatch *m)
+{
+  return m->year ? g_strdup_printf ("%s (%d)", m->title, m->year) : g_strdup (m->title);
+}
+
+char *
+bro_media_match_choice (const BroMediaMatch *m)
+{
+  if (m->tmdb_id)
+    return g_strdup_printf ("%s/%d", m->kind == BRO_KIND_TV ? "tv" : "movie", m->tmdb_id);
+  return g_strdup (m->imdb_id ? m->imdb_id : "");
+}
+
+void
+bro_episode_details_free (BroEpisodeDetails *e)
+{
+  if (!e)
+    return;
+  g_free (e->title);
+  g_free (e->overview);
+  g_free (e->aired);
+  g_free (e);
+}
+
+char *
+bro_normalize_title (const char *s)
 {
   GString *out = g_string_new (NULL);
   for (const char *p = s ? s : ""; *p; p = g_utf8_next_char (p))
@@ -362,11 +377,216 @@ normalize (const char *s)
   return g_string_free (out, FALSE);
 }
 
+char *
+bro_metadata_split_year (const char *name, int *year)
+{
+  g_autofree char *t = g_strstrip (g_strdup (name ? name : ""));
+  g_autoptr (GRegex) re = g_regex_new ("^(.*\\S)\\s*\\((\\d{4})\\)$", 0, 0, NULL);
+  g_autoptr (GMatchInfo) mi = NULL;
+  *year = 0;
+  if (g_regex_match (re, t, 0, &mi))
+    {
+      g_autofree char *y = g_match_info_fetch (mi, 2);
+      int n = atoi (y);
+      if (n >= 1870 && n <= 2100)
+        {
+          *year = n;
+          return g_match_info_fetch (mi, 1);
+        }
+    }
+  return g_steal_pointer (&t);
+}
+
+static int
+kind_of_word (const char *w)
+{
+  return !w || !*w ? -1 : g_str_equal (w, "tv") ? BRO_KIND_TV : BRO_KIND_MOVIE;
+}
+
+gboolean
+bro_online_id_parse (const char *text, int *tmdb, int *kind, char **imdb)
+{
+  g_autofree char *t = g_ascii_strdown (text ? text : "", -1);
+  g_autoptr (GRegex) tt = g_regex_new ("tt\\d{5,10}", 0, 0, NULL);
+  g_autoptr (GRegex) site = g_regex_new ("themoviedb\\.org/(movie|tv)/(\\d+)", 0, 0, NULL);
+  g_autoptr (GRegex) plain = g_regex_new ("^(?:tmdb:)?(?:(movie|tv)/)?(\\d{1,9})$", 0, 0, NULL);
+  g_autoptr (GMatchInfo) mi = NULL;
+  *tmdb = 0;
+  *kind = -1;
+  *imdb = NULL;
+  g_strstrip (t);
+  if (g_regex_match (tt, t, 0, &mi))
+    {
+      *imdb = g_match_info_fetch (mi, 0);
+      return TRUE;
+    }
+  g_clear_pointer (&mi, g_match_info_free);
+  if (!g_regex_match (site, t, 0, &mi))
+    {
+      g_clear_pointer (&mi, g_match_info_free);
+      if (!g_regex_match (plain, t, 0, &mi))
+        return FALSE;
+    }
+    {
+      g_autofree char *k = g_match_info_fetch (mi, 1);
+      g_autofree char *n = g_match_info_fetch (mi, 2);
+      int id = atoi (n);
+      if (id <= 0)
+        return FALSE;
+      *tmdb = id;
+      *kind = kind_of_word (k);
+      return TRUE;
+    }
+}
+
+char *
+bro_online_id_label (int tmdb, int kind, const char *imdb)
+{
+  if (imdb)
+    return g_strdup (imdb);
+  if (kind < 0)
+    return g_strdup_printf ("TMDb %d", tmdb);
+  return g_strdup_printf ("TMDb %s/%d", kind == BRO_KIND_TV ? "tv" : "movie", tmdb);
+}
+
+/* A TMDb request: an API key (v3) goes into the query, a read access token into a Bearer header. */
+static gboolean
+tmdb_request (const char *path, const char *query, const BroMetadataConfig *config, char **url, char **bearer)
+{
+  g_autofree char *key = g_strstrip (g_strdup (config->api_key ? config->api_key : ""));
+  g_autofree char *lang = g_uri_escape_string (config->language && *config->language ? config->language : "en-US", NULL, FALSE);
+  g_autofree char *base = NULL;
+  *url = NULL;
+  *bearer = NULL;
+  if (!*key)
+    return FALSE;
+  base = g_strdup_printf ("https://api.themoviedb.org/3/%s?%s%slanguage=%s", path, query ? query : "", query && *query ? "&" : "", lang);
+  /* A v3 API key is 32 characters; a read access token is a long JWT sent as a bearer token. */
+  if (strlen (key) <= 40)
+    {
+      g_autofree char *k = g_uri_escape_string (key, NULL, FALSE);
+      *url = g_strdup_printf ("%s&api_key=%s", base, k);
+    }
+  else
+    {
+      *url = g_steal_pointer (&base);
+      *bearer = g_strdup (key);
+    }
+  return TRUE;
+}
+
+static gboolean
+omdb_request (const char *query, const BroMetadataConfig *config, char **url, char **bearer)
+{
+  g_autofree char *key = g_strstrip (g_strdup (config->api_key ? config->api_key : ""));
+  g_autofree char *k = NULL;
+  *url = NULL;
+  *bearer = NULL;
+  if (!*key)
+    return FALSE;
+  k = g_uri_escape_string (key, NULL, FALSE);
+  *url = g_strdup_printf ("https://www.omdbapi.com/?apikey=%s&%s", k, query);
+  return TRUE;
+}
+
+gboolean
+bro_metadata_request (const char *name, BroMediaKind kind, int year, const BroMetadataConfig *config, char **url, char **bearer)
+{
+  g_autofree char *q = NULL, *query = NULL;
+  *url = NULL;
+  *bearer = NULL;
+  if (!name || !*name)
+    return FALSE;
+  q = g_uri_escape_string (name, NULL, FALSE);
+  switch (config->provider)
+    {
+    case BRO_METADATA_TMDB:
+      {
+        g_autofree char *path = g_strdup_printf ("search/%s", kind == BRO_KIND_TV ? "tv" : "movie");
+        query = year ? g_strdup_printf ("query=%s&%s=%d", q, kind == BRO_KIND_TV ? "first_air_date_year" : "year", year)
+                     : g_strdup_printf ("query=%s", q);
+        return tmdb_request (path, query, config, url, bearer);
+      }
+    case BRO_METADATA_OMDB:
+      query = year ? g_strdup_printf ("s=%s&type=%s&y=%d", q, kind == BRO_KIND_TV ? "series" : "movie", year)
+                   : g_strdup_printf ("s=%s&type=%s", q, kind == BRO_KIND_TV ? "series" : "movie");
+      return omdb_request (query, config, url, bearer);
+    default:
+      return FALSE;
+    }
+}
+
+gboolean
+bro_metadata_id_request (int tmdb, int id_kind, const char *imdb, BroMediaKind kind, const BroMetadataConfig *config, char **url,
+                         char **bearer)
+{
+  *url = NULL;
+  *bearer = NULL;
+  if (config->provider == BRO_METADATA_TMDB && tmdb > 0)
+    {
+      g_autofree char *path = g_strdup_printf ("%s/%d", (id_kind >= 0 ? id_kind : (int) kind) == BRO_KIND_TV ? "tv" : "movie", tmdb);
+      return tmdb_request (path, "", config, url, bearer);
+    }
+  if (config->provider == BRO_METADATA_TMDB && imdb)
+    {
+      g_autofree char *path = g_strdup_printf ("find/%s", imdb);
+      return tmdb_request (path, "external_source=imdb_id", config, url, bearer);
+    }
+  if (config->provider == BRO_METADATA_OMDB && imdb)
+    {
+      g_autofree char *i = g_uri_escape_string (imdb, NULL, FALSE);
+      g_autofree char *query = g_strdup_printf ("i=%s&plot=full", i);
+      return omdb_request (query, config, url, bearer);
+    }
+  return FALSE;
+}
+
+gboolean
+bro_metadata_season_request (const BroMediaMatch *match, int season, const BroMetadataConfig *config, char **url, char **bearer)
+{
+  *url = NULL;
+  *bearer = NULL;
+  if (config->provider == BRO_METADATA_TMDB && match->tmdb_id)
+    {
+      g_autofree char *path = g_strdup_printf ("tv/%d/season/%d", match->tmdb_id, season);
+      return tmdb_request (path, "", config, url, bearer);
+    }
+  if (config->provider == BRO_METADATA_OMDB && match->imdb_id)
+    {
+      g_autofree char *i = g_uri_escape_string (match->imdb_id, NULL, FALSE);
+      g_autofree char *query = g_strdup_printf ("i=%s&Season=%d", i, season);
+      return omdb_request (query, config, url, bearer);
+    }
+  return FALSE;
+}
+
 static const char *
 obj_str (JsonObject *o, const char *k)
 {
   JsonNode *n = o && json_object_has_member (o, k) ? json_object_get_member (o, k) : NULL;
   return n && JSON_NODE_HOLDS_VALUE (n) && json_node_get_value_type (n) == G_TYPE_STRING ? json_node_get_string (n) : NULL;
+}
+
+/* A text field, "" for missing values and OMDb's "N/A". */
+static const char *
+obj_text (JsonObject *o, const char *k)
+{
+  const char *s = obj_str (o, k);
+  return s && !g_str_equal (s, "N/A") ? s : "";
+}
+
+static int
+obj_int (JsonObject *o, const char *k)
+{
+  JsonNode *n = o && json_object_has_member (o, k) ? json_object_get_member (o, k) : NULL;
+  return n && JSON_NODE_HOLDS_VALUE (n) && json_node_get_value_type (n) == G_TYPE_INT64 ? (int) json_node_get_int (n) : 0;
+}
+
+static JsonArray *
+obj_arr (JsonObject *o, const char *k)
+{
+  JsonNode *n = o && json_object_has_member (o, k) ? json_object_get_member (o, k) : NULL;
+  return n && JSON_NODE_HOLDS_ARRAY (n) ? json_node_get_array (n) : NULL;
 }
 
 static int
@@ -377,98 +597,289 @@ year_of (const char *s)
   return (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
 }
 
-static const char *
-tmdb_title (JsonObject *r)
+static BroMediaMatch *
+tmdb_match (JsonObject *r, int kind)
 {
-  const char *t = obj_str (r, "title");
-  return t ? t : obj_str (r, "name");
+  const char *title = obj_str (r, "title");
+  const char *date = obj_str (r, "release_date");
+  const char *imdb = obj_text (r, "imdb_id"), *poster = obj_str (r, "poster_path");
+  BroMediaMatch *m;
+  if (!title)
+    title = obj_str (r, "name");
+  if (!title || !*title)
+    return NULL;
+  if (!date)
+    date = obj_str (r, "first_air_date");
+  m = media_match_new (title, "TMDb", kind);
+  m->year = year_of (date);
+  m->tmdb_id = obj_int (r, "id");
+  m->imdb_id = *imdb ? g_strdup (imdb) : NULL;
+  g_free (m->overview);
+  m->overview = g_strdup (obj_text (r, "overview"));
+  if (poster)
+    {
+      g_free (m->poster);
+      m->poster = g_strconcat ("https://image.tmdb.org/t/p/original", poster, NULL);
+    }
+  return m;
+}
+
+static BroMediaMatch *
+omdb_match (JsonObject *r, int kind)
+{
+  const char *title = obj_str (r, "Title"), *type = obj_str (r, "Type");
+  BroMediaMatch *m;
+  if (!title || !*title)
+    return NULL;
+  m = media_match_new (title, "OMDb", g_strcmp0 (type, "series") == 0 ? BRO_KIND_TV : g_strcmp0 (type, "movie") == 0 ? BRO_KIND_MOVIE : kind);
+  m->year = year_of (obj_str (r, "Year"));
+  m->imdb_id = g_strdup (obj_str (r, "imdbID"));
+  g_free (m->overview);
+  m->overview = g_strdup (obj_text (r, "Plot"));
+  g_free (m->poster);
+  m->poster = g_strdup (obj_text (r, "Poster"));
+  return m;
+}
+
+static JsonObject *
+parse_object (JsonParser *parser, const char *json)
+{
+  JsonNode *root;
+  if (!json || !json_parser_load_from_data (parser, json, -1, NULL))
+    return NULL;
+  root = json_parser_get_root (parser);
+  return root && JSON_NODE_HOLDS_OBJECT (root) ? json_node_get_object (root) : NULL;
+}
+
+typedef struct {
+  BroMediaMatch *m;
+  int score, order;
+} Ranked;
+
+static int
+cmp_ranked (gconstpointer a, gconstpointer b)
+{
+  const Ranked *x = a, *y = b;
+  return x->score != y->score ? y->score - x->score : x->order - y->order;
+}
+
+GPtrArray *
+bro_metadata_candidates (const char *json, BroMetadataProvider provider, const char *name, int year, BroMediaKind kind)
+{
+  g_autoptr (JsonParser) parser = json_parser_new ();
+  JsonObject *o = parse_object (parser, json);
+  g_autoptr (GPtrArray) found = g_ptr_array_new ();
+  g_autoptr (GArray) ranked = g_array_new (FALSE, FALSE, sizeof (Ranked));
+  g_autofree char *want = bro_normalize_title (name);
+  GPtrArray *out = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_media_match_free);
+  JsonArray *arr;
+  if (!o)
+    return out;
+  if (provider == BRO_METADATA_TMDB && (arr = obj_arr (o, "results")))
+    {
+      for (guint i = 0; i < json_array_get_length (arr); i++)
+        if (JSON_NODE_HOLDS_OBJECT (json_array_get_element (arr, i)))
+          {
+            BroMediaMatch *m = tmdb_match (json_array_get_object_element (arr, i), kind);
+            if (m)
+              g_ptr_array_add (found, m);
+          }
+    }
+  else if (provider == BRO_METADATA_OMDB && g_strcmp0 (obj_str (o, "Response"), "True") == 0)
+    {
+      if ((arr = obj_arr (o, "Search")))
+        {
+          for (guint i = 0; i < json_array_get_length (arr); i++)
+            if (JSON_NODE_HOLDS_OBJECT (json_array_get_element (arr, i)))
+              {
+                BroMediaMatch *m = omdb_match (json_array_get_object_element (arr, i), kind);
+                if (m)
+                  g_ptr_array_add (found, m);
+              }
+        }
+      else
+        {
+          BroMediaMatch *m = omdb_match (o, kind);
+          if (m)
+            g_ptr_array_add (found, m);
+        }
+    }
+  for (guint i = 0; i < found->len; i++)
+    {
+      BroMediaMatch *m = found->pdata[i];
+      g_autofree char *have = bro_normalize_title (m->title);
+      Ranked r = { m, g_str_equal (have, want) ? 4 : 0, (int) i };
+      if (year && m->year)
+        r.score += m->year == year ? 2 : ABS (m->year - year) == 1 ? 1 : 0;
+      g_array_append_val (ranked, r);
+    }
+  g_array_sort (ranked, cmp_ranked);
+  for (guint i = 0; i < ranked->len; i++)
+    g_ptr_array_add (out, g_array_index (ranked, Ranked, i).m);
+  return out;
 }
 
 BroMediaMatch *
 bro_metadata_parse (const char *json, BroMetadataProvider provider, const char *name)
 {
-  g_autoptr (JsonParser) parser = json_parser_new ();
-  JsonNode *root;
-  JsonObject *o;
-  BroMediaMatch *m;
-  if (!json || !json_parser_load_from_data (parser, json, -1, NULL))
-    return NULL;
-  root = json_parser_get_root (parser);
-  if (!root || !JSON_NODE_HOLDS_OBJECT (root))
-    return NULL;
-  o = json_node_get_object (root);
-  if (provider == BRO_METADATA_TMDB)
-    {
-      JsonNode *rn = json_object_has_member (o, "results") ? json_object_get_member (o, "results") : NULL;
-      JsonArray *results = rn && JSON_NODE_HOLDS_ARRAY (rn) ? json_node_get_array (rn) : NULL;
-      g_autofree char *want = normalize (name);
-      JsonObject *pick = NULL, *first = NULL;
-      const char *title, *date;
-      for (guint i = 0; results && i < json_array_get_length (results); i++)
-        {
-          JsonNode *n = json_array_get_element (results, i);
-          JsonObject *r;
-          if (!JSON_NODE_HOLDS_OBJECT (n))
-            continue;
-          r = json_node_get_object (n);
-          if (!first)
-            first = r;
-          {
-            g_autofree char *have = normalize (tmdb_title (r));
-            if (g_str_equal (have, want))
-              {
-                pick = r;
-                break;
-              }
-          }
-        }
-      if (!pick)
-        pick = first;
-      if (!pick || !(title = tmdb_title (pick)) || !*title)
-        return NULL;
-      date = obj_str (pick, "release_date");
-      if (!date)
-        date = obj_str (pick, "first_air_date");
-      m = g_new0 (BroMediaMatch, 1);
-      m->title = g_strdup (title);
-      m->year = year_of (date);
-      if (json_object_has_member (pick, "id") && JSON_NODE_HOLDS_VALUE (json_object_get_member (pick, "id")))
-        m->tmdb_id = (int) json_object_get_int_member (pick, "id");
-      m->provider = "TMDb";
-      return m;
-    }
-  if (provider == BRO_METADATA_OMDB && g_strcmp0 (obj_str (o, "Response"), "True") == 0 && obj_str (o, "Title"))
-    {
-      m = g_new0 (BroMediaMatch, 1);
-      m->title = g_strdup (obj_str (o, "Title"));
-      m->year = year_of (obj_str (o, "Year"));
-      m->imdb_id = g_strdup (obj_str (o, "imdbID"));
-      m->provider = "OMDb";
-      return m;
-    }
-  return NULL;
+  g_autoptr (GPtrArray) list = bro_metadata_candidates (json, provider, name, 0, BRO_KIND_MOVIE);
+  return list->len ? g_ptr_array_steal_index (list, 0) : NULL;
 }
 
 BroMediaMatch *
-bro_metadata_lookup (const char *name, BroMediaKind kind, const BroMetadataConfig *config, GError **error)
+bro_metadata_details (const char *json, BroMetadataProvider provider, BroMediaKind kind)
 {
-  g_autofree char *url = NULL, *bearer = NULL, *auth = NULL;
-  g_autoptr (GString) body = g_string_new (NULL);
-  const char *headers[] = { "Accept: application/json", NULL, NULL };
-  int code = 0;
-  if (!bro_metadata_request (name, kind, config, &url, &bearer))
+  g_autoptr (JsonParser) parser = json_parser_new ();
+  JsonObject *o = parse_object (parser, json);
+  if (!o)
     return NULL;
-  if (bearer)
-    headers[1] = auth = g_strdup_printf ("Authorization: Bearer %s", bearer);
+  if (provider == BRO_METADATA_TMDB)
+    {
+      if (json_object_has_member (o, "movie_results") || json_object_has_member (o, "tv_results"))
+        {
+          /* The kind the id belongs to, whatever the disc was taken for. */
+          JsonArray *movies = obj_arr (o, "movie_results"), *shows = obj_arr (o, "tv_results");
+          JsonObject *movie = movies && json_array_get_length (movies) && JSON_NODE_HOLDS_OBJECT (json_array_get_element (movies, 0))
+                                ? json_array_get_object_element (movies, 0) : NULL;
+          JsonObject *show = shows && json_array_get_length (shows) && JSON_NODE_HOLDS_OBJECT (json_array_get_element (shows, 0))
+                               ? json_array_get_object_element (shows, 0) : NULL;
+          if (kind == BRO_KIND_TV)
+            return show ? tmdb_match (show, BRO_KIND_TV) : movie ? tmdb_match (movie, BRO_KIND_MOVIE) : NULL;
+          return movie ? tmdb_match (movie, BRO_KIND_MOVIE) : show ? tmdb_match (show, BRO_KIND_TV) : NULL;
+        }
+      if (!json_object_has_member (o, "id"))
+        return NULL;
+      return tmdb_match (o, json_object_has_member (o, "name") && !json_object_has_member (o, "title") ? BRO_KIND_TV : BRO_KIND_MOVIE);
+    }
+  if (provider == BRO_METADATA_OMDB && g_strcmp0 (obj_str (o, "Response"), "True") == 0)
+    return omdb_match (o, kind);
+  return NULL;
+}
+
+GHashTable *
+bro_metadata_parse_season (const char *json, BroMetadataProvider provider)
+{
+  g_autoptr (JsonParser) parser = json_parser_new ();
+  JsonObject *o = parse_object (parser, json);
+  GHashTable *out = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) bro_episode_details_free);
+  JsonArray *arr = o ? obj_arr (o, provider == BRO_METADATA_TMDB ? "episodes" : "Episodes") : NULL;
+  for (guint i = 0; arr && provider != BRO_METADATA_NONE && i < json_array_get_length (arr); i++)
+    {
+      JsonObject *e;
+      const char *title;
+      int n;
+      BroEpisodeDetails *d;
+      if (!JSON_NODE_HOLDS_OBJECT (json_array_get_element (arr, i)))
+        continue;
+      e = json_array_get_object_element (arr, i);
+      if (provider == BRO_METADATA_TMDB)
+        {
+          n = obj_int (e, "episode_number");
+          title = obj_str (e, "name");
+        }
+      else
+        {
+          const char *num = obj_str (e, "Episode");
+          n = num && *num && strspn (num, "0123456789") == strlen (num) ? atoi (num) : 0;
+          title = obj_str (e, "Title");
+        }
+      if (n <= 0 || !title || !*title)
+        continue;
+      d = g_new0 (BroEpisodeDetails, 1);
+      d->title = g_strdup (title);
+      d->overview = g_strdup (provider == BRO_METADATA_TMDB ? obj_text (e, "overview") : "");
+      d->aired = g_strdup (obj_text (e, provider == BRO_METADATA_TMDB ? "air_date" : "Released"));
+      g_hash_table_replace (out, GINT_TO_POINTER (n), d);
+    }
+  return out;
+}
+
+static const char *
+provider_name (const BroMetadataConfig *config)
+{
+  return config->provider == BRO_METADATA_TMDB ? "TMDb" : "OMDb";
+}
+
+/* GET url; the body, or NULL with error (HTTP errors too). */
+static char *
+fetch (const char *url, const char *bearer, const BroMetadataConfig *config, GError **error)
+{
+  g_autoptr (GString) body = g_string_new (NULL);
+  g_autofree char *auth = bearer ? g_strdup_printf ("Authorization: Bearer %s", bearer) : NULL;
+  const char *headers[] = { "Accept: application/json", auth, NULL };
+  int code = 0;
   if (!bro_http_request ("GET", url, headers, NULL, 0, 20, &code, body, error))
     return NULL;
   if (code < 200 || code >= 300)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s answered HTTP %d",
-                   config->provider == BRO_METADATA_TMDB ? "TMDb" : "OMDb", code);
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s answered HTTP %d", provider_name (config), code);
       return NULL;
     }
-  return bro_metadata_parse (body->str, config->provider, name);
+  return g_string_free (g_steal_pointer (&body), FALSE);
+}
+
+GPtrArray *
+bro_metadata_search (const char *name, BroMediaKind kind, int year, const BroMetadataConfig *config, GError **error)
+{
+  g_autofree char *url = NULL, *bearer = NULL, *json = NULL;
+  GPtrArray *list = NULL;
+  if (!bro_metadata_request (name, kind, year, config, &url, &bearer))
+    return g_ptr_array_new_with_free_func ((GDestroyNotify) bro_media_match_free);
+  if (!(json = fetch (url, bearer, config, error)))
+    return NULL;
+  list = bro_metadata_candidates (json, config->provider, name, year, kind);
+  if (!list->len && year)
+    {
+      g_clear_pointer (&url, g_free);
+      g_clear_pointer (&bearer, g_free);
+      g_clear_pointer (&json, g_free);
+      bro_metadata_request (name, kind, 0, config, &url, &bearer);
+      if (!(json = fetch (url, bearer, config, error)))
+        {
+          g_ptr_array_unref (list);
+          return NULL;
+        }
+      g_ptr_array_unref (list);
+      list = bro_metadata_candidates (json, config->provider, name, year, kind);
+    }
+  /* OMDb's search results have no plot: read the best one again. */
+  if (config->provider == BRO_METADATA_OMDB && list->len && ((BroMediaMatch *) list->pdata[0])->imdb_id)
+    {
+      g_autoptr (BroMediaMatch) full = bro_metadata_lookup_id (0, -1, ((BroMediaMatch *) list->pdata[0])->imdb_id, kind, config, NULL);
+      if (full)
+        {
+          bro_media_match_free (list->pdata[0]);
+          list->pdata[0] = g_steal_pointer (&full);
+        }
+    }
+  return list;
+}
+
+BroMediaMatch *
+bro_metadata_lookup_id (int tmdb, int id_kind, const char *imdb, BroMediaKind kind, const BroMetadataConfig *config, GError **error)
+{
+  g_autofree char *url = NULL, *bearer = NULL, *json = NULL;
+  if (!bro_metadata_id_request (tmdb, id_kind, imdb, kind, config, &url, &bearer))
+    {
+      g_autofree char *label = bro_online_id_label (tmdb, id_kind, imdb);
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "%s can't look up %s%s", provider_name (config), label,
+                   config->provider == BRO_METADATA_OMDB ? " (it takes IMDb ids, tt…)" : "");
+      return NULL;
+    }
+  if (!(json = fetch (url, bearer, config, error)))
+    return NULL;
+  return bro_metadata_details (json, config->provider, kind);
+}
+
+GHashTable *
+bro_metadata_episodes (const BroMediaMatch *match, int season, const BroMetadataConfig *config, GError **error)
+{
+  g_autofree char *url = NULL, *bearer = NULL, *json = NULL;
+  if (!bro_metadata_season_request (match, season, config, &url, &bearer))
+    return g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) bro_episode_details_free);
+  if (!(json = fetch (url, bearer, config, error)))
+    return NULL;
+  return bro_metadata_parse_season (json, config->provider);
 }
 
 /* ---- media server layout ---- */

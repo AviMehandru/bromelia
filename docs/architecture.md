@@ -183,6 +183,15 @@ turns on and off.
   with the request written to a private config file so keys stay off the command line). Other Apprise URLs run
   the `apprise` command. They happen on the job's thread at the end of the job (notifications) or after the
   listing has been read (lookup); failures are logged and never fail a job.
+- **Online lookup** (`MetadataLookup` / `bro_metadata_*`): a search ranks the candidates (title, then year hint), a
+  chosen id (`OnlineId` / `bro_online_id_parse`) is read with the provider's details or `/find` request, and a
+  season's episodes give the episode titles once the numbering is settled. The job looks up after reading the
+  listing and again if the menus turn the disc into a TV show; the disc page runs the same search in the background
+  when a disc is opened (a task, `Task.Run`, a `GTask`) and keeps the candidates on the disc session, which a
+  generation counter protects from stale answers.
+- **Numbering across discs** (`EpisodeContinuation` / `bro_episode_continuation`) reads the `bromelia*.json` records
+  of the history's folders and the output root on the job's thread, after the menus were read and before the
+  episode titles are looked up.
 - **Other discs.** Before an automatic or quick rip, a disc whose `DRV` flags show no DVD / Blu-ray structure is
   probed (DiskArbitration, the Windows table of contents, udev) and gets the `audioCD` or `dataImage` mode. Those
   jobs skip `makemkvcon` entirely: the audio command runs in the staging folder, and data discs are copied to an

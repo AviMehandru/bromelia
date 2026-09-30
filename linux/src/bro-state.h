@@ -7,6 +7,7 @@
 #include "bro-config.h"
 #include "bro-makemkv.h"
 #include "bro-runner.h"
+#include "bro-integrations.h"
 #include "bro-sleep.h"
 #include "bro-archive.h"
 #include "bro-web.h"
@@ -41,7 +42,9 @@ struct _BroJob {
   GHashTable *name_overrides;
   char *media_name;            /* "" = inferred */
   int media_kind;              /* BroMediaKind, -1 = inferred */
-  int first_episode;           /* -1 = menus / 1 */
+  int first_episode;           /* -1 = menus / previous disc / 1 */
+  int media_year;              /* 0 = none */
+  char *online_id;             /* TMDb or IMDb id chosen online; "" = the best search result */
   int disc_flags;              /* DRV flags, -1 = unknown */
   gboolean automatic;
   gboolean uses_configured_mode; /* the drive's mode, so it may follow the disc's format (automatic and quick rips) */
@@ -92,7 +95,13 @@ struct _BroSession {
   char *output_override;
   char *media_name;             /* movie / show name for file names; "" = inferred */
   int media_kind;               /* BroMediaKind, -1 = inferred */
-  int first_episode;            /* -1 = read from the menus, or 1 */
+  int first_episode;            /* -1 = read from the menus, continued from the previous disc, or 1 */
+  int media_year;               /* release year, to find the right movie or show online; 0 = none */
+  char *online_id;              /* the movie or show chosen online (a TMDb or IMDb id); "" = the best search result */
+  GPtrArray *lookup_candidates; /* BroMediaMatch*: what the online lookup found, best first */
+  gboolean looking_up;
+  char *lookup_message;         /* why the lookup found nothing, or NULL */
+  guint lookup_generation;
   int disc_flags;               /* DRV flags, -1 = unknown */
   GCancellable *cancellable;
   char *libre_drive;            /* what MakeMKV said about LibreDrive when the disc was opened (drives only), or NULL */
@@ -205,6 +214,9 @@ void            bro_state_eject (BroState *self, const char *lane);
 
 BroSession     *bro_state_session (BroState *self, const char *id);
 BroDriveConfig *bro_state_session_config (BroState *self, BroSession *s);
+/* Looks the opened disc up online (name, kind and year chosen on the disc page) in the background; the session emits
+ * "lookup-changed" when it starts and when the candidates are in. */
+void            bro_state_look_up (BroState *self, BroSession *s);
 BroSession     *bro_state_open_file (BroState *self, const char *path);
 /* Downloads the current beta key from the MakeMKV forum and registers it; the result is a message for the user. */
 void            bro_state_install_beta_key (BroState *self, GAsyncReadyCallback cb, gpointer data);

@@ -26,6 +26,7 @@ public static class TemplateRenderer
     public static readonly (string Token, string Help)[] FileTokens = FolderTokens.Concat(new[]
     {
         ("episode", "Episode 138 (TV shows; empty for other titles)"), ("episodeNumber", "Episode number alone"),
+        ("episodeTitle", "Episode title from the online lookup (TV shows; empty without one)"),
         ("track", "Source title: Title 11, Title 11 Ch 8-14 (split episodes) or Playlist 00800"),
         ("title", "Title name (or the disc name when the title has none)"), ("index", "MakeMKV title number (0-based)"),
         ("n", "Position of the title in this job (1-based)"), ("source", "Source title ID (playlist / VTS number)"),

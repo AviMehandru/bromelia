@@ -231,11 +231,12 @@ private struct ServicesPreferences: View {
                     if model.config.metadata.provider == .tmdb {
                         TextField("Language", text: $model.config.metadata.language, prompt: Text("en-US"))
                     }
+                    Toggle("Look up episode titles of TV shows", isOn: $model.config.metadata.episodeTitles)
                 }
             } header: {
                 Text("Online lookup")
             } footer: {
-                Text("Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for media server names. Get a free key at themoviedb.org (Settings → API) or omdbapi.com.")
+                Text("Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for media server names, and the episode titles ({episodeTitle}). The disc page shows the other results and takes a year or an id when the best match is wrong. Get a free key at themoviedb.org (Settings → API) or omdbapi.com.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

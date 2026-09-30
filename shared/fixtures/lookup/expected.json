@@ -1,0 +1,60 @@
+{
+  "comment": "What every platform's online lookup must make of the recorded answers in this folder (see docs/configuration.md, Online lookup).",
+  "search": [
+    {"file": "tmdb-search-movie.json", "provider": "tmdb", "kind": "movie", "name": "Dune", "year": 2021,
+     "expect": [{"title": "Dune", "year": 2021, "tmdbId": 438631, "choice": "movie/438631", "poster": "https://image.tmdb.org/t/p/original/d5NXSklXo0qyIYkgV94XAgMIckC.jpg"},
+                {"title": "Dune", "year": 1984, "tmdbId": 841, "choice": "movie/841"},
+                {"title": "Dune: Part Two", "year": 2024, "tmdbId": 693134, "choice": "movie/693134"},
+                {"title": "Dune Drifter", "year": null, "tmdbId": 1, "choice": "movie/1", "poster": ""}]},
+    {"file": "tmdb-search-movie.json", "provider": "tmdb", "kind": "movie", "name": "DUNE", "year": null,
+     "expect": [{"title": "Dune", "year": 1984, "tmdbId": 841}, {"title": "Dune", "year": 2021, "tmdbId": 438631},
+                {"title": "Dune: Part Two", "year": 2024, "tmdbId": 693134}, {"title": "Dune Drifter", "year": null, "tmdbId": 1}]},
+    {"file": "tmdb-search-movie.json", "provider": "tmdb", "kind": "movie", "name": "Dune", "year": 2022,
+     "expect": [{"title": "Dune", "year": 2021, "tmdbId": 438631}, {"title": "Dune", "year": 1984, "tmdbId": 841},
+                {"title": "Dune: Part Two", "year": 2024, "tmdbId": 693134}, {"title": "Dune Drifter", "year": null, "tmdbId": 1}]},
+    {"file": "tmdb-search-tv.json", "provider": "tmdb", "kind": "tv", "name": "Friends", "year": null,
+     "expect": [{"title": "Friends", "year": 1994, "tmdbId": 1668, "choice": "tv/1668", "kind": "tv"},
+                {"title": "Friends: The Reunion", "year": 2021, "tmdbId": 239287}]},
+    {"file": "omdb-search.json", "provider": "omdb", "kind": "movie", "name": "Dune", "year": 1984,
+     "expect": [{"title": "Dune", "year": 1984, "imdbId": "tt0087182", "choice": "tt0087182", "poster": "https://m.media-amazon.com/images/M/dune1984.jpg"},
+                {"title": "Dune", "year": 2021, "imdbId": "tt1160419"},
+                {"title": "Dune: Part Two", "year": 2024, "imdbId": "tt15239678", "poster": ""}]}
+  ],
+  "details": [
+    {"file": "tmdb-movie.json", "provider": "tmdb", "kind": "movie",
+     "expect": {"title": "The Matrix", "year": 1999, "tmdbId": 603, "imdbId": "tt0133093", "kind": "movie", "choice": "movie/603",
+                "poster": "https://image.tmdb.org/t/p/original/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg", "overview": "Set in the 22nd century, The Matrix tells the story of a computer hacker."}},
+    {"file": "tmdb-find.json", "provider": "tmdb", "kind": "movie",
+     "expect": {"title": "Friends", "year": 1994, "tmdbId": 1668, "kind": "tv", "choice": "tv/1668"}},
+    {"file": "omdb-title.json", "provider": "omdb", "kind": "movie",
+     "expect": {"title": "Friends", "year": 1994, "imdbId": "tt0108778", "kind": "tv", "choice": "tt0108778",
+                "poster": "https://m.media-amazon.com/images/M/friends.jpg"}}
+  ],
+  "season": [
+    {"file": "tmdb-season.json", "provider": "tmdb",
+     "expect": {"1": "The One with Ross's New Girlfriend", "2": "The One with the Breast Milk", "3": "The One Where Heckles Dies", "4": "The One with Phoebe's Husband"},
+     "aired": {"2": "1995-09-28"}},
+    {"file": "omdb-season.json", "provider": "omdb",
+     "expect": {"1": "The One with Ross's New Girlfriend", "2": "The One with the Breast Milk", "3": "The One Where Heckles Dies"},
+     "aired": {"3": "1995-10-05"}}
+  ],
+  "ids": [
+    {"text": "tt0133093", "imdb": "tt0133093"},
+    {"text": " https://www.imdb.com/title/tt0108778/ ", "imdb": "tt0108778"},
+    {"text": "603", "tmdb": 603},
+    {"text": "tmdb:603", "tmdb": 603},
+    {"text": "tv/1668", "tmdb": 1668, "kind": "tv"},
+    {"text": "Movie/603", "tmdb": 603, "kind": "movie"},
+    {"text": "https://www.themoviedb.org/movie/603-the-matrix", "tmdb": 603, "kind": "movie"},
+    {"text": "https://www.themoviedb.org/tv/1668-friends/season/2", "tmdb": 1668, "kind": "tv"},
+    {"text": "The Matrix", "invalid": true},
+    {"text": "0", "invalid": true},
+    {"text": "", "invalid": true}
+  ],
+  "splitYear": [
+    {"text": "Inception (2010)", "name": "Inception", "year": 2010},
+    {"text": "Blade Runner 2049", "name": "Blade Runner 2049", "year": null},
+    {"text": "Dune", "name": "Dune", "year": null},
+    {"text": "Solaris (1972) ", "name": "Solaris", "year": 1972}
+  ]
+}

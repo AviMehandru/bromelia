@@ -256,7 +256,7 @@ struct MediaIdentity: Equatable, Sendable {
             "part": label.part.map(String.init) ?? "",
             "volumeNumber": label.volume.map(String.init) ?? "",
             // Per-file values default to empty so conditional sections in templates drop out.
-            "episode": "", "episodeNumber": "", "track": "",
+            "episode": "", "episodeNumber": "", "episodeTitle": "", "track": "",
         ]
     }
 

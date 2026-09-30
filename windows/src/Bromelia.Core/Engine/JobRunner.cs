@@ -73,6 +73,12 @@ public sealed class JobRunner
     DvdNavigation.EpisodePlan? _episodePlan;
     Dictionary<int, int> _separateEpisodes = new();   // MakeMKV title → episode offset
     int _firstEpisode = 1, _episodeWidth = 2;
+    /// <summary>Episode number → title and plot, from the online lookup.</summary>
+    Dictionary<int, EpisodeDetails> _episodeDetails = new();
+    /// <summary>The kind the online lookup searched for.</summary>
+    MediaKind? _lookedUpKind;
+    /// <summary>The online match is the id chosen for this disc (not a search result).</summary>
+    bool _metadataChosen;
     readonly Dictionary<string, int> _fileTitles = new(StringComparer.Ordinal);
     // Output (see FinishOutputAsync)
     string? _outputDir, _workDir;
@@ -392,26 +398,56 @@ public sealed class JobRunner
         return outDir;
     }
 
-    /// <summary>The canonical title and year from TMDb or OMDb, when a provider is set up. Failures only log.</summary>
+    /// <summary>The canonical title and year from TMDb or OMDb, when a provider is set up: the movie or show chosen for this disc
+    /// (OnlineId), else the best search result for the name (with the year typed for the disc). Failures only log.</summary>
     async Task LookUpMetadataAsync()
     {
         var m = _config.Metadata;
-        if (m.Provider == MetadataProvider.None || m.ApiKey.Length == 0 || _job.Identity is not { Name.Length: > 0 } id) return;
-        _job.Phase = $"Looking up “{id.Name}”";
+        if (m.Provider == MetadataProvider.None || m.ApiKey.Trim().Length == 0 || _job.Identity is not { Name.Length: > 0 } id) return;
+        _lookedUpKind = id.Kind;
+        var chosen = _job.OnlineId.Trim();
         try
         {
-            if (await MetadataLookup.LookupAsync(id.Name, id.Kind, m) is { } match)
+            if (chosen.Length > 0)
             {
-                _job.Metadata = match;
-                _job.AppendLog($"{match.Provider}: “{match.Title}”{(match.Year is { } y ? $" ({y})" : "")}{(match.TmdbId is { } t ? $", TMDb {t}" : "")}{(match.ImdbId is { } i ? $", {i}" : "")}");
-                ResolveIdentity(_job.DiscInfo);
+                if (OnlineId.Parse(chosen) is { } oid)
+                {
+                    _job.Phase = $"Looking up {oid.Label}";
+                    if (await MetadataLookup.LookupAsync(oid, id.Kind, m) is { } match)
+                    {
+                        _metadataChosen = true;
+                        Use(match, "chosen for this disc");
+                    }
+                    else _job.AppendLog($"{m.Provider.Label()} found nothing for {oid.Label}, chosen for this disc", Severity.Warning);
+                    return;
+                }
+                _job.AppendLog($"“{chosen}” is not a TMDb or IMDb id; looking up the name instead", Severity.Warning);
             }
-            else _job.AppendLog($"{m.Provider} found nothing for “{id.Name}”", Severity.Warning);
+            var (query, typedYear) = MetadataLookup.SplitYear(id.Name);
+            var year = _job.MediaYear ?? typedYear;
+            _job.Phase = $"Looking up “{query}”";
+            var list = await MetadataLookup.SearchAsync(query, id.Kind, year, m);
+            if (list.Count == 0)
+            {
+                _job.AppendLog($"{m.Provider.Label()} found nothing for “{query}”{(year is { } y ? $" ({y})" : "")}", Severity.Warning);
+                return;
+            }
+            var others = string.Join(", ", list.Skip(1).Take(4).Select(x => x.Label));
+            Use(list[0], list.Count == 1 ? "the only result"
+                : $"best of {list.Count} results; also {others}{(list.Count > 5 ? ", …" : "")}. Choose another on the disc page if this is wrong");
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
             _job.AppendLog($"Looking up “{id.Name}” failed: {e.Message}", Severity.Warning);
         }
+    }
+
+    void Use(MediaMatch match, string how)
+    {
+        _job.Metadata = match;
+        var ids = string.Join(", ", new[] { match.TmdbId is { } t ? $"TMDb {t}" : null, match.ImdbId }.OfType<string>());
+        _job.AppendLog($"{match.Provider}: “{match.Label}”{(ids.Length > 0 ? ", " + ids : "")} ({how})");
+        ResolveIdentity(_job.DiscInfo);
     }
 
     /// <summary>Audio CDs (ripped with cyanrip / abcde) and data discs (copied sector by sector to an ISO image).</summary>
@@ -483,7 +519,13 @@ public sealed class JobRunner
     {
         var id = MediaIdentity.Resolve(info, _job.DiscLabel, _job.Mode == RipMode.Backup, _job.DiscFlags, format ?? _job.Identity?.Format,
             _job.MediaName, _job.MediaKind, playAllEpisodes);
-        if (_job.Metadata is { } meta) id = id with { Name = TemplateRenderer.SanitizeComponent(meta.Title) };
+        if (_job.Metadata is { } meta)
+        {
+            id = id with { Name = TemplateRenderer.SanitizeComponent(meta.Title) };
+            // An id chosen for the disc may be a show where a movie was assumed (or the other way round).
+            if (_metadataChosen && meta.Kind is { } k && k != id.Kind && _job.MediaKind == null)
+                id = id with { Kind = k, Reason = $"{meta.Provider} lists it as a {(k == MediaKind.Tv ? "TV show" : "movie")}" };
+        }
         if (id != _job.Identity)
         {
             var set = id.Label.SetDescription;
@@ -529,7 +571,15 @@ public sealed class JobRunner
             }
             else if (_videoTs == null) _job.AppendLog("Could not open the disc's VIDEO_TS to look for episodes", Severity.Warning);
         }
-        ResolveIdentity(info, plans.FirstOrDefault(p => p.IsPlausible(true))?.EpisodeCount ?? 0);
+        var strict = plans.FirstOrDefault(p => p.IsPlausible(true))?.EpisodeCount ?? 0;
+        ResolveIdentity(info, strict);
+        // The menus showed a TV show where the lookup searched for a movie: search again, with the name read from the disc.
+        if (_job.Identity is { } now && _lookedUpKind is { } searched && now.Kind != searched && !_metadataChosen)
+        {
+            _job.Metadata = null;
+            ResolveIdentity(info, strict);
+            await LookUpMetadataAsync();
+        }
         if (_job.Identity?.Kind != MediaKind.Tv) return;
 
         if (plans.FirstOrDefault(p => p.IsPlausible(false)) is { } plan)
@@ -556,10 +606,76 @@ public sealed class JobRunner
             if (numbers != null && DvdNavigation.FirstEpisode(numbers, count) is { } f) { first = f; how = $"menu text [{string.Join(", ", numbers.OrderBy(n => n))}]"; }
             else how = why ?? $"menus read [{string.Join(", ", (numbers ?? new HashSet<int>()).OrderBy(n => n))}], no clear numbering";
         }
+        if (await PreviousDiscAsync() is { } found)
+        {
+            if (first == null)
+            {
+                first = found.LastEpisode + 1;
+                how = $"after episode {found.LastEpisode} of {found.Source}";
+            }
+            else if (first != found.LastEpisode + 1)
+                _job.AppendLog($"The previous disc ended with episode {found.LastEpisode} ({found.Source}), but this disc starts with {first} ({how})", Severity.Warning);
+        }
         if (first == null) how = $"numbered from 1 ({how})";
         _firstEpisode = first ?? 1;
         _episodeWidth = Math.Max(2, (_firstEpisode + count - 1).ToString(CultureInfo.InvariantCulture).Length);
         _job.AppendLog($"Episodes {_firstEpisode}–{_firstEpisode + count - 1} ({how})");
+        await LookUpEpisodeTitlesAsync(count);
+    }
+
+    /// <summary>The last episode of the previous disc of this set (see <see cref="EpisodeContinuation"/>), for discs 2 and later.</summary>
+    async Task<EpisodeContinuation.Found?> PreviousDiscAsync()
+    {
+        if (_job.Identity is not { Label.Disc: > 1 } id) return null;
+        _job.Phase = "Looking for the previous disc's episodes";
+        var q = new EpisodeContinuation.Query(id.Name, id.Label.Title, id.Label.Season, id.Label.Part, id.Label.Volume, id.Label.Disc!.Value);
+        var root = Paths.ExpandUser(_config.OutputRootFor(_job.Drive));
+        var folders = _job.ArchivedCandidates.Select(c => c.Folder).ToList();
+        var season = id.Label.Season ?? 1;
+        var seasonFolder = _job.Drive.Output.Layout == LibraryLayout.MediaServer && _outputDir != null
+            ? Path.Combine(_outputDir, $"Season {season.ToString("00", CultureInfo.InvariantCulture)}") : null;
+        return await Task.Run(() => EpisodeContinuation.Find(q, root, folders, seasonFolder, season));
+    }
+
+    /// <summary>The titles of this disc's episodes, when the show was found online (Metadata.EpisodeTitles). A season whose
+    /// numbers don't cover every episode of the disc (numbered across seasons, say) gives no titles at all.</summary>
+    async Task LookUpEpisodeTitlesAsync(int count)
+    {
+        _episodeDetails = new();
+        var m = _config.Metadata;
+        if (!m.EpisodeTitles || count == 0 || _job.Metadata is not { } match || _job.Identity?.Kind != MediaKind.Tv) return;
+        var season = _job.Identity.Label.Season ?? 1;
+        var wanted = Enumerable.Range(_firstEpisode, count).ToList();
+        _job.Phase = "Looking up episode titles";
+        try
+        {
+            var all = await MetadataLookup.EpisodesAsync(match, season, m);
+            if (all.Count == 0)
+            {
+                _job.AppendLog($"{match.Provider} lists no episodes for season {season} of “{match.Title}”", Severity.Warning);
+                return;
+            }
+            var missing = wanted.Where(n => !all.ContainsKey(n)).ToList();
+            if (missing.Count > 0)
+            {
+                _job.AppendLog($"Season {season} of “{match.Title}” on {match.Provider} has episodes {all.Keys.Min()}–{all.Keys.Max()}, not {string.Join(", ", missing)}; the episodes get no titles", Severity.Warning);
+                return;
+            }
+            foreach (var n in wanted) _episodeDetails[n] = all[n];
+            _job.AppendLog($"Episode titles from {match.Provider}, season {season}: " + string.Join(", ", wanted.Select(n => $"{n} “{all[n].Title}”")));
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            _job.AppendLog($"Looking up the episode titles failed: {e.Message}", Severity.Warning);
+        }
+    }
+
+    /// <summary>Template values of episode <paramref name="n"/>.</summary>
+    void SetEpisode(int n, Dictionary<string, string> values)
+    {
+        values["episode"] = MediaIdentity.EpisodeLabel(n, _episodeWidth);
+        values["episodeNumber"] = n.ToString(CultureInfo.InvariantCulture);
+        values["episodeTitle"] = _episodeDetails.TryGetValue(n, out var d) ? d.Title : "";
     }
 
     /// <summary>Splits the ripped "play all" title into episode files named with the file name template.</summary>
@@ -605,8 +721,7 @@ public sealed class JobRunner
             if (i < plan.EpisodeCount)
             {
                 (firstCh, lastCh) = plan.ChapterRange(i);
-                values["episode"] = MediaIdentity.EpisodeLabel(_firstEpisode + i, _episodeWidth);
-                values["episodeNumber"] = (_firstEpisode + i).ToString(CultureInfo.InvariantCulture);
+                SetEpisode(_firstEpisode + i, values);
             }
             else (firstCh, lastCh) = (plan.Tail[0], plan.Tail[^1]);
             values["track"] = $"{MediaIdentity.TrackLabel(title)} Ch {(firstCh == lastCh ? $"{firstCh}" : $"{firstCh}-{lastCh}")}";
@@ -615,7 +730,8 @@ public sealed class JobRunner
             var final = RenameTo(parts[i], values, template, fallback, outDir);
             outputs.Add(final);
             if (i < plan.EpisodeCount)
-                _job.Episodes.Add(new ArchiveRecord.EpisodeEntry { File = RelativePath(final, outDir), Episode = _firstEpisode + i, SourceTitleId = plan.Title, FirstChapter = firstCh, LastChapter = lastCh });
+                _job.Episodes.Add(new ArchiveRecord.EpisodeEntry { File = RelativePath(final, outDir), Episode = _firstEpisode + i, SourceTitleId = plan.Title, FirstChapter = firstCh, LastChapter = lastCh,
+                    Title = _episodeDetails.TryGetValue(_firstEpisode + i, out var ed) ? ed.Title : null });
         }
         _job.AppendLog($"Split {baseName} into {plan.EpisodeCount} episode(s){(parts.Count > plan.EpisodeCount ? " and a closing clip" : "")}");
         int at = _job.ProducedFiles.IndexOf(file);
@@ -1347,18 +1463,15 @@ public sealed class JobRunner
         foreach (var kv in TitleValues(title, ordinal, info, file)) values[kv.Key] = kv.Value;
         values["track"] = MediaIdentity.TrackLabel(title);
         bool episode = _separateEpisodes.TryGetValue(title.Index, out var k);
-        if (episode)
-        {
-            values["episode"] = MediaIdentity.EpisodeLabel(_firstEpisode + k, _episodeWidth);
-            values["episodeNumber"] = (_firstEpisode + k).ToString(CultureInfo.InvariantCulture);
-        }
+        if (episode) SetEpisode(_firstEpisode + k, values);
         var template = explicitName.Length > 0 ? explicitName
             : _job.Drive.Output.Layout == LibraryLayout.MediaServer ? MediaServerNaming.FileTemplate(values, title.Index == _mainTitle)
             : _job.Drive.Output.FileNameTemplate.Trim();
         var final = RenameTo(file, values, template, null, outDir);
         if (episode)
             _job.Episodes.Add(new ArchiveRecord.EpisodeEntry { File = RelativePath(final, outDir), Episode = _firstEpisode + k,
-                SourceTitleId = title.SourceTitleId ?? title.Index, FirstChapter = 1, LastChapter = Math.Max(1, title.ChapterCount) });
+                SourceTitleId = title.SourceTitleId ?? title.Index, FirstChapter = 1, LastChapter = Math.Max(1, title.ChapterCount),
+                Title = _episodeDetails.TryGetValue(_firstEpisode + k, out var ed) ? ed.Title : null });
         return final;
     }
 

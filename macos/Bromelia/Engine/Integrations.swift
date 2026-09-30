@@ -84,68 +84,269 @@ enum NotificationSender {
 // MARK: - Metadata
 
 /// A movie or show found online.
-struct MediaMatch: Codable, Equatable, Sendable {
+struct MediaMatch: Codable, Equatable, Hashable, Sendable {
     var title: String
     var year: Int?
     var tmdbId: Int?
     var imdbId: String?
     var provider: String
+    /// Movie or TV show, as the provider lists it.
+    var kind: MediaKind?
+    /// Plot summary (TMDb overview, OMDb plot), for .nfo files.
+    var overview = ""
+    /// Poster image URL, or "".
+    var poster = ""
+
+    /// "The Matrix (1999)".
+    var label: String { year.map { "\(title) (\($0))" } ?? title }
+
+    /// What to type (or pick) on the disc page to choose this match: "movie/603", "tv/1668" or "tt0133093".
+    var choiceId: String {
+        if let tmdbId { return "\((kind ?? .movie).rawValue)/\(tmdbId)" }
+        return imdbId ?? ""
+    }
 }
 
-/// Looks up the canonical title and year of a movie or show on TMDb or OMDb.
+/// An episode of a season, as listed online.
+struct EpisodeDetails: Equatable, Sendable {
+    var title: String
+    var overview = ""
+    /// yyyy-mm-dd, or "".
+    var aired = ""
+}
+
+/// A movie or show chosen by its id: a TMDb id (`603`, `tmdb:603`, `movie/603`, `tv/1668`, a themoviedb.org address)
+/// or an IMDb id (`tt0133093`, an imdb.com address).
+enum OnlineId: Equatable, Sendable {
+    case tmdb(Int, MediaKind?)
+    case imdb(String)
+
+    /// "TMDb movie/603", "TMDb 603", "tt0133093".
+    var label: String {
+        switch self {
+        case let .tmdb(n, k): return "TMDb " + (k.map { "\($0.rawValue)/\(n)" } ?? String(n))
+        case .imdb(let tt): return tt
+        }
+    }
+
+    static func parse(_ text: String) -> OnlineId? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let m = t.firstMatch(of: /tt\d{5,10}/) { return .imdb(String(m.0)) }
+        if let m = t.firstMatch(of: /themoviedb\.org\/(movie|tv)\/(\d+)/) {
+            return Int(m.2).flatMap { $0 > 0 ? .tmdb($0, MediaKind(rawValue: String(m.1))) : nil }
+        }
+        if let m = t.wholeMatch(of: /(?:tmdb:)?(?:(movie|tv)\/)?(\d{1,9})/), let n = Int(m.2), n > 0 {
+            return .tmdb(n, m.1.flatMap { MediaKind(rawValue: String($0)) })
+        }
+        return nil
+    }
+}
+
+/// Looks up movies and shows on TMDb or OMDb: candidates for a name (ranked), a movie or show by its id, and the
+/// episodes of a season.
 enum MetadataLookup {
     static func normalize(_ s: String) -> String {
         s.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(String.init).joined()
     }
 
-    /// The request for `name`: TMDb takes an API key (v3) or a read access token (Bearer).
-    static func request(name: String, kind: MediaKind, config: MetadataConfig) -> URLRequest? {
-        let key = config.apiKey.trimmingCharacters(in: .whitespaces)
-        guard !key.isEmpty, !name.isEmpty else { return nil }
-        var c: URLComponents
+    /// A year typed after the name: "Inception (2010)" → ("Inception", 2010).
+    static func splitYear(_ name: String) -> (name: String, year: Int?) {
+        let t = name.trimmingCharacters(in: .whitespaces)
+        if let m = t.wholeMatch(of: /(.*\S)\s*\((\d{4})\)/), let y = Int(m.2), (1870...2100).contains(y) { return (String(m.1), y) }
+        return (t, nil)
+    }
+
+    private static func key(_ config: MetadataConfig) -> String { config.apiKey.trimmingCharacters(in: .whitespaces) }
+
+    /// A TMDb request: an API key (v3) goes into the query, a read access token into a Bearer header.
+    private static func tmdb(_ path: String, _ query: [URLQueryItem], config: MetadataConfig) -> URLRequest? {
+        let key = key(config)
+        guard !key.isEmpty, var c = URLComponents(string: "https://api.themoviedb.org/3/" + path) else { return nil }
+        c.queryItems = query + [URLQueryItem(name: "language", value: config.language.isEmpty ? "en-US" : config.language)]
+        if key.count <= 40 { c.queryItems?.append(URLQueryItem(name: "api_key", value: key)) }
+        guard let url = c.url else { return nil }
+        var r = URLRequest(url: url)
+        r.timeoutInterval = 20
+        if key.count > 40 { r.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        return r
+    }
+
+    private static func omdb(_ query: [URLQueryItem], config: MetadataConfig) -> URLRequest? {
+        let key = key(config)
+        guard !key.isEmpty, var c = URLComponents(string: "https://www.omdbapi.com/") else { return nil }
+        c.queryItems = [URLQueryItem(name: "apikey", value: key)] + query
+        guard let url = c.url else { return nil }
+        var r = URLRequest(url: url)
+        r.timeoutInterval = 20
+        return r
+    }
+
+    /// The search for `name` (optionally released in `year`).
+    static func request(name: String, kind: MediaKind, year: Int? = nil, config: MetadataConfig) -> URLRequest? {
+        guard !name.isEmpty else { return nil }
         switch config.provider {
         case .none:
             return nil
         case .tmdb:
-            c = URLComponents(string: "https://api.themoviedb.org/3/search/\(kind == .tv ? "tv" : "movie")")!
-            c.queryItems = [URLQueryItem(name: "query", value: name), URLQueryItem(name: "language", value: config.language)]
-            if key.count <= 40 { c.queryItems?.append(URLQueryItem(name: "api_key", value: key)) }
+            var q = [URLQueryItem(name: "query", value: name)]
+            if let year { q.append(URLQueryItem(name: kind == .tv ? "first_air_date_year" : "year", value: String(year))) }
+            return tmdb("search/\(kind == .tv ? "tv" : "movie")", q, config: config)
         case .omdb:
-            c = URLComponents(string: "https://www.omdbapi.com/")!
-            c.queryItems = [URLQueryItem(name: "apikey", value: key), URLQueryItem(name: "t", value: name),
-                            URLQueryItem(name: "type", value: kind == .tv ? "series" : "movie")]
+            var q = [URLQueryItem(name: "s", value: name), URLQueryItem(name: "type", value: kind == .tv ? "series" : "movie")]
+            if let year { q.append(URLQueryItem(name: "y", value: String(year))) }
+            return omdb(q, config: config)
         }
-        guard let url = c.url else { return nil }
-        var r = URLRequest(url: url)
-        r.timeoutInterval = 20
-        if config.provider == .tmdb && key.count > 40 { r.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        return r
     }
 
-    /// Picks the result whose title matches `name` (ignoring case and punctuation), else the first one.
-    static func parse(_ data: Data, provider: MetadataProvider, name: String) -> MediaMatch? {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        func year(_ s: Any?) -> Int? { (s as? String).flatMap { Int($0.prefix(4)) } }
+    /// The movie or show with this id. TMDb ids without a kind use `kind`; OMDb only takes IMDb ids.
+    static func request(id: OnlineId, kind: MediaKind, config: MetadataConfig) -> URLRequest? {
+        switch (config.provider, id) {
+        case let (.tmdb, .tmdb(n, k)): return tmdb("\((k ?? kind) == .tv ? "tv" : "movie")/\(n)", [], config: config)
+        case let (.tmdb, .imdb(tt)): return tmdb("find/\(tt)", [URLQueryItem(name: "external_source", value: "imdb_id")], config: config)
+        case let (.omdb, .imdb(tt)): return omdb([URLQueryItem(name: "i", value: tt), URLQueryItem(name: "plot", value: "full")], config: config)
+        default: return nil
+        }
+    }
+
+    /// The episodes of `season` of the show `match`.
+    static func seasonRequest(match: MediaMatch, season: Int, config: MetadataConfig) -> URLRequest? {
+        switch config.provider {
+        case .tmdb: return match.tmdbId.flatMap { tmdb("tv/\($0)/season/\(season)", [], config: config) }
+        case .omdb: return match.imdbId.flatMap { omdb([URLQueryItem(name: "i", value: $0), URLQueryItem(name: "Season", value: String(season))], config: config) }
+        case .none: return nil
+        }
+    }
+
+    private static func object(_ data: Data) -> [String: Any]? { try? JSONSerialization.jsonObject(with: data) as? [String: Any] }
+    private static func year(_ s: Any?) -> Int? { (s as? String).flatMap { Int($0.prefix(4)) } }
+    private static func text(_ s: Any?) -> String { (s as? String).map { $0 == "N/A" ? "" : $0 } ?? "" }
+
+    private static func tmdbMatch(_ r: [String: Any], kind: MediaKind) -> MediaMatch? {
+        guard let title = (r["title"] ?? r["name"]) as? String, !title.isEmpty else { return nil }
+        let poster = (r["poster_path"] as? String).map { "https://image.tmdb.org/t/p/original" + $0 } ?? ""
+        let imdb = text(r["imdb_id"])
+        return MediaMatch(title: title, year: year(r["release_date"] ?? r["first_air_date"]), tmdbId: r["id"] as? Int,
+                          imdbId: imdb.isEmpty ? nil : imdb, provider: "TMDb", kind: kind, overview: text(r["overview"]), poster: poster)
+    }
+
+    private static func omdbMatch(_ r: [String: Any], kind: MediaKind?) -> MediaMatch? {
+        guard let title = r["Title"] as? String, !title.isEmpty else { return nil }
+        let type = r["Type"] as? String
+        return MediaMatch(title: title, year: year(r["Year"]), tmdbId: nil, imdbId: r["imdbID"] as? String, provider: "OMDb",
+                          kind: type == "series" ? .tv : type == "movie" ? .movie : kind, overview: text(r["Plot"]), poster: text(r["Poster"]))
+    }
+
+    /// The search results, best first: the title matching `name` (ignoring case and punctuation) scores 4, the year
+    /// hint 2 (1 for a year off by one); ties keep the provider's order.
+    static func candidates(_ data: Data, provider: MetadataProvider, name: String, year: Int? = nil, kind: MediaKind) -> [MediaMatch] {
+        guard let obj = object(data) else { return [] }
+        let list: [MediaMatch]
+        switch provider {
+        case .none:
+            return []
+        case .tmdb:
+            list = (obj["results"] as? [[String: Any]] ?? []).compactMap { tmdbMatch($0, kind: kind) }
+        case .omdb:
+            guard (obj["Response"] as? String) == "True" else { return [] }
+            if let search = obj["Search"] as? [[String: Any]] {
+                list = search.compactMap { omdbMatch($0, kind: kind) }
+            } else {
+                list = omdbMatch(obj, kind: kind).map { [$0] } ?? []
+            }
+        }
+        let want = normalize(name)
+        func score(_ m: MediaMatch) -> Int {
+            var s = normalize(m.title) == want ? 4 : 0
+            if let year, let y = m.year { s += y == year ? 2 : abs(y - year) == 1 ? 1 : 0 }
+            return s
+        }
+        return list.enumerated().sorted { a, b in
+            let sa = score(a.element), sb = score(b.element)
+            return sa != sb ? sa > sb : a.offset < b.offset
+        }.map(\.element)
+    }
+
+    /// The best search result (see `candidates`).
+    static func parse(_ data: Data, provider: MetadataProvider, name: String, year: Int? = nil, kind: MediaKind = .movie) -> MediaMatch? {
+        candidates(data, provider: provider, name: name, year: year, kind: kind).first
+    }
+
+    /// A movie or show read by its id: TMDb details or /find, or OMDb details.
+    static func details(_ data: Data, provider: MetadataProvider, kind: MediaKind) -> MediaMatch? {
+        guard let obj = object(data) else { return nil }
         switch provider {
         case .none:
             return nil
         case .tmdb:
-            let results = obj["results"] as? [[String: Any]] ?? []
-            let want = normalize(name)
-            let pick = results.first { normalize(($0["title"] ?? $0["name"]) as? String ?? "") == want } ?? results.first
-            guard let r = pick, let title = (r["title"] ?? r["name"]) as? String, !title.isEmpty else { return nil }
-            return MediaMatch(title: title, year: year(r["release_date"] ?? r["first_air_date"]), tmdbId: r["id"] as? Int, imdbId: nil, provider: "TMDb")
+            if obj["movie_results"] != nil || obj["tv_results"] != nil {
+                let movies = obj["movie_results"] as? [[String: Any]] ?? [], shows = obj["tv_results"] as? [[String: Any]] ?? []
+                // The kind the id belongs to, whatever the disc was taken for.
+                let pick = kind == .tv ? (shows.first.map { ($0, MediaKind.tv) } ?? movies.first.map { ($0, .movie) })
+                                       : (movies.first.map { ($0, MediaKind.movie) } ?? shows.first.map { ($0, .tv) })
+                return pick.flatMap { tmdbMatch($0.0, kind: $0.1) }
+            }
+            guard obj["id"] != nil else { return nil }
+            return tmdbMatch(obj, kind: obj["name"] != nil && obj["title"] == nil ? .tv : .movie)
         case .omdb:
-            guard (obj["Response"] as? String) == "True", let title = obj["Title"] as? String else { return nil }
-            return MediaMatch(title: title, year: year(obj["Year"]), tmdbId: nil, imdbId: obj["imdbID"] as? String, provider: "OMDb")
+            guard (obj["Response"] as? String) == "True" else { return nil }
+            return omdbMatch(obj, kind: kind)
         }
     }
 
-    static func lookup(name: String, kind: MediaKind, config: MetadataConfig) async throws -> MediaMatch? {
-        guard let r = request(name: name, kind: kind, config: config) else { return nil }
+    /// Episode number → title, plot and air date.
+    static func season(_ data: Data, provider: MetadataProvider) -> [Int: EpisodeDetails] {
+        guard let obj = object(data) else { return [:] }
+        var out: [Int: EpisodeDetails] = [:]
+        switch provider {
+        case .none:
+            break
+        case .tmdb:
+            for e in obj["episodes"] as? [[String: Any]] ?? [] {
+                guard let n = e["episode_number"] as? Int, let t = e["name"] as? String, !t.isEmpty else { continue }
+                out[n] = EpisodeDetails(title: t, overview: text(e["overview"]), aired: text(e["air_date"]))
+            }
+        case .omdb:
+            for e in obj["Episodes"] as? [[String: Any]] ?? [] {
+                guard let n = (e["Episode"] as? String).flatMap({ Int($0) }), let t = e["Title"] as? String, !t.isEmpty else { continue }
+                out[n] = EpisodeDetails(title: t, aired: text(e["Released"]))
+            }
+        }
+        return out
+    }
+
+    private static func fetch(_ r: URLRequest, config: MetadataConfig) async throws -> Data {
         let (data, resp) = try await URLSession.shared.data(for: r)
         if let h = resp as? HTTPURLResponse, h.statusCode != 200 { throw JobError.message("\(config.provider.label) answered HTTP \(h.statusCode)") }
-        return parse(data, provider: config.provider, name: name)
+        return data
+    }
+
+    /// The candidates for `name`, best first. A year that finds nothing is dropped; OMDb's best result is read again for
+    /// its plot.
+    static func search(name: String, kind: MediaKind, year: Int?, config: MetadataConfig) async throws -> [MediaMatch] {
+        var list: [MediaMatch] = []
+        if let r = request(name: name, kind: kind, year: year, config: config) {
+            list = candidates(try await fetch(r, config: config), provider: config.provider, name: name, year: year, kind: kind)
+        }
+        if list.isEmpty, year != nil, let r = request(name: name, kind: kind, config: config) {
+            list = candidates(try await fetch(r, config: config), provider: config.provider, name: name, year: year, kind: kind)
+        }
+        if config.provider == .omdb, let tt = list.first?.imdbId, let r = request(id: .imdb(tt), kind: kind, config: config),
+           let data = try? await fetch(r, config: config), let full = details(data, provider: .omdb, kind: kind) {
+            list[0] = full
+        }
+        return list
+    }
+
+    static func lookup(id: OnlineId, kind: MediaKind, config: MetadataConfig) async throws -> MediaMatch? {
+        guard let r = request(id: id, kind: kind, config: config) else {
+            throw JobError.message("\(config.provider.label) can't look up \(id.label)\(config.provider == .omdb ? " (it takes IMDb ids, tt…)" : "")")
+        }
+        return details(try await fetch(r, config: config), provider: config.provider, kind: kind)
+    }
+
+    static func episodes(of match: MediaMatch, season: Int, config: MetadataConfig) async throws -> [Int: EpisodeDetails] {
+        guard let r = seasonRequest(match: match, season: season, config: config) else { return [:] }
+        return self.season(try await fetch(r, config: config), provider: config.provider)
     }
 }
 
@@ -155,7 +356,7 @@ enum MetadataLookup {
 enum MediaServerNaming {
     static let folderTemplate = "{libraryFolder}/{name}{releaseYear? ({releaseYear})}"
     static let mainTemplate = "{name}{releaseYear? ({releaseYear})}"
-    static let episodeTemplate = "Season {seasonOr1:2}/{name}{releaseYear? ({releaseYear})} - S{seasonOr1:2}E{episodeNumber:2}"
+    static let episodeTemplate = "Season {seasonOr1:2}/{name}{releaseYear? ({releaseYear})} - S{seasonOr1:2}E{episodeNumber:2}{episodeTitle? - {episodeTitle}}"
     static let otherTemplate = "Other/{name}{releaseYear? ({releaseYear})} - {track}"
     static let backupTemplate = "Backup/{name}{releaseYear? ({releaseYear})} - Backup - {format}"
 

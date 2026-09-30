@@ -61,6 +61,7 @@ bro_run_request_new (void)
   r->media_name = g_strdup ("");
   r->media_kind = -1;
   r->first_episode = -1;
+  r->online_id = g_strdup ("");
   r->disc_flags = -1;
   r->cancellable = g_cancellable_new ();
   return r;
@@ -82,6 +83,7 @@ bro_run_request_free (BroRunRequest *r)
   g_hash_table_unref (r->track_selections);
   g_hash_table_unref (r->name_overrides);
   g_free (r->media_name);
+  g_free (r->online_id);
   g_free (r->makemkvcon);
   g_free (r->mkvmerge);
   g_clear_object (&r->cancellable);
@@ -187,6 +189,9 @@ typedef struct {
   BroNotice problem;           /* a problem with MakeMKV or the drive that explains a failure */
   BroDiscInfo *rip_info;       /* the listing the titles were ripped from (disc, backup or one-pass listing) */
   BroMediaMatch *metadata;     /* the movie / show found online */
+  gboolean metadata_chosen;    /* metadata is the id chosen for this disc (not a search result) */
+  int looked_up_kind;          /* the kind the online lookup searched for, -1 before it ran */
+  GHashTable *episode_details; /* episode number -> BroEpisodeDetails*, from the online lookup */
   int main_title;              /* the main feature of a movie (the longest title ripped), for media server names; -1 */
   char *fingerprint;           /* of the disc listing (bro_disc_fingerprint), or NULL */
   char *already_archived;      /* why an automatic rip stopped: the disc was archived before (see check_already_archived) */
@@ -195,12 +200,14 @@ typedef struct {
 typedef struct {
   char *file; /* relative to the output folder */
   int episode, source, first, last;
+  char *title; /* from the online lookup, or NULL */
 } EpisodeRec;
 
 static void
 episode_rec_free (EpisodeRec *e)
 {
   g_free (e->file);
+  g_free (e->title);
   g_free (e);
 }
 
@@ -532,6 +539,13 @@ resolve_identity (Ctx *c, BroDiscInfo *info, int play_all, int format)
     {
       g_free (id->name);
       id->name = bro_sanitize_component (c->metadata->title);
+      /* An id chosen for the disc may be a show where a movie was assumed (or the other way round). */
+      if (c->metadata_chosen && c->metadata->kind >= 0 && c->metadata->kind != (int) id->kind && c->req->media_kind < 0)
+        {
+          id->kind = c->metadata->kind;
+          g_free (id->reason);
+          id->reason = g_strdup_printf ("%s lists it as a %s", c->metadata->provider, id->kind == BRO_KIND_TV ? "TV show" : "movie");
+        }
     }
   if (!bro_identity_equal (id, c->identity))
     {
@@ -874,7 +888,23 @@ add_episode (Ctx *c, const char *file, const char *out_dir, int episode, int sou
   e->source = source;
   e->first = first;
   e->last = last;
+  {
+    BroEpisodeDetails *d = g_hash_table_lookup (c->episode_details, GINT_TO_POINTER (episode));
+    e->title = d ? g_strdup (d->title) : NULL;
+  }
   g_ptr_array_add (c->episodes, e);
+}
+
+/* Template values of episode n. */
+static void
+set_episode (Ctx *c, GHashTable *v, int n)
+{
+  g_autofree char *label = bro_episode_label (n, c->episode_width);
+  g_autofree char *num = g_strdup_printf ("%d", n);
+  BroEpisodeDetails *d = g_hash_table_lookup (c->episode_details, GINT_TO_POINTER (n));
+  bro_template_values_set (v, "episode", label);
+  bro_template_values_set (v, "episodeNumber", num);
+  bro_template_values_set (v, "episodeTitle", d ? d->title : "");
 }
 
 static char *
@@ -890,12 +920,7 @@ rename_file (Ctx *c, const char *file, BroTitle *title, int ordinal, BroDiscInfo
   title_values (v, title, ordinal, info, file);
   bro_template_values_set (v, "track", track);
   if (k >= 0)
-    {
-      g_autofree char *label = bro_episode_label (c->first_episode + k, c->episode_width);
-      g_autofree char *num = g_strdup_printf ("%d", c->first_episode + k);
-      bro_template_values_set (v, "episode", label);
-      bro_template_values_set (v, "episodeNumber", num);
-    }
+    set_episode (c, v, c->first_episode + k);
   tmpl = explicit_name && *explicit_name ? explicit_name
          : media_server (c) ? bro_media_server_file_template (v, title->index == c->main_title)
          : c->req->drive->output.file_name_template;
@@ -1056,6 +1081,91 @@ numbers_text (GArray *n)
 
 /* Decides, before ripping, which titles are episodes: a DVD "play all" title that will be split, or
  * separate episode-length titles. Also settles movie vs. TV and the first episode number. */
+static void look_up_metadata (Ctx *c, BroDiscInfo *info);
+
+/* The last episode of the previous disc of this set (see bro_episode_continuation), for discs 2 and later. */
+static BroContinuation *
+previous_disc (Ctx *c)
+{
+  BroIdentity *id = c->identity;
+  g_autofree char *root = NULL, *season_folder = NULL;
+  g_autoptr (GPtrArray) folders = g_ptr_array_new ();
+  int season;
+  if (!id || id->label.disc <= 1)
+    return NULL;
+  phase (c, "Looking for the previous disc's episodes");
+  season = id->label.season >= 0 ? id->label.season : 1;
+  root = output_root (c);
+  for (guint i = 0; c->req->archived && i < c->req->archived->len; i++)
+    g_ptr_array_add (folders, ((BroArchivedCandidate *) c->req->archived->pdata[i])->folder);
+  if (media_server (c) && c->output_dir)
+    {
+      g_autofree char *name = g_strdup_printf ("Season %02d", season);
+      season_folder = g_build_filename (c->output_dir, name, NULL);
+    }
+  {
+    BroContinuationQuery q = { id->name, id->label.title ? id->label.title : "", id->label.season, id->label.part, id->label.volume,
+                               id->label.disc };
+    return bro_episode_continuation (&q, root, folders, season_folder, season);
+  }
+}
+
+/* The titles of this disc's episodes, when the show was found online (metadata.episodeTitles). A season whose numbers
+ * don't cover every episode of the disc (numbered across seasons, say) gives no titles at all. */
+static void
+look_up_episode_titles (Ctx *c, int count)
+{
+  const BroMetadataConfig *m = &c->req->config->metadata;
+  g_autoptr (GError) err = NULL;
+  g_autoptr (GHashTable) all = NULL;
+  g_autoptr (GString) missing = g_string_new (NULL), list = g_string_new (NULL);
+  int season, lo = G_MAXINT, hi = 0;
+  GHashTableIter it;
+  gpointer key;
+  g_hash_table_remove_all (c->episode_details);
+  if (!m->episode_titles || count <= 0 || !c->metadata || c->identity->kind != BRO_KIND_TV)
+    return;
+  season = c->identity->label.season >= 0 ? c->identity->label.season : 1;
+  phase (c, "Looking up episode titles");
+  if (!(all = bro_metadata_episodes (c->metadata, season, m, &err)))
+    {
+      log_line (c, BRO_SEV_WARNING, "Looking up the episode titles failed: %s", err ? err->message : "unknown error");
+      return;
+    }
+  if (!g_hash_table_size (all))
+    {
+      log_line (c, BRO_SEV_WARNING, "%s lists no episodes for season %d of “%s”", c->metadata->provider, season, c->metadata->title);
+      return;
+    }
+  g_hash_table_iter_init (&it, all);
+  while (g_hash_table_iter_next (&it, &key, NULL))
+    {
+      lo = MIN (lo, GPOINTER_TO_INT (key));
+      hi = MAX (hi, GPOINTER_TO_INT (key));
+    }
+  for (int n = c->first_episode; n < c->first_episode + count; n++)
+    {
+      BroEpisodeDetails *d = g_hash_table_lookup (all, GINT_TO_POINTER (n));
+      if (!d)
+        g_string_append_printf (missing, "%s%d", missing->len ? ", " : "", n);
+      else
+        g_string_append_printf (list, "%s%d “%s”", list->len ? ", " : "", n, d->title);
+    }
+  if (missing->len)
+    {
+      log_line (c, BRO_SEV_WARNING, "Season %d of “%s” on %s has episodes %d–%d, not %s; the episodes get no titles", season,
+                c->metadata->title, c->metadata->provider, lo, hi, missing->str);
+      return;
+    }
+  for (int n = c->first_episode; n < c->first_episode + count; n++)
+    {
+      gpointer d = NULL;
+      if (g_hash_table_steal_extended (all, GINT_TO_POINTER (n), NULL, &d))
+        g_hash_table_replace (c->episode_details, GINT_TO_POINTER (n), d);
+    }
+  log_line (c, BRO_SEV_INFO, "Episode titles from %s, season %d: %s", c->metadata->provider, season, list->str);
+}
+
 static void
 prepare_episodes (Ctx *c, const BroSource *src, BroDiscInfo *info, GArray *indices)
 {
@@ -1116,6 +1226,13 @@ prepare_episodes (Ctx *c, const BroSource *src, BroDiscInfo *info, GArray *indic
     if (bro_episode_plan_plausible (plans->pdata[i], TRUE))
       strict = plans->pdata[i];
   resolve_identity (c, info, strict ? (int) strict->starts->len : 0, -1);
+  /* The menus showed a TV show where the lookup searched for a movie: search again, with the name read from the disc. */
+  if (c->looked_up_kind >= 0 && (int) c->identity->kind != c->looked_up_kind && !c->metadata_chosen)
+    {
+      g_clear_pointer (&c->metadata, bro_media_match_free);
+      resolve_identity (c, info, strict ? (int) strict->starts->len : 0, -1);
+      look_up_metadata (c, info);
+    }
   if (c->identity->kind != BRO_KIND_TV)
     return;
 
@@ -1177,6 +1294,18 @@ prepare_episodes (Ctx *c, const BroSource *src, BroDiscInfo *info, GArray *indic
           how = g_strdup_printf ("menus read %s, no clear numbering", n);
         }
     }
+  {
+    g_autoptr (BroContinuation) found = previous_disc (c);
+    if (found && first < 0)
+      {
+        first = found->last_episode + 1;
+        g_free (how);
+        how = g_strdup_printf ("after episode %d of %s", found->last_episode, found->source);
+      }
+    else if (found && first != found->last_episode + 1)
+      log_line (c, BRO_SEV_WARNING, "The previous disc ended with episode %d (%s), but this disc starts with %d (%s)", found->last_episode,
+                found->source, first, how);
+  }
   if (first < 0)
     {
       char *h = g_strdup_printf ("numbered from 1 (%s)", how);
@@ -1189,6 +1318,7 @@ prepare_episodes (Ctx *c, const BroSource *src, BroDiscInfo *info, GArray *indic
     c->episode_width = MAX (2, (int) strlen (last));
   }
   log_line (c, BRO_SEV_INFO, "Episodes %d–%d (%s)", c->first_episode, c->first_episode + count - 1, how);
+  look_up_episode_titles (c, count);
 }
 
 static double
@@ -1344,11 +1474,8 @@ split_episodes (Ctx *c, const char *out_dir, BroDiscInfo *info, GError **error)
       title_values (vals, title, (int) i + 1, info, parts->pdata[i]);
       if (i < p->starts->len)
         {
-          g_autofree char *label = bro_episode_label (c->first_episode + (int) i, c->episode_width);
-          g_autofree char *num = g_strdup_printf ("%d", c->first_episode + (int) i);
           bro_episode_plan_range (p, i, &f, &l);
-          bro_template_values_set (vals, "episode", label);
-          bro_template_values_set (vals, "episodeNumber", num);
+          set_episode (c, vals, c->first_episode + (int) i);
           fallback = g_strdup_printf ("%s - Episode %d", stem, c->first_episode + (int) i);
         }
       else
@@ -1803,6 +1930,11 @@ build_episodes (JsonBuilder *b, Ctx *c)
       json_builder_add_int_value (b, e->first);
       json_builder_set_member_name (b, "lastChapter");
       json_builder_add_int_value (b, e->last);
+      if (e->title)
+        {
+          json_builder_set_member_name (b, "title");
+          json_builder_add_string_value (b, e->title);
+        }
       json_builder_end_object (b);
     }
   json_builder_end_array (b);
@@ -2831,38 +2963,90 @@ prepare_output (Ctx *c, GError **error)
   return out_dir;
 }
 
-/* The canonical title and year from TMDb or OMDb, when a provider is set up. Failures only log. */
+static void
+use_match (Ctx *c, BroDiscInfo *info, BroMediaMatch *match, const char *how)
+{
+  g_autofree char *label = bro_media_match_label (match);
+  g_autofree char *tmdb = match->tmdb_id ? g_strdup_printf (", TMDb %d", match->tmdb_id) : g_strdup ("");
+  g_autofree char *imdb = match->imdb_id ? g_strdup_printf (", %s", match->imdb_id) : g_strdup ("");
+  log_line (c, BRO_SEV_INFO, "%s: “%s”%s%s (%s)", match->provider, label, tmdb, imdb, how);
+  bro_media_match_free (c->metadata);
+  c->metadata = match;
+  resolve_identity (c, info, 0, -1);
+}
+
+/* The canonical title and year from TMDb or OMDb, when a provider is set up: the movie or show chosen for this disc
+ * (online_id), else the best search result for the name (with the year typed for the disc). Failures only log. */
 static void
 look_up_metadata (Ctx *c, BroDiscInfo *info)
 {
   const BroMetadataConfig *m = &c->req->config->metadata;
   g_autoptr (GError) err = NULL;
-  g_autofree char *name = NULL, *what = NULL;
+  g_autofree char *name = NULL, *query = NULL, *what = NULL, *chosen = NULL;
   const char *provider = m->provider == BRO_METADATA_TMDB ? "TMDb" : "OMDb";
-  BroMediaMatch *match;
+  g_autoptr (GPtrArray) list = NULL;
+  int year = 0;
   if (m->provider == BRO_METADATA_NONE || !m->api_key || !*m->api_key || !c->identity || !*c->identity->name)
     return;
+  c->looked_up_kind = c->identity->kind;
   name = g_strdup (c->identity->name);
-  what = g_strdup_printf ("Looking up “%s”", name);
-  phase (c, what);
-  match = bro_metadata_lookup (name, c->identity->kind, m, &err);
-  if (!match)
+  chosen = g_strstrip (g_strdup (c->req->online_id ? c->req->online_id : ""));
+  if (*chosen)
     {
-      if (err)
-        log_line (c, BRO_SEV_WARNING, "Looking up “%s” failed: %s", name, err->message);
-      else
-        log_line (c, BRO_SEV_WARNING, "%s found nothing for “%s”", provider, name);
+      int tmdb, kind;
+      g_autofree char *imdb = NULL;
+      if (bro_online_id_parse (chosen, &tmdb, &kind, &imdb))
+        {
+          g_autofree char *label = bro_online_id_label (tmdb, kind, imdb);
+          BroMediaMatch *match;
+          what = g_strdup_printf ("Looking up %s", label);
+          phase (c, what);
+          match = bro_metadata_lookup_id (tmdb, kind, imdb, c->identity->kind, m, &err);
+          if (match)
+            {
+              c->metadata_chosen = TRUE;
+              use_match (c, info, match, "chosen for this disc");
+            }
+          else if (err)
+            log_line (c, BRO_SEV_WARNING, "Looking up %s failed: %s", label, err->message);
+          else
+            log_line (c, BRO_SEV_WARNING, "%s found nothing for %s, chosen for this disc", provider, label);
+          return;
+        }
+      log_line (c, BRO_SEV_WARNING, "“%s” is not a TMDb or IMDb id; looking up the name instead", chosen);
+    }
+  query = bro_metadata_split_year (name, &year);
+  if (c->req->media_year > 0)
+    year = c->req->media_year;
+  what = g_strdup_printf ("Looking up “%s”", query);
+  phase (c, what);
+  list = bro_metadata_search (query, c->identity->kind, year, m, &err);
+  if (!list)
+    {
+      log_line (c, BRO_SEV_WARNING, "Looking up “%s” failed: %s", name, err ? err->message : "unknown error");
       return;
     }
-  {
-    g_autofree char *year = match->year ? g_strdup_printf (" (%d)", match->year) : g_strdup ("");
-    g_autofree char *tmdb = match->tmdb_id ? g_strdup_printf (", TMDb %d", match->tmdb_id) : g_strdup ("");
-    g_autofree char *imdb = match->imdb_id ? g_strdup_printf (", %s", match->imdb_id) : g_strdup ("");
-    log_line (c, BRO_SEV_INFO, "%s: “%s”%s%s%s", match->provider, match->title, year, tmdb, imdb);
-  }
-  bro_media_match_free (c->metadata);
-  c->metadata = match;
-  resolve_identity (c, info, 0, -1);
+  if (!list->len)
+    {
+      g_autofree char *y = year ? g_strdup_printf (" (%d)", year) : g_strdup ("");
+      log_line (c, BRO_SEV_WARNING, "%s found nothing for “%s”%s", provider, query, y);
+      return;
+    }
+  if (list->len == 1)
+    use_match (c, info, g_ptr_array_steal_index (list, 0), "the only result");
+  else
+    {
+      GString *how = g_string_new (NULL);
+      g_string_printf (how, "best of %u results; also ", list->len);
+      for (guint i = 1; i < list->len && i < 5; i++)
+        {
+          g_autofree char *l = bro_media_match_label (list->pdata[i]);
+          g_string_append_printf (how, "%s%s", i > 1 ? ", " : "", l);
+        }
+      g_string_append_printf (how, "%s. Choose another on the disc page if this is wrong", list->len > 5 ? ", …" : "");
+      use_match (c, info, g_ptr_array_steal_index (list, 0), how->str);
+      g_string_free (how, TRUE);
+    }
 }
 
 /* Before an automatic rip, waits for the system to mount the disc (up to automation.waitForMountSeconds). */
@@ -3738,6 +3922,8 @@ bro_run_job (BroRunRequest *req)
   c.separate = g_hash_table_new (g_direct_hash, g_direct_equal);
   c.file_titles = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   c.episodes = g_ptr_array_new_with_free_func ((GDestroyNotify) episode_rec_free);
+  c.episode_details = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) bro_episode_details_free);
+  c.looked_up_kind = -1;
   c.error_messages = g_ptr_array_new_with_free_func (g_free);
   c.data_errors = g_ptr_array_new_with_free_func (g_free);
   c.first_episode = 1;
@@ -3863,6 +4049,7 @@ bro_run_job (BroRunRequest *req)
   g_free (c.work_dir);
   if (c.rip_info) bro_disc_info_unref (c.rip_info);
   bro_media_match_free (c.metadata);
+  g_hash_table_unref (c.episode_details);
   g_free (c.fingerprint);
   g_free (c.already_archived);
   return res;

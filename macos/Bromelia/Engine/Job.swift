@@ -62,8 +62,13 @@ final class RipJob: Identifiable {
     var mediaName = ""
     /// Movie or TV show, as chosen by the user. nil = inferred.
     var mediaKind: MediaKind?
-    /// Number of the first episode on this disc, as entered by the user. nil = read from the menus or 1.
+    /// Number of the first episode on this disc, as entered by the user. nil = read from the menus, continued from the
+    /// previous disc of the set, or 1.
     var firstEpisode: Int?
+    /// Release year typed for this disc, to find the right movie or show online. nil = none (or from "Name (2010)").
+    var mediaYear: Int?
+    /// The movie or show chosen online for this disc (a TMDb or IMDb id, see OnlineId). "" = the best search result.
+    var onlineId = ""
     /// File system flags from the drive scan (used when the disc listing is unavailable).
     var discFlags: DiscFlags?
     var isAutomatic = false

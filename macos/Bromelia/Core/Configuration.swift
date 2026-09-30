@@ -196,8 +196,8 @@ enum LibraryLayout: String, Codable, CaseIterable, Sendable, Identifiable {
 }
 
 struct OutputConfig: Codable, Hashable, Sendable {
-    /// `{name} - {episode} - {discLabel} - {rip} - {track} - {format}`, leaving out the parts that don't apply.
-    static let defaultFileNameTemplate = "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
+    /// `{name} - {episode} - {episodeTitle} - {discLabel} - {rip} - {track} - {format}`, leaving out the parts that don't apply.
+    static let defaultFileNameTemplate = "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
     static let defaultFolderTemplate = "{name}{discLabel? - {discLabel}}"
     /// Templates of configuration version 1, replaced by the defaults above when a configuration is upgraded.
     static let legacyFolderTemplate = "{disc}"
@@ -743,10 +743,12 @@ struct MetadataConfig: Codable, Hashable, Sendable {
     var apiKey: String = ""
     /// TMDb language for titles, e.g. en-US.
     var language: String = "en-US"
+    /// TV shows: look up the titles of the disc's episodes ({episodeTitle}).
+    var episodeTitles: Bool = true
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case provider, apiKey, language }
+    enum CodingKeys: String, CodingKey { case provider, apiKey, language, episodeTitles }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -754,6 +756,7 @@ struct MetadataConfig: Codable, Hashable, Sendable {
         provider = c.value(.provider, d.provider)
         apiKey = c.value(.apiKey, d.apiKey)
         language = c.value(.language, d.language)
+        episodeTitles = c.value(.episodeTitles, d.episodeTitles)
     }
 }
 

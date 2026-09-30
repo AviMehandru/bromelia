@@ -65,7 +65,9 @@ typedef struct {
   GHashTable *name_overrides;    /* int -> char*, owned */
   char *media_name;              /* movie / show name; "" = inferred from the disc */
   int media_kind;                /* BroMediaKind, -1 = inferred */
-  int first_episode;             /* -1 = read from the menus, or 1 */
+  int first_episode;             /* -1 = read from the menus, continued from the previous disc of the set, or 1 */
+  int media_year;                /* release year typed for this disc, to find the right movie or show online; 0 = none */
+  char *online_id;               /* the movie or show chosen online (a TMDb or IMDb id); "" = the best search result */
   int disc_flags;                /* DRV flags, -1 = unknown */
   char *makemkvcon;
   char *mkvmerge;                /* may be NULL */

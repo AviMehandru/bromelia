@@ -42,21 +42,65 @@ typedef struct {
   int tmdb_id;   /* 0 when unknown */
   char *imdb_id; /* NULL when unknown */
   const char *provider; /* "TMDb" / "OMDb" */
+  int kind;      /* BroMediaKind as the provider lists it, -1 when unknown */
+  char *overview; /* plot summary, "" when unknown */
+  char *poster;   /* poster image URL, "" when unknown */
 } BroMediaMatch;
 
 void           bro_media_match_free (BroMediaMatch *m);
-/* The request URL and, for a TMDb read access token, the bearer token (*bearer, else NULL). FALSE without a key or name. */
-gboolean       bro_metadata_request (const char *name, BroMediaKind kind, const BroMetadataConfig *config, char **url, char **bearer);
-/* The result whose title matches name (ignoring case and punctuation), else the first one. */
+BroMediaMatch *bro_media_match_copy (const BroMediaMatch *m);
+char          *bro_media_match_label (const BroMediaMatch *m);  /* "The Matrix (1999)" */
+/* What to type (or pick) on the disc page to choose this match: "movie/603", "tv/1668" or "tt0133093". */
+char          *bro_media_match_choice (const BroMediaMatch *m);
+
+/* An episode of a season, as listed online. */
+typedef struct {
+  char *title;
+  char *overview; /* "" when unknown */
+  char *aired;    /* yyyy-mm-dd or "" */
+} BroEpisodeDetails;
+
+void bro_episode_details_free (BroEpisodeDetails *e);
+
+/* Lower-cased letters and digits only, for comparing titles. */
+char    *bro_normalize_title (const char *s);
+/* A year typed after the name: "Inception (2010)" → "Inception", 2010 (*year = 0 when there is none). */
+char    *bro_metadata_split_year (const char *name, int *year);
+/* A TMDb id (603, tmdb:603, movie/603, tv/1668, a themoviedb.org address; *kind -1 when it doesn't say) or an IMDb id
+ * (tt0133093, an imdb.com address; *imdb set, *tmdb 0). FALSE when text is neither. */
+gboolean bro_online_id_parse (const char *text, int *tmdb, int *kind, char **imdb);
+char    *bro_online_id_label (int tmdb, int kind, const char *imdb); /* "TMDb movie/603", "TMDb 603", "tt0133093" */
+
+/* The request URL and, for a TMDb read access token, the bearer token (*bearer, else NULL). FALSE without a key.
+ * The search for name (year 0 = any): */
+gboolean       bro_metadata_request (const char *name, BroMediaKind kind, int year, const BroMetadataConfig *config, char **url, char **bearer);
+/* The movie or show with this id (TMDb ids without a kind use kind; OMDb only takes IMDb ids): */
+gboolean       bro_metadata_id_request (int tmdb, int id_kind, const char *imdb, BroMediaKind kind, const BroMetadataConfig *config,
+                                        char **url, char **bearer);
+/* The episodes of season of the show match: */
+gboolean       bro_metadata_season_request (const BroMediaMatch *match, int season, const BroMetadataConfig *config, char **url, char **bearer);
+/* The search results (BroMediaMatch*), best first: the title matching name (ignoring case and punctuation) scores 4, the
+ * year hint 2 (1 for a year off by one); ties keep the provider's order. */
+GPtrArray     *bro_metadata_candidates (const char *json, BroMetadataProvider provider, const char *name, int year, BroMediaKind kind);
+/* The best search result for a movie, or NULL. */
 BroMediaMatch *bro_metadata_parse (const char *json, BroMetadataProvider provider, const char *name);
+/* A movie or show read by its id: TMDb details or /find, or OMDb details. */
+BroMediaMatch *bro_metadata_details (const char *json, BroMetadataProvider provider, BroMediaKind kind);
+/* Episode number (GINT_TO_POINTER) -> BroEpisodeDetails*. */
+GHashTable    *bro_metadata_parse_season (const char *json, BroMetadataProvider provider);
+/* Blocking. The candidates for name, best first (a year that finds nothing is dropped; OMDb's best result is read again
+ * for its plot); NULL with error on failure. */
+GPtrArray     *bro_metadata_search (const char *name, BroMediaKind kind, int year, const BroMetadataConfig *config, GError **error);
 /* Blocking. NULL with error on failure, NULL without error when nothing was found. */
-BroMediaMatch *bro_metadata_lookup (const char *name, BroMediaKind kind, const BroMetadataConfig *config, GError **error);
+BroMediaMatch *bro_metadata_lookup_id (int tmdb, int id_kind, const char *imdb, BroMediaKind kind, const BroMetadataConfig *config,
+                                       GError **error);
+GHashTable    *bro_metadata_episodes (const BroMediaMatch *match, int season, const BroMetadataConfig *config, GError **error);
 
 /* ---- media server layout (Plex / Jellyfin / Emby) ---- */
 
 #define BRO_MEDIA_FOLDER_TEMPLATE "{libraryFolder}/{name}{releaseYear? ({releaseYear})}"
 #define BRO_MEDIA_MAIN_TEMPLATE "{name}{releaseYear? ({releaseYear})}"
-#define BRO_MEDIA_EPISODE_TEMPLATE "Season {seasonOr1:2}/{name}{releaseYear? ({releaseYear})} - S{seasonOr1:2}E{episodeNumber:2}"
+#define BRO_MEDIA_EPISODE_TEMPLATE "Season {seasonOr1:2}/{name}{releaseYear? ({releaseYear})} - S{seasonOr1:2}E{episodeNumber:2}{episodeTitle? - {episodeTitle}}"
 #define BRO_MEDIA_OTHER_TEMPLATE "Other/{name}{releaseYear? ({releaseYear})} - {track}"
 #define BRO_MEDIA_BACKUP_NAME "{name}{releaseYear? ({releaseYear})} - Backup - {format}"
 
@@ -91,5 +135,6 @@ char    *bro_disc_mount_point (const char *device); /* from /proc/self/mounts, o
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroDelivery, bro_delivery_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroMediaMatch, bro_media_match_free)
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroEpisodeDetails, bro_episode_details_free)
 
 G_END_DECLS

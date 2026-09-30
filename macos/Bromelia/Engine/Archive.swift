@@ -116,6 +116,8 @@ struct ArchiveRecord: Codable, Sendable {
         var sourceTitleId: Int
         var firstChapter: Int
         var lastChapter: Int
+        /// The episode's title from the online lookup.
+        var title: String?
     }
 
     var format = "bromelia-archive"
@@ -223,6 +225,109 @@ enum ArchiveLookup {
               o["format"] as? String == "bromelia-archive", o["status"] as? String == "success",
               let disc = o["disc"] as? [String: Any], disc["fingerprint"] as? String == fingerprint else { return nil }
         return .some((o["finishedAt"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) })
+    }
+}
+
+// MARK: - Episode numbering across discs
+
+/// Where a TV disc's episode numbering continues: after the last episode of the previous disc of its set (same show,
+/// season, part and volume; disc number one lower), read from the archive records (bromelia*.json) of the output
+/// folder, or, in a media server library, from the episode numbers already in the season folder.
+enum EpisodeContinuation {
+    struct Query: Sendable {
+        /// The show's name (after the online lookup) and the title read from the disc label.
+        var name: String
+        var labelTitle: String
+        var season: Int?
+        var part: Int?
+        var volume: Int?
+        var disc: Int
+    }
+
+    struct Found: Equatable, Sendable {
+        var lastEpisode: Int
+        /// Where it was found, for the log.
+        var source: String
+    }
+
+    /// An archived disc of a TV show: its place in the set and its highest episode number.
+    struct Record: Equatable, Sendable {
+        var name: String
+        var labelTitle: String
+        var season: Int?
+        var part: Int?
+        var volume: Int?
+        var disc: Int?
+        var lastEpisode: Int?
+        var folder: String
+    }
+
+    /// `records` are read from `folders` (the history's) and from `root` and up to four folders below it. The season
+    /// folder is used only when no record is found for the previous disc and none for a later disc (which would mean the
+    /// discs were ripped out of order).
+    static func find(_ q: Query, root: URL?, folders: [String], seasonFolder: URL?, season: Int) -> Found? {
+        guard q.disc > 1 else { return nil }
+        var records: [Record] = []
+        var seen = Set<String>()
+        func add(_ url: URL) {
+            guard seen.insert(url.standardizedFileURL.path).inserted, let r = record(url) else { return }
+            records.append(r)
+        }
+        for f in folders {
+            let dir = URL(fileURLWithPath: f, isDirectory: true)
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: f)) ?? [] where ArchiveLookup.isRecordName(name) {
+                add(dir.appendingPathComponent(name))
+            }
+        }
+        if let root { walk(root, depth: 0, visit: add) }
+        let same = records.filter { sameSet($0, q) }
+        if let prev = same.filter({ $0.disc == q.disc - 1 }).compactMap({ r in r.lastEpisode.map { (r, $0) } }).max(by: { $0.1 < $1.1 }) {
+            return Found(lastEpisode: prev.1, source: "disc \(q.disc - 1), archived in \(prev.0.folder)")
+        }
+        guard !same.contains(where: { ($0.disc ?? 0) > q.disc }), let seasonFolder,
+              let last = highestEpisode(in: seasonFolder, season: season) else { return nil }
+        return Found(lastEpisode: last, source: "the highest episode in \(seasonFolder.path)")
+    }
+
+    static func sameSet(_ r: Record, _ q: Query) -> Bool {
+        let name = MetadataLookup.normalize(q.name), title = MetadataLookup.normalize(q.labelTitle)
+        let sameShow = (!name.isEmpty && MetadataLookup.normalize(r.name) == name) || (!title.isEmpty && MetadataLookup.normalize(r.labelTitle) == title)
+        return sameShow && r.season == q.season && r.part == q.part && r.volume == q.volume
+    }
+
+    /// A bromelia*.json of a TV show that was archived (status success or errors), or nil.
+    static func record(_ url: URL) -> Record? {
+        guard let data = try? Data(contentsOf: url), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              o["format"] as? String == "bromelia-archive", ["success", "errors"].contains(o["status"] as? String ?? ""),
+              o["kind"] as? String == "tv", let disc = o["disc"] as? [String: Any] else { return nil }
+        let volumeName = disc["volumeName"] as? String ?? ""
+        let label = LabelParser.parse(volumeName.isEmpty ? disc["label"] as? String ?? "" : volumeName)
+        let episodes = (o["episodes"] as? [[String: Any]] ?? []).compactMap { $0["episode"] as? Int }
+        return Record(name: o["name"] as? String ?? "", labelTitle: label.title, season: disc["season"] as? Int, part: disc["part"] as? Int,
+                      volume: disc["volume"] as? Int, disc: disc["disc"] as? Int, lastEpisode: episodes.max(),
+                      folder: url.deletingLastPathComponent().path)
+    }
+
+    private static func walk(_ dir: URL, depth: Int, visit: (URL) -> Void) {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+        for name in names.sorted() where !name.hasPrefix(".") {
+            let url = dir.appendingPathComponent(name)
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey])
+            if ArchiveLookup.isRecordName(name), values?.isRegularFile == true {
+                visit(url)
+            } else if depth < 4, values?.isDirectory == true, values?.isSymbolicLink != true {
+                walk(url, depth: depth + 1, visit: visit)
+            }
+        }
+    }
+
+    /// The highest episode number of `season` in the names of the files in `folder` (`… S02E05 …`), or nil.
+    static func highestEpisode(in folder: URL, season: Int) -> Int? {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return names.filter { !$0.hasPrefix(".") }.compactMap { name -> Int? in
+            guard let m = name.firstMatch(of: /[Ss](\d{1,3})[Ee](\d{1,4})/), Int(m.1) == season else { return nil }
+            return Int(m.2)
+        }.max()
     }
 }
 

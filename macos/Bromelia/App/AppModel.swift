@@ -453,9 +453,39 @@ final class AppModel {
             }
             s.info = builder.info
             s.applyRule(cfg.rip.titleSelection)
+            lookUp(s)
         } catch {
             s.isLoading = false
             s.loadError = error.localizedDescription
+        }
+    }
+
+    /// Looks the opened disc up online (with the name, kind and year chosen on the disc page) and keeps the candidates,
+    /// so the disc page can show them.
+    func lookUp(_ s: DiscSession) {
+        let m = config.metadata
+        guard m.provider != .none, !m.apiKey.trimmingCharacters(in: .whitespaces).isEmpty, let info = s.info else { return }
+        let id = MediaIdentity.resolve(info: info, discLabel: info.name, flags: s.discFlags, encrypted: false,
+                                       nameOverride: s.mediaName, kindOverride: s.mediaKind)
+        let (query, typedYear) = MetadataLookup.splitYear(id.name)
+        let year = s.mediaYear ?? typedYear
+        s.lookupGeneration += 1
+        let generation = s.lookupGeneration
+        s.isLookingUp = true
+        s.lookupMessage = nil
+        Task {
+            var list: [MediaMatch] = []
+            var message: String?
+            do {
+                list = try await MetadataLookup.search(name: query, kind: id.kind, year: year, config: m)
+                if list.isEmpty { message = "\(m.provider.label) found nothing for “\(query)”" }
+            } catch {
+                message = error.localizedDescription
+            }
+            guard s.lookupGeneration == generation else { return }
+            s.lookupCandidates = list
+            s.lookupMessage = message
+            s.isLookingUp = false
         }
     }
 
@@ -521,6 +551,8 @@ final class AppModel {
         job.mediaName = s.mediaName.trimmingCharacters(in: .whitespaces)
         job.mediaKind = s.mediaKind
         job.firstEpisode = s.firstEpisode
+        job.mediaYear = s.mediaYear
+        job.onlineId = s.onlineId.trimmingCharacters(in: .whitespaces)
         if job.discFlags == nil { job.discFlags = s.discFlags }
     }
 
@@ -559,6 +591,8 @@ final class AppModel {
         j.mediaName = job.mediaName
         j.mediaKind = job.mediaKind
         j.firstEpisode = job.firstEpisode
+        j.mediaYear = job.mediaYear
+        j.onlineId = job.onlineId
         j.discFlags = job.discFlags
         enqueue(j)
     }

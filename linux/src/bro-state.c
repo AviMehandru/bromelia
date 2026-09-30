@@ -57,6 +57,7 @@ bro_job_finalize (GObject *obj)
   g_hash_table_unref (j->track_selections);
   g_hash_table_unref (j->name_overrides);
   g_free (j->media_name);
+  g_free (j->online_id);
   g_free (j->phase);
   g_free (j->operation);
   g_free (j->total_operation);
@@ -88,6 +89,7 @@ bro_job_init (BroJob *j)
   j->media_name = g_strdup ("");
   j->media_kind = -1;
   j->first_episode = -1;
+  j->online_id = g_strdup ("");
   j->disc_flags = -1;
   j->phase = g_strdup ("Queued");
   j->operation = g_strdup ("");
@@ -179,7 +181,7 @@ bro_job_log_path (BroJob *j)
 
 /* ================================ session ================================ */
 
-enum { SESSION_CHANGED, SESSION_SELECTION_CHANGED, SESSION_LOG_ADDED, SESSION_N_SIGNALS };
+enum { SESSION_CHANGED, SESSION_SELECTION_CHANGED, SESSION_LOG_ADDED, SESSION_LOOKUP_CHANGED, SESSION_N_SIGNALS };
 static guint session_signals[SESSION_N_SIGNALS];
 
 G_DEFINE_FINAL_TYPE (BroSession, bro_session, G_TYPE_OBJECT)
@@ -200,6 +202,9 @@ bro_session_finalize (GObject *obj)
   g_hash_table_unref (s->name_overrides);
   g_free (s->output_override);
   g_free (s->media_name);
+  g_free (s->online_id);
+  g_ptr_array_unref (s->lookup_candidates);
+  g_free (s->lookup_message);
   g_free (s->libre_drive);
   g_clear_object (&s->cancellable);
   G_OBJECT_CLASS (bro_session_parent_class)->finalize (obj);
@@ -212,6 +217,8 @@ bro_session_class_init (BroSessionClass *klass)
   session_signals[SESSION_CHANGED] = g_signal_new ("changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
   session_signals[SESSION_SELECTION_CHANGED] = g_signal_new ("selection-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
                                                              NULL, NULL, NULL, G_TYPE_NONE, 0);
+  session_signals[SESSION_LOOKUP_CHANGED] = g_signal_new ("lookup-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL,
+                                                          NULL, G_TYPE_NONE, 0);
   session_signals[SESSION_LOG_ADDED] = g_signal_new ("log-added", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
                                                      G_TYPE_NONE, 1, G_TYPE_POINTER);
 }
@@ -228,6 +235,8 @@ bro_session_init (BroSession *s)
   s->media_name = g_strdup ("");
   s->media_kind = -1;
   s->first_episode = -1;
+  s->online_id = g_strdup ("");
+  s->lookup_candidates = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_media_match_free);
   s->disc_flags = -1;
 }
 
@@ -282,6 +291,13 @@ bro_session_reset (BroSession *s)
   s->media_name = g_strdup ("");
   s->media_kind = -1;
   s->first_episode = -1;
+  s->media_year = 0;
+  g_free (s->online_id);
+  s->online_id = g_strdup ("");
+  g_ptr_array_set_size (s->lookup_candidates, 0);
+  s->looking_up = FALSE;
+  g_clear_pointer (&s->lookup_message, g_free);
+  s->lookup_generation++;
   g_clear_pointer (&s->libre_drive, g_free);
   s->libre_drive_required = FALSE;
   session_changed (s);
@@ -1070,6 +1086,9 @@ apply_identity_choices (BroSession *s, BroJob *j)
   j->media_name = g_strstrip (g_strdup (s->media_name ? s->media_name : ""));
   j->media_kind = s->media_kind;
   j->first_episode = s->first_episode;
+  j->media_year = s->media_year;
+  g_free (j->online_id);
+  j->online_id = g_strstrip (g_strdup (s->online_id ? s->online_id : ""));
   if (j->disc_flags < 0)
     j->disc_flags = s->disc_flags;
 }
@@ -1630,6 +1649,7 @@ load_done (GObject *src, GAsyncResult *res, gpointer data)
     {
       s->info = bro_disc_info_ref (d->info);
       bro_session_apply_rule (s, &bro_state_session_config (self, s)->rip.titles);
+      bro_state_look_up (self, s);
     }
   session_changed (s);
   emit (self, STATE_DRIVES_CHANGED);
@@ -1681,6 +1701,91 @@ bro_state_load_disc (BroState *self, BroSession *s)
   g_task_set_priority (task, G_PRIORITY_DEFAULT_IDLE);
   g_task_set_task_data (task, d, (GDestroyNotify) load_data_free);
   g_task_run_in_thread (task, load_thread);
+  g_object_unref (task);
+}
+
+/* ---- online lookup for the disc page ---- */
+
+typedef struct {
+  BroSession *session;
+  guint generation;
+  BroMetadataConfig config;
+  char *query;
+  int kind, year;
+  GPtrArray *list;
+  char *message;
+} LookupData;
+
+static void
+lookup_data_free (LookupData *d)
+{
+  g_object_unref (d->session);
+  g_free (d->config.api_key);
+  g_free (d->config.language);
+  g_free (d->query);
+  if (d->list)
+    g_ptr_array_unref (d->list);
+  g_free (d->message);
+  g_free (d);
+}
+
+static void
+lookup_thread (GTask *task, gpointer source, gpointer task_data, GCancellable *cancellable)
+{
+  LookupData *d = task_data;
+  g_autoptr (GError) err = NULL;
+  d->list = bro_metadata_search (d->query, d->kind, d->year, &d->config, &err);
+  if (!d->list)
+    d->message = g_strdup (err ? err->message : "The lookup failed");
+  else if (!d->list->len)
+    d->message = g_strdup_printf ("%s found nothing for “%s”", d->config.provider == BRO_METADATA_TMDB ? "TMDb" : "OMDb", d->query);
+  g_task_return_boolean (task, TRUE);
+}
+
+static void
+lookup_done (GObject *src, GAsyncResult *res, gpointer data)
+{
+  LookupData *d = g_task_get_task_data (G_TASK (res));
+  BroSession *s = d->session;
+  if (s->lookup_generation != d->generation)
+    return;
+  g_ptr_array_set_size (s->lookup_candidates, 0);
+  for (guint i = 0; d->list && i < d->list->len; i++)
+    g_ptr_array_add (s->lookup_candidates, bro_media_match_copy (d->list->pdata[i]));
+  g_free (s->lookup_message);
+  s->lookup_message = g_strdup (d->message);
+  s->looking_up = FALSE;
+  g_signal_emit (s, session_signals[SESSION_LOOKUP_CHANGED], 0);
+}
+
+void
+bro_state_look_up (BroState *self, BroSession *s)
+{
+  const BroMetadataConfig *m = &self->config->metadata;
+  g_autofree char *key = g_strstrip (g_strdup (m->api_key ? m->api_key : ""));
+  BroIdentity *id;
+  LookupData *d;
+  GTask *task;
+  if (m->provider == BRO_METADATA_NONE || !*key || !s->info)
+    return;
+  id = bro_identity_resolve (s->info, bro_disc_info_name (s->info), s->disc_flags, -1, FALSE, s->media_name, s->media_kind, 0);
+  d = g_new0 (LookupData, 1);
+  d->session = g_object_ref (s);
+  d->generation = ++s->lookup_generation;
+  d->config = *m;
+  d->config.api_key = g_strdup (m->api_key);
+  d->config.language = g_strdup (m->language);
+  d->query = bro_metadata_split_year (id->name, &d->year);
+  d->kind = id->kind;
+  bro_identity_free (id);
+  if (s->media_year > 0)
+    d->year = s->media_year;
+  s->looking_up = TRUE;
+  g_clear_pointer (&s->lookup_message, g_free);
+  g_signal_emit (s, session_signals[SESSION_LOOKUP_CHANGED], 0);
+  task = g_task_new (self, NULL, lookup_done, NULL);
+  g_task_set_task_data (task, d, (GDestroyNotify) lookup_data_free);
+  g_task_run_in_thread (task, lookup_thread);
   g_object_unref (task);
 }
 
@@ -2120,6 +2225,9 @@ start_job (BroState *self, BroJob *j)
   req->media_name = g_strdup (j->media_name);
   req->media_kind = j->media_kind;
   req->first_episode = j->first_episode;
+  req->media_year = j->media_year;
+  g_free (req->online_id);
+  req->online_id = g_strdup (j->online_id);
   req->disc_flags = j->disc_flags;
   req->makemkvcon = g_steal_pointer (&exe);
   req->mkvmerge = bro_state_mkvmerge (self);
@@ -2225,6 +2333,9 @@ bro_state_retry (BroState *self, BroJob *job)
   j->media_name = g_strdup (job->media_name);
   j->media_kind = job->media_kind;
   j->first_episode = job->first_episode;
+  j->media_year = job->media_year;
+  g_free (j->online_id);
+  j->online_id = g_strdup (job->online_id);
   j->disc_flags = job->disc_flags;
   enqueue (self, j);
 }

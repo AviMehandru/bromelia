@@ -1,0 +1,48 @@
+{
+  "comment": "Archive records and files to create under a temporary folder, and where each disc's episode numbering continues (see docs/configuration.md, Naming, formats and episodes). root is library/; folders are the history's folders.",
+  "records": [
+    {"path": "library/One Piece - Season 2 Part 7 Disc 1/bromelia.json",
+     "record": {"format": "bromelia-archive", "version": 2, "status": "success", "name": "One Piece", "kind": "tv",
+                "disc": {"label": "ONE_PIECE_S2_P7_D1", "volumeName": "ONE_PIECE_S2_P7_D1", "season": 2, "part": 7, "disc": 1},
+                "episodes": [{"file": "a.mkv", "episode": 133}, {"file": "b.mkv", "episode": 137}, {"file": "c.mkv", "episode": 135}]}},
+    {"path": "library/One Piece - Season 2 Part 7 Disc 2 [INCOMPLETE]/bromelia.json",
+     "record": {"format": "bromelia-archive", "version": 2, "status": "failed", "name": "One Piece", "kind": "tv",
+                "disc": {"label": "ONE_PIECE_S2_P7_D2", "volumeName": "ONE_PIECE_S2_P7_D2", "season": 2, "part": 7, "disc": 2},
+                "episodes": [{"file": "d.mkv", "episode": 138}]}},
+    {"path": "library/Anime/Cowboy Bebop/bromelia.json",
+     "record": {"format": "bromelia-archive", "version": 2, "status": "errors", "name": "Kauboi Bibappu", "kind": "tv",
+                "disc": {"label": "COWBOY_BEBOP_D1", "volumeName": "COWBOY_BEBOP_D1", "disc": 1},
+                "episodes": [{"file": "1.mkv", "episode": 1}, {"file": "5.mkv", "episode": 5}]}},
+    {"path": "library/Anime/Cowboy Bebop Movie/bromelia.json",
+     "record": {"format": "bromelia-archive", "version": 2, "status": "success", "name": "Cowboy Bebop", "kind": "movie",
+                "disc": {"label": "COWBOY_BEBOP_D1", "volumeName": "COWBOY_BEBOP_D1", "disc": 1}, "episodes": []}},
+    {"path": "library/TV Shows/Friends (1994)/bromelia.json",
+     "record": {"format": "bromelia-archive", "version": 2, "status": "success", "name": "Friends", "kind": "tv",
+                "disc": {"label": "FRIENDS_S3_D4", "volumeName": "FRIENDS_S3_D4", "season": 3, "disc": 4},
+                "episodes": [{"file": "Season 03/x.mkv", "episode": 13}]}},
+    {"path": "elsewhere/Samurai Champloo Disc 1/bromelia.json",
+     "record": {"format": "bromelia-archive", "version": 2, "status": "success", "name": "Samurai Champloo", "kind": "tv",
+                "disc": {"label": "SAMURAI_CHAMPLOO_S1_D1", "volumeName": "SAMURAI_CHAMPLOO_S1_D1", "season": 1, "disc": 1},
+                "episodes": [{"file": "1.mkv", "episode": 1}, {"file": "4.mkv", "episode": 4}]}}
+  ],
+  "files": [
+    "library/TV Shows/Friends (1994)/Season 02/Friends (1994) - S02E05.mkv",
+    "library/TV Shows/Friends (1994)/Season 02/Friends (1994) - S02E06 - The One with the Baby on the Bus.mkv",
+    "library/TV Shows/Friends (1994)/Season 02/Friends (1994) - S01E09.mkv",
+    "library/TV Shows/Friends (1994)/Season 03/Friends (1994) - S03E07.mkv"
+  ],
+  "cases": [
+    {"what": "the previous disc's record", "query": {"name": "One Piece", "labelTitle": "One Piece", "season": 2, "part": 7, "disc": 2}, "expect": 137},
+    {"what": "a failed rip doesn't count", "query": {"name": "One Piece", "labelTitle": "One Piece", "season": 2, "part": 7, "disc": 3}, "expect": null},
+    {"what": "another part of the set", "query": {"name": "One Piece", "labelTitle": "One Piece", "season": 2, "part": 8, "disc": 2}, "expect": null},
+    {"what": "disc 1 starts the numbering", "query": {"name": "One Piece", "labelTitle": "One Piece", "season": 2, "part": 7, "disc": 1}, "expect": null},
+    {"what": "the same label under another name; read errors still count; movies don't", "query": {"name": "Cowboy Bebop", "labelTitle": "Cowboy Bebop", "disc": 2}, "expect": 5},
+    {"what": "the season folder of a media server library", "query": {"name": "Friends", "labelTitle": "Friends", "season": 2, "disc": 2},
+     "seasonFolder": "library/TV Shows/Friends (1994)/Season 02", "season": 2, "expect": 6},
+    {"what": "not the season folder when a later disc was archived", "query": {"name": "Friends", "labelTitle": "Friends", "season": 3, "disc": 2},
+     "seasonFolder": "library/TV Shows/Friends (1994)/Season 03", "season": 3, "expect": null},
+    {"what": "a history folder outside the output folder", "query": {"name": "Samurai Champloo", "labelTitle": "Samurai Champloo", "season": 1, "disc": 2},
+     "folders": ["elsewhere/Samurai Champloo Disc 1"], "expect": 4},
+    {"what": "not without the history", "query": {"name": "Samurai Champloo", "labelTitle": "Samurai Champloo", "season": 1, "disc": 2}, "expect": null}
+  ]
+}

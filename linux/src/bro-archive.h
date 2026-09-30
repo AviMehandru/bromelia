@@ -78,7 +78,34 @@ GHashTable     *bro_check_records_load (const char *path);
 gboolean        bro_check_records_save (GHashTable *records, const char *path);
 void            bro_check_records_add (GHashTable *records, const BroFolderCheck *r, gint64 when);
 
+/* ---- episode numbering across discs ---- */
+
+/* A TV disc's place in its set: the show's name (after the online lookup), the title read from the disc label, and
+ * season / part / volume (-1 when absent) and disc number. */
+typedef struct {
+  const char *name;
+  const char *label_title;
+  int season, part, volume, disc;
+} BroContinuationQuery;
+
+typedef struct {
+  int last_episode;
+  char *source; /* where it was found, for the log */
+} BroContinuation;
+
+void             bro_continuation_free (BroContinuation *c);
+/* Where the episode numbering of a disc continues: after the last episode of the previous disc of its set (same show,
+ * season, part and volume; disc number one lower), read from the archive records (bromelia*.json, status success or
+ * errors, kind tv) in folders (char*, the history's; may be NULL) and in root and up to four folders below it; else, when
+ * season_folder is set (a media server library) and no record shows a later disc, the highest SxxEyy of season in its
+ * file names. NULL for disc 1 or when nothing is found. */
+BroContinuation *bro_episode_continuation (const BroContinuationQuery *q, const char *root, GPtrArray *folders,
+                                           const char *season_folder, int season);
+/* The highest episode number of season in the names of the files in folder (… S02E05 …), or -1. */
+int              bro_highest_episode (const char *folder, int season);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroArchivedMatch, bro_archived_match_free)
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroContinuation, bro_continuation_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroFolderCheck, bro_folder_check_free)
 
 G_END_DECLS

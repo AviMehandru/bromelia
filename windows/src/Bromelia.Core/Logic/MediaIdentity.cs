@@ -281,6 +281,7 @@ public sealed record MediaIdentity(string Name, MediaKind Kind, DiscFormat Forma
         ["volumeNumber"] = N(Label.Volume),
         ["episode"] = "",
         ["episodeNumber"] = "",
+        ["episodeTitle"] = "",
         ["track"] = "",
     };
 

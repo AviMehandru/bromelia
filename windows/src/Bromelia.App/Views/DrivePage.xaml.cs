@@ -421,7 +421,7 @@ public sealed partial class DrivePage : Page
         if (_session == null) return;
         var s = _session;
         var auto = Identity(false);
-        var name = new TextBox { Text = s.MediaName, PlaceholderText = auto.Name, Width = 240 };
+        var name = new TextBox { Text = s.MediaName, PlaceholderText = auto.Name, Width = 200 };
         ToolTipService.SetToolTip(name, $"Movie or show name used for folder and file names. Empty = “{auto.Name}”, read from the disc.");
         var kind = new ComboBox { Width = 170 };
         kind.Items.Add($"Auto ({auto.Kind.Label()})");
@@ -451,12 +451,63 @@ public sealed partial class DrivePage : Page
             Update();
         };
         first.ValueChanged += (_, a) => { s.FirstEpisode = double.IsNaN(a.NewValue) ? null : (int)Math.Round(a.NewValue); Update(); };
+        var year = new NumberBox { PlaceholderText = "Year", Width = 80, Minimum = 0, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden };
+        year.Value = s.MediaYear is { } y ? y : double.NaN;
+        ToolTipService.SetToolTip(year, "Release year, to find the right movie or show online");
+        year.ValueChanged += (_, a) => { s.MediaYear = double.IsNaN(a.NewValue) || a.NewValue < 1 ? null : (int)Math.Round(a.NewValue); App.State.LookUp(s); };
+        name.KeyDown += (_, a) => { if (a.Key == Windows.System.VirtualKey.Enter) App.State.LookUp(s); };
+        kind.SelectionChanged += (_, _) => App.State.LookUp(s);
         IdentityBar.Children.Add(name);
+        IdentityBar.Children.Add(year);
         IdentityBar.Children.Add(kind);
         IdentityBar.Children.Add(first);
         IdentityBar.Children.Add(_formatBadge);
+        if (App.State.Config.Metadata.Provider != MetadataProvider.None) AddLookupControls(s);
         IdentityBar.Children.Add(_sampleName);
         Update();
+    }
+
+    Action? _lookupRefresh;
+    DiscSession? _lookupSession;
+
+    /// <summary>The online match: the best search result, another candidate, or an id typed in.</summary>
+    void AddLookupControls(DiscSession s)
+    {
+        var pick = new DropDownButton { MaxWidth = 280 };
+        var id = new TextBox { Text = s.OnlineId, PlaceholderText = "TMDb / IMDb id", Width = 130 };
+        ToolTipService.SetToolTip(id, "A TMDb id (603, tv/1668), an IMDb id (tt0133093) or their web address. Empty = the best match.");
+        id.TextChanged += (_, _) => { s.OnlineId = id.Text; Refresh(); };
+        void Refresh()
+        {
+            var chosen = s.OnlineId.Trim();
+            pick.Content = s.IsLookingUp ? "Looking up…"
+                : chosen.Length > 0 ? s.LookupCandidates.FirstOrDefault(c => c.ChoiceId == chosen)?.Label ?? chosen
+                : s.LookupCandidates.FirstOrDefault()?.Label ?? (s.LookupMessage == null ? "Look up" : "Not found");
+            ToolTipService.SetToolTip(pick, s.LookupMessage ?? "The movie or show found online, used for names. Pick another result if this one is wrong.");
+            var menu = new MenuFlyout();
+            var best = new ToggleMenuFlyoutItem { Text = "Best match", IsChecked = chosen.Length == 0 };
+            best.Click += (_, _) => { id.Text = ""; };
+            menu.Items.Add(best);
+            if (s.LookupCandidates.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
+            foreach (var c in s.LookupCandidates)
+            {
+                var item = new ToggleMenuFlyoutItem { Text = $"{c.Label}  ·  {c.ChoiceId}", IsChecked = chosen == c.ChoiceId };
+                item.Click += (_, _) => { id.Text = c.ChoiceId; };
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var again = new MenuFlyoutItem { Text = "Look up again" };
+            again.Click += (_, _) => App.State.LookUp(s);
+            menu.Items.Add(again);
+            pick.Flyout = menu;
+        }
+        if (_lookupSession != null && _lookupRefresh != null) _lookupSession.LookupChanged -= _lookupRefresh;
+        _lookupSession = s;
+        _lookupRefresh = Refresh;
+        s.LookupChanged += Refresh;
+        Refresh();
+        IdentityBar.Children.Add(pick);
+        IdentityBar.Children.Add(id);
     }
 
     string SampleFileName()

@@ -59,8 +59,14 @@ public sealed class RipJob : ObservableObject
     public string MediaName { get; set; } = "";
     /// <summary>Movie or TV show as chosen by the user. Null = inferred.</summary>
     public Logic.MediaKind? MediaKind { get; set; }
-    /// <summary>First episode number entered by the user. Null = read from the menus or 1.</summary>
+    /// <summary>First episode number entered by the user. Null = read from the menus, continued from the previous disc of the
+    /// set, or 1.</summary>
     public int? FirstEpisode { get; set; }
+    /// <summary>Release year typed for this disc, to find the right movie or show online. Null = none (or from "Name (2010)").</summary>
+    public int? MediaYear { get; set; }
+    /// <summary>The movie or show chosen online for this disc (a TMDb or IMDb id, see <see cref="OnlineId"/>). "" = the best
+    /// search result.</summary>
+    public string OnlineId { get; set; } = "";
     /// <summary>File system flags from the drive scan (used when the listing is unavailable).</summary>
     public DiscFlags? DiscFlags { get; set; }
     public bool IsAutomatic { get; set; }

@@ -14,6 +14,11 @@ public enum RipMode { Mkv, Backup, BackupDecrypted, BackupThenMkv, InfoOnly, Aud
 /// <summary>How output is named: with the templates, or the way Plex / Jellyfin / Emby expect it.</summary>
 public enum LibraryLayout { Templates, MediaServer }
 public enum MetadataProvider { None, Tmdb, Omdb }
+
+public static class MetadataProviderExtensions
+{
+    public static string Label(this MetadataProvider p) => p switch { MetadataProvider.Tmdb => "TMDb", MetadataProvider.Omdb => "OMDb", _ => "Off" };
+}
 /// <summary>What an automatic rip does with a disc that was archived before (manual rips only warn).</summary>
 public enum AlreadyArchived { Skip, Ask, RipAgain }
 public enum BackupFormat { Folder, Iso }
@@ -168,7 +173,7 @@ public sealed class RipConfig
 public sealed class OutputConfig
 {
     /// <summary>{name} - {episode} - {discLabel} - {rip} - {track} - {format}, leaving out parts that don't apply.</summary>
-    public const string DefaultFileNameTemplate = "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}";
+    public const string DefaultFileNameTemplate = "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}";
     public const string DefaultFolderTemplate = "{name}{discLabel? - {discLabel}}";
     /// <summary>Folder template of configuration version 1, replaced when a configuration is upgraded.</summary>
     public const string LegacyFolderTemplate = "{disc}";
@@ -220,6 +225,8 @@ public sealed class MetadataConfig
     /// <summary>TMDb: API key (v3) or read access token; OMDb: API key.</summary>
     public string ApiKey { get; set; } = "";
     public string Language { get; set; } = "en-US";
+    /// <summary>TV shows: look up the titles of the disc's episodes ({episodeTitle}).</summary>
+    public bool EpisodeTitles { get; set; } = true;
 }
 
 /// <summary>A place to send job notifications: an http(s) webhook (Discord and Slack are recognised),

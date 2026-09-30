@@ -2202,14 +2202,14 @@ test_metadata_results (void)
   }
   g_assert_null (bro_metadata_parse ("{\"Response\":\"False\"}", BRO_METADATA_OMDB, "x"));
   g_assert_null (bro_metadata_parse ("not json", BRO_METADATA_TMDB, "x"));
-  g_assert_true (bro_metadata_request ("One Piece", BRO_KIND_TV, &c, &url, &bearer));
+  g_assert_true (bro_metadata_request ("One Piece", BRO_KIND_TV, 0, &c, &url, &bearer));
   g_assert_true (g_str_has_prefix (url, "https://api.themoviedb.org/3/search/tv?query=One%20Piece"));
   g_assert_nonnull (strstr (url, "api_key=0123"));
   g_assert_null (bearer);
   g_clear_pointer (&url, g_free);
   long_key = g_strconcat ("eyJ", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", NULL);
   c.api_key = long_key;
-  g_assert_true (bro_metadata_request ("One Piece", BRO_KIND_MOVIE, &c, &url, &bearer));
+  g_assert_true (bro_metadata_request ("One Piece", BRO_KIND_MOVIE, 0, &c, &url, &bearer));
   g_assert_true (g_str_has_prefix (bearer, "eyJ"));
   g_assert_null (strstr (url, "api_key"));
   g_assert_nonnull (strstr (url, "/3/search/movie"));
@@ -2217,11 +2217,281 @@ test_metadata_results (void)
   g_clear_pointer (&bearer, g_free);
   c.provider = BRO_METADATA_OMDB;
   c.api_key = (char *) "k";
-  g_assert_true (bro_metadata_request ("Friends", BRO_KIND_TV, &c, &url, &bearer));
-  g_assert_nonnull (strstr (url, "omdbapi.com/?apikey=k&t=Friends&type=series"));
+  g_assert_true (bro_metadata_request ("Friends", BRO_KIND_TV, 0, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "omdbapi.com/?apikey=k&s=Friends&type=series"));
   g_clear_pointer (&url, g_free);
   c.api_key = (char *) "";
-  g_assert_false (bro_metadata_request ("Friends", BRO_KIND_TV, &c, &url, &bearer));
+  g_assert_false (bro_metadata_request ("Friends", BRO_KIND_TV, 0, &c, &url, &bearer));
+}
+
+static void
+rm_rf (const char *path)
+{
+  if (g_file_test (path, G_FILE_TEST_IS_DIR) && !g_file_test (path, G_FILE_TEST_IS_SYMLINK))
+    {
+      g_autoptr (GDir) d = g_dir_open (path, 0, NULL);
+      const char *name;
+      while (d && (name = g_dir_read_name (d)))
+        {
+          g_autofree char *child = g_build_filename (path, name, NULL);
+          rm_rf (child);
+        }
+      g_rmdir (path);
+    }
+  else
+    g_unlink (path);
+}
+
+/* shared/fixtures/lookup: recorded TMDb / OMDb answers and what every platform must make of them. */
+static char *
+lookup_fixture (const char *name)
+{
+  g_autofree char *dir = fixture_path ("lookup");
+  g_autofree char *path = g_build_filename (dir, name, NULL);
+  char *text = NULL;
+  g_assert_true (g_file_get_contents (path, &text, NULL, NULL));
+  return text;
+}
+
+static JsonNode *
+load_json (const char *path)
+{
+  g_autoptr (JsonParser) p = json_parser_new ();
+  g_assert_true (json_parser_load_from_file (p, path, NULL));
+  return json_node_copy (json_parser_get_root (p));
+}
+
+static int
+node_int (JsonObject *o, const char *k)
+{
+  JsonNode *n = json_object_get_member (o, k);
+  return n && !JSON_NODE_HOLDS_NULL (n) ? (int) json_node_get_int (n) : 0;
+}
+
+static BroMetadataProvider
+fixture_provider (JsonObject *c)
+{
+  return g_str_equal (json_object_get_string_member (c, "provider"), "omdb") ? BRO_METADATA_OMDB : BRO_METADATA_TMDB;
+}
+
+static BroMediaKind
+fixture_kind (const char *k)
+{
+  return g_strcmp0 (k, "tv") == 0 ? BRO_KIND_TV : BRO_KIND_MOVIE;
+}
+
+static void
+check_match (const BroMediaMatch *m, JsonObject *e)
+{
+  g_assert_nonnull (m);
+  g_assert_cmpstr (m->title, ==, json_object_get_string_member (e, "title"));
+  if (json_object_has_member (e, "year"))
+    g_assert_cmpint (m->year, ==, node_int (e, "year"));
+  if (json_object_has_member (e, "tmdbId"))
+    g_assert_cmpint (m->tmdb_id, ==, node_int (e, "tmdbId"));
+  if (json_object_has_member (e, "imdbId"))
+    g_assert_cmpstr (m->imdb_id, ==, json_object_get_string_member (e, "imdbId"));
+  if (json_object_has_member (e, "kind"))
+    g_assert_cmpint (m->kind, ==, fixture_kind (json_object_get_string_member (e, "kind")));
+  if (json_object_has_member (e, "choice"))
+    {
+      g_autofree char *choice = bro_media_match_choice (m);
+      g_assert_cmpstr (choice, ==, json_object_get_string_member (e, "choice"));
+    }
+  if (json_object_has_member (e, "poster"))
+    g_assert_cmpstr (m->poster, ==, json_object_get_string_member (e, "poster"));
+  if (json_object_has_member (e, "overview"))
+    g_assert_cmpstr (m->overview, ==, json_object_get_string_member (e, "overview"));
+}
+
+static void
+test_lookup_fixtures (void)
+{
+  g_autofree char *dir = fixture_path ("lookup");
+  g_autofree char *path = g_build_filename (dir, "expected.json", NULL);
+  g_autoptr (JsonNode) root = load_json (path);
+  JsonObject *o = json_node_get_object (root);
+  JsonArray *a = json_object_get_array_member (o, "search");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i);
+      g_autofree char *json = lookup_fixture (json_object_get_string_member (c, "file"));
+      g_autoptr (GPtrArray) list = bro_metadata_candidates (json, fixture_provider (c), json_object_get_string_member (c, "name"),
+                                                            node_int (c, "year"), fixture_kind (json_object_get_string_member (c, "kind")));
+      JsonArray *want = json_object_get_array_member (c, "expect");
+      g_assert_cmpuint (list->len, ==, json_array_get_length (want));
+      for (guint k = 0; k < list->len; k++)
+        check_match (list->pdata[k], json_array_get_object_element (want, k));
+    }
+  a = json_object_get_array_member (o, "details");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i);
+      g_autofree char *json = lookup_fixture (json_object_get_string_member (c, "file"));
+      g_autoptr (BroMediaMatch) m = bro_metadata_details (json, fixture_provider (c), fixture_kind (json_object_get_string_member (c, "kind")));
+      check_match (m, json_object_get_object_member (c, "expect"));
+    }
+  a = json_object_get_array_member (o, "season");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i);
+      g_autofree char *json = lookup_fixture (json_object_get_string_member (c, "file"));
+      g_autoptr (GHashTable) eps = bro_metadata_parse_season (json, fixture_provider (c));
+      JsonObject *want = json_object_get_object_member (c, "expect"), *aired = json_object_get_object_member (c, "aired");
+      g_autoptr (GList) keys = json_object_get_members (want);
+      g_assert_cmpuint (g_hash_table_size (eps), ==, json_object_get_size (want));
+      for (GList *l = keys; l; l = l->next)
+        {
+          BroEpisodeDetails *d = g_hash_table_lookup (eps, GINT_TO_POINTER (atoi (l->data)));
+          g_assert_nonnull (d);
+          g_assert_cmpstr (d->title, ==, json_object_get_string_member (want, l->data));
+        }
+      {
+        g_autoptr (GList) ak = json_object_get_members (aired);
+        for (GList *l = ak; l; l = l->next)
+          g_assert_cmpstr (((BroEpisodeDetails *) g_hash_table_lookup (eps, GINT_TO_POINTER (atoi (l->data))))->aired, ==,
+                           json_object_get_string_member (aired, l->data));
+      }
+    }
+  a = json_object_get_array_member (o, "ids");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i);
+      int tmdb, kind;
+      g_autofree char *imdb = NULL;
+      gboolean ok = bro_online_id_parse (json_object_get_string_member (c, "text"), &tmdb, &kind, &imdb);
+      if (json_object_has_member (c, "invalid"))
+        g_assert_false (ok);
+      else if (json_object_has_member (c, "imdb"))
+        {
+          g_assert_true (ok);
+          g_assert_cmpstr (imdb, ==, json_object_get_string_member (c, "imdb"));
+        }
+      else
+        {
+          g_assert_true (ok);
+          g_assert_null (imdb);
+          g_assert_cmpint (tmdb, ==, node_int (c, "tmdb"));
+          g_assert_cmpint (kind, ==, json_object_has_member (c, "kind") ? (int) fixture_kind (json_object_get_string_member (c, "kind")) : -1);
+        }
+    }
+  a = json_object_get_array_member (o, "splitYear");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i);
+      int year;
+      g_autofree char *name = bro_metadata_split_year (json_object_get_string_member (c, "text"), &year);
+      g_assert_cmpstr (name, ==, json_object_get_string_member (c, "name"));
+      g_assert_cmpint (year, ==, node_int (c, "year"));
+    }
+}
+
+static void
+test_lookup_requests (void)
+{
+  BroMetadataConfig c = { BRO_METADATA_TMDB, (char *) "0123456789abcdef0123456789abcdef", (char *) "en-US", TRUE };
+  BroMediaMatch show = { (char *) "Friends", 1994, 1668, (char *) "tt0108778", "TMDb", BRO_KIND_TV, (char *) "", (char *) "" };
+  g_autofree char *url = NULL, *bearer = NULL;
+  g_assert_true (bro_metadata_request ("Friends", BRO_KIND_TV, 1994, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "/3/search/tv?query=Friends&first_air_date_year=1994"));
+  g_clear_pointer (&url, g_free);
+  g_assert_true (bro_metadata_id_request (603, -1, NULL, BRO_KIND_MOVIE, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "/3/movie/603?"));
+  g_clear_pointer (&url, g_free);
+  g_assert_true (bro_metadata_id_request (1668, BRO_KIND_TV, NULL, BRO_KIND_MOVIE, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "/3/tv/1668?"));
+  g_clear_pointer (&url, g_free);
+  g_assert_true (bro_metadata_id_request (0, -1, "tt0108778", BRO_KIND_TV, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "/3/find/tt0108778?external_source=imdb_id"));
+  g_clear_pointer (&url, g_free);
+  g_assert_true (bro_metadata_season_request (&show, 2, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "/3/tv/1668/season/2?"));
+  g_clear_pointer (&url, g_free);
+  c.provider = BRO_METADATA_OMDB;
+  g_assert_false (bro_metadata_id_request (603, -1, NULL, BRO_KIND_MOVIE, &c, &url, &bearer));
+  g_assert_true (bro_metadata_season_request (&show, 2, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "i=tt0108778&Season=2"));
+  g_clear_pointer (&url, g_free);
+  g_assert_true (bro_metadata_request ("Dune", BRO_KIND_MOVIE, 1984, &c, &url, &bearer));
+  g_assert_nonnull (strstr (url, "s=Dune&type=movie&y=1984"));
+}
+
+static void
+test_episode_titles_in_names (void)
+{
+  g_autoptr (GHashTable) v = bro_template_values_new ();
+  BroIdentity *id = bro_identity_resolve (NULL, "FRIENDS_S2_D1", -1, -1, FALSE, "", -1, 0);
+  g_autofree char *a = NULL, *b = NULL, *c2 = NULL;
+  bro_identity_template_values (id, v, "Rip");
+  bro_identity_free (id);
+  bro_template_values_set (v, "releaseYear", "1994");
+  bro_template_values_set (v, "seasonOr1", "2");
+  bro_template_values_set (v, "track", "Title 1");
+  bro_template_values_set (v, "episode", "Episode 02");
+  bro_template_values_set (v, "episodeNumber", "2");
+  bro_template_values_set (v, "episodeTitle", "The One with the Breast Milk");
+  a = bro_template_render_path (BRO_MEDIA_EPISODE_TEMPLATE, v);
+  g_assert_cmpstr (a, ==, "Season 02/Friends (1994) - S02E02 - The One with the Breast Milk");
+  b = bro_template_render_path (BRO_DEFAULT_FILE_TEMPLATE, v);
+  g_assert_cmpstr (b, ==, "Friends - Episode 02 - The One with the Breast Milk - Season 2 Disc 1 - Rip - Title 1 - DISC");
+  bro_template_values_set (v, "episodeTitle", "");
+  c2 = bro_template_render_path (BRO_MEDIA_EPISODE_TEMPLATE, v);
+  g_assert_cmpstr (c2, ==, "Season 02/Friends (1994) - S02E02");
+}
+
+/* shared/fixtures/episode-continuation.json: where each disc's episode numbering continues. */
+static void
+test_episode_continuation (void)
+{
+  g_autofree char *path = fixture_path ("episode-continuation.json");
+  g_autoptr (JsonNode) root = load_json (path);
+  JsonObject *o = json_node_get_object (root);
+  g_autofree char *base = g_dir_make_tmp ("bromelia-cont-XXXXXX", NULL);
+  g_autofree char *library = g_build_filename (base, "library", NULL);
+  JsonArray *a = json_object_get_array_member (o, "records");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *r = json_array_get_object_element (a, i);
+      g_autofree char *file = g_build_filename (base, json_object_get_string_member (r, "path"), NULL);
+      g_autofree char *parent = g_path_get_dirname (file);
+      g_autofree char *text = json_to_string (json_object_get_member (r, "record"), FALSE);
+      g_mkdir_with_parents (parent, 0755);
+      g_assert_true (g_file_set_contents (file, text, -1, NULL));
+    }
+  a = json_object_get_array_member (o, "files");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      g_autofree char *file = g_build_filename (base, json_array_get_string_element (a, i), NULL);
+      g_autofree char *parent = g_path_get_dirname (file);
+      g_mkdir_with_parents (parent, 0755);
+      g_assert_true (g_file_set_contents (file, "", 0, NULL));
+    }
+  a = json_object_get_array_member (o, "cases");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i), *q = json_object_get_object_member (c, "query");
+      g_autoptr (GPtrArray) folders = g_ptr_array_new_with_free_func (g_free);
+      g_autofree char *season_folder = NULL;
+      BroContinuationQuery query = { json_object_get_string_member (q, "name"), json_object_get_string_member (q, "labelTitle"),
+                                     json_object_has_member (q, "season") ? node_int (q, "season") : -1,
+                                     json_object_has_member (q, "part") ? node_int (q, "part") : -1,
+                                     json_object_has_member (q, "volume") ? node_int (q, "volume") : -1, node_int (q, "disc") };
+      g_autoptr (BroContinuation) found = NULL;
+      if (json_object_has_member (c, "folders"))
+        {
+          JsonArray *f = json_object_get_array_member (c, "folders");
+          for (guint k = 0; k < json_array_get_length (f); k++)
+            g_ptr_array_add (folders, g_build_filename (base, json_array_get_string_element (f, k), NULL));
+        }
+      if (json_object_has_member (c, "seasonFolder"))
+        season_folder = g_build_filename (base, json_object_get_string_member (c, "seasonFolder"), NULL);
+      found = bro_episode_continuation (&query, library, folders, season_folder,
+                                        json_object_has_member (c, "season") ? node_int (c, "season") : 1);
+      if (g_test_verbose ())
+        g_printerr ("%s: %d\n", json_object_get_string_member (c, "what"), found ? found->last_episode : -1);
+      g_assert_cmpint (found ? found->last_episode : 0, ==, node_int (c, "expect"));
+    }
+  rm_rf (base);
 }
 
 static BroDiscContent probe_audio (const char *d) { return BRO_CONTENT_AUDIO; }
@@ -3270,6 +3540,10 @@ main (int argc, char **argv)
     g_setenv ("XDG_DATA_HOME", data, TRUE);
   }
   g_test_add_func ("/robot/split-fields", test_split_fields);
+  g_test_add_func ("/lookup/fixtures", test_lookup_fixtures);
+  g_test_add_func ("/lookup/requests", test_lookup_requests);
+  g_test_add_func ("/lookup/episode-titles-in-names", test_episode_titles_in_names);
+  g_test_add_func ("/lookup/episode-continuation", test_episode_continuation);
   g_test_add_func ("/robot/parse-events", test_parse_events);
   g_test_add_func ("/robot/drive-scan-fixture", test_drive_scan_fixture);
   g_test_add_func ("/robot/disc-info-fixture", test_disc_info_fixture);

@@ -132,6 +132,8 @@ public sealed class ArchiveRecord
         public int SourceTitleId { get; set; }
         public int FirstChapter { get; set; }
         public int LastChapter { get; set; }
+        /// <summary>The episode's title from the online lookup.</summary>
+        public string? Title { get; set; }
     }
 
     public string Format { get; set; } = "bromelia-archive";
@@ -250,6 +252,111 @@ public static class ArchiveLookup
 
     static string? Str(JsonElement o, string name) =>
         o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+}
+
+/// <summary>Where a TV disc's episode numbering continues: after the last episode of the previous disc of its set (same show,
+/// season, part and volume; disc number one lower), read from the archive records (bromelia*.json) of the output folder, or,
+/// in a media server library, from the episode numbers already in the season folder.</summary>
+public static class EpisodeContinuation
+{
+    /// <summary>The show's name (after the online lookup), the title read from the disc label, and the disc's place in its set.</summary>
+    public sealed record Query(string Name, string LabelTitle, int? Season, int? Part, int? Volume, int Disc);
+
+    /// <summary>The previous disc's last episode, and where it was found (for the log).</summary>
+    public sealed record Found(int LastEpisode, string Source);
+
+    /// <summary>An archived disc of a TV show: its place in the set and its highest episode number.</summary>
+    public sealed record Record(string Name, string LabelTitle, int? Season, int? Part, int? Volume, int? Disc, int? LastEpisode, string Folder);
+
+    /// <summary>Records are read from <paramref name="folders"/> (the history's) and from <paramref name="root"/> and up to four
+    /// folders below it. The season folder is used only when no record is found for the previous disc and none for a later
+    /// disc (which would mean the discs were ripped out of order).</summary>
+    public static Found? Find(Query q, string? root, IEnumerable<string> folders, string? seasonFolder, int season)
+    {
+        if (q.Disc <= 1) return null;
+        var records = new List<Record>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string path)
+        {
+            if (seen.Add(Path.GetFullPath(path)) && Read(path) is { } r) records.Add(r);
+        }
+        foreach (var f in folders)
+        {
+            try { foreach (var p in Directory.EnumerateFiles(f).Where(p => ArchiveLookup.IsRecordName(Path.GetFileName(p)))) Add(p); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { }
+        }
+        if (!string.IsNullOrEmpty(root)) Walk(root, 0, Add);
+        var same = records.Where(r => SameSet(r, q)).ToList();
+        if (same.Where(r => r.Disc == q.Disc - 1 && r.LastEpisode != null).OrderByDescending(r => r.LastEpisode).FirstOrDefault() is { } prev)
+            return new(prev.LastEpisode!.Value, $"disc {q.Disc - 1}, archived in {prev.Folder}");
+        if (same.Any(r => (r.Disc ?? 0) > q.Disc) || seasonFolder == null || HighestEpisode(seasonFolder, season) is not { } last) return null;
+        return new(last, $"the highest episode in {seasonFolder}");
+    }
+
+    public static bool SameSet(Record r, Query q)
+    {
+        string name = MetadataLookup.Normalize(q.Name), title = MetadataLookup.Normalize(q.LabelTitle);
+        var sameShow = (name.Length > 0 && MetadataLookup.Normalize(r.Name) == name) || (title.Length > 0 && MetadataLookup.Normalize(r.LabelTitle) == title);
+        return sameShow && r.Season == q.Season && r.Part == q.Part && r.Volume == q.Volume;
+    }
+
+    static string? Str(JsonElement o, string name) => o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    static int? Int(JsonElement o, string name) => o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i) ? i : null;
+
+    /// <summary>A bromelia*.json of a TV show that was archived (status success or errors), or null.</summary>
+    public static Record? Read(string path)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var o = doc.RootElement;
+            if (o.ValueKind != JsonValueKind.Object || Str(o, "format") != "bromelia-archive" || Str(o, "status") is not ("success" or "errors")
+                || Str(o, "kind") != "tv" || !o.TryGetProperty("disc", out var disc) || disc.ValueKind != JsonValueKind.Object) return null;
+            var volumeName = Str(disc, "volumeName") ?? "";
+            var label = LabelParser.Parse(volumeName.Length > 0 ? volumeName : Str(disc, "label") ?? "");
+            int? last = null;
+            if (o.TryGetProperty("episodes", out var eps) && eps.ValueKind == JsonValueKind.Array)
+                foreach (var e in eps.EnumerateArray())
+                    if (e.ValueKind == JsonValueKind.Object && Int(e, "episode") is { } n && (last == null || n > last)) last = n;
+            return new(Str(o, "name") ?? "", label.Title, Int(disc, "season"), Int(disc, "part"), Int(disc, "volume"), Int(disc, "disc"), last,
+                Path.GetDirectoryName(path) ?? "");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    static void Walk(string dir, int depth, Action<string> visit)
+    {
+        List<string> entries;
+        try { entries = Directory.EnumerateFileSystemEntries(dir).OrderBy(p => p, StringComparer.Ordinal).ToList(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }
+        foreach (var path in entries)
+        {
+            var name = Path.GetFileName(path);
+            if (name.StartsWith('.')) continue;
+            if (ArchiveLookup.IsRecordName(name) && File.Exists(path)) visit(path);
+            else if (depth < 4 && Directory.Exists(path) && !new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint)) Walk(path, depth + 1, visit);
+        }
+    }
+
+    /// <summary>The highest episode number of <paramref name="season"/> in the names of the files in <paramref name="folder"/>
+    /// (<c>… S02E05 …</c>), or null.</summary>
+    public static int? HighestEpisode(string folder, int season)
+    {
+        IEnumerable<string> names;
+        try { names = Directory.EnumerateFileSystemEntries(folder).Select(p => Path.GetFileName(p)).ToList(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        int? best = null;
+        foreach (var n in names.Where(n => !n.StartsWith('.')))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(n, @"[Ss](\d{1,3})[Ee](\d{1,4})");
+            if (m.Success && int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) == season)
+            {
+                var e = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+                if (best == null || e > best) best = e;
+            }
+        }
+        return best;
+    }
 }
 
 /// <summary>Reads archive folders again and compares every file with its SHA256SUMS (bit rot, bad copies).</summary>

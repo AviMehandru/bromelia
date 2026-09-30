@@ -27,8 +27,18 @@ final class DiscSession: Identifiable {
     var mediaName = ""
     /// nil = decide automatically.
     var mediaKind: MediaKind?
-    /// First episode number on this disc. nil = read from the menus or start at 1.
+    /// First episode number on this disc. nil = read from the menus, continued from the previous disc, or 1.
     var firstEpisode: Int?
+    /// Release year, to find the right movie or show online. nil = none.
+    var mediaYear: Int?
+    /// The movie or show chosen online (a TMDb or IMDb id). "" = the best search result.
+    var onlineId = ""
+    /// What the online lookup found for this disc, best first.
+    var lookupCandidates: [MediaMatch] = []
+    var isLookingUp = false
+    /// Why the lookup found nothing, or nil.
+    var lookupMessage: String?
+    @ObservationIgnored var lookupGeneration = 0
     /// File system flags from the drive scan.
     var discFlags: DiscFlags?
     /// What MakeMKV said about LibreDrive when the disc was opened (drives only).
@@ -60,6 +70,12 @@ final class DiscSession: Identifiable {
         mediaName = ""
         mediaKind = nil
         firstEpisode = nil
+        mediaYear = nil
+        onlineId = ""
+        lookupCandidates = []
+        isLookingUp = false
+        lookupMessage = nil
+        lookupGeneration += 1
         libreDrive = nil
         progress = 0
         operation = ""

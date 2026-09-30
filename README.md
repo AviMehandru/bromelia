@@ -78,8 +78,9 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **TV episodes from “play all” titles.** Many TV DVDs store several episodes in one title. Bromelia reads
   the disc's own menu navigation (IFO title tables, menu and button jump commands) to find where each
   episode starts and ends, and splits the MKV into one file per episode with `mkvmerge` (no re-encoding).
-  Episode numbers are read from the episode menus with `ffmpeg` + `tesseract` when installed, or entered on
-  the disc page. Works from a disc, an ISO or a backup.
+  Episode numbers are read from the episode menus with `ffmpeg` + `tesseract` when installed, continued from
+  the previous disc of the set (`ONE_PIECE_S2_P7_D2` starts after the last episode archived from `…_D1`), or
+  entered on the disc page. Works from a disc, an ISO or a backup.
 - **Checksums and archive records.** Every output folder gets `SHA256SUMS` (checkable with
   `sha256sum -c SHA256SUMS` / `shasum -a 256 -c SHA256SUMS`), `bromelia.json` (disc identity, titles,
   episodes, files with sizes and hashes, MakeMKV version, errors, disc fingerprint) and the job log.
@@ -92,7 +93,7 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
   source, length, segment map and size), looked up in the history and in the output folder's `bromelia.json`
   files. An automatic rip skips such a disc (or stops and asks, or rips it again: `automation.alreadyArchived`),
   and the disc page says so and asks before ripping it again by hand.
-- **Output templates** for folders and file names using `{name}`, `{episode}`, `{discLabel}`, `{rip}`,
+- **Output templates** for folders and file names using `{name}`, `{episode}`, `{episodeTitle}`, `{discLabel}`, `{rip}`,
   `{track}`, `{format}`, `{season}`, `{disc}`, `{type}`, `{drive}`, `{date}`, `{title}`, `{index}`,
   `{n:2}`, `{source}`, `{duration}`, `{chapters}`, `{original}`, and conditional text such as
   `{comment? - {comment}}`.
@@ -130,10 +131,13 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 
 ### Like the other makemkvcon wrappers (ARM, docker-makemkv, MakeMKV-Auto-Rip, riplex, …)
 - **Online lookup** of the movie or show on TMDb or OMDb for canonical names such as `Inception (2010)`, with
-  `{releaseYear}`, `{tmdb}` and `{imdb}` tokens.
+  `{releaseYear}`, `{tmdb}` and `{imdb}` tokens, and **episode titles** of TV shows (`{episodeTitle}`, FileBot /
+  riplex style). The disc page lists the other results, takes a release year, and lets you pick another result or
+  type a TMDb / IMDb id (or paste its web address) when the best match is wrong; the job log names the runners-up.
 - **Plex / Jellyfin / Emby layout**: `Movies/Name (Year)/Name (Year).mkv`,
-  `TV Shows/Name (Year)/Season 02/Name (Year) - S02E05.mkv`, extras in `Other/`, backups in an ignored `Backup/`;
-  later discs are added to the same show and season folders.
+  `TV Shows/Name (Year)/Season 02/Name (Year) - S02E05 - Episode Title.mkv`, extras in `Other/`, backups in an
+  ignored `Backup/`; later discs are added to the same show and season folders, and their episode numbers continue
+  after the ones already there.
 - **Audio CDs** ripped with cyanrip or abcde (MusicBrainz tags, FLAC) and **data discs** saved as exact ISO images,
   chosen automatically from what is in the drive.
 - **Separate modes for DVDs, Blu-rays and 4K discs** (e.g. backups of DVDs, MKVs of Blu-rays).
@@ -278,7 +282,8 @@ See [docs/architecture.md](docs/architecture.md) for how the pieces fit together
 - Episode splitting works for DVDs (their menu navigation says where episodes start). Blu-ray TV discs
   normally store each episode as its own playlist, which is ripped and named per episode anyway.
 - Without an online lookup the name comes from the disc itself; change it on the disc page when the label is
-  cryptic. The lookup finds the title and year, not episode titles.
+  cryptic. Episode titles need the show's season numbering to match the disc's: a disc numbered across seasons
+  (absolute numbers such as 138) gets titles only when the online season lists those numbers.
 - Audio CDs need cyanrip or abcde (not on Windows by default: set an audio CD command); `apprise` URLs need the
   `apprise` command.
 - The `e` format codes mean “not decrypted by Bromelia”: a DVD without CSS backed up without decryption

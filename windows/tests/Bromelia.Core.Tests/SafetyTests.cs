@@ -897,11 +897,11 @@ public class IntegrationFeatureTests
         Assert.Equal((1994, "tt0108778"), (o.Year!.Value, o.ImdbId!));
         Assert.Null(MetadataLookup.Parse("{\"Response\":\"False\"}", MetadataProvider.Omdb, "x"));
         var c = new MetadataConfig { Provider = MetadataProvider.Tmdb, ApiKey = "0123456789abcdef0123456789abcdef" };
-        var r = MetadataLookup.Request("One Piece", MediaKind.Tv, c)!.Value;
+        var r = MetadataLookup.Request("One Piece", MediaKind.Tv, c)!;
         Assert.Equal("/3/search/tv", r.Url.AbsolutePath);
         Assert.Contains("api_key=0123", r.Url.Query);
         c.ApiKey = "eyJ" + new string('x', 60);
-        var b = MetadataLookup.Request("One Piece", MediaKind.Movie, c)!.Value;
+        var b = MetadataLookup.Request("One Piece", MediaKind.Movie, c)!;
         Assert.StartsWith("eyJ", b.Bearer);
         Assert.DoesNotContain("api_key", b.Url.Query);
     }

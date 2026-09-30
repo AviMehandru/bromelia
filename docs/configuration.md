@@ -35,7 +35,8 @@ between versions and platforms freely. Paths may start with `~`.
   "metadata": {                    // online lookup of the movie / show (see "Online lookup")
     "provider": "none",            // none | tmdb | omdb
     "apiKey": "",                  // TMDb: API key (v3) or read access token; OMDb: API key
-    "language": "en-US"            // TMDb language of titles
+    "language": "en-US",           // TMDb language of titles
+    "episodeTitles": true          // TV shows: look up the titles of the disc's episodes ({episodeTitle})
   },
   "notifications": [               // where to send a message when a job finishes (see "Notifications")
     { "id": "…", "url": "https://discord.com/api/webhooks/…", "enabled": true, "onlyProblems": false }
@@ -117,7 +118,7 @@ changed are kept.
     "rootOverride": "",                        // empty = outputRoot
     "folderTemplate": "{name}{discLabel? - {discLabel}}",
     // MKV files and backups; empty = keep MakeMKV's names
-    "fileNameTemplate": "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
+    "fileNameTemplate": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
     "backupSubfolder": "backup",
     "conflictPolicy": "uniqueSuffix",          // uniqueSuffix | overwrite | skip
     "layout": "templates"                      // templates | mediaServer (Plex / Jellyfin / Emby, see below)
@@ -288,6 +289,7 @@ The manifest (`BROMELIA_MANIFEST`) also contains `name`, `kind`, `format`, `form
 | `{format}` | `DVD`, `BR`, `4K` (`HDDVD`, `DISC`); with an `e` suffix for backups that are not decrypted |
 | `{kind}` | `movie` or `tv` |
 | `{episode}`, `{episodeNumber}` | `Episode 138` / `138` for TV episodes, empty for other titles (files only) |
+| `{episodeTitle}` | The episode's title from the online lookup, e.g. `The One with the Breast Milk`; empty without one (files only) |
 | `{track}` | `Title 11` (DVD title), `Playlist 00800` (Blu-ray), `Title 11 Ch 8-14` for split episodes (files only) |
 | `{disc}`, `{volume}` | Disc name / volume label |
 | `{type}` | `dvd`, `bd`, `hddvd`, `disc` |
@@ -327,8 +329,16 @@ name containing `VIDEO_TS` / `BDMV`.
   (at least 5 minutes, at most twice as long as each other) and the ripped file matches the disc title
   (chapter count, duration within 2 s, chapter times via `mkvextract` when available). A short clip after
   the last episode becomes its own file. Episode numbers come from the disc page, else from the
-  episode menus (`EPISODE 138` read by `tesseract`), else start at 1. TV discs whose episodes are separate
-  titles are numbered in title order.
+  episode menus (`EPISODE 138` read by `tesseract`), else from the previous disc of the set (below), else
+  start at 1. TV discs whose episodes are separate titles are numbered in title order.
+- **Numbering across discs.** Disc 2 and later of a set continue after the last episode of the previous disc: the
+  `bromelia*.json` records in the history's folders and in the output root (up to four folders deep) are searched
+  for a TV show with the same name (after the online lookup) or the same title in its label, the same season, part
+  and volume, and the disc number one lower; records of rips that failed don't count, rips with read errors do. In
+  the media server layout, when no such record exists and no later disc of the set was archived, the highest
+  `SxxEyy` of the season in the show's `Season NN` folder is used. When the menus or the disc page give another
+  first number, the log warns about the gap or overlap. `shared/fixtures/episode-continuation.json` holds the cases
+  every platform's tests check.
 
 ## Archive files
 
@@ -337,7 +347,7 @@ Every output folder gets, unless switched off in `archive`:
 | File | Content |
 | --- | --- |
 | `SHA256SUMS` | `sha256  relative/path` for every produced file, including all files of backup folders. Entries of earlier jobs writing into the same folder are kept. |
-| `bromelia.json` | `{"format": "bromelia-archive", "version": 2, …}`: status (`success` / `errors`), name, kind, disc (label, volume name, type, format, format code, encrypted, season / part / volume / disc, fingerprint), rip, mode, source, drive, MakeMKV version, job id, times, titles (source id, source file, duration, chapters, size, segment map), episodes, files (path, size, sha256), warning and error counts and error messages. A folder shared by several jobs gets `bromelia (2).json` and so on |
+| `bromelia.json` | `{"format": "bromelia-archive", "version": 2, …}`: status (`success` / `errors`), name, kind, disc (label, volume name, type, format, format code, encrypted, season / part / volume / disc, fingerprint), rip, mode, source, drive, MakeMKV version, job id, times, titles (source id, source file, duration, chapters, size, segment map), episodes (file, episode number, source title, chapter range, title), files (path, size, sha256), warning and error counts and error messages. A folder shared by several jobs gets `bromelia (2).json` and so on |
 | `bromelia-log.txt` | The job log |
 
 ## Archive check
@@ -397,7 +407,7 @@ With `"layout": "mediaServer"` the templates are replaced by the names Plex, Jel
 Movies/Inception (2010)/Inception (2010).mkv                    the main feature (longest title)
 Movies/Inception (2010)/Other/Inception (2010) - Playlist 00800.mkv
 Movies/Inception (2010)/Backup/Inception (2010) - Backup - BR   backups (.plexignore / .ignore keep servers out)
-TV Shows/One Piece (1999)/Season 02/One Piece (1999) - S02E138.mkv
+TV Shows/Friends (1994)/Season 02/Friends (1994) - S02E02 - The One with the Breast Milk.mkv
 ```
 
 A show or movie keeps one folder: later discs are added to it (`Season 02` gets the next disc's episodes)
@@ -425,9 +435,26 @@ A mounted disc with `BDMV`, `VIDEO_TS` or `HVDVD_TS` always counts as a video di
 
 With `metadata.provider` set to `tmdb` (The Movie Database; free API key at themoviedb.org → Settings → API,
 v3 key or read access token) or `omdb` (omdbapi.com), every job looks up the name read from the disc and uses
-the canonical title for `{name}`, plus `{releaseYear}`, `{tmdb}` and `{imdb}`. The result whose title matches
-the disc's name (ignoring case and punctuation) wins, else the first one. A failed lookup is logged and the
+the canonical title for `{name}`, plus `{releaseYear}`, `{tmdb}` and `{imdb}`. A failed lookup is logged and the
 job continues with the disc's own name. Requests use `curl` on Linux; the key never appears on a command line.
+
+**Choosing the match.** The search results are ranked: a title equal to the disc's name (ignoring case and
+punctuation) scores 4, the release year 2 (1 when it is off by one); ties keep the provider's order. The year comes
+from the disc page, or from a name typed as `Inception (2010)`; a year that finds nothing is dropped. The job log
+names the match and up to four runners-up. When a disc is opened, the disc page looks it up too and lists the
+results: pick another one, or type an id — a TMDb id (`603`, `tmdb:603`, `movie/603`, `tv/1668`, or a
+themoviedb.org address) or an IMDb id (`tt0133093`, or an imdb.com address). A TMDb id without `movie/` or `tv/`
+uses the disc's kind. OMDb only takes IMDb ids. A chosen id replaces the search; it also decides movie or TV
+unless the disc page does. When the disc menus turn a disc taken for a movie into a TV show, the job searches again
+as a TV show.
+
+**Episode titles.** With `episodeTitles` (on by default), a TV disc's episodes get their titles from the show's
+season (the season from the label, else 1): TMDb `/tv/{id}/season/{n}`, OMDb `?i={imdbId}&Season={n}`. They fill
+`{episodeTitle}`, the media server names and the archive record. When the season doesn't list every episode number
+of the disc (discs numbered across seasons, say), no episode gets a title and the log says why.
+
+The recorded answers in `shared/fixtures/lookup` and what must come out of them (`expected.json`) are checked by
+the tests of all three platforms.
 
 ## Notifications
 

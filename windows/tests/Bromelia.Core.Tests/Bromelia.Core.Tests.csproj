@@ -26,6 +26,9 @@
     <None Include="..\..\..\shared\fixtures\*.json" LinkBase="fixtures">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\..\shared\fixtures\lookup\*.json" LinkBase="fixtures\lookup">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\..\..\shared\fixtures\dvd-play-all\**\*" LinkBase="fixtures\dvd-play-all">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

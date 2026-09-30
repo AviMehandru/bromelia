@@ -104,6 +104,12 @@ final class JobRunner {
     private var separateEpisodes: [Int: Int] = [:]   // MakeMKV title → episode offset
     private var firstEpisodeNumber = 1
     private var episodeWidth = 2
+    /// Episode number → title and plot, from the online lookup.
+    private var episodeDetails: [Int: EpisodeDetails] = [:]
+    /// The kind the online lookup searched for.
+    private var lookedUpKind: MediaKind?
+    /// The online match is the id chosen for this disc (not a search result).
+    private var metadataChosen = false
     private var fileTitles: [URL: Int] = [:]
     // Output (see finishOutput)
     private var outputDir: URL?
@@ -403,22 +409,48 @@ final class JobRunner {
         throw JobError.message(message)
     }
 
-    /// The canonical title and year from TMDb or OMDb, when a provider is set up. Failures only log.
+    /// The canonical title and year from TMDb or OMDb, when a provider is set up: the movie or show chosen for this disc
+    /// (onlineId), else the best search result for the name (with the year typed for the disc). Failures only log.
     private func lookUpMetadata() async {
         let m = config.metadata
         guard m.provider != .none, !m.apiKey.isEmpty, let id = job.identity, !id.name.isEmpty else { return }
-        job.phase = "Looking up “\(id.name)”"
+        lookedUpKind = id.kind
+        let chosen = job.onlineId.trimmingCharacters(in: .whitespaces)
         do {
-            if let match = try await MetadataLookup.lookup(name: id.name, kind: id.kind, config: m) {
-                job.metadata = match
-                job.appendLog("\(match.provider): “\(match.title)”\(match.year.map { " (\($0))" } ?? "")\(match.tmdbId.map { ", TMDb \($0)" } ?? "")\(match.imdbId.map { ", \($0)" } ?? "")")
-                resolveIdentity(info: job.discInfo)
-            } else {
-                job.appendLog("\(m.provider.label) found nothing for “\(id.name)”", severity: .warning)
+            if !chosen.isEmpty {
+                if let oid = OnlineId.parse(chosen) {
+                    job.phase = "Looking up \(oid.label)"
+                    if let match = try await MetadataLookup.lookup(id: oid, kind: id.kind, config: m) {
+                        metadataChosen = true
+                        use(match, how: "chosen for this disc")
+                    } else {
+                        job.appendLog("\(m.provider.label) found nothing for \(oid.label), chosen for this disc", severity: .warning)
+                    }
+                    return
+                }
+                job.appendLog("“\(chosen)” is not a TMDb or IMDb id; looking up the name instead", severity: .warning)
             }
+            let (query, typedYear) = MetadataLookup.splitYear(id.name)
+            let year = job.mediaYear ?? typedYear
+            job.phase = "Looking up “\(query)”"
+            let list = try await MetadataLookup.search(name: query, kind: id.kind, year: year, config: m)
+            guard let best = list.first else {
+                job.appendLog("\(m.provider.label) found nothing for “\(query)”\(year.map { " (\($0))" } ?? "")", severity: .warning)
+                return
+            }
+            let others = list.dropFirst().prefix(4).map(\.label)
+            use(best, how: list.count == 1 ? "the only result" : "best of \(list.count) results; also " + others.joined(separator: ", ")
+                + (list.count > 5 ? ", …" : "") + ". Choose another on the disc page if this is wrong")
         } catch {
             job.appendLog("Looking up “\(id.name)” failed: \(error.localizedDescription)", severity: .warning)
         }
+    }
+
+    private func use(_ match: MediaMatch, how: String) {
+        job.metadata = match
+        let ids = [match.tmdbId.map { "TMDb \($0)" }, match.imdbId].compactMap { $0 }.joined(separator: ", ")
+        job.appendLog("\(match.provider): “\(match.label)”\(ids.isEmpty ? "" : ", \(ids)") (\(how))")
+        resolveIdentity(info: job.discInfo)
     }
 
     /// Audio CDs (ripped with cyanrip / abcde) and data discs (copied to an ISO image).
@@ -493,7 +525,14 @@ final class JobRunner {
         var id = MediaIdentity.resolve(info: info, discLabel: job.discLabel, flags: job.discFlags, format: format ?? job.identity?.format,
                                        encrypted: job.mode == .backup, nameOverride: job.mediaName, kindOverride: job.mediaKind,
                                        playAllEpisodes: playAllEpisodes)
-        if let m = job.metadata { id.name = TemplateRenderer.sanitizeComponent(m.title) }
+        if let m = job.metadata {
+            id.name = TemplateRenderer.sanitizeComponent(m.title)
+            // An id chosen for the disc may be a show where a movie was assumed (or the other way round).
+            if metadataChosen, let k = m.kind, k != id.kind, job.mediaKind == nil {
+                id.kind = k
+                id.reason = "\(m.provider) lists it as a \(k == .tv ? "TV show" : "movie")"
+            }
+        }
         if id != job.identity {
             let set = id.label.setDescription
             job.appendLog("Identified as \(id.kind == .tv ? "TV show" : "movie") “\(id.name)”\(set.isEmpty ? "" : " (\(set))"), \(id.format.label), format code \(id.formatCode) — \(id.reason)")
@@ -537,6 +576,12 @@ final class JobRunner {
         }
         let strict = plans.first { $0.isPlausible(strict: true) }?.episodeCount ?? 0
         resolveIdentity(info: info, playAllEpisodes: strict)
+        // The menus showed a TV show where the lookup searched for a movie: search again, with the name read from the disc.
+        if let k = job.identity?.kind, let searched = lookedUpKind, k != searched, !metadataChosen {
+            job.metadata = nil
+            resolveIdentity(info: info, playAllEpisodes: strict)
+            await lookUpMetadata()
+        }
         guard job.identity?.kind == .tv else { return }
 
         if let p = plans.first(where: { $0.isPlausible(strict: false) }) {
@@ -566,10 +611,67 @@ final class JobRunner {
                 how = why ?? "menus read \(numbers.map { $0.sorted().description } ?? "[]"), no clear numbering"
             }
         }
+        if let found = await previousDisc() {
+            if first == nil {
+                first = found.lastEpisode + 1
+                how = "after episode \(found.lastEpisode) of \(found.source)"
+            } else if first != found.lastEpisode + 1 {
+                job.appendLog("The previous disc ended with episode \(found.lastEpisode) (\(found.source)), but this disc starts with \(first!) (\(how))", severity: .warning)
+            }
+        }
         if first == nil { how = "numbered from 1 (\(how.isEmpty ? "no number given" : how))" }
         firstEpisodeNumber = first ?? 1
         episodeWidth = max(2, String(firstEpisodeNumber + count - 1).count)
         job.appendLog("Episodes \(firstEpisodeNumber)–\(firstEpisodeNumber + count - 1) (\(how))")
+        await lookUpEpisodeTitles(count: count)
+    }
+
+    /// The last episode of the previous disc of this set (see EpisodeContinuation), for discs 2 and later.
+    private func previousDisc() async -> EpisodeContinuation.Found? {
+        guard let id = job.identity, let disc = id.label.disc, disc > 1 else { return nil }
+        job.phase = "Looking for the previous disc's episodes"
+        let q = EpisodeContinuation.Query(name: id.name, labelTitle: id.label.title, season: id.label.season, part: id.label.part,
+                                          volume: id.label.volume, disc: disc)
+        let root = URL(fileURLWithPath: Paths.expandTilde(config.outputRoot(for: job.drive)), isDirectory: true)
+        let folders = job.archivedCandidates.map(\.folder)
+        let season = id.label.season ?? 1
+        let seasonFolder = job.drive.output.layout == .mediaServer
+            ? outputDir?.appendingPathComponent(String(format: "Season %02d", season), isDirectory: true) : nil
+        return await Task.detached { EpisodeContinuation.find(q, root: root, folders: folders, seasonFolder: seasonFolder, season: season) }.value
+    }
+
+    /// The titles of this disc's episodes, when the show was found online (metadata.episodeTitles). A season whose
+    /// numbers don't cover every episode of the disc (numbered across seasons, say) gives no titles at all.
+    private func lookUpEpisodeTitles(count: Int) async {
+        episodeDetails = [:]
+        let m = config.metadata
+        guard m.episodeTitles, count > 0, let match = job.metadata, job.identity?.kind == .tv else { return }
+        let season = job.identity?.label.season ?? 1
+        let wanted = Array(firstEpisodeNumber..<(firstEpisodeNumber + count))
+        job.phase = "Looking up episode titles"
+        do {
+            let all = try await MetadataLookup.episodes(of: match, season: season, config: m)
+            guard let lo = all.keys.min(), let hi = all.keys.max() else {
+                job.appendLog("\(match.provider) lists no episodes for season \(season) of “\(match.title)”", severity: .warning)
+                return
+            }
+            let missing = wanted.filter { all[$0] == nil }
+            if !missing.isEmpty {
+                job.appendLog("Season \(season) of “\(match.title)” on \(match.provider) has episodes \(lo)–\(hi), not \(missing.map(String.init).joined(separator: ", ")); the episodes get no titles", severity: .warning)
+                return
+            }
+            for n in wanted { episodeDetails[n] = all[n] }
+            job.appendLog("Episode titles from \(match.provider), season \(season): " + wanted.map { "\($0) “\(all[$0]!.title)”" }.joined(separator: ", "))
+        } catch {
+            job.appendLog("Looking up the episode titles failed: \(error.localizedDescription)", severity: .warning)
+        }
+    }
+
+    /// Template values of episode `n`.
+    private func setEpisode(_ n: Int, in values: inout [String: String]) {
+        values["episode"] = MediaIdentity.episodeLabel(n, width: episodeWidth)
+        values["episodeNumber"] = String(n)
+        values["episodeTitle"] = episodeDetails[n]?.title ?? ""
     }
 
     /// Splits the ripped "play all" title into episode files named with the file name template.
@@ -605,8 +707,7 @@ final class JobRunner {
             let range: ClosedRange<Int>
             if i < plan.episodeCount {
                 range = plan.chapterRange(i)
-                values["episode"] = MediaIdentity.episodeLabel(firstEpisodeNumber + i, width: episodeWidth)
-                values["episodeNumber"] = String(firstEpisodeNumber + i)
+                setEpisode(firstEpisodeNumber + i, in: &values)
             } else {
                 range = plan.tail.first!...plan.tail.last!
             }
@@ -618,7 +719,8 @@ final class JobRunner {
             outputs.append(final)
             if i < plan.episodeCount {
                 job.episodes.append(.init(file: relativePath(final, outDir), episode: firstEpisodeNumber + i, sourceTitleId: plan.title,
-                                          firstChapter: range.lowerBound, lastChapter: range.upperBound))
+                                          firstChapter: range.lowerBound, lastChapter: range.upperBound,
+                                          title: episodeDetails[firstEpisodeNumber + i]?.title))
             }
         }
         job.appendLog("Split \(file.lastPathComponent) into \(plan.episodeCount) episode(s)\(parts.count > plan.episodeCount ? " and a closing clip" : "")")
@@ -1272,17 +1374,14 @@ final class JobRunner {
         var values = templateValues(status: .running)
         for (k, v) in Self.titleValues(title, ordinal: ordinal, disc: info, originalFile: file) { values[k] = v }
         values["track"] = MediaIdentity.trackLabel(title)
-        if let k = separateEpisodes[title.index] {
-            values["episode"] = MediaIdentity.episodeLabel(firstEpisodeNumber + k, width: episodeWidth)
-            values["episodeNumber"] = String(firstEpisodeNumber + k)
-        }
+        if let k = separateEpisodes[title.index] { setEpisode(firstEpisodeNumber + k, in: &values) }
         let template = !explicit.isEmpty ? explicit
             : job.drive.output.layout == .mediaServer ? MediaServerNaming.fileTemplate(values: values, isMainFeature: title.index == mainTitle)
             : job.drive.output.fileNameTemplate.trimmingCharacters(in: .whitespaces)
         let final = rename(file, values: values, template: template, fallbackName: nil, outDir: outDir)
         if let k = separateEpisodes[title.index] {
             job.episodes.append(.init(file: relativePath(final, outDir), episode: firstEpisodeNumber + k, sourceTitleId: title.sourceTitleId ?? title.index,
-                                      firstChapter: 1, lastChapter: max(1, title.chapterCount)))
+                                      firstChapter: 1, lastChapter: max(1, title.chapterCount), title: episodeDetails[firstEpisodeNumber + k]?.title))
         }
         return final
     }

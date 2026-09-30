@@ -61,11 +61,12 @@ public sealed partial class SettingsPage : Page
         f.Section("Archive check", "Reads the output folder's archives again and compares every file with SHA256SUMS, to find damaged or missing files. The result is sent to the notifications. The Archive check page checks now.");
         f.Number("Check archives every (0 = never)", () => c.ArchiveCheck.IntervalDays, v => c.ArchiveCheck.IntervalDays = v, 0, 3650, suffix: "days");
 
-        f.Section("Online lookup", "Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for media server names. Get a free key at themoviedb.org or omdbapi.com.");
+        f.Section("Online lookup", "Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for media server names, and the episode titles ({episodeTitle}). The disc page shows the other results and takes a year or an id when the best match is wrong. Get a free key at themoviedb.org or omdbapi.com.");
         f.Choice("Look up movies and shows", new[] { (MetadataProvider.None, "Off"), (MetadataProvider.Tmdb, "The Movie Database (TMDb)"), (MetadataProvider.Omdb, "OMDb (IMDb data)") },
             () => c.Metadata.Provider, v => c.Metadata.Provider = v);
         f.Text("API key", () => c.Metadata.ApiKey, v => c.Metadata.ApiKey = v);
         f.Text("Language (TMDb)", () => c.Metadata.Language, v => c.Metadata.Language = v, "en-US");
+        f.Toggle("Look up episode titles of TV shows", () => c.Metadata.EpisodeTitles, v => c.Metadata.EpisodeTitles = v);
 
         f.Section("Notifications", "Sent when a job finishes, one URL per line. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook (JSON) work directly; other Apprise URLs need the apprise command. Add “ !” at the end of a line to be told only about problems.");
         var urls = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 80,

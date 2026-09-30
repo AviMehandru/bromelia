@@ -2,9 +2,11 @@
 #include "bro-archive.h"
 #include "bro-config.h"
 #include "bro-identity.h"
+#include "bro-integrations.h"
 
 #include <glib/gstdio.h>
 #include <json-glib/json-glib.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -153,6 +155,192 @@ bro_find_archived (const char *fingerprint, GPtrArray *candidates, const char *r
         }
     }
   return root && *root ? scan_for_record (root, fingerprint, 0) : NULL;
+}
+
+/* ---- episode numbering across discs ---- */
+
+typedef struct {
+  char *name, *label_title, *folder;
+  int season, part, volume, disc, last_episode; /* -1 when absent */
+} ShowRecord;
+
+static void
+show_record_free (ShowRecord *r)
+{
+  g_free (r->name);
+  g_free (r->label_title);
+  g_free (r->folder);
+  g_free (r);
+}
+
+void
+bro_continuation_free (BroContinuation *c)
+{
+  if (!c)
+    return;
+  g_free (c->source);
+  g_free (c);
+}
+
+static int
+member_int (JsonObject *o, const char *k)
+{
+  JsonNode *n = o && json_object_has_member (o, k) ? json_object_get_member (o, k) : NULL;
+  return n && JSON_NODE_HOLDS_VALUE (n) && json_node_get_value_type (n) == G_TYPE_INT64 ? (int) json_node_get_int (n) : -1;
+}
+
+/* A bromelia*.json of a TV show that was archived (status success or errors), or NULL. */
+static ShowRecord *
+read_show_record (const char *path)
+{
+  g_autoptr (JsonParser) p = json_parser_new ();
+  JsonObject *o, *disc;
+  const char *status, *volume_name;
+  BroLabelInfo label = { 0 };
+  ShowRecord *r;
+  if (!json_parser_load_from_file (p, path, NULL) || !JSON_NODE_HOLDS_OBJECT (json_parser_get_root (p)))
+    return NULL;
+  o = json_node_get_object (json_parser_get_root (p));
+  status = json_object_get_string_member_with_default (o, "status", "");
+  if (g_strcmp0 (json_object_get_string_member_with_default (o, "format", ""), "bromelia-archive") != 0
+      || (!g_str_equal (status, "success") && !g_str_equal (status, "errors"))
+      || g_strcmp0 (json_object_get_string_member_with_default (o, "kind", ""), "tv") != 0
+      || !json_object_has_member (o, "disc") || !JSON_NODE_HOLDS_OBJECT (json_object_get_member (o, "disc")))
+    return NULL;
+  disc = json_object_get_object_member (o, "disc");
+  volume_name = json_object_get_string_member_with_default (disc, "volumeName", "");
+  bro_label_parse (*volume_name ? volume_name : json_object_get_string_member_with_default (disc, "label", ""), &label);
+  r = g_new0 (ShowRecord, 1);
+  r->name = g_strdup (json_object_get_string_member_with_default (o, "name", ""));
+  r->label_title = g_strdup (label.title ? label.title : "");
+  r->folder = g_path_get_dirname (path);
+  r->season = member_int (disc, "season");
+  r->part = member_int (disc, "part");
+  r->volume = member_int (disc, "volume");
+  r->disc = member_int (disc, "disc");
+  r->last_episode = -1;
+  bro_label_clear (&label);
+  if (json_object_has_member (o, "episodes") && JSON_NODE_HOLDS_ARRAY (json_object_get_member (o, "episodes")))
+    {
+      JsonArray *eps = json_object_get_array_member (o, "episodes");
+      for (guint i = 0; i < json_array_get_length (eps); i++)
+        if (JSON_NODE_HOLDS_OBJECT (json_array_get_element (eps, i)))
+          r->last_episode = MAX (r->last_episode, member_int (json_array_get_object_element (eps, i), "episode"));
+    }
+  return r;
+}
+
+static void
+add_show_record (GPtrArray *records, GHashTable *seen, const char *path)
+{
+  ShowRecord *r;
+  if (!g_hash_table_add (seen, g_canonicalize_filename (path, NULL)))
+    return;
+  if ((r = read_show_record (path)))
+    g_ptr_array_add (records, r);
+}
+
+static void
+walk_show_records (const char *dir, int depth, GPtrArray *records, GHashTable *seen)
+{
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  g_autoptr (GPtrArray) names = g_ptr_array_new_with_free_func (g_free);
+  const char *name;
+  if (!d)
+    return;
+  while ((name = g_dir_read_name (d)))
+    if (name[0] != '.')
+      g_ptr_array_add (names, g_strdup (name));
+  g_ptr_array_sort (names, cmp_str);
+  for (guint i = 0; i < names->len; i++)
+    {
+      g_autofree char *full = g_build_filename (dir, names->pdata[i], NULL);
+      if (is_record_name (names->pdata[i]) && g_file_test (full, G_FILE_TEST_IS_REGULAR))
+        add_show_record (records, seen, full);
+      else if (depth < 4 && g_file_test (full, G_FILE_TEST_IS_DIR) && !g_file_test (full, G_FILE_TEST_IS_SYMLINK))
+        walk_show_records (full, depth + 1, records, seen);
+    }
+}
+
+static gboolean
+same_set (const ShowRecord *r, const BroContinuationQuery *q)
+{
+  g_autofree char *name = bro_normalize_title (q->name), *title = bro_normalize_title (q->label_title);
+  g_autofree char *rname = bro_normalize_title (r->name), *rtitle = bro_normalize_title (r->label_title);
+  gboolean same_show = (*name && g_str_equal (rname, name)) || (*title && g_str_equal (rtitle, title));
+  return same_show && r->season == q->season && r->part == q->part && r->volume == q->volume;
+}
+
+int
+bro_highest_episode (const char *folder, int season)
+{
+  g_autoptr (GDir) d = g_dir_open (folder, 0, NULL);
+  g_autoptr (GRegex) re = g_regex_new ("[Ss](\\d{1,3})[Ee](\\d{1,4})", 0, 0, NULL);
+  const char *name;
+  int best = -1;
+  while (d && (name = g_dir_read_name (d)))
+    {
+      g_autoptr (GMatchInfo) mi = NULL;
+      if (name[0] == '.' || !g_regex_match (re, name, 0, &mi))
+        continue;
+      {
+        g_autofree char *s = g_match_info_fetch (mi, 1), *e = g_match_info_fetch (mi, 2);
+        if (atoi (s) == season)
+          best = MAX (best, atoi (e));
+      }
+    }
+  return best;
+}
+
+BroContinuation *
+bro_episode_continuation (const BroContinuationQuery *q, const char *root, GPtrArray *folders, const char *season_folder, int season)
+{
+  g_autoptr (GPtrArray) records = NULL;
+  g_autoptr (GHashTable) seen = NULL;
+  ShowRecord *prev = NULL;
+  gboolean later = FALSE;
+  BroContinuation *c;
+  int last;
+  if (q->disc <= 1)
+    return NULL;
+  records = g_ptr_array_new_with_free_func ((GDestroyNotify) show_record_free);
+  seen = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  for (guint i = 0; folders && i < folders->len; i++)
+    {
+      g_autoptr (GDir) d = g_dir_open (folders->pdata[i], 0, NULL);
+      const char *name;
+      while (d && (name = g_dir_read_name (d)))
+        if (is_record_name (name))
+          {
+            g_autofree char *full = g_build_filename (folders->pdata[i], name, NULL);
+            add_show_record (records, seen, full);
+          }
+    }
+  if (root && *root)
+    walk_show_records (root, 0, records, seen);
+  for (guint i = 0; i < records->len; i++)
+    {
+      ShowRecord *r = records->pdata[i];
+      if (!same_set (r, q))
+        continue;
+      if (r->disc == q->disc - 1 && r->last_episode >= 0 && (!prev || r->last_episode > prev->last_episode))
+        prev = r;
+      if (r->disc > q->disc)
+        later = TRUE;
+    }
+  if (prev)
+    {
+      c = g_new0 (BroContinuation, 1);
+      c->last_episode = prev->last_episode;
+      c->source = g_strdup_printf ("disc %d, archived in %s", q->disc - 1, prev->folder);
+      return c;
+    }
+  if (later || !season_folder || (last = bro_highest_episode (season_folder, season)) < 0)
+    return NULL;
+  c = g_new0 (BroContinuation, 1);
+  c->last_episode = last;
+  c->source = g_strdup_printf ("the highest episode in %s", season_folder);
+  return c;
 }
 
 /* ---- verifying archives ---- */

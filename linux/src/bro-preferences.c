@@ -595,10 +595,12 @@ services_page (void)
 
   g = group (ADW_PREFERENCES_PAGE (page), "Online lookup",
              "Finds the canonical title and year of the name read from the disc, for {name}, {releaseYear}, {tmdb} and {imdb} and for "
-             "media server names. Get a free key at themoviedb.org (Settings → API) or omdbapi.com. Needs curl.");
+             "media server names, and the episode titles ({episodeTitle}). The disc page shows the other results and takes a year or an "
+             "id when the best match is wrong. Get a free key at themoviedb.org (Settings → API) or omdbapi.com. Needs curl.");
   adw_preferences_group_add (g, bro_combo_row ("Look up movies and shows", provider_labels, (int *) &c->metadata.provider, changed_cb, NULL));
   adw_preferences_group_add (g, secret_row ("API key", &c->metadata.api_key));
   adw_preferences_group_add (g, bro_entry_row ("Language (TMDb)", &c->metadata.language, "en-US", changed_cb, NULL));
+  adw_preferences_group_add (g, bro_switch_row ("Look up episode titles of TV shows", NULL, &c->metadata.episode_titles, changed_cb, NULL));
 
   g = group (ADW_PREFERENCES_PAGE (page), "Notifications",
              "Sent when a job finishes. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook "

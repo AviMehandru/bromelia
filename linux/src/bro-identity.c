@@ -440,6 +440,7 @@ bro_identity_template_values (const BroIdentity *id, GHashTable *v, const char *
 #undef NUM
   bro_template_values_set (v, "episode", "");
   bro_template_values_set (v, "episodeNumber", "");
+  bro_template_values_set (v, "episodeTitle", "");
   bro_template_values_set (v, "track", "");
 }
 

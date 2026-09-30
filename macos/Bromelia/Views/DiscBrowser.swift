@@ -175,6 +175,11 @@ struct DiscBrowser: View {
             TextField("Name", text: $session.mediaName, prompt: Text(auto.name))
                 .frame(minWidth: 160, maxWidth: 260)
                 .help("Movie or show name used for folder and file names. Empty = “\(auto.name)”, read from the disc.")
+                .onSubmit { model.lookUp(session) }
+            TextField("Year", value: $session.mediaYear, format: .number.grouping(.never), prompt: Text("Year"))
+                .frame(width: 56)
+                .help("Release year, to find the right movie or show online")
+                .onSubmit { model.lookUp(session) }
             Picker("", selection: $session.mediaKind) {
                 Text("Auto (\(auto.kind.label))").tag(MediaKind?.none)
                 ForEach(MediaKind.allCases) { Text($0.label).tag(MediaKind?.some($0)) }
@@ -182,6 +187,7 @@ struct DiscBrowser: View {
             .labelsHidden()
             .fixedSize()
             .help(session.mediaKind == nil ? "Detected: \(auto.reason)" : "Chosen for this disc")
+            .onChange(of: session.mediaKind) { _, _ in model.lookUp(session) }
             if id.kind == .tv {
                 TextField("First episode", value: $session.firstEpisode, format: .number, prompt: Text("First ep."))
                     .frame(width: 70)
@@ -193,9 +199,53 @@ struct DiscBrowser: View {
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 .textSelection(.enabled)
             Spacer(minLength: 0)
+            if model.config.metadata.provider != .none { lookupControls }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// The online match: the best search result, another candidate, or an id typed in.
+    private var lookupControls: some View {
+        @Bindable var session = session
+        let chosen = session.onlineId.trimmingCharacters(in: .whitespaces)
+        let label: String
+        if session.isLookingUp {
+            label = "Looking up…"
+        } else if !chosen.isEmpty {
+            label = session.lookupCandidates.first { $0.choiceId == chosen }?.label ?? chosen
+        } else if let best = session.lookupCandidates.first {
+            label = best.label
+        } else {
+            label = session.lookupMessage == nil ? "Look up" : "Not found"
+        }
+        return HStack(spacing: 6) {
+            Menu {
+                Button {
+                    session.onlineId = ""
+                } label: {
+                    if chosen.isEmpty { Label("Best match", systemImage: "checkmark") } else { Text("Best match") }
+                }
+                if !session.lookupCandidates.isEmpty { Divider() }
+                ForEach(session.lookupCandidates, id: \.self) { c in
+                    Button {
+                        session.onlineId = c.choiceId
+                    } label: {
+                        let text = "\(c.label)  ·  \(c.choiceId)"
+                        if chosen == c.choiceId { Label(text, systemImage: "checkmark") } else { Text(text) }
+                    }
+                }
+                Divider()
+                Button("Look Up Again") { model.lookUp(session) }
+            } label: {
+                Label(label, systemImage: "magnifyingglass")
+            }
+            .fixedSize()
+            .help(session.lookupMessage ?? "The movie or show found online, used for names. Pick another result if this one is wrong.")
+            TextField("Id", text: $session.onlineId, prompt: Text("TMDb / IMDb id"))
+                .frame(width: 110)
+                .help("A TMDb id (603, tv/1668), an IMDb id (tt0133093) or their web address. Empty = the best match.")
+        }
     }
 
     private func sampleFileName(_ id: MediaIdentity) -> String {

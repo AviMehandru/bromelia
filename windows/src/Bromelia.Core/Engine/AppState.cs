@@ -42,8 +42,21 @@ public sealed class DiscSession : ObservableObject
     public string MediaName { get; set; } = "";
     /// <summary>Null = decide automatically.</summary>
     public MediaKind? MediaKind { get; set; }
-    /// <summary>First episode number on this disc. Null = read from the menus or 1.</summary>
+    /// <summary>First episode number on this disc. Null = read from the menus, continued from the previous disc, or 1.</summary>
     public int? FirstEpisode { get; set; }
+    /// <summary>Release year, to find the right movie or show online. Null = none.</summary>
+    public int? MediaYear { get; set; }
+    /// <summary>The movie or show chosen online (a TMDb or IMDb id). "" = the best search result.</summary>
+    public string OnlineId { get; set; } = "";
+    /// <summary>What the online lookup found for this disc, best first.</summary>
+    public List<MediaMatch> LookupCandidates { get; set; } = new();
+    public bool IsLookingUp { get; set; }
+    /// <summary>Why the lookup found nothing, or null.</summary>
+    public string? LookupMessage { get; set; }
+    public int LookupGeneration { get; set; }
+    /// <summary>Raised on the UI thread when a lookup starts or ends.</summary>
+    public event Action? LookupChanged;
+    public void RaiseLookupChanged() => LookupChanged?.Invoke();
     /// <summary>File system flags from the drive scan.</summary>
     public DiscFlags? DiscFlags { get; set; }
     public ObservableCollection<LogEntry> Log { get; } = new();
@@ -75,6 +88,12 @@ public sealed class DiscSession : ObservableObject
         MediaName = "";
         MediaKind = null;
         FirstEpisode = null;
+        MediaYear = null;
+        OnlineId = "";
+        LookupCandidates = new();
+        IsLookingUp = false;
+        LookupMessage = null;
+        LookupGeneration++;
         LibreDrive = null;
         LibreDriveRequired = false;
         Progress = 0;
@@ -625,12 +644,47 @@ public sealed class AppState : ObservableObject
             }
             s.Info = builder.Info;
             s.ApplyRule(cfg.Rip.TitleSelection);
+            LookUp(s);
         }
         catch (Exception e)
         {
             s.IsLoading = false;
             s.LoadError = e.Message;
         }
+    }
+
+    /// <summary>Looks the opened disc up online (with the name, kind and year chosen on the disc page) and keeps the candidates,
+    /// so the disc page can show them.</summary>
+    public void LookUp(DiscSession s)
+    {
+        var m = Config.Metadata;
+        if (m.Provider == MetadataProvider.None || m.ApiKey.Trim().Length == 0 || s.Info is not { } info) return;
+        var id = MediaIdentity.Resolve(info, info.Name, false, s.DiscFlags, null, s.MediaName, s.MediaKind);
+        var (query, typedYear) = MetadataLookup.SplitYear(id.Name);
+        var year = s.MediaYear ?? typedYear;
+        var generation = ++s.LookupGeneration;
+        s.IsLookingUp = true;
+        s.LookupMessage = null;
+        s.RaiseLookupChanged();
+        _ = Task.Run(async () =>
+        {
+            List<MediaMatch> list = new();
+            string? message = null;
+            try
+            {
+                list = await MetadataLookup.SearchAsync(query, id.Kind, year, m).ConfigureAwait(false);
+                if (list.Count == 0) message = $"{m.Provider.Label()} found nothing for “{query}”";
+            }
+            catch (Exception e) { message = e.Message; }
+            _ui.Post(() =>
+            {
+                if (s.LookupGeneration != generation) return;
+                s.LookupCandidates = list;
+                s.LookupMessage = message;
+                s.IsLookingUp = false;
+                s.RaiseLookupChanged();
+            });
+        });
     }
 
     // --- jobs ---------------------------------------------------------------------------------
@@ -643,6 +697,8 @@ public sealed class AppState : ObservableObject
         job.MediaName = s.MediaName.Trim();
         job.MediaKind = s.MediaKind;
         job.FirstEpisode = s.FirstEpisode;
+        job.MediaYear = s.MediaYear;
+        job.OnlineId = s.OnlineId.Trim();
         job.DiscFlags ??= s.DiscFlags;
     }
 
@@ -727,6 +783,8 @@ public sealed class AppState : ObservableObject
             MediaName = job.MediaName,
             MediaKind = job.MediaKind,
             FirstEpisode = job.FirstEpisode,
+            MediaYear = job.MediaYear,
+            OnlineId = job.OnlineId,
             DiscFlags = job.DiscFlags,
         };
         Enqueue(j);

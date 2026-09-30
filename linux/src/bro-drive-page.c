@@ -27,12 +27,13 @@ typedef struct {
   GtkWidget *titles_list, *info_list;
   GtkWidget *action_bar, *summary, *output_preview, *mkv_btn, *backup_btn, *folder_btn;
   GtkWidget *identity_bar, *name_entry, *kind_dropdown, *first_spin, *format_label, *sample_label;
+  GtkWidget *year_spin, *lookup_btn, *lookup_list, *online_entry; /* online lookup: year, candidates, chosen id */
 
   BroDiscInfo *shown_info;
   GHashTable *title_checks; /* int -> GtkCheckButton* */
   GHashTable *title_rows;   /* int -> AdwExpanderRow* */
   gboolean syncing;
-  gulong session_changed_id, session_selection_id;
+  gulong session_changed_id, session_selection_id, session_lookup_id;
 } Page;
 
 static void refresh_all (Page *p);
@@ -52,6 +53,7 @@ page_free (Page *p)
     {
       if (p->session_changed_id) g_signal_handler_disconnect (p->session, p->session_changed_id);
       if (p->session_selection_id) g_signal_handler_disconnect (p->session, p->session_selection_id);
+      if (p->session_lookup_id) g_signal_handler_disconnect (p->session, p->session_lookup_id);
       g_object_unref (p->session);
     }
   g_clear_object (&p->shown_job);
@@ -84,6 +86,8 @@ current_config (Page *p)
 }
 
 static void on_session_changed (BroSession *s, Page *p) { refresh_disc (p); refresh_header (p); }
+static void refresh_lookup (Page *p);
+static void on_lookup_changed (BroSession *s, Page *p) { refresh_lookup (p); }
 static void on_selection_changed (BroSession *s, Page *p) { sync_checks (p); }
 
 static void
@@ -95,6 +99,7 @@ attach_session (Page *p, BroSession *s)
     {
       g_signal_handler_disconnect (p->session, p->session_changed_id);
       g_signal_handler_disconnect (p->session, p->session_selection_id);
+      g_signal_handler_disconnect (p->session, p->session_lookup_id);
       g_clear_object (&p->session);
     }
   g_clear_pointer (&p->shown_info, bro_disc_info_unref);
@@ -103,6 +108,7 @@ attach_session (Page *p, BroSession *s)
       p->session = g_object_ref (s);
       p->session_changed_id = g_signal_connect (s, "changed", G_CALLBACK (on_session_changed), p);
       p->session_selection_id = g_signal_connect (s, "selection-changed", G_CALLBACK (on_selection_changed), p);
+      p->session_lookup_id = g_signal_connect (s, "lookup-changed", G_CALLBACK (on_lookup_changed), p);
     }
 }
 
@@ -594,6 +600,110 @@ on_media_kind (GObject *dd, GParamSpec *pspec, Page *p)
     return;
   p->session->media_kind = i == 1 ? BRO_KIND_MOVIE : i == 2 ? BRO_KIND_TV : -1;
   refresh_identity (p);
+  bro_state_look_up (st (), p->session);
+}
+
+static void
+on_name_activate (GtkEntry *e, Page *p)
+{
+  if (p->session)
+    bro_state_look_up (st (), p->session);
+}
+
+static void
+on_year (GtkEntry *e, Page *p)
+{
+  const char *t = gtk_editable_get_text (GTK_EDITABLE (e));
+  int v = t && strlen (t) == 4 && strspn (t, "0123456789") == 4 ? atoi (t) : 0;
+  if (p->syncing || !p->session)
+    return;
+  p->session->media_year = v >= 1870 && v <= 2100 ? v : 0;
+  bro_state_look_up (st (), p->session);
+}
+
+static void
+on_online_id (GtkEditable *e, Page *p)
+{
+  if (p->syncing || !p->session)
+    return;
+  g_free (p->session->online_id);
+  p->session->online_id = g_strdup (gtk_editable_get_text (e));
+  refresh_lookup (p);
+}
+
+static void
+on_pick_candidate (GtkButton *b, Page *p)
+{
+  const char *choice = g_object_get_data (G_OBJECT (b), "choice");
+  gtk_editable_set_text (GTK_EDITABLE (p->online_entry), choice ? choice : "");
+  gtk_menu_button_popdown (GTK_MENU_BUTTON (p->lookup_btn));
+}
+
+static void
+on_look_up_again (GtkButton *b, Page *p)
+{
+  gtk_menu_button_popdown (GTK_MENU_BUTTON (p->lookup_btn));
+  if (p->session)
+    bro_state_look_up (st (), p->session);
+}
+
+static GtkWidget *
+candidate_button (Page *p, const char *text, const char *choice, gboolean chosen)
+{
+  g_autofree char *label = g_strdup_printf ("%s%s", chosen ? "✓ " : "", text);
+  GtkWidget *b = gtk_button_new_with_label (label);
+  gtk_widget_add_css_class (b, "flat");
+  gtk_label_set_xalign (GTK_LABEL (gtk_button_get_child (GTK_BUTTON (b))), 0);
+  g_object_set_data_full (G_OBJECT (b), "choice", g_strdup (choice), g_free);
+  g_signal_connect (b, "clicked", G_CALLBACK (on_pick_candidate), p);
+  return b;
+}
+
+/* The online match: the best search result, another candidate, or an id typed in. */
+static void
+refresh_lookup (Page *p)
+{
+  BroSession *s = p->session;
+  g_autofree char *chosen = NULL, *label = NULL;
+  GtkWidget *child, *again;
+  if (!s || !p->lookup_btn)
+    return;
+  chosen = g_strstrip (g_strdup (s->online_id ? s->online_id : ""));
+  if (s->looking_up)
+    label = g_strdup ("Looking up…");
+  else if (*chosen)
+    {
+      for (guint i = 0; i < s->lookup_candidates->len && !label; i++)
+        {
+          g_autofree char *c = bro_media_match_choice (s->lookup_candidates->pdata[i]);
+          if (g_str_equal (c, chosen))
+            label = bro_media_match_label (s->lookup_candidates->pdata[i]);
+        }
+      if (!label)
+        label = g_strdup (chosen);
+    }
+  else if (s->lookup_candidates->len)
+    label = bro_media_match_label (s->lookup_candidates->pdata[0]);
+  else
+    label = g_strdup (s->lookup_message ? "Not found" : "Look up");
+  gtk_menu_button_set_label (GTK_MENU_BUTTON (p->lookup_btn), label);
+  gtk_widget_set_tooltip_text (p->lookup_btn, s->lookup_message ? s->lookup_message
+                               : "The movie or show found online, used for names. Pick another result if this one is wrong.");
+  while ((child = gtk_widget_get_first_child (p->lookup_list)))
+    gtk_box_remove (GTK_BOX (p->lookup_list), child);
+  gtk_box_append (GTK_BOX (p->lookup_list), candidate_button (p, "Best match", "", !*chosen));
+  for (guint i = 0; i < s->lookup_candidates->len; i++)
+    {
+      g_autofree char *l = bro_media_match_label (s->lookup_candidates->pdata[i]);
+      g_autofree char *c = bro_media_match_choice (s->lookup_candidates->pdata[i]);
+      g_autofree char *text = g_strdup_printf ("%s  ·  %s", l, c);
+      gtk_box_append (GTK_BOX (p->lookup_list), candidate_button (p, text, c, g_str_equal (c, chosen)));
+    }
+  again = gtk_button_new_with_label ("Look Up Again");
+  gtk_widget_add_css_class (again, "flat");
+  g_signal_connect (again, "clicked", G_CALLBACK (on_look_up_again), p);
+  gtk_box_append (GTK_BOX (p->lookup_list), gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
+  gtk_box_append (GTK_BOX (p->lookup_list), again);
 }
 
 static void
@@ -621,9 +731,20 @@ build_identity (Page *p)
   gtk_drop_down_set_selected (GTK_DROP_DOWN (p->kind_dropdown), p->session->media_kind == BRO_KIND_MOVIE ? 1 : p->session->media_kind == BRO_KIND_TV ? 2 : 0);
   gtk_widget_set_tooltip_text (p->kind_dropdown, tip);
   gtk_spin_button_set_value (GTK_SPIN_BUTTON (p->first_spin), p->session->first_episode > 0 ? p->session->first_episode : 0);
+  {
+    g_autofree char *y = p->session->media_year > 0 ? g_strdup_printf ("%d", p->session->media_year) : g_strdup ("");
+    gtk_editable_set_text (GTK_EDITABLE (p->year_spin), y);
+  }
+  gtk_editable_set_text (GTK_EDITABLE (p->online_entry), p->session->online_id ? p->session->online_id : "");
   p->syncing = FALSE;
   bro_identity_free (automatic);
+  {
+    gboolean on = st ()->config->metadata.provider != BRO_METADATA_NONE;
+    gtk_widget_set_visible (p->lookup_btn, on);
+    gtk_widget_set_visible (p->online_entry, on);
+  }
   refresh_identity (p);
+  refresh_lookup (p);
 }
 
 static void
@@ -1220,9 +1341,18 @@ bro_drive_page_new (const char *tag)
   gtk_widget_set_margin_top (p->identity_bar, 6);
   gtk_widget_set_margin_bottom (p->identity_bar, 2);
   p->name_entry = gtk_entry_new ();
-  gtk_widget_set_size_request (p->name_entry, 220, -1);
+  gtk_widget_set_size_request (p->name_entry, 180, -1);
   gtk_widget_set_tooltip_text (p->name_entry, "Movie or show name used for folder and file names. Empty = the name read from the disc.");
   g_signal_connect (p->name_entry, "changed", G_CALLBACK (on_media_name), p);
+  g_signal_connect (p->name_entry, "activate", G_CALLBACK (on_name_activate), p);
+  p->year_spin = gtk_entry_new ();
+  gtk_entry_set_placeholder_text (GTK_ENTRY (p->year_spin), "Year");
+  gtk_entry_set_input_purpose (GTK_ENTRY (p->year_spin), GTK_INPUT_PURPOSE_DIGITS);
+  gtk_entry_set_max_length (GTK_ENTRY (p->year_spin), 4);
+  gtk_editable_set_width_chars (GTK_EDITABLE (p->year_spin), 5);
+  gtk_editable_set_max_width_chars (GTK_EDITABLE (p->year_spin), 5);
+  gtk_widget_set_tooltip_text (p->year_spin, "Release year, to find the right movie or show online (press Enter to look it up)");
+  g_signal_connect (p->year_spin, "activate", G_CALLBACK (on_year), p);
   p->kind_dropdown = gtk_drop_down_new (NULL, NULL);
   g_signal_connect (p->kind_dropdown, "notify::selected", G_CALLBACK (on_media_kind), p);
   p->first_spin = gtk_spin_button_new_with_range (0, 9999, 1);
@@ -1235,10 +1365,26 @@ bro_drive_page_new (const char *tag)
   gtk_label_set_selectable (GTK_LABEL (p->sample_label), TRUE);
   gtk_widget_set_hexpand (p->sample_label, TRUE);
   gtk_label_set_xalign (GTK_LABEL (p->sample_label), 0);
+  p->lookup_btn = gtk_menu_button_new ();
+  gtk_menu_button_set_label (GTK_MENU_BUTTON (p->lookup_btn), "Look up");
+  p->lookup_list = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  {
+    GtkWidget *pop = gtk_popover_new ();
+    gtk_popover_set_child (GTK_POPOVER (pop), p->lookup_list);
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (p->lookup_btn), pop);
+  }
+  p->online_entry = gtk_entry_new ();
+  gtk_entry_set_placeholder_text (GTK_ENTRY (p->online_entry), "TMDb / IMDb id");
+  gtk_editable_set_width_chars (GTK_EDITABLE (p->online_entry), 10);
+  gtk_widget_set_tooltip_text (p->online_entry, "A TMDb id (603, tv/1668), an IMDb id (tt0133093) or their web address. Empty = the best match.");
+  g_signal_connect (p->online_entry, "changed", G_CALLBACK (on_online_id), p);
   gtk_box_append (GTK_BOX (p->identity_bar), p->name_entry);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->year_spin);
   gtk_box_append (GTK_BOX (p->identity_bar), p->kind_dropdown);
   gtk_box_append (GTK_BOX (p->identity_bar), p->first_spin);
   gtk_box_append (GTK_BOX (p->identity_bar), p->format_label);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->lookup_btn);
+  gtk_box_append (GTK_BOX (p->identity_bar), p->online_entry);
   gtk_box_append (GTK_BOX (p->identity_bar), p->sample_label);
 
   content = p->root;

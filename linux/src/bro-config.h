@@ -55,7 +55,7 @@ typedef struct {
 } BroRipConfig;
 
 /* {name} - {episode} - {discLabel} - {rip} - {track} - {format}, leaving out parts that don't apply. */
-#define BRO_DEFAULT_FILE_TEMPLATE "{name}{episode? - {episode}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
+#define BRO_DEFAULT_FILE_TEMPLATE "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
 #define BRO_DEFAULT_FOLDER_TEMPLATE "{name}{discLabel? - {discLabel}}"
 #define BRO_LEGACY_FOLDER_TEMPLATE "{disc}"
 #define BRO_CONFIG_VERSION 2
@@ -163,6 +163,7 @@ typedef struct {
   BroMetadataProvider provider;
   char *api_key;  /* TMDb: API key (v3) or read access token; OMDb: API key */
   char *language; /* TMDb language, e.g. en-US */
+  gboolean episode_titles; /* TV shows: look up the titles of the disc's episodes ({episodeTitle}) */
 } BroMetadataConfig;
 
 /* Where job notifications go: an http(s) webhook (Discord and Slack are recognised), ntfy://topic,
