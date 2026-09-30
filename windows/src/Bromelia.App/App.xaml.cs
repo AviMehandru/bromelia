@@ -22,6 +22,7 @@ public partial class App : Application
         {
             State?.SaveNow();
             System.Diagnostics.Debug.WriteLine(e.Exception);
+            Snapshots.Failed(e.Exception);
         };
     }
 

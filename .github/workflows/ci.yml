@@ -57,10 +57,14 @@ jobs:
           $env:BROMELIA_DATA_DIR = $data; $env:BROMELIA_SNAPSHOT = $shots
           $p = Start-Process windows\publish\Bromelia.exe -PassThru
           if (-not $p.WaitForExit(300000)) { $p.Kill(); throw "The app did not finish its screenshots in 5 minutes" }
-          if (Test-Path $shots\errors.txt) { Get-Content $shots\errors.txt; throw "Screenshot mode failed" }
           $n = (Get-ChildItem $shots -Filter *.png).Count
-          "$n screenshots"
-          if ($n -lt 20) { throw "Too few screenshots" }
+          "Exit code $($p.ExitCode); $n screenshots"
+          if ((Test-Path $shots\errors.txt) -or $n -lt 20) {
+            if (Test-Path $shots\errors.txt) { Get-Content $shots\errors.txt }
+            Get-WinEvent -LogName Application -MaxEvents 30 -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProviderName -in '.NET Runtime', 'Application Error', 'Windows Error Reporting' } | Format-List TimeCreated, ProviderName, Message
+            throw "Screenshot mode failed"
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

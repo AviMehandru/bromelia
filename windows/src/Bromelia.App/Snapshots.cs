@@ -20,6 +20,13 @@ static class Snapshots
 
     static int _count;
 
+    /// <summary>Records an unhandled exception in screenshot mode (CI shows errors.txt).</summary>
+    public static void Failed(Exception e)
+    {
+        if (Folder is { } f)
+            try { Directory.CreateDirectory(f); File.AppendAllText(Path.Combine(f, "errors.txt"), e + Environment.NewLine); } catch (IOException) { }
+    }
+
     public static async Task RunAsync(string folder)
     {
         Directory.CreateDirectory(folder);
@@ -67,7 +74,7 @@ static class Snapshots
         }
         catch (Exception e)
         {
-            File.WriteAllText(Path.Combine(folder, "errors.txt"), e.ToString());
+            Failed(e);
         }
         Application.Current.Exit();
 

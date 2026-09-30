@@ -109,10 +109,10 @@ try {
   page.on("pageerror", e => { failed = true; console.error("Page error:", e.message); });
   const error = page.locator("#error");
 
-  // --- Without the token the page says how to add it. ---
-  await page.goto(base + "/");
-  await error.filter({ hasText: "?token=" }).waitFor();
-  await page.screenshot({ path: path.join(shots, "no-token.png") });
+  // --- Without the token not even the page loads; the browser shows why. ---
+  const noToken = await page.goto(base + "/");
+  assert.equal(noToken.status(), 401, "the page without its token → 401");
+  assert.match(await page.textContent("body"), /token is required/);
 
   // --- Opened under another host name without a token: refused, with the reason. ---
   const remotePage = await browser.newPage();
