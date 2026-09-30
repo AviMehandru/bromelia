@@ -453,7 +453,7 @@ collect_extra (const char *base, const char *rel, GHashTable *listed, GPtrArray 
           if (!g_file_test (sums, G_FILE_TEST_EXISTS) && !g_file_test (full, G_FILE_TEST_IS_SYMLINK))
             collect_extra (base, r, listed, extra);
         }
-      else if (!g_hash_table_contains (listed, r) && !(*rel == '\0' && own_file (n)))
+      else if (!g_hash_table_contains (listed, r) && !(*rel == '\0' && own_file (n)) && !bro_is_metadata_file (n))
         g_ptr_array_add (extra, g_steal_pointer (&r));
     }
 }

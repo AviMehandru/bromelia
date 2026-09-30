@@ -354,7 +354,7 @@ struct OutputTab: View {
                     ForEach(LibraryLayout.allCases) { Text($0.label).tag($0) }
                 }
                 if config.output.layout == .mediaServer {
-                    Text("Movies/Name (Year)/Name (Year).mkv, TV Shows/Name (Year)/Season 02/Name (Year) - S02E05.mkv; other titles go to Other/ and backups to Backup/ (hidden from Plex and Jellyfin). Turn on the online lookup for years. The templates below aren't used.")
+                    Text("Movies/Name (Year)/Name (Year).mkv, TV Shows/Name (Year)/Season 02/Name (Year) - S02E05 - Episode Title.mkv; other titles go to Other/ and backups to Backup/ (hidden from Plex and Jellyfin). Turn on the online lookup for years, episode titles, .nfo files and the poster. The templates below aren't used.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 TextField("Folder name", text: $config.output.folderTemplate, prompt: Text(OutputConfig.defaultFolderTemplate))

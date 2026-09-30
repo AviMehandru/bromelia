@@ -745,10 +745,12 @@ struct MetadataConfig: Codable, Hashable, Sendable {
     var language: String = "en-US"
     /// TV shows: look up the titles of the disc's episodes ({episodeTitle}).
     var episodeTitles: Bool = true
+    /// Media server layout: write Kodi / Jellyfin / Emby .nfo files and the poster next to the files.
+    var nfo: Bool = true
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case provider, apiKey, language, episodeTitles }
+    enum CodingKeys: String, CodingKey { case provider, apiKey, language, episodeTitles, nfo }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -757,6 +759,7 @@ struct MetadataConfig: Codable, Hashable, Sendable {
         apiKey = c.value(.apiKey, d.apiKey)
         language = c.value(.language, d.language)
         episodeTitles = c.value(.episodeTitles, d.episodeTitles)
+        nfo = c.value(.nfo, d.nfo)
     }
 }
 

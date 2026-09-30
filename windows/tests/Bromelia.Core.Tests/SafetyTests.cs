@@ -1206,7 +1206,10 @@ public class ArchiveCheckTests : IDisposable
         bytes[3] ^= 1;
         File.WriteAllBytes(e1, bytes);
         File.Delete(Path.Combine(bad, "Season 01", "E02.mkv"));
-        File.WriteAllText(Path.Combine(bad, "Season 01", "E01.nfo"), "<episodedetails/>");
+        File.WriteAllText(Path.Combine(bad, "Season 01", "E01.srt"), "1");
+        // .nfo files and the poster of a media server library aren't in SHA256SUMS, and aren't reported.
+        File.WriteAllText(Path.Combine(bad, "Season 01", "E02.nfo"), "<episodedetails/>");
+        File.WriteAllText(Path.Combine(bad, "poster.jpg"), "jpg");
         File.WriteAllText(Path.Combine(bad, "bromelia.json"), "{}");
         File.WriteAllText(Path.Combine(bad, "bromelia-log.txt"), "log");
 
@@ -1223,7 +1226,7 @@ public class ArchiveCheckTests : IDisposable
         Assert.False(b.Ok);
         Assert.Equal(new[] { "Season 01/E01.mkv" }, b.Changed);
         Assert.Equal(new[] { "Season 01/E02.mkv" }, b.Missing);
-        Assert.Equal(new[] { "Season 01/E01.nfo" }, b.Extra);
+        Assert.Equal(new[] { "Season 01/E01.srt" }, b.Extra);
         Assert.Equal("1 changed, 1 missing of 3 file(s); 1 not listed", b.Summary);
         // Stopping keeps only folders that were finished.
         var none = ArchiveVerifier.Verify(folders, (_, _, _, _) => false);

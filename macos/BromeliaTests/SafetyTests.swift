@@ -1275,7 +1275,10 @@ struct ArchiveCheckTests {
         bytes[3] ^= 1
         try bytes.write(to: e1)
         try FileManager.default.removeItem(at: bad.appendingPathComponent("Season 01/E02.mkv"))
-        try Data("<episodedetails/>".utf8).write(to: bad.appendingPathComponent("Season 01/E01.nfo"))
+        try Data("1\n00:00:01,000 --> 00:00:02,000\nHi\n".utf8).write(to: bad.appendingPathComponent("Season 01/E01.srt"))
+        // .nfo files and the poster of a media server library aren't in SHA256SUMS, and aren't reported.
+        try Data("<episodedetails/>".utf8).write(to: bad.appendingPathComponent("Season 01/E02.nfo"))
+        try Data([0xFF, 0xD8]).write(to: bad.appendingPathComponent("poster.jpg"))
         try Data("{}".utf8).write(to: bad.appendingPathComponent("bromelia.json"))
         try Data("log".utf8).write(to: bad.appendingPathComponent("bromelia-log.txt"))
 
@@ -1289,7 +1292,7 @@ struct ArchiveCheckTests {
         #expect(!b.ok)
         #expect(b.changed == ["Season 01/E01.mkv"])
         #expect(b.missing == ["Season 01/E02.mkv"])
-        #expect(b.extra == ["Season 01/E01.nfo"])
+        #expect(b.extra == ["Season 01/E01.srt"])
         #expect(b.summary == "1 changed, 1 missing of 3 file(s); 1 not listed")
         // Stopping keeps only folders that were finished.
         let none = ArchiveVerifier.verify(folders: folders) { _, _, _, _ in false }

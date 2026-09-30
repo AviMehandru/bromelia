@@ -1,0 +1,9 @@
+{
+  "comment": "The .nfo files the media server layout writes, from the answers in ../lookup (see docs/configuration.md, Media server layout).",
+  "cases": [
+    {"nfo": "movie.nfo", "details": "tmdb-movie.json", "provider": "tmdb", "kind": "movie"},
+    {"nfo": "tvshow.nfo", "details": "omdb-title.json", "provider": "omdb", "kind": "tv"},
+    {"nfo": "episode.nfo", "show": "Friends", "season": 2, "episode": 1, "seasonFile": "tmdb-season.json", "provider": "tmdb"},
+    {"nfo": "escaped.nfo", "match": {"title": "Tom & Jerry <Uncut>"}, "kind": "movie"}
+  ]
+}

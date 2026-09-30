@@ -227,6 +227,8 @@ public sealed class MetadataConfig
     public string Language { get; set; } = "en-US";
     /// <summary>TV shows: look up the titles of the disc's episodes ({episodeTitle}).</summary>
     public bool EpisodeTitles { get; set; } = true;
+    /// <summary>Media server layout: write Kodi / Jellyfin / Emby .nfo files and the poster next to the files.</summary>
+    public bool Nfo { get; set; } = true;
 }
 
 /// <summary>A place to send job notifications: an http(s) webhook (Discord and Slack are recognised),

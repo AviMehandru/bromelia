@@ -882,6 +882,103 @@ bro_metadata_episodes (const BroMediaMatch *match, int season, const BroMetadata
   return bro_metadata_parse_season (json, config->provider);
 }
 
+/* ---- media server metadata ---- */
+
+gboolean
+bro_is_metadata_file (const char *name)
+{
+  g_autofree char *lower = g_ascii_strdown (name, -1);
+  return g_str_has_suffix (lower, ".nfo") || g_str_equal (name, BRO_POSTER_NAME);
+}
+
+static void
+xml_element (GString *out, const char *name, const char *close, const char *value)
+{
+  if (!value || !*value)
+    return;
+  g_string_append_printf (out, "  <%s>", name);
+  for (const char *p = value; *p; p++)
+    switch (*p)
+      {
+      case '&': g_string_append (out, "&amp;"); break;
+      case '<': g_string_append (out, "&lt;"); break;
+      case '>': g_string_append (out, "&gt;"); break;
+      default: g_string_append_c (out, *p);
+      }
+  g_string_append_printf (out, "</%s>\n", close ? close : name);
+}
+
+static GString *
+nfo_start (const char *root)
+{
+  GString *out = g_string_new ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+  g_string_append_printf (out, "<%s>\n", root);
+  return out;
+}
+
+char *
+bro_nfo (const BroMediaMatch *m, BroMediaKind kind)
+{
+  const char *root = kind == BRO_KIND_TV ? "tvshow" : "movie";
+  GString *out = nfo_start (root);
+  g_autofree char *year = m->year ? g_strdup_printf ("%d", m->year) : NULL;
+  g_autofree char *tmdb = m->tmdb_id ? g_strdup_printf ("%d", m->tmdb_id) : NULL;
+  gboolean first = TRUE;
+  xml_element (out, "title", NULL, m->title);
+  xml_element (out, "year", NULL, year);
+  xml_element (out, "plot", NULL, m->overview);
+  if (tmdb)
+    {
+      xml_element (out, "uniqueid type=\"tmdb\" default=\"true\"", "uniqueid", tmdb);
+      first = FALSE;
+    }
+  if (m->imdb_id && *m->imdb_id)
+    xml_element (out, first ? "uniqueid type=\"imdb\" default=\"true\"" : "uniqueid type=\"imdb\"", "uniqueid", m->imdb_id);
+  g_string_append_printf (out, "</%s>\n", root);
+  return g_string_free (out, FALSE);
+}
+
+char *
+bro_episode_nfo (const char *show, int season, int episode, const BroEpisodeDetails *d)
+{
+  GString *out = nfo_start ("episodedetails");
+  g_autofree char *s = g_strdup_printf ("%d", season), *e = g_strdup_printf ("%d", episode);
+  xml_element (out, "title", NULL, d->title);
+  xml_element (out, "showtitle", NULL, show);
+  xml_element (out, "season", NULL, s);
+  xml_element (out, "episode", NULL, e);
+  xml_element (out, "plot", NULL, d->overview);
+  xml_element (out, "aired", NULL, d->aired);
+  g_string_append (out, "</episodedetails>\n");
+  return g_string_free (out, FALSE);
+}
+
+gboolean
+bro_http_download (const char *url, const char *dest, GError **error)
+{
+  g_autoptr (GString) body = g_string_new (NULL);
+  g_autoptr (GFile) file = NULL;
+  g_autoptr (GFileOutputStream) out = NULL;
+  int code = 0;
+  if (!bro_http_request ("GET", url, NULL, NULL, 0, 60, &code, body, error))
+    return FALSE;
+  if (code != 200 || !body->len)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, code != 200 ? "HTTP %d" : "empty answer", code);
+      return FALSE;
+    }
+  file = g_file_new_for_path (dest);
+  if (!(out = g_file_create (file, G_FILE_CREATE_NONE, NULL, error)))
+    return FALSE;
+  if (!g_output_stream_write_all (G_OUTPUT_STREAM (out), body->str, body->len, NULL, NULL, error)
+      || !g_output_stream_close (G_OUTPUT_STREAM (out), NULL, error))
+    {
+      g_file_delete (file, NULL, NULL);
+      return FALSE;
+    }
+  return TRUE;
+}
+
 /* ---- media server layout ---- */
 
 const char *

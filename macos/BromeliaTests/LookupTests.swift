@@ -140,3 +140,31 @@ struct EpisodeContinuationTests {
         }
     }
 }
+
+@Suite("Media server metadata")
+struct MediaServerMetadataTests {
+    @Test func nfoFiles() throws {
+        let dir = shared.appendingPathComponent("nfo"), lookup = shared.appendingPathComponent("lookup")
+        let expected = try json(dir.appendingPathComponent("nfo-cases.json"))
+        for c in expected["cases"] as! [[String: Any]] {
+            let name = c["nfo"] as! String
+            let want = try String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8)
+            let got: String
+            if let file = c["details"] as? String {
+                let m = try #require(MetadataLookup.details(try Data(contentsOf: lookup.appendingPathComponent(file)), provider: provider(c["provider"]),
+                                                            kind: kind(c["kind"])))
+                got = MediaServerMetadata.nfo(m, kind: kind(c["kind"]))
+            } else if let file = c["seasonFile"] as? String {
+                let eps = MetadataLookup.season(try Data(contentsOf: lookup.appendingPathComponent(file)), provider: provider(c["provider"]))
+                let n = c["episode"] as! Int
+                got = MediaServerMetadata.episodeNfo(show: c["show"] as! String, season: c["season"] as! Int, episode: n, details: try #require(eps[n]))
+            } else {
+                let m = c["match"] as! [String: Any]
+                got = MediaServerMetadata.nfo(MediaMatch(title: m["title"] as! String, provider: "TMDb"), kind: kind(c["kind"]))
+            }
+            #expect(got == want, "\(name)")
+        }
+        #expect(MediaServerMetadata.isMetadataFile("Friends (1994) - S02E01.NFO") && MediaServerMetadata.isMetadataFile("poster.jpg"))
+        #expect(!MediaServerMetadata.isMetadataFile("Friends (1994) - S02E01.mkv"))
+    }
+}

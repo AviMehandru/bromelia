@@ -2439,6 +2439,48 @@ test_episode_titles_in_names (void)
   g_assert_cmpstr (c2, ==, "Season 02/Friends (1994) - S02E02");
 }
 
+/* shared/fixtures/nfo: the .nfo files the media server layout writes. */
+static void
+test_nfo_files (void)
+{
+  g_autofree char *dir = fixture_path ("nfo");
+  g_autofree char *path = g_build_filename (dir, "nfo-cases.json", NULL);
+  g_autoptr (JsonNode) root = load_json (path);
+  JsonArray *a = json_object_get_array_member (json_node_get_object (root), "cases");
+  for (guint i = 0; i < json_array_get_length (a); i++)
+    {
+      JsonObject *c = json_array_get_object_element (a, i);
+      g_autofree char *want_path = g_build_filename (dir, json_object_get_string_member (c, "nfo"), NULL);
+      g_autofree char *want = NULL, *got = NULL;
+      g_assert_true (g_file_get_contents (want_path, &want, NULL, NULL));
+      if (json_object_has_member (c, "details"))
+        {
+          g_autofree char *json = lookup_fixture (json_object_get_string_member (c, "details"));
+          BroMediaKind kind = fixture_kind (json_object_get_string_member (c, "kind"));
+          g_autoptr (BroMediaMatch) m = bro_metadata_details (json, fixture_provider (c), kind);
+          got = bro_nfo (m, kind);
+        }
+      else if (json_object_has_member (c, "seasonFile"))
+        {
+          g_autofree char *json = lookup_fixture (json_object_get_string_member (c, "seasonFile"));
+          g_autoptr (GHashTable) eps = bro_metadata_parse_season (json, fixture_provider (c));
+          int n = node_int (c, "episode");
+          got = bro_episode_nfo (json_object_get_string_member (c, "show"), node_int (c, "season"), n,
+                                 g_hash_table_lookup (eps, GINT_TO_POINTER (n)));
+        }
+      else
+        {
+          BroMediaMatch m = { (char *) json_object_get_string_member (json_object_get_object_member (c, "match"), "title"), 0, 0, NULL, "TMDb",
+                              -1, (char *) "", (char *) "" };
+          got = bro_nfo (&m, fixture_kind (json_object_get_string_member (c, "kind")));
+        }
+      g_assert_cmpstr (got, ==, want);
+    }
+  g_assert_true (bro_is_metadata_file ("Friends (1994) - S02E01.NFO"));
+  g_assert_true (bro_is_metadata_file ("poster.jpg"));
+  g_assert_false (bro_is_metadata_file ("Friends (1994) - S02E01.mkv"));
+}
+
 /* shared/fixtures/episode-continuation.json: where each disc's episode numbering continues. */
 static void
 test_episode_continuation (void)
@@ -3312,7 +3354,7 @@ test_verify_archives (void)
   g_autoptr (GPtrArray) results = NULL;
   g_autofree char *e1 = g_build_filename (bad, "Season 01", "E01.mkv", NULL);
   g_autofree char *e2 = g_build_filename (bad, "Season 01", "E02.mkv", NULL);
-  g_autofree char *extra = g_build_filename (bad, "Season 01", "E01.nfo", NULL);
+  g_autofree char *extra = g_build_filename (bad, "Season 01", "E01.srt", NULL);
   g_autofree char *record = g_build_filename (bad, "bromelia.json", NULL);
   g_autofree char *log = g_build_filename (bad, "bromelia-log.txt", NULL);
   g_autofree char *contents = NULL;
@@ -3327,7 +3369,14 @@ test_verify_archives (void)
   contents[3] ^= 1;
   g_assert_true (g_file_set_contents (e1, contents, len, NULL));
   g_assert_cmpint (g_unlink (e2), ==, 0);
-  g_assert_true (g_file_set_contents (extra, "<episodedetails/>", -1, NULL));
+  g_assert_true (g_file_set_contents (extra, "1", -1, NULL));
+  /* .nfo files and the poster of a media server library aren't in SHA256SUMS, and aren't reported. */
+  {
+    g_autofree char *nfo = g_build_filename (bad, "Season 01", "E02.nfo", NULL);
+    g_autofree char *poster = g_build_filename (bad, "poster.jpg", NULL);
+    g_assert_true (g_file_set_contents (nfo, "<episodedetails/>", -1, NULL));
+    g_assert_true (g_file_set_contents (poster, "jpg", -1, NULL));
+  }
   g_assert_true (g_file_set_contents (record, "{}", -1, NULL));
   g_assert_true (g_file_set_contents (log, "log", -1, NULL));
 
@@ -3349,7 +3398,7 @@ test_verify_archives (void)
   g_assert_cmpuint (r->missing->len, ==, 1);
   g_assert_cmpstr (r->missing->pdata[0], ==, "Season 01/E02.mkv");
   g_assert_cmpuint (r->extra->len, ==, 1);
-  g_assert_cmpstr (r->extra->pdata[0], ==, "Season 01/E01.nfo");
+  g_assert_cmpstr (r->extra->pdata[0], ==, "Season 01/E01.srt");
   {
     g_autofree char *summary = bro_folder_check_summary (r);
     g_assert_cmpstr (summary, ==, "1 changed, 1 missing of 3 file(s); 1 not listed");
@@ -3544,6 +3593,7 @@ main (int argc, char **argv)
   g_test_add_func ("/lookup/requests", test_lookup_requests);
   g_test_add_func ("/lookup/episode-titles-in-names", test_episode_titles_in_names);
   g_test_add_func ("/lookup/episode-continuation", test_episode_continuation);
+  g_test_add_func ("/lookup/nfo-files", test_nfo_files);
   g_test_add_func ("/robot/parse-events", test_parse_events);
   g_test_add_func ("/robot/drive-scan-fixture", test_drive_scan_fixture);
   g_test_add_func ("/robot/disc-info-fixture", test_disc_info_fixture);

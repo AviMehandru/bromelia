@@ -137,7 +137,8 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **Plex / Jellyfin / Emby layout**: `Movies/Name (Year)/Name (Year).mkv`,
   `TV Shows/Name (Year)/Season 02/Name (Year) - S02E05 - Episode Title.mkv`, extras in `Other/`, backups in an
   ignored `Backup/`; later discs are added to the same show and season folders, and their episode numbers continue
-  after the ones already there.
+  after the ones already there. **Kodi / Jellyfin / Emby metadata**: `tvshow.nfo` or the movie's `.nfo`, an `.nfo`
+  per episode (title, plot, air date) and `poster.jpg`, from the online lookup.
 - **Audio CDs** ripped with cyanrip or abcde (MusicBrainz tags, FLAC) and **data discs** saved as exact ISO images,
   chosen automatically from what is in the drive.
 - **Separate modes for DVDs, Blu-rays and 4K discs** (e.g. backups of DVDs, MKVs of Blu-rays).

@@ -177,6 +177,7 @@ final class JobRunner {
             job.appendLog(job.errorMessage!, severity: .error)
         }
         status = await finishOutput(status: status)
+        if status == .succeeded { await writeMediaServerMetadata() }
 
         // Post-processing. Background steps run later, in the background queue, once the disc is out.
         writeManifest(status: status)
@@ -858,6 +859,50 @@ final class JobRunner {
         }
         if status != .succeeded { writeNote(in: dest, tag: tag ?? "INCOMPLETE", status: status) }
         return status
+    }
+
+    /// Media server layout with an online match (metadata.nfo): the movie's or show's .nfo and poster in its folder (when
+    /// missing: an earlier disc may have written them, or the server rewritten them), and an .nfo next to each episode.
+    /// These are not in SHA256SUMS. Failures only log.
+    private func writeMediaServerMetadata() async {
+        guard config.metadata.nfo, job.drive.output.layout == .mediaServer, let match = job.metadata, let dir = job.outputDirectory,
+              let id = job.identity else { return }
+        job.phase = "Writing media server metadata"
+        let fm = FileManager.default
+        var written: [String] = []
+        func write(_ text: String, to url: URL) {
+            guard !fm.fileExists(atPath: url.path) else { return }
+            do {
+                try Data(text.utf8).write(to: url, options: .withoutOverwriting)
+                written.append(relativePath(url, dir))
+            } catch {
+                job.appendLog("Could not write \(url.path): \(error.localizedDescription)", severity: .warning)
+            }
+        }
+        if id.kind == .tv {
+            write(MediaServerMetadata.nfo(match, kind: .tv), to: dir.appendingPathComponent("tvshow.nfo"))
+            let season = id.label.season ?? 1
+            for e in job.episodes {
+                guard let n = e.episode, let d = episodeDetails[n] else { continue }
+                let file = dir.appendingPathComponent(e.file)
+                write(MediaServerMetadata.episodeNfo(show: match.title, season: season, episode: n, details: d),
+                      to: file.deletingPathExtension().appendingPathExtension("nfo"))
+            }
+        } else if let main = mainTitle, let file = fileTitles.first(where: { $0.value == main })?.key {
+            write(MediaServerMetadata.nfo(match, kind: .movie), to: file.deletingPathExtension().appendingPathExtension("nfo"))
+        }
+        let poster = dir.appendingPathComponent(MediaServerMetadata.posterName)
+        if !match.poster.isEmpty, !fm.fileExists(atPath: poster.path), let url = URL(string: match.poster) {
+            do {
+                try await MediaServerMetadata.download(url, to: poster)
+                written.append(poster.lastPathComponent)
+            } catch {
+                job.appendLog("Could not download the poster from \(url.host ?? ""): \(error.localizedDescription)", severity: .warning)
+            }
+        }
+        if !written.isEmpty {
+            job.appendLog("Wrote media server metadata: " + (written.count > 4 ? written.prefix(3).joined(separator: ", ") + " and \(written.count - 3) more" : written.joined(separator: ", ")))
+        }
     }
 
     /// Where the files of a job that didn't succeed go. When the output folder was created for this job it is

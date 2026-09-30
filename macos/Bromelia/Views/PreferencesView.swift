@@ -232,6 +232,8 @@ private struct ServicesPreferences: View {
                         TextField("Language", text: $model.config.metadata.language, prompt: Text("en-US"))
                     }
                     Toggle("Look up episode titles of TV shows", isOn: $model.config.metadata.episodeTitles)
+                    Toggle("Write .nfo files and the poster in media server libraries", isOn: $model.config.metadata.nfo)
+                        .help("Kodi / Jellyfin / Emby: tvshow.nfo or the movie's .nfo, an .nfo per episode, and poster.jpg, next to the files")
                 }
             } header: {
                 Text("Online lookup")

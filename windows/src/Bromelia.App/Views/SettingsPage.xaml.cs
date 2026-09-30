@@ -67,6 +67,8 @@ public sealed partial class SettingsPage : Page
         f.Text("API key", () => c.Metadata.ApiKey, v => c.Metadata.ApiKey = v);
         f.Text("Language (TMDb)", () => c.Metadata.Language, v => c.Metadata.Language = v, "en-US");
         f.Toggle("Look up episode titles of TV shows", () => c.Metadata.EpisodeTitles, v => c.Metadata.EpisodeTitles = v);
+        f.Toggle("Write .nfo files and the poster in media server libraries", () => c.Metadata.Nfo, v => c.Metadata.Nfo = v,
+            "Kodi / Jellyfin / Emby: tvshow.nfo or the movie's .nfo, an .nfo per episode, and poster.jpg, next to the files");
 
         f.Section("Notifications", "Sent when a job finishes, one URL per line. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook (JSON) work directly; other Apprise URLs need the apprise command. Add “ !” at the end of a line to be told only about problems.");
         var urls = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 80,

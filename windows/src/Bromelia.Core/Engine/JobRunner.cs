@@ -161,6 +161,7 @@ public sealed class JobRunner
             _job.AppendLog(_job.ErrorMessage, Severity.Error);
         }
         status = await FinishOutputAsync(status);
+        if (status == JobState.Succeeded) await WriteMediaServerMetadataAsync();
 
         WriteManifest(status);
         // Background steps run later, in the background queue, once the disc is out.
@@ -766,6 +767,53 @@ public sealed class JobRunner
     /// Anything else goes into a folder marked “[INCOMPLETE]” (failed or cancelled) or “[READ ERRORS]”, with a note
     /// explaining why, so an unfinished or damaged rip can never look like a finished archive. Checksums and the
     /// archive record are written for complete files, including files with read errors.</summary>
+    /// <summary>Media server layout with an online match (Metadata.Nfo): the movie's or show's .nfo and poster in its folder (when
+    /// missing: an earlier disc may have written them, or the server rewritten them), and an .nfo next to each episode. These
+    /// are not in SHA256SUMS. Failures only log.</summary>
+    async Task WriteMediaServerMetadataAsync()
+    {
+        if (!_config.Metadata.Nfo || _job.Drive.Output.Layout != LibraryLayout.MediaServer || _job.Metadata is not { } match
+            || _job.OutputDirectory is not { } dir || _job.Identity is not { } id) return;
+        _job.Phase = "Writing media server metadata";
+        var written = new List<string>();
+        void Write(string text, string path)
+        {
+            if (File.Exists(path)) return;
+            try
+            {
+                using (var f = new FileStream(path, FileMode.CreateNew, FileAccess.Write)) f.Write(new UTF8Encoding(false).GetBytes(text));
+                written.Add(RelativePath(path, dir));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { _job.AppendLog($"Could not write {path}: {e.Message}", Severity.Warning); }
+        }
+        if (id.Kind == MediaKind.Tv)
+        {
+            Write(MediaServerMetadata.Nfo(match, MediaKind.Tv), Path.Combine(dir, "tvshow.nfo"));
+            var season = id.Label.Season ?? 1;
+            foreach (var e in _job.Episodes)
+                if (e.Episode is { } n && _episodeDetails.TryGetValue(n, out var d))
+                    Write(MediaServerMetadata.EpisodeNfo(match.Title, season, n, d),
+                        Path.ChangeExtension(Path.Combine(dir, e.File.Replace('/', Path.DirectorySeparatorChar)), ".nfo"));
+        }
+        else if (_mainTitle is { } main && _fileTitles.FirstOrDefault(kv => kv.Value == main).Key is { } file)
+            Write(MediaServerMetadata.Nfo(match, MediaKind.Movie), Path.ChangeExtension(file, ".nfo"));
+        var poster = Path.Combine(dir, MediaServerMetadata.PosterName);
+        if (match.Poster.Length > 0 && !File.Exists(poster) && Uri.TryCreate(match.Poster, UriKind.Absolute, out var url))
+        {
+            try
+            {
+                await MediaServerMetadata.DownloadAsync(url, poster);
+                written.Add(MediaServerMetadata.PosterName);
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or JobException)
+            {
+                _job.AppendLog($"Could not download the poster from {url.Host}: {e.Message}", Severity.Warning);
+            }
+        }
+        if (written.Count > 0)
+            _job.AppendLog("Wrote media server metadata: " + (written.Count > 4 ? string.Join(", ", written.Take(3)) + $" and {written.Count - 3} more" : string.Join(", ", written)));
+    }
+
     async Task<JobState> FinishOutputAsync(JobState status)
     {
         if (_workDir is not { } stage || _outputDir is not { } outDir) return status;

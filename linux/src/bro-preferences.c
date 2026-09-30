@@ -601,6 +601,9 @@ services_page (void)
   adw_preferences_group_add (g, secret_row ("API key", &c->metadata.api_key));
   adw_preferences_group_add (g, bro_entry_row ("Language (TMDb)", &c->metadata.language, "en-US", changed_cb, NULL));
   adw_preferences_group_add (g, bro_switch_row ("Look up episode titles of TV shows", NULL, &c->metadata.episode_titles, changed_cb, NULL));
+  adw_preferences_group_add (g, bro_switch_row ("Write .nfo files and the poster in media server libraries",
+                                                "Kodi / Jellyfin / Emby: tvshow.nfo or the movie's .nfo, an .nfo per episode, and poster.jpg",
+                                                &c->metadata.nfo, changed_cb, NULL));
 
   g = group (ADW_PREFERENCES_PAGE (page), "Notifications",
              "Sent when a job finishes. Discord and Slack webhooks, ntfy (ntfy://topic or ntfys://host/topic) and any https webhook "

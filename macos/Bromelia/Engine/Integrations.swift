@@ -368,6 +368,53 @@ enum MediaServerNaming {
     }
 }
 
+// MARK: - Media server metadata
+
+/// Kodi / Jellyfin / Emby metadata written next to a media server library: .nfo files and the poster.
+enum MediaServerMetadata {
+    static let posterName = "poster.jpg"
+
+    /// Files this writes, which SHA256SUMS doesn't list (media servers may rewrite them).
+    static func isMetadataFile(_ name: String) -> Bool { name.lowercased().hasSuffix(".nfo") || name == posterName }
+
+    static func escape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    private static func document(_ root: String, _ elements: [(String, String)]) -> String {
+        var out = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<\(root)>\n"
+        for (name, value) in elements where !value.isEmpty {
+            if name.hasPrefix("uniqueid ") { out += "  <\(name)>\(escape(value))</uniqueid>\n" } else { out += "  <\(name)>\(escape(value))</\(name)>\n" }
+        }
+        return out + "</\(root)>\n"
+    }
+
+    /// movie.nfo / tvshow.nfo: title, year, plot and the ids (the first one is the default).
+    static func nfo(_ m: MediaMatch, kind: MediaKind) -> String {
+        var e: [(String, String)] = [("title", m.title), ("year", m.year.map(String.init) ?? ""), ("plot", m.overview)]
+        var ids: [(String, String)] = []
+        if let t = m.tmdbId { ids.append(("tmdb", String(t))) }
+        if let i = m.imdbId, !i.isEmpty { ids.append(("imdb", i)) }
+        for (n, (type, value)) in ids.enumerated() { e.append(("uniqueid type=\"\(type)\"\(n == 0 ? " default=\"true\"" : "")", value)) }
+        return document(kind == .tv ? "tvshow" : "movie", e)
+    }
+
+    /// An episode's .nfo.
+    static func episodeNfo(show: String, season: Int, episode: Int, details: EpisodeDetails) -> String {
+        document("episodedetails", [("title", details.title), ("showtitle", show), ("season", String(season)), ("episode", String(episode)),
+                                    ("plot", details.overview), ("aired", details.aired)])
+    }
+
+    static func download(_ url: URL, to file: URL) async throws {
+        var r = URLRequest(url: url)
+        r.timeoutInterval = 60
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        if let h = resp as? HTTPURLResponse, h.statusCode != 200 { throw JobError.message("HTTP \(h.statusCode)") }
+        guard !data.isEmpty else { throw JobError.message("empty answer") }
+        try data.write(to: file, options: .withoutOverwriting)
+    }
+}
+
 // MARK: - Other discs
 
 enum DiscContent: Equatable, Sendable {

@@ -465,7 +465,7 @@ enum ArchiveVerifier {
                 let v = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
                 if v?.isDirectory == true {
                     if v?.isSymbolicLink != true && !fm.fileExists(atPath: url.appendingPathComponent(Checksums.fileName).path) { walk(r) }
-                } else if !listed.contains(r) && !(rel.isEmpty && isOwnFile(name)) {
+                } else if !listed.contains(r) && !(rel.isEmpty && isOwnFile(name)) && !MediaServerMetadata.isMetadataFile(name) {
                     out.append(r)
                 }
             }

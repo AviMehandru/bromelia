@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>The Matrix</title>
+  <year>1999</year>
+  <plot>Set in the 22nd century, The Matrix tells the story of a computer hacker.</plot>
+  <uniqueid type="tmdb" default="true">603</uniqueid>
+  <uniqueid type="imdb">tt0133093</uniqueid>
+</movie>

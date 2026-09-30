@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+  <title>Friends</title>
+  <year>1994</year>
+  <plot>Follows the personal and professional lives of six twenty to thirty year-old friends living in the Manhattan borough of New York City.</plot>
+  <uniqueid type="imdb" default="true">tt0108778</uniqueid>
+</tvshow>

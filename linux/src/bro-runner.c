@@ -1902,6 +1902,103 @@ finish_output (Ctx *c, BroJobState status)
   return status;
 }
 
+/* Writes text to path unless it exists; adds its name to written. */
+static void
+write_metadata_file (Ctx *c, const char *text, const char *path, GPtrArray *written)
+{
+  g_autoptr (GFile) file = g_file_new_for_path (path);
+  g_autoptr (GFileOutputStream) out = NULL;
+  g_autoptr (GError) err = NULL;
+  if (g_file_test (path, G_FILE_TEST_EXISTS))
+    return;
+  if (!(out = g_file_create (file, G_FILE_CREATE_NONE, NULL, &err))
+      || !g_output_stream_write_all (G_OUTPUT_STREAM (out), text, strlen (text), NULL, NULL, &err)
+      || !g_output_stream_close (G_OUTPUT_STREAM (out), NULL, &err))
+    {
+      log_line (c, BRO_SEV_WARNING, "Could not write %s: %s", path, err ? err->message : "unknown error");
+      return;
+    }
+  g_ptr_array_add (written, relative_to (path, c->res->output_dir));
+}
+
+/* path with its extension replaced by .nfo. */
+static char *
+nfo_path (const char *path)
+{
+  const char *slash = strrchr (path, '/'), *dot = strrchr (path, '.');
+  return dot && (!slash || dot > slash) ? g_strdup_printf ("%.*s.nfo", (int) (dot - path), path) : g_strconcat (path, ".nfo", NULL);
+}
+
+/* Media server layout with an online match (metadata.nfo): the movie's or show's .nfo and poster in its folder (when
+ * missing: an earlier disc may have written them, or the server rewritten them), and an .nfo next to each episode. These
+ * are not in SHA256SUMS. Failures only log. */
+static void
+write_media_server_metadata (Ctx *c)
+{
+  const char *dir = c->res->output_dir;
+  g_autoptr (GPtrArray) written = g_ptr_array_new_with_free_func (g_free);
+  g_autofree char *poster = NULL;
+  if (!c->req->config->metadata.nfo || !media_server (c) || !c->metadata || !dir || !c->identity)
+    return;
+  phase (c, "Writing media server metadata");
+  if (c->identity->kind == BRO_KIND_TV)
+    {
+      g_autofree char *text = bro_nfo (c->metadata, BRO_KIND_TV);
+      g_autofree char *path = g_build_filename (dir, "tvshow.nfo", NULL);
+      int season = c->identity->label.season >= 0 ? c->identity->label.season : 1;
+      write_metadata_file (c, text, path, written);
+      for (guint i = 0; i < c->episodes->len; i++)
+        {
+          EpisodeRec *e = c->episodes->pdata[i];
+          BroEpisodeDetails *d = g_hash_table_lookup (c->episode_details, GINT_TO_POINTER (e->episode));
+          g_autofree char *file = NULL, *nfo = NULL, *ep = NULL;
+          if (!d)
+            continue;
+          file = g_build_filename (dir, e->file, NULL);
+          nfo = nfo_path (file);
+          ep = bro_episode_nfo (c->metadata->title, season, e->episode, d);
+          write_metadata_file (c, ep, nfo, written);
+        }
+    }
+  else if (c->main_title >= 0)
+    {
+      GHashTableIter it;
+      gpointer k, v;
+      g_hash_table_iter_init (&it, c->file_titles);
+      while (g_hash_table_iter_next (&it, &k, &v))
+        if (GPOINTER_TO_INT (v) - 1 == c->main_title)
+          {
+            g_autofree char *text = bro_nfo (c->metadata, BRO_KIND_MOVIE);
+            g_autofree char *nfo = nfo_path (k);
+            write_metadata_file (c, text, nfo, written);
+            break;
+          }
+    }
+  poster = g_build_filename (dir, BRO_POSTER_NAME, NULL);
+  if (c->metadata->poster && *c->metadata->poster && !g_file_test (poster, G_FILE_TEST_EXISTS))
+    {
+      g_autoptr (GError) err = NULL;
+      if (bro_http_download (c->metadata->poster, poster, &err))
+        g_ptr_array_add (written, g_strdup (BRO_POSTER_NAME));
+      else
+        {
+          g_autoptr (GUri) u = g_uri_parse (c->metadata->poster, G_URI_FLAGS_NONE, NULL);
+          log_line (c, BRO_SEV_WARNING, "Could not download the poster from %s: %s", u && g_uri_get_host (u) ? g_uri_get_host (u) : "",
+                    err ? err->message : "unknown error");
+        }
+    }
+  if (written->len)
+    {
+      GString *list = g_string_new (NULL);
+      for (guint i = 0; i < written->len && (written->len <= 4 || i < 3); i++)
+        g_string_append_printf (list, "%s%s", i ? ", " : "", (char *) written->pdata[i]);
+      if (written->len > 4)
+        g_string_append_printf (list, " and %u more", written->len - 3);
+      log_line (c, BRO_SEV_INFO, "Wrote media server metadata: %s", list->str);
+      g_string_free (list, TRUE);
+    }
+}
+
 static void
 add_optional_int (JsonBuilder *b, const char *name, int v)
 {
@@ -3981,6 +4078,8 @@ bro_run_job (BroRunRequest *req)
       log_line (&c, BRO_SEV_ERROR, "%s", res->error);
     }
   status = finish_output (&c, status);
+  if (status == BRO_JOB_SUCCEEDED)
+    write_media_server_metadata (&c);
 
   write_manifest (&c, status);
   if (!g_cancellable_is_cancelled (req->cancellable) && !c.already_archived && run_post_processing (&c, status)

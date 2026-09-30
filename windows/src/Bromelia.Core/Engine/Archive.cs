@@ -512,7 +512,7 @@ public static class ArchiveVerifier
                 {
                     if (!IsLink(full) && !File.Exists(System.IO.Path.Combine(full, Checksums.FileName))) Walk(r);
                 }
-                else if (!listed.Contains(r) && !(rel.Length == 0 && IsOwnFile(name))) out_.Add(r);
+                else if (!listed.Contains(r) && !(rel.Length == 0 && IsOwnFile(name)) && !MediaServerMetadata.IsMetadataFile(name)) out_.Add(r);
             }
         }
         Walk("");

@@ -107,6 +107,19 @@ GHashTable    *bro_metadata_episodes (const BroMediaMatch *match, int season, co
 /* The file name template for an episode, the main feature of a movie, or another title. */
 const char *bro_media_server_file_template (GHashTable *values, gboolean is_main_feature);
 
+/* ---- media server metadata (Kodi / Jellyfin / Emby .nfo files and the poster) ---- */
+
+#define BRO_POSTER_NAME "poster.jpg"
+
+/* Files these are, which SHA256SUMS doesn't list (media servers may rewrite them): *.nfo and poster.jpg. */
+gboolean bro_is_metadata_file (const char *name);
+/* movie.nfo / tvshow.nfo (kind): title, year, plot and the ids (the first one is the default). */
+char    *bro_nfo (const BroMediaMatch *m, BroMediaKind kind);
+/* An episode's .nfo. */
+char    *bro_episode_nfo (const char *show, int season, int episode, const BroEpisodeDetails *d);
+/* Blocking. Saves url to dest, which must not exist. */
+gboolean bro_http_download (const char *url, const char *dest, GError **error);
+
 /* ---- discs without a DVD / Blu-ray structure ---- */
 
 typedef enum { BRO_CONTENT_VIDEO, BRO_CONTENT_AUDIO, BRO_CONTENT_DATA, BRO_CONTENT_UNKNOWN } BroDiscContent;

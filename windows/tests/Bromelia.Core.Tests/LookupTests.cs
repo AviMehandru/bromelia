@@ -153,4 +153,31 @@ public class LookupTests
         }
         finally { try { Directory.Delete(baseDir, true); } catch (IOException) { } }
     }
+
+    [Fact]
+    public void NfoFiles()
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "fixtures", "nfo");
+        foreach (var c in JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "nfo-cases.json"))).RootElement.GetProperty("cases").EnumerateArray())
+        {
+            var name = c.GetProperty("nfo").GetString()!;
+            var want = File.ReadAllText(Path.Combine(dir, name));
+            string got;
+            if (c.TryGetProperty("details", out var details))
+            {
+                var m = MetadataLookup.Details(File.ReadAllText(Path.Combine(Dir, details.GetString()!)), Provider(c), Kind(c.GetProperty("kind")))!;
+                got = MediaServerMetadata.Nfo(m, Kind(c.GetProperty("kind")));
+            }
+            else if (c.TryGetProperty("seasonFile", out var season))
+            {
+                var eps = MetadataLookup.Season(File.ReadAllText(Path.Combine(Dir, season.GetString()!)), Provider(c));
+                var n = c.GetProperty("episode").GetInt32();
+                got = MediaServerMetadata.EpisodeNfo(c.GetProperty("show").GetString()!, c.GetProperty("season").GetInt32(), n, eps[n]);
+            }
+            else got = MediaServerMetadata.Nfo(new MediaMatch(c.GetProperty("match").GetProperty("title").GetString()!, null, null, null, "TMDb"), Kind(c.GetProperty("kind")));
+            Assert.Equal(want.Replace("\r\n", "\n"), got);
+        }
+        Assert.True(MediaServerMetadata.IsMetadataFile("Friends (1994) - S02E01.NFO") && MediaServerMetadata.IsMetadataFile("poster.jpg"));
+        Assert.False(MediaServerMetadata.IsMetadataFile("Friends (1994) - S02E01.mkv"));
+    }
 }

@@ -164,6 +164,7 @@ typedef struct {
   char *api_key;  /* TMDb: API key (v3) or read access token; OMDb: API key */
   char *language; /* TMDb language, e.g. en-US */
   gboolean episode_titles; /* TV shows: look up the titles of the disc's episodes ({episodeTitle}) */
+  gboolean nfo;            /* media server layout: write Kodi / Jellyfin / Emby .nfo files and the poster */
 } BroMetadataConfig;
 
 /* Where job notifications go: an http(s) webhook (Discord and Slack are recognised), ntfy://topic,

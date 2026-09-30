@@ -822,6 +822,7 @@ bro_app_config_new (void)
   c->metadata.api_key = g_strdup ("");
   c->metadata.language = g_strdup ("en-US");
   c->metadata.episode_titles = TRUE;
+  c->metadata.nfo = TRUE;
   c->notifications = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_notification_target_free);
   c->background_jobs = 1;
   c->web_ui.address = g_strdup ("127.0.0.1");
@@ -922,6 +923,8 @@ bro_app_config_to_json (const BroAppConfig *c)
   S ("language", c->metadata.language);
   json_builder_set_member_name (b, "episodeTitles");
   json_builder_add_boolean_value (b, c->metadata.episode_titles);
+  json_builder_set_member_name (b, "nfo");
+  json_builder_add_boolean_value (b, c->metadata.nfo);
   json_builder_end_object (b);
   json_builder_set_member_name (b, "notifications");
   json_builder_begin_array (b);
@@ -1006,6 +1009,7 @@ bro_app_config_from_json (JsonNode *node)
     REPLACE (c->metadata.api_key, dup_str (m, "apiKey", ""));
     REPLACE (c->metadata.language, dup_str (m, "language", "en-US"));
     c->metadata.episode_titles = get_bool (m, "episodeTitles", TRUE);
+    c->metadata.nfo = get_bool (m, "nfo", TRUE);
     if ((arr = get_arr (o, "notifications")))
       for (guint i = 0; i < json_array_get_length (arr); i++)
         if (JSON_NODE_HOLDS_OBJECT (json_array_get_element (arr, i)))

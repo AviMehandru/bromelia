@@ -36,7 +36,8 @@ between versions and platforms freely. Paths may start with `~`.
     "provider": "none",            // none | tmdb | omdb
     "apiKey": "",                  // TMDb: API key (v3) or read access token; OMDb: API key
     "language": "en-US",           // TMDb language of titles
-    "episodeTitles": true          // TV shows: look up the titles of the disc's episodes ({episodeTitle})
+    "episodeTitles": true,         // TV shows: look up the titles of the disc's episodes ({episodeTitle})
+    "nfo": true                    // media server layout: write .nfo files and the poster (see "Media server layout")
   },
   "notifications": [               // where to send a message when a job finishes (see "Notifications")
     { "id": "…", "url": "https://discord.com/api/webhooks/…", "enabled": true, "onlyProblems": false }
@@ -413,6 +414,22 @@ TV Shows/Friends (1994)/Season 02/Friends (1994) - S02E02 - The One with the Bre
 A show or movie keeps one folder: later discs are added to it (`Season 02` gets the next disc's episodes)
 instead of creating numbered folders. The year comes from the online lookup; without one the names have no
 year. Jobs that fail or have read errors are kept outside the library in `<output root>/<name> [INCOMPLETE …]`.
+
+**Kodi / Jellyfin / Emby metadata.** With an online match and `metadata.nfo` (on by default), a job that succeeded
+also writes, next to its files:
+
+```
+Movies/Inception (2010)/Inception (2010).nfo        <movie>: title, year, plot, TMDb / IMDb ids (next to the main feature)
+TV Shows/Friends (1994)/tvshow.nfo                  <tvshow>: the same for the show
+TV Shows/Friends (1994)/Season 02/Friends (1994) - S02E02 - The One with the Breast Milk.nfo
+                                                    <episodedetails>: title, show, season, episode, plot, air date
+…/poster.jpg                                        the poster (TMDb's original size, or OMDb's)
+```
+
+Episode `.nfo` files need episode titles (`metadata.episodeTitles`). A file that exists already is never replaced
+(an earlier disc wrote it, or the server or you changed it). These files are not in `SHA256SUMS` (servers may rewrite
+them), and the archive check doesn't report them as not listed. `shared/fixtures/nfo` holds the exact files every
+platform's tests expect.
 
 ## Other discs
 

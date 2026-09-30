@@ -339,6 +339,57 @@ public static class MediaServerNaming
     }
 }
 
+/// <summary>Kodi / Jellyfin / Emby metadata written next to a media server library: .nfo files and the poster.</summary>
+public static class MediaServerMetadata
+{
+    public const string PosterName = "poster.jpg";
+
+    /// <summary>Files this writes, which SHA256SUMS doesn't list (media servers may rewrite them).</summary>
+    public static bool IsMetadataFile(string name) => name.EndsWith(".nfo", StringComparison.OrdinalIgnoreCase) || name == PosterName;
+
+    public static string Escape(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
+    static string Document(string root, IEnumerable<(string Name, string Value)> elements)
+    {
+        var sb = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<").Append(root).Append(">\n");
+        foreach (var (name, value) in elements.Where(e => e.Value.Length > 0))
+        {
+            var close = name.StartsWith("uniqueid ", StringComparison.Ordinal) ? "uniqueid" : name;
+            sb.Append("  <").Append(name).Append('>').Append(Escape(value)).Append("</").Append(close).Append(">\n");
+        }
+        return sb.Append("</").Append(root).Append(">\n").ToString();
+    }
+
+    /// <summary>movie.nfo / tvshow.nfo: title, year, plot and the ids (the first one is the default).</summary>
+    public static string Nfo(MediaMatch m, MediaKind kind)
+    {
+        var e = new List<(string, string)> { ("title", m.Title), ("year", m.Year?.ToString(CultureInfo.InvariantCulture) ?? ""), ("plot", m.Overview) };
+        var ids = new List<(string Type, string Value)>();
+        if (m.TmdbId is { } t) ids.Add(("tmdb", t.ToString(CultureInfo.InvariantCulture)));
+        if (m.ImdbId is { Length: > 0 } i) ids.Add(("imdb", i));
+        for (int n = 0; n < ids.Count; n++) e.Add(($"uniqueid type=\"{ids[n].Type}\"{(n == 0 ? " default=\"true\"" : "")}", ids[n].Value));
+        return Document(kind == MediaKind.Tv ? "tvshow" : "movie", e);
+    }
+
+    /// <summary>An episode's .nfo.</summary>
+    public static string EpisodeNfo(string show, int season, int episode, EpisodeDetails d) => Document("episodedetails", new (string, string)[]
+    {
+        ("title", d.Title), ("showtitle", show), ("season", season.ToString(CultureInfo.InvariantCulture)),
+        ("episode", episode.ToString(CultureInfo.InvariantCulture)), ("plot", d.Overview), ("aired", d.Aired),
+    });
+
+    public static async Task DownloadAsync(Uri url, string file)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        using var resp = await http.GetAsync(url).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode) throw new JobException($"HTTP {(int)resp.StatusCode}");
+        var data = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+        if (data.Length == 0) throw new JobException("empty answer");
+        using var f = new FileStream(file, FileMode.CreateNew, FileAccess.Write);
+        await f.WriteAsync(data).ConfigureAwait(false);
+    }
+}
+
 public enum DiscContent { Video, Audio, Data, Unknown }
 
 public static class DiscContentRules
