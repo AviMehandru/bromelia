@@ -8,7 +8,8 @@ All Bromelia versions store their configuration as one JSON document with the sa
 | Windows | `%LOCALAPPDATA%\Bromelia\config.json` |
 | Linux | `$XDG_CONFIG_HOME/bromelia/config.json` (usually `~/.config/bromelia/config.json`) |
 
-Job logs, manifests and history live next to it (`jobs/<job id>/`, `history.json`, `archive-checks.json`,
+Job logs, manifests and history live next to it (`jobs/<job id>/`: `log.txt`, `makemkv.txt` with everything
+`makemkvcon` printed, `makemkv-debug.txt` with MakeMKV's debug log after each run when that's on, `manifest.json`; `history.json`, `archive-checks.json`,
 `unfinished-<pid>.json`; on Linux under `$XDG_DATA_HOME/bromelia`). Unknown keys are ignored and missing keys take their defaults, so files move
 between versions and platforms freely. Paths may start with `~`.
 
@@ -138,7 +139,7 @@ changed are kept.
   },
   "archive": {
     "checksums": true,                         // SHA256SUMS in the output folder
-    "archiveRecord": true,                     // bromelia.json and bromelia-log.txt in the output folder
+    "archiveRecord": true,                     // bromelia.json and the logs in the output folder (see "Archive files")
     "verifyRips": true                         // check each MKV against the disc listing (mkvmerge) and each backup's structure
   },
   "episodes": {
@@ -163,9 +164,9 @@ is left behind:
 
 | Outcome | Where the files go |
 | --- | --- |
-| Succeeded | The output folder, with `SHA256SUMS`, `bromelia.json` and `bromelia-log.txt` |
-| Completed with read errors: every title was saved, but MakeMKV reported errors while reading the disc (e.g. `MEDIUM ERROR`, hash check failures) | `<folder> [READ ERRORS]`, with checksums, the archive record (`"status": "errors"`, `readErrors`) and a `READ ERRORS.txt` note |
-| Failed or cancelled | `<folder> [INCOMPLETE]`, with an `INCOMPLETE.txt` note. Titles that didn't finish keep MakeMKV's own file name |
+| Succeeded | The output folder, with `SHA256SUMS`, `bromelia.json` and the logs |
+| Completed with read errors: every title was saved, but MakeMKV reported errors while reading the disc (e.g. `MEDIUM ERROR`, hash check failures) | `<folder> [READ ERRORS]`, with checksums, the archive record (`"status": "errors"`, `readErrors`), the logs and a `READ ERRORS.txt` note |
+| Failed or cancelled | `<folder> [INCOMPLETE]`, with the logs and an `INCOMPLETE.txt` note. Titles that didn't finish keep MakeMKV's own file name |
 
 The folder is renamed only when it was created for this job; in a shared folder (an empty folder template,
 or `conflictPolicy: overwrite` on a folder that has content) a subfolder such as `INCOMPLETE - 1a2b3c4d` is
@@ -366,7 +367,9 @@ Every output folder gets, unless switched off in `archive`:
 | --- | --- |
 | `SHA256SUMS` | `sha256  relative/path` for every produced file, including all files of backup folders. Entries of earlier jobs writing into the same folder are kept. |
 | `bromelia.json` | `{"format": "bromelia-archive", "version": 2, …}`: status (`success` / `errors`), name, kind, disc (label, volume name, type, format, format code, encrypted, season / part / volume / disc, fingerprint), rip, mode, source, drive, MakeMKV version, job id, times, titles (source id, source file, duration, chapters, size, segment map), episodes (file, episode number, source title, chapter range, title), files (path, size, sha256), warning and error counts and error messages. A folder shared by several jobs gets `bromelia (2).json` and so on |
-| `bromelia-log.txt` | The job log |
+| `bromelia-log.txt` | The job log. Like the two MakeMKV logs, it goes with the files whatever the outcome: into a folder marked `[INCOMPLETE]` or `[READ ERRORS]` too |
+| `makemkv-log.txt` | Everything `makemkvcon` printed, unfiltered (robot-format messages, listings and progress), each run headed by its command line and followed by its exit status |
+| `makemkv-debug-log.txt` | MakeMKV's own debug log (`MakeMKV_log.txt`, written when *Log debug messages* / `app_ShowDebug` is on), saved after each run since MakeMKV starts it afresh every time |
 
 ## Archive check
 
@@ -375,7 +378,7 @@ and `archiveCheck.intervalDays` look for every folder with a `SHA256SUMS` under 
 as staging folders, are skipped), read every listed file again and compare its SHA-256. Each folder is reported as
 OK or damaged, with the files that are **changed**, **unreadable** or **missing**, and files the folder has that
 `SHA256SUMS` doesn't list (**not listed**; that alone doesn't make a folder damaged: post-processing may add files).
-Bromelia's own files (`SHA256SUMS`, `bromelia*.json`, `bromelia-log*.txt`, the `INCOMPLETE.txt` / `READ ERRORS.txt`
+Bromelia's own files (`SHA256SUMS`, `bromelia*.json`, `bromelia-log*.txt`, `makemkv-log*.txt`, `makemkv-debug-log*.txt`, the `INCOMPLETE.txt` / `READ ERRORS.txt`
 notes) are not reported. When each folder was last verified is kept in `archive-checks.json` next to `history.json`
 (`{"<folder>": {"checkedAt", "ok", "summary"}}`); the history shows it. With `archiveCheck.intervalDays`, the apps and
 `bromelia-daemon` check the whole output folder when its last check is that old (looking a minute after starting,

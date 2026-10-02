@@ -62,6 +62,29 @@ final class EventSink: @unchecked Sendable {
     }
 }
 
+/// Appends text to a file from any thread (makemkvcon's output arrives on the process reader's queue).
+final class OutputFile: @unchecked Sendable {
+    private let lock = NSLock()
+    private let handle: FileHandle
+
+    init?(_ url: URL) {
+        if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+        guard let h = try? FileHandle(forWritingTo: url) else { return nil }
+        _ = try? h.seekToEnd()
+        handle = h
+    }
+
+    func write(_ text: String) {
+        lock.lock(); defer { lock.unlock() }
+        try? handle.write(contentsOf: Data(text.utf8))
+    }
+
+    func close() {
+        lock.lock(); defer { lock.unlock() }
+        try? handle.close()
+    }
+}
+
 /// Executes a single `RipJob`.
 @MainActor
 final class JobRunner {
@@ -76,6 +99,8 @@ final class JobRunner {
         var firstError: String?
         /// MakeMKV's warning that the output may not fit on the destination (message 5038).
         var spaceWarning: String?
+        /// MakeMKV's debug log (app_ShowDebug), named by message 1004.
+        var debugLog: URL?
 
         /// Why the run failed, for the job's error message.
         var reason: String { firstError ?? errorMessages.last ?? "makemkvcon exit status \(exitCode)" }
@@ -116,6 +141,10 @@ final class JobRunner {
     private var workDir: URL?
     /// The output folder was created for this job (not a shared folder), so it may be renamed or removed.
     private var ownsOutputDir = false
+    /// The folder finishOutput moved the job's files into (the output folder, or one marked [INCOMPLETE] or [READ ERRORS]).
+    private var filesFolder: URL?
+    /// Everything makemkvcon printed during the job (makemkv.txt in the job folder).
+    private var makemkvOutput: OutputFile?
     /// Error messages of the running makemkvcon count as read errors (rips and backups, not listings).
     private var collectDataErrors = false
     private var reportedMissingVerifier = false
@@ -238,8 +267,13 @@ final class JobRunner {
         job.appendLog("Finished: \(status.label) in \(Formatters.duration(job.elapsed))")
         try? job.logHandle?.close()
         job.logHandle = nil
-        if job.drive.archive.archiveRecord, let dir = job.outputDirectory, !job.producedFiles.isEmpty {
-            try? FileManager.default.copyItem(at: job.logFile, to: Paths.uniqueURL(dir.appendingPathComponent("bromelia-log.txt")))
+        makemkvOutput?.close()
+        makemkvOutput = nil
+        // The logs go wherever the files went, including a folder marked [INCOMPLETE] or [READ ERRORS].
+        if job.drive.archive.archiveRecord, let dir = filesFolder {
+            for (file, name) in RipJob.archivedLogs where FileManager.default.fileExists(atPath: job.logDirectory.appendingPathComponent(file).path) {
+                try? FileManager.default.copyItem(at: job.logDirectory.appendingPathComponent(file), to: Paths.uniqueURL(dir.appendingPathComponent(name)))
+            }
         }
 
         if job.drive.automation.notify {
@@ -848,6 +882,7 @@ final class JobRunner {
         job.episodes = job.episodes.map { var e = $0; e.file = relocate(relative: e.file); return e }
         entries = entries.map { var e = $0; e.path = relocate(relative: e.path); return e }
         job.outputDirectory = dest
+        if !moved.isEmpty { filesFolder = dest }
         job.appendLog(tag == nil ? "Moved \(moved.count) item(s) into \(dest.path)" : "Kept \(moved.count) item(s) apart in \(dest.path)",
                       severity: tag == nil ? .info : .warning)
 
@@ -941,6 +976,10 @@ final class JobRunner {
         if let e = job.errorMessage { text += "\(e)\n\n" }
         if !job.dataErrors.isEmpty {
             text += "Errors reported by MakeMKV while reading the disc:\n" + job.dataErrors.map { "  \($0)\n" }.joined() + "\n"
+        }
+        if job.drive.archive.archiveRecord {
+            let makemkv = FileManager.default.fileExists(atPath: job.makemkvLogFile.path)
+            text += "The job's log is in this folder as bromelia-log.txt\(makemkv ? ", and everything MakeMKV printed as makemkv-log.txt" : "").\n"
         }
         text += "Full log: \(job.logFile.path)\n"
         try? text.write(to: dir.appendingPathComponent("\(tag).txt"), atomically: true, encoding: .utf8)
@@ -1047,17 +1086,26 @@ final class JobRunner {
                                    workingDirectory: env.homeDirectory, stopSignal: SIGTERM)
         job.commands.append(runner.commandLine)
         job.appendLog("$ " + runner.commandLine)
+        if makemkvOutput == nil { makemkvOutput = OutputFile(job.makemkvLogFile) }
+        let raw = makemkvOutput
+        raw?.write("==== \(RipJob.logTimeFormatter.string(from: Date())) $ \(runner.commandLine)\n")
         activeRunner = runner
         let showDebug = env.settings["app_ShowDebug"] == "1"
         let sink = EventSink { [weak self] ev in self?.handle(ev, showDebug: showDebug) }
         defer { activeRunner = nil }
         let out: ProcessRunner.Output
         do {
-            out = try await runner.run(stallTimeout: TimeInterval(max(0, config.stallTimeoutMinutes) * 60)) { line in sink.receive(line) }
+            out = try await runner.run(stallTimeout: TimeInterval(max(0, config.stallTimeoutMinutes) * 60)) { line in
+                raw?.write(line + "\n")
+                sink.receive(line)
+            }
         } catch {
+            raw?.write("==== could not start: \(error.localizedDescription)\n")
             throw JobError.message("Could not start makemkvcon: \(error.localizedDescription)")
         }
         await sink.drain()
+        raw?.write("==== \(RipJob.logTimeFormatter.string(from: Date())) exit status \(out.exitCode)\n")
+        keepDebugLog(summary.debugLog, command: runner.commandLine)
         summary.exitCode = out.exitCode
         // These stop makemkvcon themselves, so they are checked before cancellation.
         if !cancelRequested {
@@ -1073,6 +1121,16 @@ final class JobRunner {
         return summary
     }
 
+    /// MakeMKV starts its debug log afresh every time it starts, so it is added to the job's copy after each run.
+    private func keepDebugLog(_ url: URL?, command: String) {
+        guard let url, let data = try? Data(contentsOf: url), !data.isEmpty,
+              let out = OutputFile(job.makemkvDebugLogFile) else { return }
+        out.write("==== \(url.path) after $ \(command)\n")
+        out.write(String(decoding: data, as: UTF8.self))
+        if data.last != UInt8(ascii: "\n") { out.write("\n") }
+        out.close()
+    }
+
     private func handle(_ ev: RobotEvent, showDebug: Bool) {
         summary.info.consume(ev)
         switch ev {
@@ -1084,6 +1142,11 @@ final class JobRunner {
                 job.makemkvProblem = job.makemkvProblem ?? n
             case nil:
                 break
+            }
+            // "Debug logging enabled, log will be saved as file:///…/MakeMKV_log.txt"
+            if m.code == 1004, let p = m.parameters.first, p.hasPrefix("file://") {
+                let path = String(p.dropFirst("file://".count))
+                summary.debugLog = URL(fileURLWithPath: path.removingPercentEncoding ?? path)
             }
             let sev = m.severity
             if sev == .debug && !showDebug { return }

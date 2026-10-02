@@ -1278,6 +1278,25 @@ test_safety_success (void)
   items = names_in (res->output_dir, TRUE);
   g_assert_false (has_prefix (items, ".bromelia"));
   g_assert_true (has_name (items, "SHA256SUMS"));
+  g_assert_true (has_name (items, "bromelia-log.txt"));
+  g_assert_true (has_name (items, "makemkv-log.txt"));
+  g_assert_false (has_name (items, "makemkv-debug-log.txt")); /* MakeMKV's debug log is off */
+  {
+    /* Every line makemkvcon printed, run after run, not only its messages. */
+    g_autofree char *path = g_build_filename (res->output_dir, "makemkv-log.txt", NULL);
+    g_autofree char *raw = NULL;
+    g_auto (GStrv) lines = NULL;
+    guint runs = 0;
+    g_assert_true (g_file_get_contents (path, &raw, NULL, NULL));
+    lines = g_strsplit (raw, "\n", -1);
+    for (guint i = 0; lines[i]; i++)
+      runs += g_str_has_prefix (lines[i], "==== ") && strstr (lines[i], " $ ") != NULL;
+    g_assert_cmpuint (runs, ==, 2);
+    g_assert_nonnull (strstr (raw, "\nTCOUNT:2\n"));
+    g_assert_nonnull (strstr (raw, "\nTINFO:1,27,0,\"title_t01.mkv\"\n"));
+    g_assert_nonnull (strstr (raw, "Copy complete. 1 titles saved."));
+    g_assert_nonnull (strstr (raw, "exit status 0"));
+  }
   g_assert_cmpuint (res->files->len, ==, 2);
   for (guint i = 0; i < res->files->len; i++)
     {
@@ -1379,8 +1398,58 @@ test_safety_shared_folder (void)
   g_assert_true (has_prefix (root, "INCOMPLETE - "));
   {
     g_autoptr (GPtrArray) sub = names_in (res->output_dir, FALSE);
+    g_autofree char *note_path = g_build_filename (res->output_dir, "INCOMPLETE.txt", NULL);
+    g_autofree char *raw_path = g_build_filename (res->output_dir, "makemkv-log.txt", NULL);
+    g_autofree char *note = NULL, *raw = NULL;
     g_assert_true (has_name (sub, "title_t00.mkv"));
+    /* The logs go with the files that were kept. */
+    g_assert_true (has_name (sub, "bromelia-log.txt"));
+    g_assert_true (has_name (sub, "makemkv-log.txt"));
+    g_assert_true (g_file_get_contents (note_path, &note, NULL, NULL));
+    g_assert_nonnull (strstr (note, "bromelia-log.txt"));
+    g_assert_nonnull (strstr (note, "makemkv-log.txt"));
+    g_assert_true (g_file_get_contents (raw_path, &raw, NULL, NULL));
+    g_assert_nonnull (strstr (raw, "Failed to save title 1 to file title_t01.mkv"));
   }
+  fake_free (f);
+}
+
+/* makemkvcon names its debug log in message 1004 and writes it anew on every start; the job keeps each one. */
+static void
+test_safety_debug_log (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-debug XXXXXX", NULL);
+  g_autofree char *debug_log = g_build_filename (dir, "MakeMKV_log.txt", NULL);
+  g_autofree char *escaped = g_uri_escape_string (debug_log, "/", FALSE);
+  g_autofree char *announce = g_strdup_printf ("MSG:1004,131072,1,\"Debug logging enabled, log will be saved as file://%s\","
+                                               "\"Debug logging enabled, log will be saved as %%1\",\"file://%s\"", escaped, escaped);
+  g_autofree char *l0 = listing ("SAMPLE_MOVIE", "0:00:10,1"), *l = g_strconcat (announce, "\n", l0, NULL);
+  g_autofree char *w = writes_file (SAVED), *w2 = g_strdup_printf ("cat <<'EOF'\n%s\nEOF\n%s", announce, w);
+  g_autofree char *m = g_strdup_printf ("    printf 'Debug log of the rip' > '%s'\n%s", debug_log, w2);
+  Fake *f = NULL;
+  g_autoptr (BroRunResult) res = NULL;
+  g_autofree char *kept_path = NULL, *archived_path = NULL, *kept = NULL, *archived = NULL, *header = NULL;
+  char *listing_at, *rip_at;
+  g_assert_true (g_file_set_contents (debug_log, "Debug log of the listing\n", -1, NULL));
+  f = fake_new (l, m);
+  res = run_fake (f, "0", NULL, NULL, FALSE);
+  if (res->status != BRO_JOB_SUCCEEDED)
+    g_error ("debug log: %s", res->error);
+  kept_path = g_build_filename (f->dir, "job", "makemkv-debug.txt", NULL);
+  g_assert_true (g_file_get_contents (kept_path, &kept, NULL, NULL));
+  listing_at = strstr (kept, "Debug log of the listing\n");
+  rip_at = strstr (kept, "Debug log of the rip\n");
+  g_assert_nonnull (listing_at);
+  g_assert_nonnull (rip_at);
+  g_assert_true (listing_at < rip_at);
+  header = g_strdup_printf ("==== %s after $ ", debug_log);
+  g_assert_nonnull (strstr (kept, header));
+  g_assert_nonnull (strstr (strstr (kept, header) + 1, header));
+  archived_path = g_build_filename (res->output_dir, "makemkv-debug-log.txt", NULL);
+  g_assert_true (g_file_get_contents (archived_path, &archived, NULL, NULL));
+  g_assert_cmpstr (archived, ==, kept);
+  g_unlink (debug_log);
+  g_rmdir (dir);
   fake_free (f);
 }
 
@@ -1802,6 +1871,14 @@ test_iso_backups (void)
     g_autoptr (BroRunResult) res = run_job (f, BRO_MODE_BACKUP_DECRYPTED, bro_source_new_drive (0, ""), NULL, TRUE);
     g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
     g_assert_nonnull (strstr (res->error, "Backup failed the check"));
+    /* Nothing counts as produced, but the failed backup is kept, and the logs go with it. */
+    g_assert_cmpuint (res->files->len, ==, 0);
+    {
+      g_autoptr (GPtrArray) items = names_in (res->output_dir, FALSE);
+      g_assert_true (has_name (items, "INCOMPLETE.txt"));
+      g_assert_true (has_name (items, "bromelia-log.txt"));
+      g_assert_true (has_name (items, "makemkv-log.txt"));
+    }
     fake_free (f);
   }
 }
@@ -3709,6 +3786,12 @@ test_verify_archives (void)
   }
   g_assert_true (g_file_set_contents (record, "{}", -1, NULL));
   g_assert_true (g_file_set_contents (log, "log", -1, NULL));
+  {
+    g_autofree char *raw = g_build_filename (bad, "makemkv-log.txt", NULL);
+    g_autofree char *debug = g_build_filename (bad, "makemkv-debug-log-1.txt", NULL);
+    g_assert_true (g_file_set_contents (raw, "log", -1, NULL));
+    g_assert_true (g_file_set_contents (debug, "log", -1, NULL));
+  }
 
   folders = bro_archive_folders (root);
   g_assert_cmpuint (folders->len, ==, 2); /* hidden (staging) folders are left out */
@@ -3961,6 +4044,7 @@ main (int argc, char **argv)
   g_test_add_func ("/safety/failed-title", test_safety_failed_title);
   g_test_add_func ("/safety/failure-without-files", test_safety_failure_without_files);
   g_test_add_func ("/safety/shared-folder", test_safety_shared_folder);
+  g_test_add_func ("/safety/debug-log", test_safety_debug_log);
   g_test_add_func ("/safety/different-disc", test_safety_different_disc);
   g_test_add_func ("/safety/title-numbers", test_safety_title_numbers);
   g_test_add_func ("/safety/checks-rips", test_safety_checks_rips);

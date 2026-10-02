@@ -165,6 +165,15 @@ public sealed class RipJob : ObservableObject
     public string LogDirectory => Path.Combine(Paths.JobsDirectory, Id.ToString());
     public string LogFile => Path.Combine(LogDirectory, "log.txt");
     public string ManifestFile => Path.Combine(LogDirectory, "manifest.json");
+    /// <summary>Everything makemkvcon printed, run after run.</summary>
+    public string MakemkvLogFile => Path.Combine(LogDirectory, MakemkvLogName);
+    /// <summary>MakeMKV's own debug log (MakeMKV_log.txt) after each run, when debug logging is on.</summary>
+    public string MakemkvDebugLogFile => Path.Combine(LogDirectory, MakemkvDebugLogName);
+    public const string MakemkvLogName = "makemkv.txt";
+    public const string MakemkvDebugLogName = "makemkv-debug.txt";
+    /// <summary>Files of the job folder copied next to the archived files (archiveRecord), and their names there.</summary>
+    public static readonly (string File, string Name)[] ArchivedLogs =
+        { ("log.txt", "bromelia-log.txt"), (MakemkvLogName, "makemkv-log.txt"), (MakemkvDebugLogName, "makemkv-debug-log.txt") };
 
     public void OpenLogFile()
     {

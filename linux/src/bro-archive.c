@@ -424,7 +424,8 @@ static gboolean
 own_file (const char *name)
 {
   return g_str_equal (name, BRO_CHECKSUM_FILE) || is_record_name (name)
-         || (g_str_has_prefix (name, "bromelia-log") && g_str_has_suffix (name, ".txt"))
+         || (g_str_has_suffix (name, ".txt") && (g_str_has_prefix (name, "bromelia-log") || g_str_has_prefix (name, "makemkv-log")
+                                                  || g_str_has_prefix (name, "makemkv-debug-log")))
          || g_str_equal (name, "INCOMPLETE.txt") || g_str_equal (name, "READ ERRORS.txt");
 }
 

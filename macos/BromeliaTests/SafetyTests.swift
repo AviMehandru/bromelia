@@ -134,6 +134,13 @@ struct SafetyTests {
         let items = allItems(out)
         #expect(!items.contains { $0.hasPrefix(".bromelia") }, "staging folder left behind: \(items)")
         #expect(items.contains("SHA256SUMS") && items.contains("bromelia.json"))
+        #expect(items.contains("bromelia-log.txt") && items.contains("makemkv-log.txt"), "\(items)")
+        #expect(!items.contains("makemkv-debug-log.txt"), "MakeMKV's debug log is off")
+        // Every line makemkvcon printed, run after run, not only its messages.
+        let raw = try String(contentsOf: out.appendingPathComponent("makemkv-log.txt"), encoding: .utf8)
+        #expect(raw.components(separatedBy: "\n").filter { $0.hasPrefix("==== ") && $0.contains(" $ ") }.count == 2, "\(raw)")
+        #expect(raw.contains("\nTCOUNT:2\n") && raw.contains("\nTINFO:1,27,0,\"title_t01.mkv\"\n") && raw.contains("Copy complete. 1 titles saved."))
+        #expect(raw.contains("exit status 0"))
         #expect(job.producedFiles.count == 2)
         for f in job.producedFiles { #expect(f.deletingLastPathComponent().path == out.path && FileManager.default.fileExists(atPath: f.path)) }
         #expect(try Checksums.verify(folder: out).isEmpty)
@@ -213,7 +220,50 @@ struct SafetyTests {
         let items = rootItems
         #expect(items.count == 2 && items.contains("other.mkv"), "\(items)")
         let sub = try #require(items.first { $0.hasPrefix("INCOMPLETE - ") })
-        #expect(allItems(root.appendingPathComponent(sub)).contains("title_t00.mkv"), "\(allItems(root.appendingPathComponent(sub)))")
+        let kept = allItems(root.appendingPathComponent(sub))
+        #expect(kept.contains("title_t00.mkv"), "\(kept)")
+        // The logs go with the files that were kept.
+        #expect(kept.contains("bromelia-log.txt") && kept.contains("makemkv-log.txt"), "\(kept)")
+        let note = try String(contentsOf: root.appendingPathComponent(sub).appendingPathComponent("INCOMPLETE.txt"), encoding: .utf8)
+        #expect(note.contains("bromelia-log.txt") && note.contains("makemkv-log.txt"))
+        let raw = try String(contentsOf: root.appendingPathComponent(sub).appendingPathComponent("makemkv-log.txt"), encoding: .utf8)
+        #expect(raw.contains("Failed to save title 1 to file title_t01.mkv"))
+    }
+
+    @Test func logsFollowFilesOnlyWithTheArchiveRecord() async throws {
+        let fake = try FakeMakeMKV(listing: listing(titles: [("0:00:10", 1)]), mkv: writesFile(failedSave))
+        let job = await run(fake, titles: [0]) { $0.archive.archiveRecord = false }
+        #expect(job.state == .failed)
+        let out = try #require(job.outputDirectory)
+        let items = allItems(out)
+        #expect(items.contains("title_t00.mkv") && !items.contains { $0.hasSuffix("-log.txt") }, "\(items)")
+        // The job folder keeps them anyway.
+        #expect(FileManager.default.fileExists(atPath: job.makemkvLogFile.path))
+        let note = try String(contentsOf: out.appendingPathComponent("INCOMPLETE.txt"), encoding: .utf8)
+        #expect(!note.contains("bromelia-log.txt") && note.contains(job.logFile.path))
+    }
+
+    @Test func makeMKVsDebugLogIsKeptAfterEachRun() async throws {
+        // makemkvcon names its debug log in message 1004 and writes it anew on every start.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-debug \(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let debugLog = dir.appendingPathComponent("MakeMKV_log.txt")
+        try "Debug log of the listing\n".write(to: debugLog, atomically: true, encoding: .utf8)
+        let uri = "file://" + debugLog.path.replacingOccurrences(of: " ", with: "%20")
+        let announce = #"MSG:1004,131072,1,"Debug logging enabled, log will be saved as \#(uri)","Debug logging enabled, log will be saved as %1","\#(uri)""#
+        let rip = "    printf 'Debug log of the rip' > '\(debugLog.path)'\n" + writesFile(announce + "\n" + saved)
+        let fake = try FakeMakeMKV(listing: announce + "\n" + listing(titles: [("0:00:10", 1)]), mkv: rip)
+        let job = await run(fake, titles: [0])
+
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "")")
+        let kept = try String(contentsOf: job.makemkvDebugLogFile, encoding: .utf8)
+        let listingAt = try #require(kept.range(of: "Debug log of the listing\n"))
+        let ripAt = try #require(kept.range(of: "Debug log of the rip\n"))
+        #expect(listingAt.lowerBound < ripAt.lowerBound)
+        #expect(kept.components(separatedBy: "\n").filter { $0.hasPrefix("==== \(debugLog.path) after $ ") }.count == 2, "\(kept)")
+        let out = try #require(job.outputDirectory)
+        #expect(try String(contentsOf: out.appendingPathComponent("makemkv-debug-log.txt"), encoding: .utf8) == kept)
     }
 
     @Test func aDifferentDiscIsNotRipped() async throws {
@@ -565,6 +615,11 @@ struct ReliabilityTests {
         let job = await backupJob(fake, mode: .backupDecrypted)
         #expect(job.state == .failed)
         #expect(job.errorMessage?.contains("Backup failed the check") == true, "\(job.errorMessage ?? "")")
+        // Nothing counts as produced, but the failed backup is kept, and the logs go with it.
+        #expect(job.producedFiles.isEmpty)
+        let out = try #require(job.outputDirectory)
+        let items = JobRunner.visibleItems(out)
+        #expect(items.contains("INCOMPLETE.txt") && items.contains("bromelia-log.txt") && items.contains("makemkv-log.txt"), "\(items)")
     }
 
     @Test func archiveEverythingPreset() {
@@ -1281,6 +1336,8 @@ struct ArchiveCheckTests {
         try Data([0xFF, 0xD8]).write(to: bad.appendingPathComponent("poster.jpg"))
         try Data("{}".utf8).write(to: bad.appendingPathComponent("bromelia.json"))
         try Data("log".utf8).write(to: bad.appendingPathComponent("bromelia-log.txt"))
+        try Data("log".utf8).write(to: bad.appendingPathComponent("makemkv-log.txt"))
+        try Data("log".utf8).write(to: bad.appendingPathComponent("makemkv-debug-log-1.txt"))
 
         let folders = ArchiveVerifier.folders(under: root)
         #expect(folders.map(\.path) == [good.path, bad.path], "hidden (staging) folders are left out")

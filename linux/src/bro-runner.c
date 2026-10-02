@@ -196,6 +196,9 @@ typedef struct {
   int main_title;              /* the main feature of a movie (the longest title ripped), for media server names; -1 */
   char *fingerprint;           /* of the disc listing (bro_disc_fingerprint), or NULL */
   char *already_archived;      /* why an automatic rip stopped: the disc was archived before (see check_already_archived) */
+  char *files_folder;          /* the folder finish_output moved the files into (also one marked [INCOMPLETE] / [READ ERRORS]) */
+  FILE *makemkv_log;           /* everything makemkvcon printed (makemkv.txt in the job folder) */
+  char *debug_log;             /* MakeMKV's debug log (app_ShowDebug) of the running makemkvcon, named by message 1004 */
 } Ctx;
 
 typedef struct {
@@ -283,7 +286,13 @@ on_makemkv_line (const char *line, gpointer data)
 {
   Ctx *c = data;
   Summary *s = c->sum;
-  g_autoptr (BroEvent) ev = bro_event_parse (line);
+  g_autoptr (BroEvent) ev = NULL;
+  if (c->makemkv_log)
+    {
+      fprintf (c->makemkv_log, "%s\n", line);
+      fflush (c->makemkv_log);
+    }
+  ev = bro_event_parse (line);
   if (!ev)
     return;
   bro_disc_info_consume (s->info, ev);
@@ -298,6 +307,15 @@ on_makemkv_line (const char *line, gpointer data)
           c->res->libre_drive = g_steal_pointer (&detail);
         else if (notice != BRO_NOTICE_NONE && notice != BRO_NOTICE_LIBREDRIVE && c->problem == BRO_NOTICE_NONE)
           c->problem = notice;
+        /* "Debug logging enabled, log will be saved as file:///…/MakeMKV_log.txt" */
+        if (ev->code == 1004 && ev->params->len > 0 && g_str_has_prefix (ev->params->pdata[0], "file://"))
+          {
+            const char *p = (const char *) ev->params->pdata[0] + strlen ("file://");
+            g_free (c->debug_log);
+            c->debug_log = g_uri_unescape_string (p, NULL);
+            if (!c->debug_log)
+              c->debug_log = g_strdup (p);
+          }
         if (sev == BRO_SEV_DEBUG && !c->show_debug)
           return;
         log_line (c, sev, "%s", ev->text);
@@ -364,6 +382,41 @@ on_makemkv_line (const char *line, gpointer data)
     }
 }
 
+/* Appends text to a file of the job folder. */
+static void
+append_job_file (Ctx *c, const char *name, const char *text, gsize len)
+{
+  g_autofree char *path = g_build_filename (c->req->job_dir, name, NULL);
+  FILE *f = fopen (path, "a");
+  if (!f)
+    return;
+  fwrite (text, 1, len, f);
+  fclose (f);
+}
+
+/* MakeMKV starts its debug log afresh every time it starts, so it is added to the job's copy after each run. */
+static void
+keep_debug_log (Ctx *c, const char *cmd)
+{
+  g_autofree char *contents = NULL;
+  g_autofree char *head = NULL;
+  gsize len = 0;
+  if (!c->debug_log || !g_file_get_contents (c->debug_log, &contents, &len, NULL) || len == 0)
+    return;
+  head = g_strdup_printf ("==== %s after $ %s\n", c->debug_log, cmd);
+  append_job_file (c, BRO_MAKEMKV_DEBUG_LOG, head, strlen (head));
+  append_job_file (c, BRO_MAKEMKV_DEBUG_LOG, contents, len);
+  if (contents[len - 1] != '\n')
+    append_job_file (c, BRO_MAKEMKV_DEBUG_LOG, "\n", 1);
+}
+
+static char *
+now_stamp (void)
+{
+  g_autoptr (GDateTime) now = g_date_time_new_now_local ();
+  return g_date_time_format (now, "%Y-%m-%d %H:%M:%S");
+}
+
 static void
 cancel_run (GCancellable *job, gpointer run)
 {
@@ -395,6 +448,18 @@ run_makemkv (Ctx *c, GPtrArray *args, gboolean reads_data, GError **error)
   log_line (c, BRO_SEV_INFO, "$ %s", cmd);
   g_free (c->last_total);
   c->last_total = NULL;
+  g_clear_pointer (&c->debug_log, g_free);
+  if (!c->makemkv_log)
+    {
+      g_autofree char *path = g_build_filename (c->req->job_dir, BRO_MAKEMKV_LOG, NULL);
+      c->makemkv_log = fopen (path, "a");
+    }
+  if (c->makemkv_log)
+    {
+      g_autofree char *stamp = now_stamp ();
+      fprintf (c->makemkv_log, "==== %s $ %s\n", stamp, cmd);
+      fflush (c->makemkv_log);
+    }
 
   c->sum = s;
   c->collect_data_errors = reads_data;
@@ -409,6 +474,16 @@ run_makemkv (Ctx *c, GPtrArray *args, gboolean reads_data, GError **error)
   c->collect_data_errors = FALSE;
   c->sum = NULL;
   s->exit_status = st.exit_status;
+  if (c->makemkv_log)
+    {
+      g_autofree char *stamp = now_stamp ();
+      if (ran)
+        fprintf (c->makemkv_log, "==== %s exit status %d\n", stamp, st.exit_status);
+      else
+        fprintf (c->makemkv_log, "==== could not start: %s\n", error && *error ? (*error)->message : "unknown error");
+      fflush (c->makemkv_log);
+    }
+  keep_debug_log (c, cmd);
   if (!ran)
     {
       summary_free (s);
@@ -1698,6 +1773,12 @@ write_note (Ctx *c, const char *dir, const char *tag, BroJobState status)
         g_string_append_printf (t, "  %s\n", (char *) c->data_errors->pdata[i]);
       g_string_append (t, "\n");
     }
+  if (c->req->drive->archive.archive_record)
+    {
+      g_autofree char *raw = g_build_filename (c->req->job_dir, BRO_MAKEMKV_LOG, NULL);
+      g_string_append_printf (t, "The job's log is in this folder as bromelia-log.txt%s.\n",
+                              g_file_test (raw, G_FILE_TEST_EXISTS) ? ", and everything MakeMKV printed as makemkv-log.txt" : "");
+    }
   g_string_append_printf (t, "Full log: %s\n", log);
   g_file_set_contents (path, t->str, -1, NULL);
 }
@@ -1882,6 +1963,11 @@ finish_output (Ctx *c, BroJobState status)
     }
   g_free (c->res->output_dir);
   c->res->output_dir = g_strdup (dest);
+  if (g_hash_table_size (moved))
+    {
+      g_free (c->files_folder);
+      c->files_folder = g_strdup (dest);
+    }
   update (c, BRO_UPDATE_OUTPUT_DIR, BRO_SEV_INFO, dest, 0, 0);
   if (tag)
     log_line (c, BRO_SEV_WARNING, "Kept %u item(s) apart in %s", g_hash_table_size (moved), dest);
@@ -4309,14 +4395,26 @@ bro_run_job (BroRunRequest *req)
   log_line (&c, BRO_SEV_INFO, "Finished: %s", bro_job_state_label (status));
   if (c.log)
     fclose (c.log);
-  if (req->drive->archive.archive_record && res->output_dir && res->files->len)
+  if (c.makemkv_log)
+    fclose (c.makemkv_log);
+  /* The logs go wherever the files went, including a folder marked [INCOMPLETE] or [READ ERRORS]. */
+  if (req->drive->archive.archive_record && c.files_folder)
     {
-      g_autofree char *want = g_build_filename (res->output_dir, "bromelia-log.txt", NULL);
-      g_autofree char *target = bro_unique_path (want);
-      g_autofree char *contents = NULL;
-      gsize len = 0;
-      if (g_file_get_contents (logpath, &contents, &len, NULL))
-        g_file_set_contents (target, contents, len, NULL);
+      static const char *const logs[][2] = {
+        { "log.txt", "bromelia-log.txt" }, { BRO_MAKEMKV_LOG, "makemkv-log.txt" }, { BRO_MAKEMKV_DEBUG_LOG, "makemkv-debug-log.txt" }
+      };
+      for (guint i = 0; i < G_N_ELEMENTS (logs); i++)
+        {
+          g_autofree char *from = g_build_filename (req->job_dir, logs[i][0], NULL);
+          g_autofree char *want = g_build_filename (c.files_folder, logs[i][1], NULL);
+          g_autofree char *target = NULL;
+          g_autofree char *contents = NULL;
+          gsize len = 0;
+          if (!g_file_get_contents (from, &contents, &len, NULL))
+            continue;
+          target = bro_unique_path (want);
+          g_file_set_contents (target, contents, len, NULL);
+        }
     }
   if (c.base_env) bro_makemkv_env_free (c.base_env);
   if (c.all_env) bro_makemkv_env_free (c.all_env);
@@ -4342,5 +4440,7 @@ bro_run_job (BroRunRequest *req)
   g_hash_table_unref (c.episode_details);
   g_free (c.fingerprint);
   g_free (c.already_archived);
+  g_free (c.files_folder);
+  g_free (c.debug_log);
   return res;
 }

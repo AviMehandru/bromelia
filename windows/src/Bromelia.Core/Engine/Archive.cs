@@ -424,9 +424,12 @@ public static class ArchiveVerifier
         return out_.OrderBy(p => p, StringComparer.Ordinal).ToList();
     }
 
+    static readonly string[] OwnLogPrefixes = { "bromelia-log", "makemkv-log", "makemkv-debug-log" };
+
     /// <summary>Files Bromelia writes next to the archived ones that SHA256SUMS doesn't list.</summary>
     public static bool IsOwnFile(string name) =>
-        name == Checksums.FileName || ArchiveLookup.IsRecordName(name) || (name.StartsWith("bromelia-log", StringComparison.Ordinal) && name.EndsWith(".txt", StringComparison.Ordinal))
+        name == Checksums.FileName || ArchiveLookup.IsRecordName(name)
+        || (name.EndsWith(".txt", StringComparison.Ordinal) && OwnLogPrefixes.Any(p => name.StartsWith(p, StringComparison.Ordinal)))
         || name is "INCOMPLETE.txt" or "READ ERRORS.txt";
 
     /// <summary>Progress: bytes hashed so far of the total, the folder and the file being read. Return false to stop.</summary>

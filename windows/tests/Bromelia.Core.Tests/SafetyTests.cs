@@ -123,6 +123,16 @@ public class SafetyTests
         var items = AllItems(outDir);
         Assert.DoesNotContain(items, n => n.StartsWith(".bromelia", StringComparison.Ordinal));
         Assert.Contains("SHA256SUMS", items);
+        Assert.Contains("bromelia-log.txt", items);
+        Assert.Contains("makemkv-log.txt", items);
+        Assert.DoesNotContain("makemkv-debug-log.txt", items); // MakeMKV's debug log is off
+        // Every line makemkvcon printed, run after run, not only its messages.
+        var raw = File.ReadAllText(Path.Combine(outDir, "makemkv-log.txt"));
+        Assert.Equal(2, raw.Split('\n').Count(l => l.StartsWith("==== ", StringComparison.Ordinal) && l.Contains(" $ ")));
+        Assert.Contains("\nTCOUNT:2\n", raw);
+        Assert.Contains("\nTINFO:1,27,0,\"title_t01.mkv\"\n", raw);
+        Assert.Contains("Copy complete. 1 titles saved.", raw);
+        Assert.Contains("exit status 0", raw);
         Assert.Equal(2, job.ProducedFiles.Count);
         Assert.All(job.ProducedFiles, f => Assert.Equal(outDir, Path.GetDirectoryName(f)));
         Assert.Empty(Checksums.Verify(outDir));
@@ -200,7 +210,59 @@ public class SafetyTests
         Assert.Equal(2, items.Count);
         Assert.Contains("other.mkv", items);
         var sub = Assert.Single(items, n => n.StartsWith("INCOMPLETE - ", StringComparison.Ordinal));
-        Assert.Contains("title_t00.mkv", AllItems(Path.Combine(_root, sub)));
+        var kept = AllItems(Path.Combine(_root, sub));
+        Assert.Contains("title_t00.mkv", kept);
+        // The logs go with the files that were kept.
+        Assert.Contains("bromelia-log.txt", kept);
+        Assert.Contains("makemkv-log.txt", kept);
+        var note = File.ReadAllText(Path.Combine(_root, sub, "INCOMPLETE.txt"));
+        Assert.Contains("bromelia-log.txt", note);
+        Assert.Contains("makemkv-log.txt", note);
+        Assert.Contains("Failed to save title 1 to file title_t01.mkv", File.ReadAllText(Path.Combine(_root, sub, "makemkv-log.txt")));
+    }
+
+    [Fact]
+    public void LogsFollowFilesOnlyWithTheArchiveRecord()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1)), FakeMakeMkv.WritesFile(Listing.FailedSave));
+        var job = Run(fake, new() { 0 }, configure: d => d.Archive.ArchiveRecord = false);
+        Assert.Equal(JobState.Failed, job.State);
+        var items = AllItems(job.OutputDirectory!);
+        Assert.Contains("title_t00.mkv", items);
+        Assert.DoesNotContain(items, n => n.EndsWith("-log.txt", StringComparison.Ordinal));
+        // The job folder keeps them anyway.
+        Assert.True(File.Exists(job.MakemkvLogFile));
+        var note = File.ReadAllText(Path.Combine(job.OutputDirectory!, "INCOMPLETE.txt"));
+        Assert.DoesNotContain("bromelia-log.txt", note);
+        Assert.Contains(job.LogFile, note);
+    }
+
+    [Fact]
+    public void MakeMkvsDebugLogIsKeptAfterEachRun()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        // makemkvcon names its debug log in message 1004 and writes it anew on every start.
+        var dir = Path.Combine(Path.GetTempPath(), "bromelia-debug " + Guid.NewGuid().ToString("N")[..6]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var debugLog = Path.Combine(dir, "MakeMKV_log.txt");
+            File.WriteAllText(debugLog, "Debug log of the listing\n");
+            var uri = new Uri(debugLog).AbsoluteUri;
+            var announce = $"MSG:1004,131072,1,\"Debug logging enabled, log will be saved as {uri}\",\"Debug logging enabled, log will be saved as %1\",\"{uri}\"";
+            var rip = $"printf 'Debug log of the rip' > '{debugLog}'\n" + FakeMakeMkv.WritesFile(announce + "\n" + Listing.Saved);
+            var fake = new FakeMakeMkv(announce + "\n" + Listing.Make(("0:00:10", 1)), rip);
+            var job = Run(fake, new() { 0 });
+            Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+            var kept = File.ReadAllText(job.MakemkvDebugLogFile);
+            var listingAt = kept.IndexOf("Debug log of the listing\n", StringComparison.Ordinal);
+            var ripAt = kept.IndexOf("Debug log of the rip\n", StringComparison.Ordinal);
+            Assert.True(listingAt >= 0 && ripAt > listingAt, kept);
+            Assert.Equal(2, kept.Split('\n').Count(l => l.StartsWith($"==== {debugLog} after $ ", StringComparison.Ordinal)));
+            Assert.Equal(kept, File.ReadAllText(Path.Combine(job.OutputDirectory!, "makemkv-debug-log.txt")));
+        }
+        finally { Directory.Delete(dir, true); }
     }
 
     [Fact]
@@ -520,6 +582,12 @@ public class ReliabilityTests
         var job = Run(fake, RipMode.BackupDecrypted, new DiscSource.Drive(0, ""));
         Assert.Equal(JobState.Failed, job.State);
         Assert.Contains("Backup failed the check", job.ErrorMessage);
+        // Nothing counts as produced, but the failed backup is kept, and the logs go with it.
+        Assert.Empty(job.ProducedFiles);
+        var items = JobRunner.VisibleItems(job.OutputDirectory!);
+        Assert.Contains("INCOMPLETE.txt", items);
+        Assert.Contains("bromelia-log.txt", items);
+        Assert.Contains("makemkv-log.txt", items);
     }
 
     [Fact]
@@ -1212,6 +1280,8 @@ public class ArchiveCheckTests : IDisposable
         File.WriteAllText(Path.Combine(bad, "poster.jpg"), "jpg");
         File.WriteAllText(Path.Combine(bad, "bromelia.json"), "{}");
         File.WriteAllText(Path.Combine(bad, "bromelia-log.txt"), "log");
+        File.WriteAllText(Path.Combine(bad, "makemkv-log.txt"), "log");
+        File.WriteAllText(Path.Combine(bad, "makemkv-debug-log-1.txt"), "log");
 
         var folders = ArchiveVerifier.Folders(_root);
         Assert.Equal(new[] { good, bad }, folders); // hidden (staging) folders are left out

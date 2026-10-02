@@ -47,6 +47,8 @@ public sealed class JobRunner
         public string? FirstError;
         /// <summary>MakeMKV's warning that the output may not fit on the destination (message 5038).</summary>
         public string? SpaceWarning;
+        /// <summary>MakeMKV's debug log (app_ShowDebug), named by message 1004.</summary>
+        public string? DebugLog;
 
         /// <summary>Why the run failed, for the job's error message.</summary>
         public string Reason => FirstError ?? ErrorMessages.LastOrDefault() ?? $"makemkvcon exit status {ExitCode}";
@@ -84,6 +86,10 @@ public sealed class JobRunner
     string? _outputDir, _workDir;
     /// <summary>The output folder was created for this job (not a shared folder), so it may be renamed or removed.</summary>
     bool _ownsOutputDir;
+    /// <summary>The folder FinishOutputAsync moved the job's files into (the output folder, or one marked [INCOMPLETE] or [READ ERRORS]).</summary>
+    string? _filesFolder;
+    /// <summary>Everything makemkvcon printed during the job (makemkv.txt in the job folder).</summary>
+    TextWriter? _makemkvOutput;
     /// <summary>Error messages of the running makemkvcon count as read errors (rips and backups, not listings).</summary>
     bool _collectDataErrors;
     bool _reportedMissingVerifier;
@@ -220,10 +226,18 @@ public sealed class JobRunner
         }
         _job.AppendLog($"Finished: {status.Label()} in {FormatElapsed(_job.Elapsed)}");
         _job.CloseLogFile();
+        _makemkvOutput?.Dispose();
+        _makemkvOutput = null;
         _videoTs?.Dispose();
-        if (_job.Drive.Archive.ArchiveRecord && _job.OutputDirectory is { } archiveDir && _job.ProducedFiles.Count > 0)
+        // The logs go wherever the files went, including a folder marked [INCOMPLETE] or [READ ERRORS].
+        if (_job.Drive.Archive.ArchiveRecord && _filesFolder is { } archiveDir)
         {
-            try { File.Copy(_job.LogFile, Paths.UniquePath(Path.Combine(archiveDir, "bromelia-log.txt"))); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            foreach (var (file, name) in RipJob.ArchivedLogs)
+            {
+                var from = Path.Combine(_job.LogDirectory, file);
+                if (!File.Exists(from)) continue;
+                try { File.Copy(from, Paths.UniquePath(Path.Combine(archiveDir, name))); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
         }
 
         if (_job.Drive.Automation.Notify) _platform.Notify(title, body, _job.Drive.Automation.PlaySound);
@@ -918,6 +932,7 @@ public sealed class JobRunner
         foreach (var e in _job.Episodes) e.File = RelocateRelative(e.File);
         entries = entries.Select(e => e with { Path = RelocateRelative(e.Path) }).ToList();
         _job.OutputDirectory = dest;
+        if (moved.Count > 0) _filesFolder = dest;
         _job.AppendLog(tag == null ? $"Moved {moved.Count} item(s) into {dest}" : $"Kept {moved.Count} item(s) apart in {dest}",
             tag == null ? Severity.Info : Severity.Warning);
 
@@ -984,6 +999,8 @@ public sealed class JobRunner
             foreach (var e in _job.DataErrors) text.Append("  ").Append(e).Append('\n');
             text.Append('\n');
         }
+        if (_job.Drive.Archive.ArchiveRecord)
+            text.Append($"The job's log is in this folder as bromelia-log.txt{(File.Exists(_job.MakemkvLogFile) ? ", and everything MakeMKV printed as makemkv-log.txt" : "")}.\n");
         text.Append($"Full log: {_job.LogFile}\n");
         try { File.WriteAllText(Path.Combine(dir, $"{tag}.txt"), text.ToString()); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
@@ -1105,23 +1122,34 @@ public sealed class JobRunner
         _summary = summary;
         _lastTotalTitle = "";
         bool showDebug = _env.Settings.TryGetValue("app_ShowDebug", out var dbg) && dbg == "1";
+        if (_makemkvOutput == null)
+        {
+            try { _makemkvOutput = TextWriter.Synchronized(new StreamWriter(_job.MakemkvLogFile, append: true) { AutoFlush = true }); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        var raw = _makemkvOutput;
+        var command = "";
         ProcessRunner.Result result;
         try
         {
             result = await _env.RunAsync(args,
                 line =>
                 {
+                    WriteOutput(raw, line);
                     if (RobotParser.Parse(line) is { } ev) _ui.Post(() => Handle(ev, summary, showDebug));
                 },
                 r =>
                 {
                     _active = r;
+                    command = r.CommandLine;
                     _job.Commands.Add(r.CommandLine);
                     _job.AppendLog("$ " + r.CommandLine);
+                    WriteOutput(raw, $"==== {DateTime.Now:yyyy-MM-dd HH:mm:ss} $ {r.CommandLine}");
                 }, default, _cts.Token, TimeSpan.FromMinutes(Math.Max(0, _config.StallTimeoutMinutes)));
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or FileNotFoundException)
         {
+            WriteOutput(raw, $"==== could not start: {e.Message}");
             throw new JobException($"Could not start makemkvcon: {e.Message}");
         }
         finally
@@ -1129,6 +1157,8 @@ public sealed class JobRunner
             _active = null;
         }
         await _ui.Barrier();
+        WriteOutput(raw, $"==== {DateTime.Now:yyyy-MM-dd HH:mm:ss} exit status {result.ExitCode}");
+        KeepDebugLog(summary.DebugLog, command);
         _collectDataErrors = false;
         summary.ExitCode = result.ExitCode;
         // These stop makemkvcon themselves, so they are checked before cancellation.
@@ -1144,6 +1174,26 @@ public sealed class JobRunner
         return summary;
     }
 
+    static void WriteOutput(TextWriter? w, string line)
+    {
+        try { w?.WriteLine(line); }
+        catch (Exception e) when (e is IOException or ObjectDisposedException) { }
+    }
+
+    /// <summary>MakeMKV starts its debug log afresh every time it starts, so it is added to the job's copy after each run.</summary>
+    void KeepDebugLog(string? path, string command)
+    {
+        if (path == null) return;
+        try
+        {
+            if (!File.Exists(path)) return;
+            var text = File.ReadAllText(path);
+            if (text.Length == 0) return;
+            File.AppendAllText(_job.MakemkvDebugLogFile, $"==== {path} after $ {command}\n" + text + (text.EndsWith('\n') ? "" : "\n"));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
     void Handle(RobotEvent ev, RunSummary s, bool showDebug)
     {
         s.Info.Consume(ev);
@@ -1155,6 +1205,10 @@ public sealed class JobRunner
                     if (notice.Kind == NoticeKind.LibreDrive) _job.LibreDrive ??= notice.Detail;
                     else _job.MakemkvProblem ??= notice;
                 }
+                // "Debug logging enabled, log will be saved as file:///C:/…/MakeMKV_log.txt"
+                if (m.Code == 1004 && m.Parameters.Count > 0 && m.Parameters[0].StartsWith("file://", StringComparison.OrdinalIgnoreCase)
+                    && Uri.TryCreate(m.Parameters[0], UriKind.Absolute, out var debugLog) && debugLog.IsFile)
+                    s.DebugLog = debugLog.LocalPath;
                 var sev = m.Severity;
                 if (sev == Severity.Debug && !showDebug) return;
                 _job.AppendLog(m.Text, sev);

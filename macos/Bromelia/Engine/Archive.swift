@@ -386,7 +386,8 @@ enum ArchiveVerifier {
 
     /// Files Bromelia writes next to the archived ones that SHA256SUMS doesn't list.
     static func isOwnFile(_ name: String) -> Bool {
-        name == Checksums.fileName || ArchiveLookup.isRecordName(name) || (name.hasPrefix("bromelia-log") && name.hasSuffix(".txt"))
+        name == Checksums.fileName || ArchiveLookup.isRecordName(name)
+            || (name.hasSuffix(".txt") && ["bromelia-log", "makemkv-log", "makemkv-debug-log"].contains { name.hasPrefix($0) })
             || name == "INCOMPLETE.txt" || name == "READ ERRORS.txt"
     }
 

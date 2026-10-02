@@ -160,6 +160,14 @@ final class RipJob: Identifiable {
     var logDirectory: URL { Paths.jobsDirectory.appendingPathComponent(id.uuidString, isDirectory: true) }
     var logFile: URL { logDirectory.appendingPathComponent("log.txt") }
     var manifestFile: URL { logDirectory.appendingPathComponent("manifest.json") }
+    /// Everything makemkvcon printed, run after run.
+    var makemkvLogFile: URL { logDirectory.appendingPathComponent(RipJob.makemkvLogName) }
+    /// MakeMKV's own debug log (MakeMKV_log.txt) after each run, when debug logging is on.
+    var makemkvDebugLogFile: URL { logDirectory.appendingPathComponent(RipJob.makemkvDebugLogName) }
+    static let makemkvLogName = "makemkv.txt"
+    static let makemkvDebugLogName = "makemkv-debug.txt"
+    /// Files of the job folder copied next to the archived files (archiveRecord), and their names there.
+    static let archivedLogs = [("log.txt", "bromelia-log.txt"), (makemkvLogName, "makemkv-log.txt"), (makemkvDebugLogName, "makemkv-debug-log.txt")]
 
     func appendLog(_ text: String, severity: RobotMessage.Severity = .info) {
         let entry = LogEntry(id: nextLogId, time: Date(), severity: severity, text: text)

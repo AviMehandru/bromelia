@@ -149,6 +149,10 @@ char      *bro_unique_path (const char *path);
 /* Name prefix of the hidden staging folder a job writes to inside its output folder. */
 #define BRO_STAGING_PREFIX ".bromelia-incomplete-"
 
+/* Files of the job folder: everything makemkvcon printed, and MakeMKV's debug log (MakeMKV_log.txt) after each run. */
+#define BRO_MAKEMKV_LOG       "makemkv.txt"
+#define BRO_MAKEMKV_DEBUG_LOG "makemkv-debug.txt"
+
 /* A ripped MKV as reported by `mkvmerge -J`. */
 typedef struct {
   gboolean has_duration;

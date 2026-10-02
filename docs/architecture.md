@@ -61,6 +61,14 @@ Drives are addressed by device (`dev:`) wherever possible because MakeMKV's driv
 
 The generated profile (`profile.mmcp.xml`) is written to the same job folder and passed with `--profile`.
 
+Every line `makemkvcon` prints is appended, unparsed, to `makemkv.txt` in the job folder, each run headed by its
+command line and followed by its exit status; the job log only shows the text of its messages. When debug logging is
+on, message 1004 names the debug log (`file:///…/MakeMKV_log.txt`; on Windows it isn't in the job folder). MakeMKV
+rewrites that file on every start, so after each run it is appended to `makemkv-debug.txt`. With `archiveRecord`,
+`log.txt`, `makemkv.txt` and `makemkv-debug.txt` are copied as `bromelia-log.txt`, `makemkv-log.txt` and
+`makemkv-debug-log.txt` into the folder the job's files were moved to, whether that is the output folder or one
+marked `[INCOMPLETE]` / `[READ ERRORS]`.
+
 ## Threads
 
 - **macOS:** process output is read on a background queue, parsed, and delivered to the main actor in

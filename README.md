@@ -83,7 +83,9 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
   entered on the disc page. Works from a disc, an ISO or a backup.
 - **Checksums and archive records.** Every output folder gets `SHA256SUMS` (checkable with
   `sha256sum -c SHA256SUMS` / `shasum -a 256 -c SHA256SUMS`), `bromelia.json` (disc identity, titles,
-  episodes, files with sizes and hashes, MakeMKV version, errors, disc fingerprint) and the job log.
+  episodes, files with sizes and hashes, MakeMKV version, errors, disc fingerprint), the job log, everything
+  `makemkvcon` printed and, when debug logging is on, MakeMKV's debug log. The logs also go into folders of jobs
+  that didn't succeed.
 - **Archive check.** *Verify Archive…* (Archive Check in the sidebar) reads every file of the output folder's
   archives, or of any folder, again and compares it with `SHA256SUMS`, reporting changed, unreadable, missing and
   unlisted files per folder; a finished job's folder can be checked from the history, which shows when each
