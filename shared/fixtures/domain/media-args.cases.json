@@ -1,0 +1,771 @@
+{
+  "functions": [
+    "MkvProbe.parse",
+    "RipCheck.check",
+    "RipCheck.tolerance",
+    "Remux.arguments",
+    "Split.arguments",
+    "SimpleChapters.parse",
+    "HandBrakeArgs.build",
+    "HandBrakeArgs.output",
+    "HandBrakeArgs.isSource",
+    "HandBrakeArgs.keepLine",
+    "BackupStructure.problem"
+  ],
+  "description": "Arguments for and output of mkvmerge, mkvextract and HandBrakeCLI; the checks of an MKV against its title and of a backup's structure. A backup's 'folder' lists the files in it (a trailing / is an empty folder).",
+  "cases": [
+    {
+      "id": "probe-parse",
+      "from": [
+        "macos RipCheckTests.parsesMkvmergeJSON",
+        "windows SafetyTests.ParsesMkvmergeJson",
+        "linux /safety/rip-checks"
+      ],
+      "given": {
+        "json": "{\"container\":{\"recognized\":true,\"supported\":true,\"properties\":{\"duration\":7212345000000}},\"tracks\":[{\"id\":0,\"type\":\"video\"},{\"id\":1,\"type\":\"audio\"},{\"id\":2,\"type\":\"subtitles\"}],\"chapters\":[{\"num_entries\":24}]}"
+      },
+      "expect": {
+        "probe": {
+          "durationSeconds": 7212.345,
+          "trackTypes": [
+            "video",
+            "audio",
+            "subtitles"
+          ],
+          "chapterCount": 24
+        }
+      }
+    },
+    {
+      "id": "probe-unrecognised",
+      "from": [
+        "macos RipCheckTests.parsesMkvmergeJSON"
+      ],
+      "given": {
+        "json": "{\"container\":{\"recognized\":false}}"
+      },
+      "expect": {
+        "probe": null
+      }
+    },
+    {
+      "id": "check-matches",
+      "from": [
+        "macos RipCheckTests.acceptsMatchingFiles",
+        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": 7212.4,
+          "trackTypes": [
+            "video",
+            "audio"
+          ],
+          "chapterCount": 25
+        },
+        "title": {
+          "duration": "2:00:10",
+          "chapters": 24,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problems": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "check-1",
+      "from": [
+        "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "linux /safety/rip-checks"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": 5400,
+          "trackTypes": [
+            "video",
+            "audio"
+          ],
+          "chapterCount": 24
+        },
+        "title": {
+          "duration": "2:00:10",
+          "chapters": 0,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problemCodes": [
+          "ripcheck.duration"
+        ]
+      }
+    },
+    {
+      "id": "check-2",
+      "from": [
+        "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "linux /safety/rip-checks"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": null,
+          "trackTypes": [
+            "video"
+          ],
+          "chapterCount": 0
+        },
+        "title": {
+          "duration": "2:00:10",
+          "chapters": 0,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problemCodes": [
+          "ripcheck.noDuration"
+        ]
+      }
+    },
+    {
+      "id": "check-3",
+      "from": [
+        "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "linux /safety/rip-checks"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": 7210,
+          "trackTypes": [],
+          "chapterCount": 0
+        },
+        "title": {
+          "duration": "2:00:10",
+          "chapters": 0,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problemCodes": [
+          "ripcheck.noTracks"
+        ]
+      }
+    },
+    {
+      "id": "check-4",
+      "from": [
+        "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "linux /safety/rip-checks"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": 7210,
+          "trackTypes": [
+            "audio"
+          ],
+          "chapterCount": 0
+        },
+        "title": {
+          "duration": "2:00:10",
+          "chapters": 0,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problemCodes": [
+          "ripcheck.noVideo"
+        ]
+      }
+    },
+    {
+      "id": "check-5",
+      "from": [
+        "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "linux /safety/rip-checks"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": 7240,
+          "trackTypes": [
+            "video"
+          ],
+          "chapterCount": 0
+        },
+        "title": {
+          "duration": "2:00:10",
+          "chapters": 0,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problemCodes": []
+      }
+    },
+    {
+      "id": "check-6",
+      "from": [
+        "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "linux /safety/rip-checks"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": 7260,
+          "trackTypes": [
+            "video"
+          ],
+          "chapterCount": 0
+        },
+        "title": {
+          "duration": "2:00:10",
+          "chapters": 0,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problemCodes": [
+          "ripcheck.duration"
+        ]
+      }
+    },
+    {
+      "id": "check-chapter-note",
+      "from": [
+        "macos RipCheckTests.notesChapterDifferences"
+      ],
+      "given": {
+        "probe": {
+          "durationSeconds": 600,
+          "trackTypes": [
+            "video"
+          ],
+          "chapterCount": 3
+        },
+        "title": {
+          "duration": "0:10:00",
+          "chapters": 12,
+          "tracks": [
+            "Video",
+            "Audio"
+          ]
+        }
+      },
+      "expect": {
+        "problems": [],
+        "noteCodes": [
+          "ripcheck.chapters"
+        ]
+      }
+    },
+    {
+      "id": "check-tolerance",
+      "from": [
+        "docs/configuration.md (within 5 s or 0.5 %, whichever is larger)"
+      ],
+      "given": {
+        "expectedSeconds": [
+          60,
+          7210
+        ]
+      },
+      "expect": {
+        "tolerance": [
+          5,
+          36.05
+        ]
+      }
+    },
+    {
+      "id": "remux-arguments",
+      "from": [
+        "macos RemuxTests.buildsTrackArguments",
+        "windows RemuxTests.BuildsTrackArguments",
+        "linux /runner/remux-args"
+      ],
+      "given": {
+        "listing": "info-dvd.txt",
+        "title": 1,
+        "layout": [
+          {
+            "id": 0,
+            "type": "video"
+          },
+          {
+            "id": 1,
+            "type": "audio"
+          },
+          {
+            "id": 2,
+            "type": "audio"
+          },
+          {
+            "id": 3,
+            "type": "audio"
+          },
+          {
+            "id": 4,
+            "type": "audio"
+          },
+          {
+            "id": 5,
+            "type": "subtitles"
+          }
+        ],
+        "keep": [
+          0,
+          1,
+          3
+        ],
+        "input": "/in.mkv",
+        "output": "/out.mkv"
+      },
+      "expect": {
+        "arguments": [
+          "-o",
+          "/out.mkv",
+          "--video-tracks",
+          "0",
+          "--audio-tracks",
+          "1,3",
+          "--no-subtitles",
+          "/in.mkv"
+        ]
+      }
+    },
+    {
+      "id": "remux-layout-differs",
+      "from": [
+        "macos RemuxTests.buildsTrackArguments"
+      ],
+      "given": {
+        "listing": "info-dvd.txt",
+        "title": 1,
+        "layout": [
+          {
+            "id": 0,
+            "type": "video"
+          },
+          {
+            "id": 1,
+            "type": "audio"
+          },
+          {
+            "id": 2,
+            "type": "audio"
+          },
+          {
+            "id": 3,
+            "type": "audio"
+          },
+          {
+            "id": 4,
+            "type": "audio"
+          }
+        ],
+        "keep": [
+          0
+        ],
+        "input": "/i",
+        "output": "/o"
+      },
+      "expect": {
+        "arguments": null
+      }
+    },
+    {
+      "id": "remux-video-only",
+      "from": [
+        "shared/scenarios/tracks-hand-picked-remux.yaml"
+      ],
+      "given": {
+        "tracks": [
+          "video",
+          "audio"
+        ],
+        "layout": [
+          {
+            "id": 0,
+            "type": "video"
+          },
+          {
+            "id": 1,
+            "type": "audio"
+          }
+        ],
+        "keep": [
+          0
+        ],
+        "input": "/i.mkv",
+        "output": "/o.mkv"
+      },
+      "expect": {
+        "arguments": [
+          "-o",
+          "/o.mkv",
+          "--video-tracks",
+          "0",
+          "--no-audio",
+          "/i.mkv"
+        ]
+      }
+    },
+    {
+      "id": "split-arguments",
+      "from": [
+        "docs/architecture.md#identity-episodes-and-archiving (mkvmerge --split chapters:…)"
+      ],
+      "given": {
+        "chapters": [
+          8,
+          15,
+          22,
+          29,
+          36,
+          43
+        ],
+        "input": "/s/t.mkv",
+        "output": "/s/.part.mkv"
+      },
+      "expect": {
+        "arguments": [
+          "-o",
+          "/s/.part.mkv",
+          "--split",
+          "chapters:8,15,22,29,36,43",
+          "/s/t.mkv"
+        ]
+      }
+    },
+    {
+      "id": "simple-chapters",
+      "from": [
+        "macos DVDNavigationTests.mapsChaptersToMKV",
+        "windows ArchiveTests.PicksFirstEpisodeAndMapsChapters"
+      ],
+      "given": {
+        "text": "CHAPTER01=00:00:00.000\nCHAPTER01NAME=x\nCHAPTER02=00:23:36.815\n"
+      },
+      "expect": {
+        "starts": [
+          0,
+          1416.815
+        ]
+      }
+    },
+    {
+      "id": "handbrake-defaults",
+      "from": [
+        "macos HandBrakeTests.arguments",
+        "windows HandBrakeTests.Arguments",
+        "linux /post/handbrake-arguments"
+      ],
+      "given": {
+        "step": {
+          "kind": "handbrake"
+        }
+      },
+      "expect": {
+        "background": true,
+        "preset": "H.265 MKV 1080p30",
+        "runsOn": {
+          "succeeded": true,
+          "failed": false
+        }
+      }
+    },
+    {
+      "id": "handbrake-output",
+      "from": [
+        "macos HandBrakeTests.arguments",
+        "windows HandBrakeTests.Arguments",
+        "linux /post/handbrake-arguments"
+      ],
+      "given": {
+        "step": {
+          "kind": "handbrake",
+          "handbrake": {
+            "presetFile": "/p/archive.json"
+          }
+        },
+        "values": {
+          "outputDir": "/out/Show",
+          "stem": "Show - S01E01",
+          "name": "Show"
+        }
+      },
+      "expect": {
+        "output": "/out/Show/Encoded/Show - S01E01.mkv"
+      }
+    },
+    {
+      "id": "handbrake-arguments",
+      "from": [
+        "macos HandBrakeTests.arguments",
+        "windows HandBrakeTests.Arguments",
+        "linux /post/handbrake-arguments"
+      ],
+      "given": {
+        "step": {
+          "kind": "handbrake",
+          "handbrake": {
+            "presetFile": "/p/archive.json",
+            "extraArguments": "--all-subtitles --subtitle-burned=none"
+          }
+        },
+        "input": "/out/Show/Show - S01E01.mkv",
+        "output": "/out/Show/Encoded/Show - S01E01.mkv"
+      },
+      "expect": {
+        "arguments": [
+          "--preset-import-file",
+          "/p/archive.json",
+          "--preset",
+          "H.265 MKV 1080p30",
+          "-i",
+          "/out/Show/Show - S01E01.mkv",
+          "-o",
+          "/out/Show/Encoded/Show - S01E01.mkv",
+          "--all-subtitles",
+          "--subtitle-burned=none"
+        ]
+      }
+    },
+    {
+      "id": "handbrake-sources",
+      "from": [
+        "macos HandBrakeTests.arguments",
+        "windows HandBrakeTests.Arguments",
+        "linux /post/handbrake-arguments"
+      ],
+      "given": {
+        "files": [
+          "/x/a.MKV",
+          "/x/a.iso"
+        ]
+      },
+      "expect": {
+        "sources": [
+          "/x/a.MKV"
+        ]
+      }
+    },
+    {
+      "id": "handbrake-progress-filter",
+      "from": [
+        "macos HandBrakeTests.arguments",
+        "windows HandBrakeTests.Arguments",
+        "linux /post/handbrake-arguments"
+      ],
+      "given": {
+        "lines": [
+          "Encoding: task 1 of 2, 0.50 % (0.0 fps)",
+          "Encoding: task 1 of 2, 3.00 %",
+          "Encoding: task 1 of 2, 10.01 %",
+          "Encoding: task 1 of 2, 19.99 %",
+          "x264 [info]: done",
+          "Encoding: task 2 of 2, 1.00 %",
+          "Encoding: task 2 of 2, 95.00 %"
+        ]
+      },
+      "expect": {
+        "kept": [
+          "Encoding: task 1 of 2, 0.50 % (0.0 fps)",
+          "Encoding: task 1 of 2, 10.01 %",
+          "x264 [info]: done",
+          "Encoding: task 2 of 2, 1.00 %",
+          "Encoding: task 2 of 2, 95.00 %"
+        ]
+      }
+    },
+    {
+      "id": "backup-structure-1",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "folder": [
+          "BDMV/"
+        ]
+      },
+      "expect": {
+        "problem": {
+          "code": "structure.bdmvIndexMissing"
+        }
+      }
+    },
+    {
+      "id": "backup-structure-2",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "folder": [
+          "BDMV/index.bdmv"
+        ]
+      },
+      "expect": {
+        "problem": null
+      }
+    },
+    {
+      "id": "backup-structure-3",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "folder": [
+          "VIDEO_TS/VIDEO_TS.IFO"
+        ]
+      },
+      "expect": {
+        "problem": null
+      }
+    },
+    {
+      "id": "backup-structure-4",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "missing": true
+      },
+      "expect": {
+        "problem": {
+          "code": "structure.notCreated"
+        }
+      }
+    },
+    {
+      "id": "backup-structure-5",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "iso": true,
+        "folder": [
+          "x"
+        ]
+      },
+      "expect": {
+        "problem": {
+          "code": "structure.isFolder"
+        }
+      }
+    },
+    {
+      "id": "backup-structure-6",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "iso": true,
+        "bytes": 40000,
+        "descriptorAt32769": "BEA01"
+      },
+      "expect": {
+        "problem": null
+      }
+    },
+    {
+      "id": "backup-structure-7",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "iso": true,
+        "bytes": 40000,
+        "descriptorAt32769": "CD001"
+      },
+      "expect": {
+        "problem": null
+      }
+    },
+    {
+      "id": "backup-structure-8",
+      "from": [
+        "macos RipCheckTests.checksBackupStructure",
+        "windows SafetyTests.ChecksBackupStructure",
+        "linux /safety/backup-checks"
+      ],
+      "given": {
+        "iso": true,
+        "bytes": 40000
+      },
+      "expect": {
+        "problem": {
+          "code": "structure.notImage"
+        }
+      }
+    },
+    {
+      "id": "backup-structure-9",
+      "from": [
+        "macos BackupVerifier.problem (today's code)"
+      ],
+      "given": {
+        "folder": [
+          "junk/file"
+        ]
+      },
+      "expect": {
+        "problem": {
+          "code": "structure.noDiscFolder"
+        }
+      }
+    },
+    {
+      "id": "backup-structure-10",
+      "from": [
+        "macos BackupVerifier.problem (today's code)"
+      ],
+      "given": {
+        "folder": [
+          "HVDVD_TS/x"
+        ]
+      },
+      "expect": {
+        "problem": null
+      }
+    }
+  ]
+}

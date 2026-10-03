@@ -1,0 +1,178 @@
+{
+  "functions": [
+    "DvdNav.decodeJump",
+    "DvdNav.mkvChapters"
+  ],
+  "description": "DVD VM jump commands, and the split points in an MKV whose chapter list may start with an added chapter 00.",
+  "cases": [
+    {
+      "id": "jump-vts-ptt",
+      "from": [
+        "macos DVDNavigationTests.decodesJumps",
+        "windows ArchiveTests.DecodesJumps",
+        "linux /dvd/jumps-and-numbers"
+      ],
+      "given": {
+        "bytes": [
+          48,
+          5,
+          0,
+          5,
+          0,
+          3,
+          0,
+          0
+        ]
+      },
+      "expect": {
+        "jump": {
+          "kind": "ptt",
+          "titleNumber": 3,
+          "ptt": 5,
+          "condition": ""
+        }
+      }
+    },
+    {
+      "id": "jump-link-pttn-condition",
+      "from": [
+        "macos DVDNavigationTests.decodesJumps"
+      ],
+      "given": {
+        "bytes": [
+          32,
+          165,
+          0,
+          7,
+          0,
+          21,
+          0,
+          8
+        ]
+      },
+      "expect": {
+        "jump": {
+          "kind": "ptt",
+          "titleNumber": null,
+          "ptt": 8,
+          "condition": "if GPRM7 == 21: "
+        }
+      }
+    },
+    {
+      "id": "jump-title",
+      "from": [
+        "macos DVDNavigationTests.decodesJumps"
+      ],
+      "given": {
+        "bytes": [
+          48,
+          2,
+          0,
+          0,
+          0,
+          4,
+          0,
+          0
+        ]
+      },
+      "expect": {
+        "jump": {
+          "kind": "title",
+          "title": 4,
+          "condition": ""
+        }
+      }
+    },
+    {
+      "id": "jump-none",
+      "from": [
+        "macos DVDNavigationTests.decodesJumps"
+      ],
+      "given": {
+        "bytes": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "expect": {
+        "jump": null
+      }
+    },
+    {
+      "id": "mkv-chapters-shifted",
+      "from": [
+        "macos DVDNavigationTests.mapsChaptersToMKV",
+        "windows ArchiveTests.PicksFirstEpisodeAndMapsChapters"
+      ],
+      "given": {
+        "plan": "dvd-play-all.navigation.expected.json",
+        "split": [
+          8,
+          15,
+          22,
+          29,
+          36,
+          43
+        ],
+        "mkvStarts": "a chapter 00 at 0, then every disc chapter start + 0.02 s"
+      },
+      "expect": {
+        "chapters": [
+          9,
+          16,
+          23,
+          30,
+          37,
+          44
+        ]
+      }
+    },
+    {
+      "id": "mkv-chapters-misaligned",
+      "from": [
+        "macos DVDNavigationTests.mapsChaptersToMKV"
+      ],
+      "given": {
+        "plan": "dvd-play-all.navigation.expected.json",
+        "split": [
+          8
+        ],
+        "mkvStarts": [
+          0,
+          10,
+          20
+        ]
+      },
+      "expect": {
+        "chapters": null
+      }
+    },
+    {
+      "id": "mkv-chapters-unknown",
+      "from": [
+        "macos DVDNavigationTests.mapsChaptersToMKV"
+      ],
+      "given": {
+        "plan": "dvd-play-all.navigation.expected.json",
+        "split": [
+          8,
+          15
+        ],
+        "mkvStarts": null
+      },
+      "expect": {
+        "chapters": [
+          8,
+          15
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,255 @@
+{
+  "functions": [
+    "NotifyRequests.build",
+    "NotifyMessages.forJob",
+    "NotifyRequests.targetsFor"
+  ],
+  "description": "How a notification URL is sent (more cases in shared/fixtures/notifications.json, which every platform already checks) and the text of job notifications.",
+  "cases": [
+    {
+      "id": "discord",
+      "from": [
+        "macos IntegrationFeatureTests.notificationDeliveries",
+        "windows IntegrationFeatureTests.NotificationDeliveries",
+        "linux /integrations/notifications"
+      ],
+      "given": {
+        "url": "https://discord.com/api/webhooks/1/abc",
+        "title": "T",
+        "body": "B",
+        "status": "success"
+      },
+      "expect": {
+        "json": {
+          "content": "**T**\nB"
+        }
+      }
+    },
+    {
+      "id": "slack",
+      "from": [
+        "macos IntegrationFeatureTests.notificationDeliveries",
+        "windows IntegrationFeatureTests.NotificationDeliveries",
+        "linux /integrations/notifications"
+      ],
+      "given": {
+        "url": "https://hooks.slack.com/services/x/y/z",
+        "title": "T",
+        "body": "B",
+        "status": "failed"
+      },
+      "expect": {
+        "json": {
+          "text": "*T*\nB"
+        }
+      }
+    },
+    {
+      "id": "ntfy",
+      "from": [
+        "macos IntegrationFeatureTests.notificationDeliveries",
+        "windows IntegrationFeatureTests.NotificationDeliveries",
+        "linux /integrations/notifications"
+      ],
+      "given": {
+        "url": "ntfy://rips",
+        "title": "T",
+        "body": "B",
+        "status": "failed"
+      },
+      "expect": {
+        "url": "https://ntfy.sh/rips",
+        "headers": {
+          "Title": "T"
+        },
+        "text": "B"
+      }
+    },
+    {
+      "id": "ntfys",
+      "from": [
+        "macos IntegrationFeatureTests.notificationDeliveries",
+        "windows IntegrationFeatureTests.NotificationDeliveries",
+        "linux /integrations/notifications"
+      ],
+      "given": {
+        "url": "ntfys://ntfy.example.org/rips",
+        "title": "T",
+        "body": "B",
+        "status": "success"
+      },
+      "expect": {
+        "url": "https://ntfy.example.org/rips"
+      }
+    },
+    {
+      "id": "webhook",
+      "from": [
+        "macos IntegrationFeatureTests.notificationDeliveries",
+        "windows IntegrationFeatureTests.NotificationDeliveries",
+        "linux /integrations/notifications"
+      ],
+      "given": {
+        "url": "https://example.org/hook",
+        "title": "T",
+        "body": "B",
+        "status": "errors"
+      },
+      "expect": {
+        "json": {
+          "app": "Bromelia",
+          "title": "T",
+          "body": "B",
+          "status": "errors"
+        }
+      }
+    },
+    {
+      "id": "tgram-malformed",
+      "from": [
+        "macos IntegrationFeatureTests.notificationDeliveries",
+        "windows IntegrationFeatureTests.NotificationDeliveries",
+        "linux /integrations/notifications"
+      ],
+      "given": {
+        "url": "tgram://bot/chat",
+        "title": "T",
+        "body": "B",
+        "status": "success"
+      },
+      "expect": {
+        "apprise": "tgram://bot/chat"
+      }
+    },
+    {
+      "id": "empty",
+      "from": [
+        "macos IntegrationFeatureTests.notificationDeliveries",
+        "windows IntegrationFeatureTests.NotificationDeliveries",
+        "linux /integrations/notifications"
+      ],
+      "given": {
+        "url": "",
+        "title": "T",
+        "body": "B",
+        "status": "success"
+      },
+      "expect": {
+        "delivery": null
+      }
+    },
+    {
+      "id": "recorded-cases",
+      "from": [
+        "macos NotificationFixtureTests.sharedCases",
+        "windows LookupTests.NotificationDeliveries",
+        "linux /notifications/fixtures"
+      ],
+      "given": {
+        "fixture": "notifications.json"
+      },
+      "expect": {
+        "asInFixture": true
+      }
+    },
+    {
+      "id": "job-title-succeeded",
+      "from": [
+        "macos JobRunner.notificationText"
+      ],
+      "given": {
+        "mode": "mkv",
+        "outcome": "succeeded",
+        "what": "Inception"
+      },
+      "expect": {
+        "title": {
+          "code": "notify.title.job",
+          "params": {
+            "mode": "mkv",
+            "outcome": "succeeded",
+            "what": "Inception"
+          }
+        },
+        "text": "MKV finished: Inception"
+      }
+    },
+    {
+      "id": "job-title-read-errors",
+      "from": [
+        "macos JobRunner.notificationText"
+      ],
+      "given": {
+        "mode": "backupThenMkv",
+        "outcome": "succeededWithReadErrors",
+        "what": "One Piece"
+      },
+      "expect": {
+        "text": "Backup + MKV completed with read errors: One Piece"
+      }
+    },
+    {
+      "id": "job-body-saved",
+      "from": [
+        "macos JobRunner.notificationText"
+      ],
+      "given": {
+        "outcome": "succeeded",
+        "files": 2,
+        "path": "/rips/Inception"
+      },
+      "expect": {
+        "body": {
+          "code": "notify.body.saved",
+          "params": {
+            "count": 2,
+            "path": "/rips/Inception"
+          }
+        },
+        "text": "2 items saved to /rips/Inception"
+      }
+    },
+    {
+      "id": "only-problems",
+      "from": [
+        "docs/configuration.md#notifications (with onlyProblems, only when it didn't succeed)"
+      ],
+      "given": {
+        "targets": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b",
+            "onlyProblems": true
+          }
+        ],
+        "statuses": [
+          "success",
+          "errors",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "expect": {
+        "sentTo": {
+          "success": [
+            "a"
+          ],
+          "errors": [
+            "a",
+            "b"
+          ],
+          "failed": [
+            "a",
+            "b"
+          ],
+          "cancelled": [
+            "a",
+            "b"
+          ]
+        }
+      }
+    }
+  ]
+}

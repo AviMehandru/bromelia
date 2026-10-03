@@ -1,0 +1,387 @@
+{
+  "functions": [
+    "TitleRules.select"
+  ],
+  "description": "TitleRules.select(listing, rules) → selected indices and the reason for each title (SelectionTrace). Filters, then duplicates (same segment map, length and angle), then the strategy, then maxTitles. The include/exclude text is the title name, comment, output file name, source file name, segment map, '#<source id>' and duration. Missing rule keys take the defaults of config-3.json TitleRules.",
+  "cases": [
+    {
+      "id": "all-skips-duplicates",
+      "from": [
+        "macos TitleSelectorTests.allWithDuplicateSkipping",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "all"
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          2,
+          3,
+          4
+        ],
+        "reasons": {
+          "1": {
+            "code": "titles.reason.duplicateOf",
+            "params": {
+              "title": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "all-keeps-duplicates",
+      "from": [
+        "macos TitleSelectorTests.allWithDuplicateSkipping",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "all",
+          "skipDuplicates": false
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "id": "longest-one",
+      "from": [
+        "macos TitleSelectorTests.mainFeature",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "longest"
+        }
+      },
+      "expect": {
+        "selected": [
+          0
+        ]
+      }
+    },
+    {
+      "id": "longest-three",
+      "from": [
+        "macos TitleSelectorTests.mainFeature",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "longest",
+          "longestCount": 3
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "episodes-by-duration",
+      "from": [
+        "macos TitleSelectorTests.episodesByDuration",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "minDurationSeconds": 1200,
+          "maxDurationSeconds": 1800
+        }
+      },
+      "expect": {
+        "selected": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "index-pattern",
+      "from": [
+        "macos TitleSelectorTests.indexPatterns",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "indices",
+          "skipDuplicates": false,
+          "indexPattern": "0, 3-"
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "id": "index-last",
+      "from": [
+        "macos TitleSelectorTests.indexPatterns",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "indices",
+          "skipDuplicates": false,
+          "indexPattern": "last"
+        }
+      },
+      "expect": {
+        "selected": [
+          4
+        ]
+      }
+    },
+    {
+      "id": "index-source",
+      "from": [
+        "macos TitleSelectorTests.indexPatterns",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "indices",
+          "skipDuplicates": false,
+          "indexBase": "source",
+          "indexPattern": "800-801,11"
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          1,
+          3
+        ]
+      }
+    },
+    {
+      "id": "index-invalid",
+      "from": [
+        "macos TitleSelectorTests.indexPatterns",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "indices",
+          "skipDuplicates": false,
+          "indexPattern": "x"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "config.invalidIndexPattern"
+        },
+        "selected": []
+      }
+    },
+    {
+      "id": "include-pattern",
+      "from": [
+        "macos TitleSelectorTests.regexFilters",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "skipDuplicates": false,
+          "includePattern": "0080[01]\\.mpls"
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "exclude-name",
+      "from": [
+        "macos TitleSelectorTests.regexFilters",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "skipDuplicates": false,
+          "excludePattern": "trailer"
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "exclude-source-id",
+      "from": [
+        "macos TitleSelectorTests.regexFilters",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "skipDuplicates": false,
+          "excludePattern": "#10\\b"
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          1,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "id": "max-titles",
+      "from": [
+        "macos TitleSelectorTests.limitsAndManual",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "maxTitles": 2
+        }
+      },
+      "expect": {
+        "selected": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "id": "manual",
+      "from": [
+        "macos TitleSelectorTests.limitsAndManual",
+        "windows TitleSelectorTests",
+        "linux /logic/selection"
+      ],
+      "given": {
+        "titles": "five",
+        "rules": {
+          "strategy": "manual",
+          "maxTitles": 2
+        }
+      },
+      "expect": {
+        "selected": [],
+        "requiresManualChoice": true
+      }
+    },
+    {
+      "id": "real-disc-longest",
+      "from": [
+        "macos TitleSelectorTests.worksOnRealDisc"
+      ],
+      "given": {
+        "listing": "info-dvd.txt",
+        "rules": {
+          "strategy": "longest"
+        }
+      },
+      "expect": {
+        "selected": [
+          0
+        ]
+      }
+    }
+  ],
+  "inputs": {
+    "five": [
+      {
+        "index": 0,
+        "duration": "1:58:02",
+        "chapters": 24,
+        "sizeBytes": 30000000000,
+        "sourceTitleId": 800,
+        "segmentMap": "1,2,3",
+        "sourceFile": "00800.mpls"
+      },
+      {
+        "index": 1,
+        "duration": "1:58:02",
+        "chapters": 24,
+        "sizeBytes": 30000000000,
+        "sourceTitleId": 801,
+        "segmentMap": "1,2,3",
+        "sourceFile": "00801.mpls"
+      },
+      {
+        "index": 2,
+        "duration": "0:22:10",
+        "chapters": 5,
+        "sizeBytes": 2000000000,
+        "sourceTitleId": 10,
+        "segmentMap": "",
+        "sourceFile": "00010.mpls"
+      },
+      {
+        "index": 3,
+        "duration": "0:23:15",
+        "chapters": 6,
+        "sizeBytes": 2100000000,
+        "sourceTitleId": 11,
+        "segmentMap": "",
+        "sourceFile": "00011.mpls"
+      },
+      {
+        "index": 4,
+        "duration": "0:03:00",
+        "chapters": 1,
+        "sizeBytes": 100000000,
+        "sourceTitleId": 20,
+        "segmentMap": "",
+        "sourceFile": "00020.mpls",
+        "name": "Trailer"
+      }
+    ]
+  }
+}

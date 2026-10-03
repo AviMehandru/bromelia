@@ -1,0 +1,464 @@
+{
+  "functions": [
+    "SettingsConf.parse",
+    "SettingsConf.render",
+    "ProfileXml.render",
+    "SettingsLayers.merge",
+    "MakemkvArgs.info",
+    "MakemkvArgs.mkv",
+    "MakemkvArgs.backup",
+    "MakemkvArgs.scanDrives",
+    "SourceResolver.source",
+    "BetaKeyPage.parse",
+    "BetaKey.mayReplace"
+  ],
+  "description": "settings.conf, the generated .mmcp.xml profile, makemkvcon command lines, where a file belongs and the beta key.",
+  "cases": [
+    {
+      "id": "settings-parse",
+      "from": [
+        "macos MakeMKVFileTests.settingsRoundTrip",
+        "windows MakeMKVFileTests.SettingsRoundTrip",
+        "linux /makemkv/settings-conf"
+      ],
+      "given": {
+        "text": "#\n# MakeMKV settings file\n#\napp_DestinationDir = \"/Users/me/Movies\"\napp_ExpertMode = \"1\"\ndvd_MinimumTitleLength = \"120\"\n"
+      },
+      "expect": {
+        "parse": {
+          "app_DestinationDir": "/Users/me/Movies",
+          "app_ExpertMode": "1",
+          "dvd_MinimumTitleLength": "120"
+        },
+        "roundTrips": true
+      }
+    },
+    {
+      "id": "profile-xml",
+      "from": [
+        "macos MakeMKVFileTests.profileIsWellFormedXML",
+        "windows MakeMKVFileTests.ProfileIsWellFormed",
+        "linux /makemkv/profile"
+      ],
+      "given": {
+        "generated": {
+          "name": "Test & <Profile>",
+          "selectionRule": "-sel:all,+sel:(eng|jpn)&audio"
+        }
+      },
+      "expect": {
+        "wellFormedXml": true,
+        "contains": [
+          "app_DefaultSelectionString=\"-sel:all,+sel:(eng|jpn)&amp;audio\"",
+          "outputSettingsName=\"flac-best\""
+        ]
+      }
+    },
+    {
+      "id": "profile-xml-default-rule",
+      "from": [
+        "macos MakeMKVFileTests.profileIsWellFormedXML"
+      ],
+      "given": {
+        "generated": {}
+      },
+      "expect": {
+        "containsMakemkvDefaultSelection": true
+      }
+    },
+    {
+      "id": "settings-layers",
+      "from": [
+        "macos MakeMKVFileTests.environmentIsolatesSettings",
+        "windows MakeMKVFileTests.EnvironmentBuildsArguments",
+        "linux /makemkv/environment",
+        "macos ConfigurationTests.effectiveSettingsOverlay",
+        "windows ConfigurationTests.EffectiveSettingsOverlay"
+      ],
+      "given": {
+        "global": {
+          "dvd_MinimumTitleLength": "120",
+          "app_ShowDebug": "1",
+          "app_Proxy": ""
+        },
+        "profile": {},
+        "drive": {
+          "dvd_MinimumTitleLength": "30"
+        },
+        "registrationKey": "T-TESTKEY",
+        "selectionOverride": "+sel:all",
+        "makemkvDataDir": "/Users/me/Library/MakeMKV"
+      },
+      "expect": {
+        "settings": {
+          "dvd_MinimumTitleLength": "30",
+          "app_ShowDebug": "1",
+          "app_Key": "T-TESTKEY",
+          "app_DefaultSelectionString": "+sel:all",
+          "app_DataDir": "/Users/me/Library/MakeMKV"
+        },
+        "rule": "Layers: makemkv.settings → the profile's → the drive's makemkvSettings; empty values are dropped; app_Key from the registration key when set; app_DefaultSelectionString from the selection override (hand-picked tracks: +sel:all); app_DataDir points back to the user's real MakeMKV data folder."
+      }
+    },
+    {
+      "id": "settings-overlay",
+      "from": [
+        "macos ConfigurationTests.effectiveSettingsOverlay",
+        "windows ConfigurationTests.EffectiveSettingsOverlay"
+      ],
+      "given": {
+        "global": {
+          "a": "1",
+          "b": "2"
+        },
+        "profile": {},
+        "drive": {
+          "b": "3",
+          "c": "4"
+        }
+      },
+      "expect": {
+        "settings": {
+          "a": "1",
+          "b": "3",
+          "c": "4"
+        }
+      }
+    },
+    {
+      "id": "args-info",
+      "from": [
+        "macos MakeMKVFileTests.environmentIsolatesSettings",
+        "windows MakeMKVFileTests.EnvironmentBuildsArguments",
+        "linux /makemkv/environment"
+      ],
+      "given": {
+        "command": "info",
+        "source": {
+          "drive": {
+            "index": 2,
+            "device": "/dev/rdisk5"
+          }
+        },
+        "options": {
+          "minLengthSeconds": 45,
+          "cacheMB": 256,
+          "directIO": false
+        },
+        "profilePath": "/job/home/profile.mmcp.xml"
+      },
+      "expect": {
+        "endsWith": [
+          "info",
+          "dev:/dev/rdisk5"
+        ],
+        "contains": [
+          "-r",
+          "--progress=-same",
+          "--minlength=45",
+          "--cache=256",
+          "--directio=false",
+          "--profile=/job/home/profile.mmcp.xml",
+          "--noscan"
+        ]
+      }
+    },
+    {
+      "id": "args-mkv-iso",
+      "from": [
+        "macos MakeMKVFileTests.environmentIsolatesSettings"
+      ],
+      "given": {
+        "command": "mkv",
+        "source": {
+          "iso": "/a b.iso"
+        },
+        "title": "all",
+        "destination": "/out"
+      },
+      "expect": {
+        "endsWith": [
+          "mkv",
+          "iso:/a b.iso",
+          "all",
+          "/out"
+        ]
+      }
+    },
+    {
+      "id": "args-backup",
+      "from": [
+        "macos MakeMKVFileTests.environmentIsolatesSettings"
+      ],
+      "given": {
+        "command": "backup",
+        "source": {
+          "drive": {
+            "index": 2,
+            "device": "/dev/rdisk5"
+          }
+        },
+        "decrypt": true,
+        "destination": "/bk"
+      },
+      "expect": {
+        "endsWith": [
+          "backup",
+          "--decrypt",
+          "disc:2",
+          "/bk"
+        ]
+      }
+    },
+    {
+      "id": "args-backup-needs-drive",
+      "from": [
+        "macos MakeMKVFileTests.environmentIsolatesSettings"
+      ],
+      "given": {
+        "command": "backup",
+        "source": {
+          "folder": "/x"
+        },
+        "decrypt": false,
+        "destination": "/bk"
+      },
+      "expect": {
+        "error": {
+          "code": "backup.needsDrive"
+        }
+      }
+    },
+    {
+      "id": "args-drive-scan",
+      "from": [
+        "docs/architecture.md#makemkvcon (drive scan)"
+      ],
+      "given": {
+        "command": "scanDrives"
+      },
+      "expect": {
+        "arguments": [
+          "-r",
+          "--cache=1",
+          "info",
+          "disc:9999"
+        ]
+      }
+    },
+    {
+      "id": "source-1",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/Disc/VIDEO_TS/VTS_01_1.VOB",
+        "isDirectory": false
+      },
+      "expect": {
+        "source": "file:/Rips/Disc"
+      }
+    },
+    {
+      "id": "source-2",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/Disc/VIDEO_TS/VIDEO_TS.IFO",
+        "isDirectory": false
+      },
+      "expect": {
+        "source": "file:/Rips/Disc"
+      }
+    },
+    {
+      "id": "source-3",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/Disc/BDMV/PLAYLIST/00800.mpls",
+        "isDirectory": false
+      },
+      "expect": {
+        "source": "file:/Rips/Disc"
+      }
+    },
+    {
+      "id": "source-4",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/Disc/BDMV/STREAM/00001.m2ts",
+        "isDirectory": false
+      },
+      "expect": {
+        "source": "file:/Rips/Disc"
+      }
+    },
+    {
+      "id": "source-5",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/Disc/BDMV",
+        "isDirectory": true
+      },
+      "expect": {
+        "source": "file:/Rips/Disc"
+      }
+    },
+    {
+      "id": "source-6",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/Disc",
+        "isDirectory": true
+      },
+      "expect": {
+        "source": "file:/Rips/Disc"
+      }
+    },
+    {
+      "id": "source-7",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/Movie.ISO",
+        "isDirectory": false
+      },
+      "expect": {
+        "source": "iso:/Rips/Movie.ISO"
+      }
+    },
+    {
+      "id": "source-8",
+      "from": [
+        "macos ParityTests.opensTheDiscAFileBelongsTo",
+        "windows ParityTests.OpensTheDiscAFileBelongsTo",
+        "linux /parity/source-resolve"
+      ],
+      "given": {
+        "path": "/Rips/loose.m2ts",
+        "isDirectory": false
+      },
+      "expect": {
+        "source": "file:/Rips/loose.m2ts"
+      }
+    },
+    {
+      "id": "beta-key-page",
+      "from": [
+        "macos ParityTests.readsTheBetaKeyFromTheForumPage",
+        "windows ParityTests.ReadsTheBetaKeyFromTheForumPage",
+        "linux /parity/beta-key"
+      ],
+      "given": {
+        "html": "<div class=\"codebox\"><p>Code: <a href=\"#\">Select all</a></p><pre><code>T-aB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_x</code></pre></div> and is valid until end of October"
+      },
+      "expect": {
+        "key": "T-aB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_x"
+      }
+    },
+    {
+      "id": "beta-key-page-none",
+      "from": [
+        "macos ParityTests.readsTheBetaKeyFromTheForumPage"
+      ],
+      "given": {
+        "html": "no key here"
+      },
+      "expect": {
+        "key": null
+      }
+    },
+    {
+      "id": "beta-key-page-fixture",
+      "from": [
+        "shared/scenarios/makemkv-beta-key-installed-when-expired.yaml"
+      ],
+      "given": {
+        "htmlFile": "domain/beta-key-page.html"
+      },
+      "expect": {
+        "key": "T-aB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_xaB3@_x"
+      }
+    },
+    {
+      "id": "beta-key-may-replace-1",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "currentKey": null
+      },
+      "expect": {
+        "mayReplace": true
+      }
+    },
+    {
+      "id": "beta-key-may-replace-2",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "currentKey": ""
+      },
+      "expect": {
+        "mayReplace": true
+      }
+    },
+    {
+      "id": "beta-key-may-replace-3",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "currentKey": "T-abc"
+      },
+      "expect": {
+        "mayReplace": true
+      }
+    },
+    {
+      "id": "beta-key-may-replace-4",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "currentKey": "M-purchasedkey"
+      },
+      "expect": {
+        "mayReplace": false
+      }
+    }
+  ]
+}

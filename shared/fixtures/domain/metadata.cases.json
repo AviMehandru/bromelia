@@ -1,0 +1,311 @@
+{
+  "functions": [
+    "TmdbRequests.search",
+    "TmdbRequests.details",
+    "TmdbRequests.find",
+    "TmdbRequests.season",
+    "OmdbRequests.search",
+    "OmdbRequests.details",
+    "OmdbRequests.season",
+    "TmdbParse.candidates",
+    "OmdbParse.candidates",
+    "Ranking.rank",
+    "OnlineId.parse",
+    "OnlineId.splitYear"
+  ],
+  "description": "Online lookup requests (pure specs: method, URL, headers; the key never on a command line) and answers. shared/fixtures/lookup/expected.json holds the recorded answers' cases.",
+  "cases": [
+    {
+      "id": "tmdb-search-tv-key",
+      "from": [
+        "macos IntegrationFeatureTests.metadataResults",
+        "windows IntegrationFeatureTests.MetadataResults",
+        "linux /integrations/metadata"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "key": "0123456789abcdef0123456789abcdef",
+        "search": {
+          "name": "One Piece",
+          "kind": "tv"
+        }
+      },
+      "expect": {
+        "method": "GET",
+        "path": "/3/search/tv",
+        "queryContains": [
+          "api_key=0123456789abcdef0123456789abcdef"
+        ],
+        "noHeader": "Authorization"
+      }
+    },
+    {
+      "id": "tmdb-bearer",
+      "from": [
+        "macos IntegrationFeatureTests.metadataResults"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "key": "eyJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "search": {
+          "name": "One Piece",
+          "kind": "movie"
+        }
+      },
+      "expect": {
+        "header": {
+          "Authorization": "Bearer eyJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "queryExcludes": [
+          "api_key"
+        ],
+        "rule": "A key longer than 40 characters is a read access token (Bearer)."
+      }
+    },
+    {
+      "id": "tmdb-search-year",
+      "from": [
+        "macos LookupTests.requests",
+        "windows LookupTests.Requests",
+        "linux /lookup/requests"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "key": "0123456789abcdef0123456789abcdef",
+        "search": {
+          "name": "Friends",
+          "kind": "tv",
+          "year": 1994
+        }
+      },
+      "expect": {
+        "path": "/3/search/tv",
+        "queryContains": [
+          "first_air_date_year=1994"
+        ]
+      }
+    },
+    {
+      "id": "tmdb-id-movie",
+      "from": [
+        "macos LookupTests.requests"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "id": {
+          "tmdb": 603
+        },
+        "kind": "movie"
+      },
+      "expect": {
+        "path": "/3/movie/603"
+      }
+    },
+    {
+      "id": "tmdb-id-tv-kind",
+      "from": [
+        "macos LookupTests.requests"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "id": {
+          "tmdb": 1668,
+          "kind": "tv"
+        },
+        "kind": "movie"
+      },
+      "expect": {
+        "path": "/3/tv/1668"
+      }
+    },
+    {
+      "id": "tmdb-imdb-find",
+      "from": [
+        "macos LookupTests.requests"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "id": {
+          "imdb": "tt0108778"
+        },
+        "kind": "tv"
+      },
+      "expect": {
+        "queryContains": [
+          "external_source=imdb_id"
+        ]
+      }
+    },
+    {
+      "id": "tmdb-season",
+      "from": [
+        "macos LookupTests.requests"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "season": {
+          "tmdbId": 1668,
+          "imdbId": "tt0108778",
+          "kind": "tv",
+          "season": 2
+        }
+      },
+      "expect": {
+        "path": "/3/tv/1668/season/2"
+      }
+    },
+    {
+      "id": "omdb-no-tmdb-ids",
+      "from": [
+        "macos LookupTests.requests"
+      ],
+      "given": {
+        "provider": "omdb",
+        "key": "k",
+        "id": {
+          "tmdb": 603
+        },
+        "kind": "movie"
+      },
+      "expect": {
+        "request": null,
+        "error": {
+          "code": "metadata.idUnsupported"
+        }
+      }
+    },
+    {
+      "id": "omdb-season",
+      "from": [
+        "macos LookupTests.requests"
+      ],
+      "given": {
+        "provider": "omdb",
+        "key": "k",
+        "season": {
+          "tmdbId": 1668,
+          "imdbId": "tt0108778",
+          "kind": "tv",
+          "season": 2
+        }
+      },
+      "expect": {
+        "queryContains": [
+          "i=tt0108778",
+          "Season=2"
+        ]
+      }
+    },
+    {
+      "id": "omdb-search",
+      "from": [
+        "macos LookupTests.requests"
+      ],
+      "given": {
+        "provider": "omdb",
+        "key": "k",
+        "search": {
+          "name": "Dune",
+          "kind": "movie",
+          "year": 1984
+        }
+      },
+      "expect": {
+        "queryContains": [
+          "s=Dune",
+          "y=1984"
+        ]
+      }
+    },
+    {
+      "id": "parse-tmdb-best",
+      "from": [
+        "macos IntegrationFeatureTests.metadataResults",
+        "windows IntegrationFeatureTests.MetadataResults"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "name": "INCEPTION",
+        "kind": "movie",
+        "body": "{\"results\":[{\"id\":1,\"title\":\"Inception Behind\",\"release_date\":\"2011-01-01\"},{\"id\":27205,\"title\":\"Inception\",\"release_date\":\"2010-07-15\"}]}"
+      },
+      "expect": {
+        "best": {
+          "title": "Inception",
+          "year": 2010,
+          "tmdbId": 27205
+        }
+      }
+    },
+    {
+      "id": "parse-tmdb-tv",
+      "from": [
+        "macos IntegrationFeatureTests.metadataResults"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "name": "One Piece",
+        "kind": "tv",
+        "body": "{\"results\":[{\"id\":37854,\"name\":\"One Piece\",\"first_air_date\":\"1999-10-20\"}]}"
+      },
+      "expect": {
+        "best": {
+          "year": 1999
+        }
+      }
+    },
+    {
+      "id": "parse-omdb-years",
+      "from": [
+        "macos IntegrationFeatureTests.metadataResults"
+      ],
+      "given": {
+        "provider": "omdb",
+        "name": "Friends",
+        "body": "{\"Title\":\"Friends\",\"Year\":\"1994–2004\",\"imdbID\":\"tt0108778\",\"Response\":\"True\"}"
+      },
+      "expect": {
+        "best": {
+          "year": 1994,
+          "imdbId": "tt0108778"
+        }
+      }
+    },
+    {
+      "id": "parse-omdb-false",
+      "from": [
+        "macos IntegrationFeatureTests.metadataResults"
+      ],
+      "given": {
+        "provider": "omdb",
+        "name": "x",
+        "body": "{\"Response\":\"False\"}"
+      },
+      "expect": {
+        "best": null
+      }
+    },
+    {
+      "id": "recorded-answers",
+      "from": [
+        "macos LookupTests.rankedSearchResults",
+        "macos LookupTests.detailsAndSeasons",
+        "macos LookupTests.idsAndYears",
+        "windows LookupTests.RankedSearchResults",
+        "windows LookupTests.DetailsAndSeasons",
+        "windows LookupTests.IdsAndYears",
+        "linux /lookup/fixtures"
+      ],
+      "given": {
+        "fixture": "lookup/expected.json"
+      },
+      "expect": {
+        "asInFixture": true
+      }
+    }
+  ]
+}

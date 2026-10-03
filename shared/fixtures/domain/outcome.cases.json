@@ -1,0 +1,444 @@
+{
+  "functions": [
+    "RunOutcome.classify",
+    "JobOutcome.decide"
+  ],
+  "description": "RunOutcome.classify: what one makemkvcon run said (exit 0 when a title fails, so the saved / failed counts 5036, 5037, 5004 and the produced files decide). JobOutcome.decide: the job's outcome from its steps' results, cancellation and policy, one pure function.",
+  "cases": [
+    {
+      "id": "run-mkv-rip",
+      "from": [
+        "shared/fixtures/rip-outcomes.json",
+        "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "producedFiles": 1
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null
+      }
+    },
+    {
+      "id": "run-rip-read-errors",
+      "from": [
+        "shared/fixtures/rip-outcomes.json",
+        "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixture": "rip-read-errors.txt",
+        "exitCode": 0,
+        "producedFiles": 1
+      },
+      "expect": {
+        "statusWord": "errors",
+        "failed": false,
+        "readErrors": true,
+        "errorContains": "read error"
+      }
+    },
+    {
+      "id": "run-rip-failure",
+      "from": [
+        "shared/fixtures/rip-outcomes.json",
+        "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixture": "rip-failure.txt",
+        "exitCode": 0,
+        "producedFiles": 0
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "MEDIUM ERROR"
+      }
+    },
+    {
+      "id": "run-rip-disk-full",
+      "from": [
+        "shared/fixtures/rip-outcomes.json",
+        "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixture": "rip-disk-full.txt",
+        "exitCode": 0,
+        "producedFiles": 0
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "free space"
+      }
+    },
+    {
+      "id": "run-rip-killed",
+      "from": [
+        "shared/fixtures/rip-outcomes.json",
+        "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixture": "rip-killed.txt",
+        "exitCode": 143,
+        "producedFiles": 1
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "exit status 143"
+      }
+    },
+    {
+      "id": "run-rip-missing-source",
+      "from": [
+        "shared/fixtures/rip-outcomes.json",
+        "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixture": "rip-missing-source.txt",
+        "exitCode": 11,
+        "producedFiles": 0
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "does not exist"
+      }
+    },
+    {
+      "id": "run-rip-missing-title",
+      "from": [
+        "shared/fixtures/rip-outcomes.json",
+        "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixture": "rip-missing-title.txt",
+        "exitCode": 12,
+        "producedFiles": 0
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "Input parameter is incorrect"
+      }
+    },
+    {
+      "id": "decide-succeeded",
+      "from": [
+        "macos JobRunner.run (today's chain of flags); rearchitecture-plan §20.3"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 0
+          },
+          {
+            "kind": "commit",
+            "state": "succeeded"
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "succeeded"
+      }
+    },
+    {
+      "id": "decide-read-errors",
+      "from": [
+        "macos JobRunner.run (today's chain of flags); rearchitecture-plan §20.3"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 2
+          },
+          {
+            "kind": "commit",
+            "state": "succeeded",
+            "quarantined": true
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "succeededWithReadErrors",
+        "error": {
+          "code": "rip.readErrors",
+          "params": {
+            "count": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "decide-failed-step",
+      "from": [
+        "macos JobRunner.run (today's chain of flags); rearchitecture-plan §20.3"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "failed",
+            "error": {
+              "code": "rip.failed"
+            }
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "failed",
+        "error": {
+          "code": "rip.failed"
+        }
+      }
+    },
+    {
+      "id": "decide-cancel-wins",
+      "from": [
+        "macos JobRunner.run (today's chain of flags); rearchitecture-plan §20.3"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "failed",
+            "error": {
+              "code": "rip.failed"
+            }
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "cancelled",
+        "error": {
+          "code": "job.cancelledByUser"
+        }
+      }
+    },
+    {
+      "id": "decide-cancel-after-success",
+      "from": [
+        "macos JobRunner.run (if cancelRequested && status == .succeeded { status = .cancelled })"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 0
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "cancelled"
+      }
+    },
+    {
+      "id": "decide-makemkv-problem-named",
+      "from": [
+        "macos JobRunner.run (the explanation of a MakeMKV problem replaces the error, with the original as its cause)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "probe",
+            "state": "failed",
+            "error": {
+              "code": "disc.noTitles"
+            },
+            "notice": "keyExpired"
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "failed",
+        "error": {
+          "code": "makemkv.keyExpired",
+          "cause": {
+            "code": "disc.noTitles"
+          }
+        }
+      }
+    },
+    {
+      "id": "decide-already-archived",
+      "from": [
+        "macos JobRunner.checkAlreadyArchived; rearchitecture-plan §20.2 Skipped"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "plan",
+            "state": "succeeded",
+            "skip": {
+              "code": "disc.alreadyArchived"
+            }
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "skipped",
+        "error": {
+          "code": "disc.alreadyArchived"
+        }
+      }
+    },
+    {
+      "id": "decide-step-failed-affects",
+      "from": [
+        "rearchitecture-plan §20.3"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "commit",
+            "state": "succeeded"
+          },
+          {
+            "kind": "postProcess",
+            "state": "failed",
+            "affectsOutcome": true
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "succeededStepsFailed"
+      }
+    },
+    {
+      "id": "decide-step-failed-ignored",
+      "from": [
+        "docs/configuration.md#postprocessstep (failJobOnError false)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "commit",
+            "state": "succeeded"
+          },
+          {
+            "kind": "postProcess",
+            "state": "failed",
+            "affectsOutcome": false
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "succeeded"
+      }
+    },
+    {
+      "id": "decide-read-errors-and-step-failed",
+      "from": [
+        "rearchitecture-plan §20.3 (read errors are the more important fact)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 1
+          },
+          {
+            "kind": "commit",
+            "state": "succeeded",
+            "quarantined": true
+          },
+          {
+            "kind": "postProcess",
+            "state": "failed",
+            "affectsOutcome": true
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "succeededWithReadErrors"
+      }
+    },
+    {
+      "id": "decide-interrupted",
+      "from": [
+        "rearchitecture-plan §20.4"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "interrupted"
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "interrupted",
+        "error": {
+          "code": "recovery.interrupted",
+          "params": {
+            "step": "acquire"
+          }
+        }
+      }
+    },
+    {
+      "id": "decide-move-failed",
+      "from": [
+        "macos JobRunner.finishOutput (some files could not be moved)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "commit",
+            "state": "failed",
+            "error": {
+              "code": "archive.someNotMoved"
+            }
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "failed",
+        "error": {
+          "code": "archive.someNotMoved"
+        }
+      }
+    }
+  ]
+}

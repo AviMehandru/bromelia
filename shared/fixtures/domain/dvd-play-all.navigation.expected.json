@@ -1,0 +1,55 @@
+{
+  "functions": [
+    "DvdNav.analyse",
+    "DvdNav.plans"
+  ],
+  "from": [
+    "macos DVDNavigationTests.findsPlayAllEpisodes",
+    "windows ArchiveTests.FindsPlayAllEpisodes",
+    "linux /dvd/navigation"
+  ],
+  "input": "dvd-play-all/VIDEO_TS",
+  "description": "DvdNav.analyse over the IFOs of One_Piece_S2_P7_D2 (title 11 plays six episodes back to back), then the first episode plan.",
+  "expect": {
+    "plan": {
+      "title": 11,
+      "starts": [
+        1,
+        8,
+        15,
+        22,
+        29,
+        36
+      ],
+      "lastEnd": 42,
+      "endRule": "VOB boundary",
+      "tail": [
+        43
+      ],
+      "splitChapters": [
+        8,
+        15,
+        22,
+        29,
+        36,
+        43
+      ],
+      "duration": "2:21:51.370",
+      "chapterStart8": "0:23:36.815",
+      "chapterRanges": {
+        "0": [
+          1,
+          7
+        ],
+        "5": [
+          36,
+          42
+        ]
+      },
+      "plausibleStrict": true,
+      "reasons": {
+        "1": "if GPRM7 == 21: LinkPTTN 8"
+      }
+    }
+  }
+}

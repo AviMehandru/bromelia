@@ -1,0 +1,294 @@
+{
+  "functions": [
+    "Authenticator.check",
+    "ConfigValidator.validate"
+  ],
+  "description": "Who may call which route (shared/schema/api/routes.json conventions). Each platform's Server tests run these.",
+  "cases": [
+    {
+      "id": "local-host-ok",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows IntegrationFeatureTests.WebAccessRules",
+        "linux /integrations/web-access"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "GET",
+        "host": "localhost:51280",
+        "tokens": []
+      },
+      "expect": {
+        "allowed": true
+      }
+    },
+    {
+      "id": "other-host-forbidden",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows IntegrationFeatureTests.WebAccessRules",
+        "linux /integrations/web-access"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "GET",
+        "host": "attacker.example:51280",
+        "tokens": []
+      },
+      "expect": {
+        "status": 403,
+        "code": "server.hostNotAllowed"
+      }
+    },
+    {
+      "id": "post-needs-header",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows IntegrationFeatureTests.WebAccessRules",
+        "linux /integrations/web-access"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "POST",
+        "host": "127.0.0.1:51280",
+        "tokens": []
+      },
+      "expect": {
+        "status": 403,
+        "code": "server.headerMissing"
+      }
+    },
+    {
+      "id": "post-with-header",
+      "from": [
+        "windows IntegrationFeatureTests.WebAccessRules"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "POST",
+        "host": "127.0.0.1:51280",
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "tokens": []
+      },
+      "expect": {
+        "allowed": true
+      }
+    },
+    {
+      "id": "token-any-host",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows IntegrationFeatureTests.WebAccessRules",
+        "linux /integrations/web-access"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "GET",
+        "host": "attacker.example",
+        "headers": {
+          "Authorization": "Bearer s3cret"
+        },
+        "tokens": [
+          {
+            "token": "s3cret",
+            "scope": "control"
+          }
+        ]
+      },
+      "expect": {
+        "allowed": true
+      }
+    },
+    {
+      "id": "token-missing",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows IntegrationFeatureTests.WebAccessRules",
+        "linux /integrations/web-access"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "GET",
+        "host": "localhost",
+        "tokens": [
+          {
+            "token": "s3cret",
+            "scope": "control"
+          }
+        ]
+      },
+      "expect": {
+        "status": 401,
+        "code": "server.tokenRequired"
+      }
+    },
+    {
+      "id": "token-in-url-refused",
+      "from": [
+        "rearchitecture-plan §25 (no tokens left in URLs)",
+        "docs/configuration.md#web-page (?token= today)"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "GET",
+        "host": "localhost",
+        "query": {
+          "token": "s3cret"
+        },
+        "tokens": [
+          {
+            "token": "s3cret",
+            "scope": "control"
+          }
+        ]
+      },
+      "expect": {
+        "status": 401,
+        "code": "server.tokenRequired"
+      }
+    },
+    {
+      "id": "cookie",
+      "from": [
+        "rearchitecture-plan §25"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "GET",
+        "host": "nas.local",
+        "cookie": "the cookie /v1/login set",
+        "tokens": [
+          {
+            "token": "s3cret",
+            "scope": "control"
+          }
+        ]
+      },
+      "expect": {
+        "allowed": true
+      }
+    },
+    {
+      "id": "read-token-cant-write",
+      "from": [
+        "rearchitecture-plan §25 (scoped tokens)"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "POST",
+        "host": "nas.local",
+        "headers": {
+          "Authorization": "Bearer v",
+          "X-Bromelia": "1"
+        },
+        "tokens": [
+          {
+            "token": "v",
+            "scope": "read"
+          }
+        ]
+      },
+      "expect": {
+        "status": 403,
+        "code": "server.readOnlyToken"
+      }
+    },
+    {
+      "id": "origin-mismatch",
+      "from": [
+        "rearchitecture-plan §25 (Origin check)"
+      ],
+      "given": {
+        "transport": "tcp",
+        "method": "POST",
+        "host": "localhost:51280",
+        "headers": {
+          "X-Bromelia": "1",
+          "Origin": "https://evil.example"
+        },
+        "tokens": []
+      },
+      "expect": {
+        "status": 403,
+        "code": "server.originNotAllowed"
+      }
+    },
+    {
+      "id": "socket-trusted",
+      "from": [
+        "rearchitecture-plan §7.2"
+      ],
+      "given": {
+        "transport": "socket",
+        "method": "POST",
+        "peerIsUser": true,
+        "tokens": [
+          {
+            "token": "s3cret",
+            "scope": "control"
+          }
+        ]
+      },
+      "expect": {
+        "allowed": true
+      }
+    },
+    {
+      "id": "network-needs-token",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess (startProblem)",
+        "windows IntegrationFeatureTests.WebAccessRules"
+      ],
+      "given": {
+        "listen": {
+          "address": "0.0.0.0"
+        },
+        "tokens": []
+      },
+      "expect": {
+        "issue": "config.networkNeedsToken"
+      }
+    },
+    {
+      "id": "network-with-token",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows IntegrationFeatureTests.WebAccessRules",
+        "linux /integrations/web-access"
+      ],
+      "given": {
+        "listen": {
+          "address": "0.0.0.0"
+        },
+        "tokens": [
+          {
+            "token": "t",
+            "scope": "control"
+          }
+        ]
+      },
+      "expect": {
+        "issue": null
+      }
+    },
+    {
+      "id": "tls-needs-both",
+      "from": [
+        "macos WebTests.tlsIdentity",
+        "windows WebApiTests.ServesHttps",
+        "linux /web/tls"
+      ],
+      "given": {
+        "tls": {
+          "certificate": "cert.pem",
+          "key": ""
+        }
+      },
+      "expect": {
+        "issue": "config.tlsNeedsBoth"
+      }
+    }
+  ]
+}

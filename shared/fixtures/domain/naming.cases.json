@@ -1,0 +1,412 @@
+{
+  "functions": [
+    "TemplateEngine.render",
+    "TemplateEngine.renderPath",
+    "Sanitizer.component",
+    "Layouts.paths",
+    "TokenRegistry.trackLabel",
+    "TokenRegistry.episodeLabel",
+    "ConflictNamer.next"
+  ],
+  "description": "Templates, file name safety, the media server names and conflict names. {n:3} zero-pads; {token?text} inserts text only when token isn't empty; unknown tokens stay; in paths '/' separates folders and every component is made safe.",
+  "cases": [
+    {
+      "id": "pad",
+      "from": [
+        "macos TemplateTests.rendersTokens"
+      ],
+      "given": {
+        "template": "{disc} - {n:2}",
+        "values": {
+          "disc": "MOVIE",
+          "n": "3",
+          "comment": "",
+          "title": "A/B: C"
+        }
+      },
+      "expect": {
+        "render": "MOVIE - 03"
+      }
+    },
+    {
+      "id": "conditional-empty",
+      "from": [
+        "macos TemplateTests.rendersTokens"
+      ],
+      "given": {
+        "template": "{disc}{comment? ({comment})}",
+        "values": {
+          "disc": "MOVIE",
+          "n": "3",
+          "comment": "",
+          "title": "A/B: C"
+        }
+      },
+      "expect": {
+        "render": "MOVIE"
+      }
+    },
+    {
+      "id": "conditional-set",
+      "from": [
+        "macos TemplateTests.rendersTokens"
+      ],
+      "given": {
+        "template": "{disc}{n? #{n}}",
+        "values": {
+          "disc": "MOVIE",
+          "n": "3",
+          "comment": "",
+          "title": "A/B: C"
+        }
+      },
+      "expect": {
+        "render": "MOVIE #3"
+      }
+    },
+    {
+      "id": "unknown-token",
+      "from": [
+        "macos TemplateTests.rendersTokens"
+      ],
+      "given": {
+        "template": "{unknown}",
+        "values": {
+          "disc": "MOVIE",
+          "n": "3",
+          "comment": "",
+          "title": "A/B: C"
+        }
+      },
+      "expect": {
+        "render": "{unknown}"
+      }
+    },
+    {
+      "id": "path-sanitised",
+      "from": [
+        "macos TemplateTests.rendersTokens",
+        "windows TemplateTests",
+        "linux /logic/templates"
+      ],
+      "given": {
+        "template": "Movies/{title}",
+        "values": {
+          "disc": "MOVIE",
+          "n": "3",
+          "comment": "",
+          "title": "A/B: C"
+        }
+      },
+      "expect": {
+        "renderPath": "Movies/A-B- C"
+      }
+    },
+    {
+      "id": "path-dots-dropped",
+      "from": [
+        "macos TemplateTests.rendersTokens"
+      ],
+      "given": {
+        "template": "../{disc}/./",
+        "values": {
+          "disc": "MOVIE",
+          "n": "3",
+          "comment": "",
+          "title": "A/B: C"
+        }
+      },
+      "expect": {
+        "renderPath": "MOVIE"
+      }
+    },
+    {
+      "id": "sanitize-reserved",
+      "from": [
+        "macos TemplateTests.sanitizes",
+        "windows TemplateTests.Sanitizes"
+      ],
+      "given": {
+        "component": "a:b/c\\d*e?f\"g<h>i|j"
+      },
+      "expect": {
+        "sanitize": "a-b-c-d-e-f-g-h-i-j"
+      }
+    },
+    {
+      "id": "sanitize-trim",
+      "from": [
+        "macos TemplateTests.sanitizes"
+      ],
+      "given": {
+        "component": "  .name. "
+      },
+      "expect": {
+        "sanitize": "name"
+      }
+    },
+    {
+      "id": "default-episode",
+      "from": [
+        "macos NamingTests.defaultTemplate",
+        "windows NamingTests.DefaultTemplate",
+        "linux /identity/naming"
+      ],
+      "given": {
+        "template": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
+        "values": {
+          "name": "One Piece",
+          "kind": "tv",
+          "format": "DVD",
+          "rip": "Rip",
+          "discLabel": "Season 2 Part 7 Disc 2",
+          "season": "2",
+          "part": "7",
+          "discNumber": "2",
+          "episode": "Episode 138",
+          "track": "Title 11 Ch 1-7"
+        }
+      },
+      "expect": {
+        "renderPath": "One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD"
+      }
+    },
+    {
+      "id": "default-backup",
+      "from": [
+        "macos NamingTests.defaultTemplate",
+        "windows NamingTests.DefaultTemplate",
+        "linux /identity/naming"
+      ],
+      "given": {
+        "template": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
+        "values": {
+          "name": "One Piece",
+          "kind": "tv",
+          "format": "DVDe",
+          "rip": "Backup",
+          "discLabel": "Season 2 Part 7 Disc 2",
+          "season": "2",
+          "part": "7",
+          "discNumber": "2"
+        }
+      },
+      "expect": {
+        "renderPath": "One Piece - Season 2 Part 7 Disc 2 - Backup - DVDe"
+      }
+    },
+    {
+      "id": "default-movie",
+      "from": [
+        "macos NamingTests.defaultTemplate",
+        "windows NamingTests.DefaultTemplate",
+        "linux /identity/naming"
+      ],
+      "given": {
+        "template": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
+        "values": {
+          "name": "Inception",
+          "format": "4K",
+          "rip": "Rip",
+          "track": "Playlist 00800",
+          "discLabel": ""
+        }
+      },
+      "expect": {
+        "renderPath": "Inception - Rip - Playlist 00800 - 4K"
+      }
+    },
+    {
+      "id": "default-folder",
+      "from": [
+        "macos NamingTests.defaultTemplate",
+        "windows NamingTests.DefaultTemplate",
+        "linux /identity/naming"
+      ],
+      "given": {
+        "template": "{name}{discLabel? - {discLabel}}",
+        "values": {
+          "name": "Inception",
+          "discLabel": ""
+        }
+      },
+      "expect": {
+        "renderPath": "Inception"
+      }
+    },
+    {
+      "id": "media-server-episode-title",
+      "from": [
+        "macos LookupTests.episodeTitlesInNames",
+        "windows LookupTests.EpisodeTitlesInNames",
+        "linux /lookup/episode-titles-in-names"
+      ],
+      "given": {
+        "layout": "mediaServer",
+        "kind": "tv",
+        "values": {
+          "name": "Friends",
+          "releaseYear": "1994",
+          "seasonOr1": "2",
+          "episodeNumber": "2",
+          "episodeTitle": "The One with the Breast Milk"
+        }
+      },
+      "expect": {
+        "episodePath": "Season 02/Friends (1994) - S02E02 - The One with the Breast Milk"
+      }
+    },
+    {
+      "id": "default-with-episode-title",
+      "from": [
+        "macos LookupTests.episodeTitlesInNames"
+      ],
+      "given": {
+        "template": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
+        "values": {
+          "name": "Friends",
+          "discLabel": "Season 2 Disc 1",
+          "rip": "Rip",
+          "format": "DISC",
+          "track": "Title 1",
+          "episode": "Episode 02",
+          "episodeTitle": "The One with the Breast Milk"
+        }
+      },
+      "expect": {
+        "renderPath": "Friends - Episode 02 - The One with the Breast Milk - Season 2 Disc 1 - Rip - Title 1 - DISC"
+      }
+    },
+    {
+      "id": "media-server-episode-no-title",
+      "from": [
+        "macos LookupTests.episodeTitlesInNames"
+      ],
+      "given": {
+        "layout": "mediaServer",
+        "kind": "tv",
+        "values": {
+          "name": "Friends",
+          "releaseYear": "1994",
+          "seasonOr1": "2",
+          "episodeNumber": "2",
+          "episodeTitle": ""
+        }
+      },
+      "expect": {
+        "episodePath": "Season 02/Friends (1994) - S02E02"
+      }
+    },
+    {
+      "id": "media-server-movie",
+      "from": [
+        "docs/configuration.md#media-server-layout"
+      ],
+      "given": {
+        "layout": "mediaServer",
+        "kind": "movie",
+        "values": {
+          "name": "Inception",
+          "releaseYear": "2010",
+          "track": "Playlist 00800"
+        }
+      },
+      "expect": {
+        "folder": "Movies/Inception (2010)",
+        "mainFeature": "Inception (2010)",
+        "extra": "Other/Inception (2010) - Playlist 00800",
+        "backup": "Backup/Inception (2010) - Backup - BR"
+      }
+    },
+    {
+      "id": "track-label-dvd",
+      "from": [
+        "macos IdentityTests.trackLabels",
+        "windows ArchiveTests.TrackLabels",
+        "linux /identity/naming"
+      ],
+      "given": {
+        "title": {
+          "index": 0,
+          "sourceTitleId": 11
+        }
+      },
+      "expect": {
+        "trackLabel": "Title 11"
+      }
+    },
+    {
+      "id": "track-label-bluray",
+      "from": [
+        "macos IdentityTests.trackLabels"
+      ],
+      "given": {
+        "title": {
+          "index": 3,
+          "sourceFile": "00800.mpls"
+        }
+      },
+      "expect": {
+        "trackLabel": "Playlist 00800"
+      }
+    },
+    {
+      "id": "track-label-plain",
+      "from": [
+        "macos MediaIdentity.trackLabel (today's code)"
+      ],
+      "given": {
+        "title": {
+          "index": 5
+        }
+      },
+      "expect": {
+        "trackLabel": "Title 5"
+      }
+    },
+    {
+      "id": "episode-label",
+      "from": [
+        "macos IdentityTests.trackLabels"
+      ],
+      "given": {
+        "episode": 7,
+        "width": 3
+      },
+      "expect": {
+        "episodeLabel": "Episode 007"
+      }
+    },
+    {
+      "id": "conflict-namer-file",
+      "from": [
+        "macos HandBrakeTests.encodesEveryMKVWithoutReplacingAnything (A.mkv → A (2).mkv); Paths.uniqueURL"
+      ],
+      "given": {
+        "name": "A.mkv",
+        "existing": [
+          "A.mkv"
+        ]
+      },
+      "expect": {
+        "next": "A (2).mkv"
+      }
+    },
+    {
+      "id": "conflict-namer-folder",
+      "from": [
+        "docs/configuration.md#driveconfig (uniqueSuffix: Disc (2))"
+      ],
+      "given": {
+        "name": "Disc",
+        "existing": [
+          "Disc",
+          "Disc (2)"
+        ]
+      },
+      "expect": {
+        "next": "Disc (3)"
+      }
+    }
+  ]
+}

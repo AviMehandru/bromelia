@@ -1,0 +1,64 @@
+{
+  "functions": [
+    "HttpRequestParser.parse"
+  ],
+  "description": "The HTTP/1.1 request head parser of Servers that parse requests themselves (Network.framework, a TcpListener); Kestrel and libsoup must behave the same.",
+  "cases": [
+    {
+      "id": "parse",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows WebApiTests.ParsesRequests"
+      ],
+      "given": {
+        "raw": "GET /api/status?token=s3cret HTTP/1.1\r\nHost: localhost:51280\r\nX-Bromelia: 1\r\n\r\n"
+      },
+      "expect": {
+        "method": "GET",
+        "path": "/api/status",
+        "query": {
+          "token": "s3cret"
+        },
+        "headers": {
+          "host": "localhost:51280",
+          "x-bromelia": "1"
+        }
+      }
+    },
+    {
+      "id": "incomplete",
+      "from": [
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "windows WebApiTests.ParsesRequests"
+      ],
+      "given": {
+        "raw": "GET / HTTP/1.1\r\nHost: x"
+      },
+      "expect": {
+        "request": null
+      }
+    },
+    {
+      "id": "decoding",
+      "from": [
+        "windows WebApiTests.ParsesRequests"
+      ],
+      "given": {
+        "raw": "post /api/drives/dev%3A%2Fdev%2Fsr0/rip?titles=1%2C2&token=a+b HTTP/1.1\r\nHost: localhost:51280\r\nX-Bromelia: 1\r\n\r\n"
+      },
+      "expect": {
+        "method": "POST",
+        "path": "/api/drives/dev%3A%2Fdev%2Fsr0/rip",
+        "query": {
+          "titles": "1,2",
+          "token": "a b"
+        },
+        "headers": {
+          "host": "localhost:51280",
+          "x-bromelia": "1"
+        },
+        "rule": "The method is upper-cased; the path stays percent-encoded (path parameters are decoded one by one); the query is decoded, + is a space; header names are lower-cased."
+      }
+    }
+  ]
+}

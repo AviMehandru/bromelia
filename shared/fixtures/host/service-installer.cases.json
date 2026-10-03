@@ -1,0 +1,79 @@
+{
+  "functions": [
+    "ServiceInstaller.install"
+  ],
+  "description": "What ServiceInstaller writes or runs on each platform (an adapter; the text is checked by each platform's adapter tests).",
+  "cases": [
+    {
+      "id": "launch-agent",
+      "from": [
+        "macos HeadlessTests.launchAgent"
+      ],
+      "given": {
+        "platform": "macos",
+        "executable": "/Applications/Bromelia.app/Contents/MacOS/bromeliad",
+        "arguments": [
+          "--port",
+          "8080"
+        ]
+      },
+      "expect": {
+        "plist": {
+          "Label": "app.bromelia.engine",
+          "ProgramArguments": [
+            "/Applications/Bromelia.app/Contents/MacOS/bromeliad",
+            "--port",
+            "8080"
+          ],
+          "RunAtLoad": true,
+          "KeepAlive": {
+            "SuccessfulExit": false
+          }
+        },
+        "note": "Today's agent runs 'Bromelia --headless' with Label app.bromelia.headless; the engine host is its own executable now and registers with SMAppService.agent."
+      }
+    },
+    {
+      "id": "logon-task",
+      "from": [
+        "windows DaemonTests.LogonTaskArguments"
+      ],
+      "given": {
+        "platform": "windows",
+        "executable": "C:\\Program Files\\Bromelia\\bromeliad.exe",
+        "arguments": [
+          "--port",
+          "8080"
+        ]
+      },
+      "expect": {
+        "schtasks": [
+          "/Create",
+          "/F",
+          "/SC",
+          "ONLOGON",
+          "/RL",
+          "LIMITED",
+          "/TN",
+          "Bromelia",
+          "/TR",
+          "\"C:\\Program Files\\Bromelia\\bromeliad.exe\" --port 8080"
+        ]
+      }
+    },
+    {
+      "id": "systemd-unit",
+      "from": [
+        "rearchitecture-plan §7.1, §10.3 (systemd --user unit)"
+      ],
+      "given": {
+        "platform": "linux",
+        "executable": "/usr/bin/bromeliad",
+        "arguments": []
+      },
+      "expect": {
+        "unit": "[Unit]\nDescription=Bromelia engine\n\n[Service]\nExecStart=/usr/bin/bromeliad\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
+      }
+    }
+  ]
+}

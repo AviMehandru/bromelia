@@ -1,0 +1,144 @@
+{
+  "functions": [
+    "Fingerprint.of"
+  ],
+  "description": "The v1 disc fingerprint (docs/configuration.md, 'Discs archived before'), byte for byte as today. Inputs are robot-mode listings: a fixture file, or 'titles' expanded with the listing generator of shared/scenarios/README.md.",
+  "cases": [
+    {
+      "id": "fixture",
+      "from": [
+        "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform",
+        "windows ArchiveCheckTests.FingerprintsMatchEveryPlatform",
+        "linux /archive/fingerprints"
+      ],
+      "given": {
+        "listingFile": "info-dvd.txt"
+      },
+      "expect": {
+        "fingerprint": "v1:975fb16e865898de86ce51c559e479fc"
+      }
+    },
+    {
+      "id": "renumbered-same",
+      "from": [
+        "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform",
+        "windows ArchiveCheckTests.FingerprintsMatchEveryPlatform",
+        "linux /archive/fingerprints"
+      ],
+      "given": {
+        "listings": [
+          {
+            "volume": "SHOW_S1_D1",
+            "titles": [
+              [
+                "0:22:10",
+                1
+              ],
+              [
+                "0:22:40",
+                2
+              ],
+              [
+                "0:23:05",
+                3
+              ]
+            ]
+          },
+          {
+            "volume": "SHOW_S1_D1",
+            "titles": [
+              [
+                "0:23:05",
+                3
+              ],
+              [
+                "0:22:10",
+                1
+              ],
+              [
+                "0:22:40",
+                2
+              ]
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "fingerprints": [
+          "v1:efc824377b704156ffe61b0a06ef9ce5",
+          "v1:efc824377b704156ffe61b0a06ef9ce5"
+        ],
+        "equal": true
+      }
+    },
+    {
+      "id": "other-disc-same-label",
+      "from": [
+        "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform",
+        "windows ArchiveCheckTests.FingerprintsMatchEveryPlatform",
+        "linux /archive/fingerprints"
+      ],
+      "given": {
+        "listings": [
+          {
+            "volume": "SHOW_S1_D1",
+            "titles": [
+              [
+                "0:22:10",
+                1
+              ],
+              [
+                "0:22:40",
+                2
+              ],
+              [
+                "0:23:05",
+                3
+              ]
+            ]
+          },
+          {
+            "volume": "SHOW_S1_D1",
+            "titles": [
+              [
+                "0:22:12",
+                1
+              ],
+              [
+                "0:22:40",
+                2
+              ],
+              [
+                "0:23:05",
+                3
+              ]
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "fingerprints": [
+          "v1:efc824377b704156ffe61b0a06ef9ce5",
+          "v1:a4e2459206bfb7e432e07150ac8c5033"
+        ],
+        "equal": false
+      }
+    },
+    {
+      "id": "empty",
+      "from": [
+        "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform",
+        "windows ArchiveCheckTests.FingerprintsMatchEveryPlatform",
+        "linux /archive/fingerprints"
+      ],
+      "given": {
+        "listing": {
+          "titles": []
+        }
+      },
+      "expect": {
+        "fingerprint": null
+      }
+    }
+  ]
+}

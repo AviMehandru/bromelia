@@ -1,0 +1,730 @@
+{
+  "functions": [
+    "RuleMatcher.matches",
+    "ConfigValidator.validate",
+    "DriveJoin.matches",
+    "DriveJoin.entryFor",
+    "DriveJoin.driveId",
+    "ModeChooser.mode",
+    "ProfileResolver.resolve"
+  ],
+  "description": "Which rules apply (was PluginMatcher), which drive entry a drive gets, the mode for a disc, and the effective profile with its trace.",
+  "cases": [
+    {
+      "id": "match-1",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {},
+        "facts": {
+          "name": "Anything",
+          "label": "X",
+          "formatCode": "BR"
+        }
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "match-2",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "nameOrLabel": "^one piece$"
+        },
+        "facts": {
+          "name": "One Piece",
+          "label": "ONE_PIECE_S2",
+          "formatCode": "DVD"
+        }
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "match-3",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "nameOrLabel": "^one piece$"
+        },
+        "facts": {
+          "name": "Naruto",
+          "label": "NARUTO",
+          "formatCode": "DVD"
+        }
+      },
+      "expect": {
+        "matches": false
+      }
+    },
+    {
+      "id": "match-4",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "nameOrLabel": "S2_P7"
+        },
+        "facts": {
+          "name": "One Piece",
+          "label": "ONE_PIECE_S2_P7_D2",
+          "formatCode": "DVD"
+        }
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "match-5",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "formats": [
+            "BR*",
+            "4K"
+          ]
+        },
+        "facts": {
+          "name": "",
+          "label": "",
+          "formatCode": "BRe"
+        }
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "match-6",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "formats": [
+            "BR*",
+            "4K"
+          ]
+        },
+        "facts": {
+          "name": "",
+          "label": "",
+          "formatCode": "4K"
+        }
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "match-7",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "formats": [
+            "BR*",
+            "4K"
+          ]
+        },
+        "facts": {
+          "name": "",
+          "label": "",
+          "formatCode": "4Ke"
+        }
+      },
+      "expect": {
+        "matches": false
+      }
+    },
+    {
+      "id": "match-8",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "formats": [
+            "BR*",
+            "4K"
+          ]
+        },
+        "facts": {
+          "name": "",
+          "label": "",
+          "formatCode": "DVD"
+        }
+      },
+      "expect": {
+        "matches": false
+      }
+    },
+    {
+      "id": "match-9",
+      "from": [
+        "macos NamingTests.pluginMatching",
+        "windows ArchiveTests.PluginMatching",
+        "linux /identity/plugins"
+      ],
+      "given": {
+        "when": {
+          "nameOrLabel": "("
+        },
+        "facts": {
+          "name": "x",
+          "label": "",
+          "formatCode": "BR"
+        }
+      },
+      "expect": {
+        "matches": false
+      }
+    },
+    {
+      "id": "match-10",
+      "from": [
+        "rearchitecture-plan §24 (rules: when → then)"
+      ],
+      "given": {
+        "when": {
+          "kinds": [
+            "tv"
+          ],
+          "automatic": true
+        },
+        "facts": {
+          "name": "x",
+          "label": "",
+          "formatCode": "BR",
+          "kind": "tv",
+          "automatic": false
+        }
+      },
+      "expect": {
+        "matches": false
+      }
+    },
+    {
+      "id": "invalid-regex-issue",
+      "from": [
+        "macos NamingTests.pluginMatching (PluginMatcher.validate)"
+      ],
+      "given": {
+        "config": {
+          "rules": [
+            {
+              "id": "r",
+              "when": {
+                "nameOrLabel": "("
+              },
+              "then": {
+                "steps": []
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "issues": [
+          {
+            "path": "rules[0].when.nameOrLabel",
+            "code": "config.invalidRegex",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "id": "drive-match-name",
+      "from": [
+        "macos ConfigurationTests.matchesDrives",
+        "windows ConfigurationTests.MatchesDrives",
+        "linux /config/json"
+      ],
+      "given": {
+        "match": {
+          "driveName": "bd-re hl-dt-st bd-re wh16ns60 1.02 klam6e84325"
+        },
+        "drive": {
+          "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+          "device": "/dev/rdisk4"
+        }
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "drive-match-other",
+      "from": [
+        "macos ConfigurationTests.matchesDrives",
+        "windows ConfigurationTests.MatchesDrives",
+        "linux /config/json"
+      ],
+      "given": {
+        "match": {
+          "driveName": "BD-RE ASUS"
+        },
+        "drive": {
+          "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+          "device": "/dev/rdisk4"
+        }
+      },
+      "expect": {
+        "matches": false
+      }
+    },
+    {
+      "id": "drive-match-device",
+      "from": [
+        "macos ConfigurationTests.matchesDrives",
+        "windows ConfigurationTests.MatchesDrives",
+        "linux /config/json"
+      ],
+      "given": {
+        "match": {
+          "devicePath": "/dev/rdisk4"
+        },
+        "drive": {
+          "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+          "device": "/dev/rdisk4"
+        }
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "drive-match-device-case",
+      "from": [
+        "windows ConfigurationTests.MatchesDrives"
+      ],
+      "given": {
+        "match": {
+          "devicePath": "e:"
+        },
+        "drive": {
+          "identification": "X",
+          "device": "E:"
+        },
+        "platform": "windows"
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "drive-entry-first-enabled",
+      "from": [
+        "macos ConfigurationTests.matchesDrives",
+        "macos AppConfig.driveConfig(for:) (first enabled match, else first match)"
+      ],
+      "given": {
+        "drives": [
+          {
+            "id": "off",
+            "enabled": false,
+            "match": {
+              "devicePath": "/dev/rdisk4"
+            }
+          },
+          {
+            "id": "on",
+            "match": {
+              "devicePath": "/dev/rdisk4"
+            }
+          }
+        ],
+        "drive": {
+          "identification": "",
+          "device": "/dev/rdisk4"
+        }
+      },
+      "expect": {
+        "entry": "on"
+      }
+    },
+    {
+      "id": "drive-id",
+      "from": [
+        "shared/schema/common.json DriveId"
+      ],
+      "given": {
+        "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+        "device": "/dev/rdisk4"
+      },
+      "expect": {
+        "driveId": "drv-86920bcfd062b640"
+      }
+    },
+    {
+      "id": "drive-id-no-name",
+      "from": [
+        "shared/schema/common.json DriveId"
+      ],
+      "given": {
+        "identification": "",
+        "device": "/dev/sr0"
+      },
+      "expect": {
+        "driveId": "drv-a3bf3f3815849e7c"
+      }
+    },
+    {
+      "id": "mode-other-disc-1",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "flags": [
+          "blurayFiles"
+        ],
+        "content": "data",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv"
+          },
+          "otherDiscs": {}
+        }
+      },
+      "expect": {
+        "mode": "backupThenMkv"
+      }
+    },
+    {
+      "id": "mode-other-disc-2",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "flags": [],
+        "content": "video",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv"
+          },
+          "otherDiscs": {}
+        }
+      },
+      "expect": {
+        "mode": "backupThenMkv"
+      }
+    },
+    {
+      "id": "mode-other-disc-3",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "flags": [],
+        "content": "audio",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv"
+          },
+          "otherDiscs": {}
+        }
+      },
+      "expect": {
+        "mode": "audioCD"
+      }
+    },
+    {
+      "id": "mode-other-disc-4",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "flags": [],
+        "content": "data",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv"
+          },
+          "otherDiscs": {}
+        }
+      },
+      "expect": {
+        "mode": "dataImage"
+      }
+    },
+    {
+      "id": "mode-other-disc-5",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "flags": [],
+        "content": "audio",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv"
+          },
+          "otherDiscs": {
+            "ripAudioCDs": false
+          }
+        }
+      },
+      "expect": {
+        "mode": null
+      }
+    },
+    {
+      "id": "mode-other-disc-6",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "flags": [],
+        "content": "data",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv"
+          },
+          "otherDiscs": {
+            "imageDataDiscs": false
+          }
+        }
+      },
+      "expect": {
+        "mode": null
+      }
+    },
+    {
+      "id": "mode-by-format-bluray",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "format": "bluray",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv",
+            "byFormat": {
+              "bluray": "backup"
+            }
+          }
+        }
+      },
+      "expect": {
+        "mode": "backup"
+      }
+    },
+    {
+      "id": "mode-by-format-dvd",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys",
+        "linux /integrations/modes-and-keys"
+      ],
+      "given": {
+        "format": "dvd",
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv",
+            "byFormat": {
+              "bluray": "backup"
+            }
+          }
+        }
+      },
+      "expect": {
+        "mode": "backupThenMkv"
+      }
+    },
+    {
+      "id": "mode-by-format-unknown",
+      "from": [
+        "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys"
+      ],
+      "given": {
+        "format": null,
+        "profile": {
+          "mode": {
+            "default": "backupThenMkv",
+            "byFormat": {
+              "bluray": "backup"
+            }
+          }
+        }
+      },
+      "expect": {
+        "mode": "backupThenMkv"
+      }
+    },
+    {
+      "id": "resolve-layers",
+      "from": [
+        "rearchitecture-plan §24 (defaults → default profile → drive's profile → drive overrides → rules → session)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "D",
+              "titles": {
+                "strategy": "longest"
+              },
+              "naming": {
+                "layout": "mediaServer"
+              }
+            },
+            {
+              "id": "left",
+              "name": "L",
+              "mode": {
+                "default": "backupThenMkv"
+              },
+              "titles": {
+                "longestCount": 2
+              }
+            }
+          ],
+          "drives": [
+            {
+              "id": "d1",
+              "match": {
+                "devicePath": "/dev/a"
+              },
+              "profile": "left",
+              "makemkvSettings": {
+                "io_ErrorRetryCount": "10"
+              }
+            }
+          ],
+          "steps": [
+            {
+              "id": "s",
+              "kind": "command"
+            }
+          ],
+          "rules": [
+            {
+              "id": "bd",
+              "when": {
+                "formats": [
+                  "BR*"
+                ]
+              },
+              "then": {
+                "set": {
+                  "mode": {
+                    "default": "mkv"
+                  }
+                },
+                "steps": [
+                  "s"
+                ]
+              }
+            }
+          ]
+        },
+        "drive": "d1",
+        "facts": {
+          "name": "X",
+          "label": "X",
+          "formatCode": "BR",
+          "kind": "movie",
+          "automatic": true
+        },
+        "session": {
+          "titles": {
+            "maxTitles": 1
+          }
+        }
+      },
+      "expect": {
+        "profile": {
+          "mode": {
+            "default": "mkv"
+          },
+          "titles": {
+            "strategy": "longest",
+            "longestCount": 2,
+            "maxTitles": 1
+          },
+          "naming": {
+            "layout": "mediaServer"
+          },
+          "makemkv": {
+            "settings": {
+              "io_ErrorRetryCount": "10"
+            }
+          }
+        },
+        "steps": [
+          "s"
+        ],
+        "trace": [
+          {
+            "layer": "defaults"
+          },
+          {
+            "layer": "defaultProfile",
+            "id": "default"
+          },
+          {
+            "layer": "driveProfile",
+            "id": "left"
+          },
+          {
+            "layer": "driveOverrides",
+            "id": "d1"
+          },
+          {
+            "layer": "rule",
+            "id": "bd"
+          },
+          {
+            "layer": "session"
+          }
+        ]
+      }
+    }
+  ]
+}

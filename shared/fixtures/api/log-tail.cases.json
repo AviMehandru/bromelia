@@ -1,0 +1,53 @@
+{
+  "functions": [
+    "LogTail.tail"
+  ],
+  "description": "GET /v1/jobs/{id}/log?format=text: the end of the rendered log (at most 256 KB). The log file has 'line 1'…'line 1000', one per line.",
+  "cases": [
+    {
+      "id": "short-log",
+      "from": [
+        "macos WebTests.logTail",
+        "windows WebApiTests.LogTail",
+        "linux /web/log-tail"
+      ],
+      "given": {
+        "lines": 1000,
+        "limit": 262144
+      },
+      "expect": {
+        "startsWith": "line 1\n"
+      }
+    },
+    {
+      "id": "long-log",
+      "from": [
+        "macos WebTests.logTail",
+        "windows WebApiTests.LogTail",
+        "linux /web/log-tail"
+      ],
+      "given": {
+        "lines": 1000,
+        "limit": 100
+      },
+      "expect": {
+        "startsWith": "…\nline ",
+        "endsWith": "line 1000\n",
+        "maxLength": 110,
+        "rule": "The last bytes up to the limit, starting at a line start, after '…\\n'."
+      }
+    },
+    {
+      "id": "missing",
+      "from": [
+        "macos WebTests.logTail"
+      ],
+      "given": {
+        "path": "/nonexistent"
+      },
+      "expect": {
+        "text": ""
+      }
+    }
+  ]
+}

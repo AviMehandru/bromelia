@@ -1,0 +1,406 @@
+{
+  "functions": [
+    "Robot.splitFields",
+    "Robot.parseLine",
+    "MessageCatalog.severity",
+    "MessageCatalog.notice",
+    "RunAccumulator.feed"
+  ],
+  "description": "makemkvcon's robot-mode lines → events; message severity and the notices Bromelia shows outside the log.",
+  "cases": [
+    {
+      "id": "split-quoted-fields",
+      "from": [
+        "macos RobotParserTests.splitsQuotedFields",
+        "windows RobotParserTests.SplitsQuotedFields",
+        "linux /robot/split-fields"
+      ],
+      "given": {
+        "fields": "1,2,\"a, b\",\"say \\\"hi\\\"\",\"back\\\\slash\",plain"
+      },
+      "expect": {
+        "fields": [
+          "1",
+          "2",
+          "a, b",
+          "say \"hi\"",
+          "back\\slash",
+          "plain"
+        ]
+      }
+    },
+    {
+      "id": "message",
+      "from": [
+        "macos RobotParserTests.parsesMessage",
+        "windows RobotParserTests.ParsesMessagesAndProgress",
+        "linux /robot/parse-events"
+      ],
+      "given": {
+        "line": "MSG:5036,260,1,\"Copy complete. 1 titles saved.\",\"Copy complete. %1 titles saved.\",\"1\""
+      },
+      "expect": {
+        "event": {
+          "kind": "message",
+          "code": 5036,
+          "flags": 260,
+          "text": "Copy complete. 1 titles saved.",
+          "format": "Copy complete. %1 titles saved.",
+          "params": [
+            "1"
+          ],
+          "severity": "info"
+        }
+      }
+    },
+    {
+      "id": "severity-debug",
+      "from": [
+        "macos RobotParserTests.classifiesSeverity"
+      ],
+      "given": {
+        "message": {
+          "code": 1003,
+          "flags": 16777248,
+          "text": "DEBUG: Code 0"
+        }
+      },
+      "expect": {
+        "severity": "debug"
+      }
+    },
+    {
+      "id": "severity-error",
+      "from": [
+        "macos RobotParserTests.classifiesSeverity"
+      ],
+      "given": {
+        "message": {
+          "code": 5037,
+          "flags": 516,
+          "text": "Copy complete. 0 titles saved, 1 failed."
+        }
+      },
+      "expect": {
+        "severity": "error"
+      }
+    },
+    {
+      "id": "severity-warning",
+      "from": [
+        "macos RobotParserTests.classifiesSeverity"
+      ],
+      "given": {
+        "message": {
+          "code": 1,
+          "flags": 1028,
+          "text": "x"
+        }
+      },
+      "expect": {
+        "severity": "warning"
+      }
+    },
+    {
+      "id": "severity-by-code",
+      "from": [
+        "macos RobotMessage.errorCodes / warningCodes (today's code)"
+      ],
+      "given": {
+        "codes": {
+          "error": [
+            2003,
+            2004,
+            2018,
+            2023,
+            5003,
+            5006,
+            5010,
+            5021,
+            5037,
+            5055,
+            5069,
+            5077
+          ],
+          "warning": [
+            3038,
+            3041,
+            5042
+          ]
+        },
+        "flags": 0
+      },
+      "expect": {
+        "severity": "error for the error codes, warning for the warning codes, whatever the flags"
+      }
+    },
+    {
+      "id": "progress-value",
+      "from": [
+        "macos RobotParserTests.parsesProgress",
+        "linux /robot/parse-events"
+      ],
+      "given": {
+        "line": "PRGV:5957,356,65536"
+      },
+      "expect": {
+        "event": {
+          "kind": "progressValue",
+          "current": 5957,
+          "total": 356,
+          "max": 65536
+        }
+      }
+    },
+    {
+      "id": "progress-total",
+      "from": [
+        "macos RobotParserTests.parsesProgress"
+      ],
+      "given": {
+        "line": "PRGT:5018,0,\"Scanning CD-ROM devices\""
+      },
+      "expect": {
+        "event": {
+          "kind": "progressTotal",
+          "code": 5018,
+          "id": 0,
+          "name": "Scanning CD-ROM devices"
+        }
+      }
+    },
+    {
+      "id": "progress-current",
+      "from": [
+        "macos RobotParserTests.parsesProgress"
+      ],
+      "given": {
+        "line": "PRGC:3102,0,\"Processing title sets\""
+      },
+      "expect": {
+        "event": {
+          "kind": "progressCurrent",
+          "code": 3102,
+          "id": 0,
+          "name": "Processing title sets"
+        }
+      }
+    },
+    {
+      "id": "title-count",
+      "from": [
+        "macos RobotParserTests.parsesProgress"
+      ],
+      "given": {
+        "line": "TCOUNT:3"
+      },
+      "expect": {
+        "event": {
+          "kind": "titleCount",
+          "count": 3
+        }
+      }
+    },
+    {
+      "id": "raw-line",
+      "from": [
+        "macos RobotParserTests.parsesProgress"
+      ],
+      "given": {
+        "line": "Backup source must start with \"disc:\""
+      },
+      "expect": {
+        "event": {
+          "kind": "raw",
+          "text": "Backup source must start with \"disc:\""
+        }
+      }
+    },
+    {
+      "id": "empty-line",
+      "from": [
+        "macos RobotParserTests.parsesProgress"
+      ],
+      "given": {
+        "line": ""
+      },
+      "expect": {
+        "event": null
+      }
+    },
+    {
+      "id": "mkv-rip-saved",
+      "from": [
+        "macos RobotParserTests.ripFixtureReportsSuccess"
+      ],
+      "given": {
+        "fixture": "mkv-rip.txt"
+      },
+      "expect": {
+        "lastSaved": 1
+      }
+    },
+    {
+      "id": "failure-errors",
+      "from": [
+        "macos RobotParserTests.failureFixtureReportsErrors",
+        "windows RobotParserTests.FailureFixtureReportsErrors",
+        "linux /robot/failure-fixture"
+      ],
+      "given": {
+        "fixture": "rip-failure.txt"
+      },
+      "expect": {
+        "errorCodes": [
+          2003,
+          5003,
+          5037
+        ],
+        "lastErrorParams": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "id": "notice-libredrive",
+      "from": [
+        "macos ParityTests.recognisesNotices",
+        "windows ParityTests.RecognisesNotices",
+        "linux /parity/notices"
+      ],
+      "given": {
+        "line": "MSG:1011,0,1,\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\",\"%1\",\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\""
+      },
+      "expect": {
+        "notice": {
+          "kind": "libreDrive",
+          "detail": "v06.3 id=4FBA32AEC678",
+          "licenseProblem": false
+        }
+      }
+    },
+    {
+      "id": "notice-key-expired-5055",
+      "from": [
+        "macos ParityTests.recognisesNotices",
+        "windows ParityTests.RecognisesNotices",
+        "linux /parity/notices"
+      ],
+      "given": {
+        "line": "MSG:5055,0,0,\"Evaluation period has expired, shareware functionality unavailable.\",\"Evaluation period has expired, shareware functionality unavailable.\""
+      },
+      "expect": {
+        "notice": {
+          "kind": "keyExpired",
+          "licenseProblem": true
+        }
+      }
+    },
+    {
+      "id": "notice-key-expired-5052",
+      "from": [
+        "macos ParityTests.recognisesNotices",
+        "windows ParityTests.RecognisesNotices",
+        "linux /parity/notices"
+      ],
+      "given": {
+        "line": "MSG:5052,516,0,\"Evaluation period has expired. Please purchase an activation key if you've found this application useful. You may still use all free functionality without any restrictions.\",\"x\""
+      },
+      "expect": {
+        "notice": {
+          "kind": "keyExpired",
+          "licenseProblem": true
+        }
+      }
+    },
+    {
+      "id": "notice-too-old",
+      "from": [
+        "macos ParityTests.recognisesNotices",
+        "windows ParityTests.RecognisesNotices",
+        "linux /parity/notices"
+      ],
+      "given": {
+        "line": "MSG:5021,260,1,\"This application version is too old.  Please download the latest version at http://www.makemkv.com/ or enter a registration key to continue using the current version.\",\"x\",\"http://www.makemkv.com/\""
+      },
+      "expect": {
+        "notice": {
+          "kind": "versionTooOld",
+          "licenseProblem": true
+        }
+      }
+    },
+    {
+      "id": "notice-libredrive-required",
+      "from": [
+        "macos ParityTests.recognisesNotices",
+        "windows ParityTests.RecognisesNotices",
+        "linux /parity/notices"
+      ],
+      "given": {
+        "line": "MSG:2024,0,0,\"LibreDrive compatible drive is required to open this disc - video can't be decrypted.\",\"x\""
+      },
+      "expect": {
+        "notice": {
+          "kind": "libreDriveRequired",
+          "licenseProblem": false
+        }
+      }
+    },
+    {
+      "id": "notice-evaluation-not-started",
+      "from": [
+        "macos ParityTests.recognisesNotices",
+        "windows ParityTests.RecognisesNotices",
+        "linux /parity/notices"
+      ],
+      "given": {
+        "line": "MSG:5095,0,0,\"Evaluation period not started, please start MakeMKV evaluation from a third-party application.\",\"x\""
+      },
+      "expect": {
+        "notice": {
+          "kind": "evaluationNotStarted",
+          "licenseProblem": true
+        }
+      }
+    },
+    {
+      "id": "notice-none",
+      "from": [
+        "macos ParityTests.recognisesNotices",
+        "windows ParityTests.RecognisesNotices",
+        "linux /parity/notices"
+      ],
+      "given": {
+        "line": "MSG:3007,0,0,\"Using direct disc access mode\",\"Using direct disc access mode\""
+      },
+      "expect": {
+        "notice": null
+      }
+    },
+    {
+      "id": "first-error-names-the-cause",
+      "from": [
+        "macos RecordedRunTests.failuresNameTheirCause",
+        "windows SafetyTests.FailuresNameTheirCause",
+        "linux /reliability/recorded-runs"
+      ],
+      "given": {
+        "fixtures": [
+          "rip-disk-full.txt",
+          "rip-missing-source.txt",
+          "rip-failure.txt"
+        ]
+      },
+      "expect": {
+        "firstErrorContains": {
+          "rip-disk-full.txt": "megabytes free on the destination",
+          "rip-missing-source.txt": "does not exist",
+          "rip-failure.txt": "MEDIUM ERROR"
+        },
+        "rule": "RunAccumulator.firstError: the first message of severity error whose code isn't 5037 or 5004 (the saved / failed summary)."
+      }
+    }
+  ]
+}

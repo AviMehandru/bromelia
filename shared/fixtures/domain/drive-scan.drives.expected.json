@@ -1,0 +1,102 @@
+{
+  "functions": [
+    "Robot.parseLine",
+    "MakemkvDrive.from"
+  ],
+  "from": [
+    "macos RobotParserTests.parsesDriveScanFixture",
+    "windows RobotParserTests.ParsesDriveScanFixture",
+    "linux /robot/drive-scan-fixture"
+  ],
+  "input": "drive-scan.txt",
+  "description": "Every DRV line of a `makemkvcon -r --cache=1 info disc:9999` run.",
+  "expect": [
+    {
+      "index": 0,
+      "state": "inserted",
+      "present": true,
+      "flags": [
+        "blurayFiles",
+        "aacsFiles"
+      ],
+      "typeText": "Blu-ray (AACS)",
+      "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+      "label": "MOVIE_DISC",
+      "device": "/dev/rdisk4"
+    },
+    {
+      "index": 1,
+      "state": "emptyClosed",
+      "present": true,
+      "flags": [],
+      "typeText": "Disc",
+      "identification": "BD-RE ASUS BW-16D1HT 3.10 KL3H4AB1234",
+      "label": "",
+      "device": "/dev/rdisk5"
+    },
+    {
+      "index": 2,
+      "state": "emptyOpen",
+      "present": true,
+      "flags": [],
+      "typeText": "Disc",
+      "identification": "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00",
+      "label": "",
+      "device": "/dev/rdisk6"
+    },
+    {
+      "index": 3,
+      "state": "loading",
+      "present": true,
+      "flags": [
+        "dvdFiles"
+      ],
+      "typeText": "DVD",
+      "identification": "DVD-RW PIONEER DVR-S21 1.00",
+      "label": "",
+      "device": "/dev/rdisk7"
+    },
+    {
+      "index": 4,
+      "state": "inserted",
+      "present": true,
+      "flags": [
+        "dvdFiles"
+      ],
+      "typeText": "DVD",
+      "identification": "DVD+RW Some \"Quoted\" Drive",
+      "label": "Disc, With Comma",
+      "device": "/dev/rdisk8"
+    },
+    {
+      "index": 5,
+      "state": "noDrive",
+      "present": false,
+      "flags": [],
+      "typeText": "Disc",
+      "identification": "",
+      "label": "",
+      "device": ""
+    },
+    {
+      "index": 6,
+      "state": "noDrive",
+      "present": false,
+      "flags": [],
+      "typeText": "Disc",
+      "identification": "",
+      "label": "",
+      "device": ""
+    },
+    {
+      "index": 7,
+      "state": "noDrive",
+      "present": false,
+      "flags": [],
+      "typeText": "Disc",
+      "identification": "",
+      "label": "",
+      "device": ""
+    }
+  ]
+}

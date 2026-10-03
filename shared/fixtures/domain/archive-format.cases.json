@@ -1,0 +1,466 @@
+{
+  "functions": [
+    "Sha256Sums.parse",
+    "Sha256Sums.render",
+    "Sha256Sums.merge",
+    "ArchiveFiles.isOwnFile",
+    "ArchiveFiles.isMetadataFile",
+    "ArchiveFiles.expand",
+    "VerifyResult.compare"
+  ],
+  "description": "SHA256SUMS, Bromelia's own file names (not reported as unlisted), media server metadata files (not in SHA256SUMS), and the verdict of a check. A check's per-file input says whether the file hashed the same, changed, is missing or unreadable.",
+  "cases": [
+    {
+      "id": "sha256-abc",
+      "from": [
+        "macos ChecksumTests.hashesFilesAndFolders",
+        "windows ArchiveTests.HashesFilesAndFolders",
+        "linux /archive/checksums"
+      ],
+      "given": {
+        "bytes": "abc"
+      },
+      "expect": {
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      }
+    },
+    {
+      "id": "sums-render",
+      "from": [
+        "macos ChecksumTests.hashesFilesAndFolders"
+      ],
+      "given": {
+        "entries": [
+          {
+            "path": "backup/VIDEO_TS/VIDEO_TS.IFO",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "a.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          }
+        ]
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  backup/VIDEO_TS/VIDEO_TS.IFO\n",
+        "rule": "'<sha256>  <path>' per line, sorted by path, '/' separated, a final newline: what sha256sum -c and shasum -a 256 -c read (I4)."
+      }
+    },
+    {
+      "id": "sums-parse",
+      "from": [
+        "macos ChecksumTests.hashesFilesAndFolders"
+      ],
+      "given": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad *b c.mkv\n\n"
+      },
+      "expect": {
+        "entries": [
+          {
+            "path": "a.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          {
+            "path": "b c.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sums-merge",
+      "from": [
+        "docs/configuration.md#archive-files (entries of earlier jobs writing into the same folder are kept)"
+      ],
+      "given": {
+        "existing": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  Season 02/E01.mkv\n",
+        "entries": [
+          {
+            "path": "Season 02/E02.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          }
+        ]
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  Season 02/E01.mkv\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  Season 02/E02.mkv\n"
+      }
+    },
+    {
+      "id": "folder-files",
+      "from": [
+        "macos ChecksumTests.hashesFilesAndFolders"
+      ],
+      "given": {
+        "produced": [
+          "a.mkv",
+          "backup"
+        ],
+        "tree": [
+          "a.mkv",
+          "backup/VIDEO_TS/VIDEO_TS.IFO"
+        ]
+      },
+      "expect": {
+        "relative": [
+          "a.mkv",
+          "backup/VIDEO_TS/VIDEO_TS.IFO"
+        ]
+      }
+    },
+    {
+      "id": "own-sha256sums",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "SHA256SUMS"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-bromelia-json",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "bromelia.json"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-bromelia-2-json",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "bromelia (2).json"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-bromelia-1a2b3c4d-json",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "bromelia-1a2b3c4d.json"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-bromelia-log-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "bromelia-log.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-bromelia-1a2b3c4d-log-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "bromelia-1a2b3c4d-log.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-makemkv-log-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "makemkv-log.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-makemkv-1a2b3c4d-log-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "makemkv-1a2b3c4d-log.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-makemkv-debug-log-1-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "makemkv-debug-log-1.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-makemkv-1a2b3c4d-debug-log-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "makemkv-1a2b3c4d-debug-log.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-incomplete-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "INCOMPLETE.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-read-errors-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "READ ERRORS.txt"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-movie-mkv",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "Movie.mkv"
+      },
+      "expect": {
+        "isOwnFile": false
+      }
+    },
+    {
+      "id": "own-notes-txt",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "docs/configuration.md#archive-check"
+      ],
+      "given": {
+        "name": "notes.txt"
+      },
+      "expect": {
+        "isOwnFile": false
+      }
+    },
+    {
+      "id": "metadata-friends-1994-s02e01-nfo",
+      "from": [
+        "macos MediaServerMetadataTests.nfoFiles",
+        "windows LookupTests.NfoFiles"
+      ],
+      "given": {
+        "name": "Friends (1994) - S02E01.NFO"
+      },
+      "expect": {
+        "isMetadataFile": true
+      }
+    },
+    {
+      "id": "metadata-poster-jpg",
+      "from": [
+        "macos MediaServerMetadataTests.nfoFiles",
+        "windows LookupTests.NfoFiles"
+      ],
+      "given": {
+        "name": "poster.jpg"
+      },
+      "expect": {
+        "isMetadataFile": true
+      }
+    },
+    {
+      "id": "metadata-tvshow-nfo",
+      "from": [
+        "macos MediaServerMetadataTests.nfoFiles",
+        "windows LookupTests.NfoFiles"
+      ],
+      "given": {
+        "name": "tvshow.nfo"
+      },
+      "expect": {
+        "isMetadataFile": true
+      }
+    },
+    {
+      "id": "metadata-friends-1994-s02e01-mkv",
+      "from": [
+        "macos MediaServerMetadataTests.nfoFiles",
+        "windows LookupTests.NfoFiles"
+      ],
+      "given": {
+        "name": "Friends (1994) - S02E01.mkv"
+      },
+      "expect": {
+        "isMetadataFile": false
+      }
+    },
+    {
+      "id": "verify-compare",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives",
+        "windows ArchiveCheckTests.VerifiesArchives",
+        "linux /archive/verify"
+      ],
+      "given": {
+        "sums": [
+          "Season 01/E01.mkv",
+          "Season 01/E02.mkv",
+          "Season 01/E03.mkv"
+        ],
+        "hashes": {
+          "Season 01/E01.mkv": "changed",
+          "Season 01/E02.mkv": "missing",
+          "Season 01/E03.mkv": "same"
+        },
+        "folder": [
+          "Season 01/E01.mkv",
+          "Season 01/E03.mkv",
+          "Season 01/E01.srt",
+          "Season 01/E02.nfo",
+          "poster.jpg",
+          "bromelia.json",
+          "bromelia-log.txt",
+          "makemkv-log.txt",
+          "makemkv-debug-log-1.txt",
+          "SHA256SUMS"
+        ]
+      },
+      "expect": {
+        "result": "damaged",
+        "changed": [
+          "Season 01/E01.mkv"
+        ],
+        "missing": [
+          "Season 01/E02.mkv"
+        ],
+        "unreadable": [],
+        "unlisted": [
+          "Season 01/E01.srt"
+        ],
+        "files": 3,
+        "summary": {
+          "code": "check.damaged",
+          "params": {
+            "parts": [
+              {
+                "code": "check.part.changed",
+                "params": {
+                  "count": 1
+                }
+              },
+              {
+                "code": "check.part.missing",
+                "params": {
+                  "count": 1
+                }
+              }
+            ],
+            "files": 3,
+            "unlisted": 1
+          }
+        },
+        "summaryText": "1 changed, 1 missing of 3 files; 1 not listed"
+      }
+    },
+    {
+      "id": "verify-ok",
+      "from": [
+        "macos ArchiveCheckTests.verifiesArchives"
+      ],
+      "given": {
+        "sums": [
+          "Good.mkv",
+          "Backup/BDMV/index.bdmv"
+        ],
+        "hashes": {
+          "Good.mkv": "same",
+          "Backup/BDMV/index.bdmv": "same"
+        },
+        "folder": [
+          "Good.mkv",
+          "Backup/BDMV/index.bdmv",
+          "SHA256SUMS"
+        ]
+      },
+      "expect": {
+        "result": "ok",
+        "files": 2,
+        "unlisted": [],
+        "summary": {
+          "code": "check.ok",
+          "params": {
+            "files": 2,
+            "unlisted": 0
+          }
+        },
+        "summaryText": "2 files OK"
+      }
+    },
+    {
+      "id": "verify-sums-empty",
+      "from": [
+        "macos ArchiveVerifier.verify (SHA256SUMS lists no files)"
+      ],
+      "given": {
+        "sums": [],
+        "hashes": {},
+        "folder": [
+          "SHA256SUMS"
+        ]
+      },
+      "expect": {
+        "result": "error",
+        "error": {
+          "code": "check.sumsEmpty"
+        }
+      }
+    }
+  ]
+}

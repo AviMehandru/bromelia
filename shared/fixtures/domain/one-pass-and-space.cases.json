@@ -1,0 +1,455 @@
+{
+  "functions": [
+    "OnePass.plan",
+    "OnePass.matches",
+    "SpaceEstimate.required"
+  ],
+  "description": "OnePass.plan: the minimum length that leaves exactly the chosen titles (three or more, the longest, not too close to the next; null = rip title by title). SpaceEstimate.required: bytes plus 2 % or 256 MB, whichever is larger.",
+  "cases": [
+    {
+      "id": "one-pass-min-length",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "titles": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 30,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          },
+          {
+            "index": 4,
+            "durationSeconds": 40,
+            "sourceTitleId": 5
+          }
+        ],
+        "chosen": [
+          0,
+          2,
+          3
+        ],
+        "current": null
+      },
+      "expect": {
+        "minLength": 41
+      }
+    },
+    {
+      "id": "one-pass-too-few",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "titles": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 30,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          },
+          {
+            "index": 4,
+            "durationSeconds": 40,
+            "sourceTitleId": 5
+          }
+        ],
+        "chosen": [
+          0,
+          2
+        ],
+        "current": null
+      },
+      "expect": {
+        "minLength": null
+      }
+    },
+    {
+      "id": "one-pass-every-title",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "titles": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 30,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          },
+          {
+            "index": 4,
+            "durationSeconds": 40,
+            "sourceTitleId": 5
+          }
+        ],
+        "chosen": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "current": null
+      },
+      "expect": {
+        "minLength": null
+      }
+    },
+    {
+      "id": "one-pass-longer-title-left-out",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "titles": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 30,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          },
+          {
+            "index": 4,
+            "durationSeconds": 40,
+            "sourceTitleId": 5
+          }
+        ],
+        "chosen": [
+          1,
+          2,
+          3
+        ],
+        "current": null
+      },
+      "expect": {
+        "minLength": null
+      }
+    },
+    {
+      "id": "one-pass-too-close",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "titles": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 599,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          }
+        ],
+        "chosen": [
+          0,
+          2,
+          3
+        ],
+        "current": null
+      },
+      "expect": {
+        "minLength": null
+      }
+    },
+    {
+      "id": "one-pass-already-filtered",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "titles": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 30,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          },
+          {
+            "index": 4,
+            "durationSeconds": 40,
+            "sourceTitleId": 5
+          }
+        ],
+        "chosen": [
+          0,
+          2,
+          3
+        ],
+        "current": 120
+      },
+      "expect": {
+        "minLength": null
+      }
+    },
+    {
+      "id": "one-pass-matches",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "listing": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 2,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          }
+        ],
+        "chosen": [
+          0,
+          2,
+          3
+        ],
+        "of": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 30,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          },
+          {
+            "index": 4,
+            "durationSeconds": 40,
+            "sourceTitleId": 5
+          }
+        ]
+      },
+      "expect": {
+        "matches": true
+      }
+    },
+    {
+      "id": "one-pass-doesnt-match",
+      "from": [
+        "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem",
+        "linux /parity/one-pass-rule"
+      ],
+      "given": {
+        "listing": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 900,
+            "sourceTitleId": 2
+          }
+        ],
+        "chosen": [
+          0,
+          2,
+          3
+        ],
+        "of": [
+          {
+            "index": 0,
+            "durationSeconds": 600,
+            "sourceTitleId": 1
+          },
+          {
+            "index": 1,
+            "durationSeconds": 30,
+            "sourceTitleId": 2
+          },
+          {
+            "index": 2,
+            "durationSeconds": 900,
+            "sourceTitleId": 3
+          },
+          {
+            "index": 3,
+            "durationSeconds": 1200,
+            "sourceTitleId": 4
+          },
+          {
+            "index": 4,
+            "durationSeconds": 40,
+            "sourceTitleId": 5
+          }
+        ]
+      },
+      "expect": {
+        "matches": false
+      }
+    },
+    {
+      "id": "space-margin-small",
+      "from": [
+        "macos ReliabilityTests.requiredSpaceHasAMargin",
+        "windows SafetyTests.RequiredSpaceHasAMargin",
+        "linux /reliability/free-space"
+      ],
+      "given": {
+        "bytes": 1000
+      },
+      "expect": {
+        "required": 268436456
+      }
+    },
+    {
+      "id": "space-margin-large",
+      "from": [
+        "macos ReliabilityTests.requiredSpaceHasAMargin",
+        "windows SafetyTests.RequiredSpaceHasAMargin",
+        "linux /reliability/free-space"
+      ],
+      "given": {
+        "bytes": 107374182400
+      },
+      "expect": {
+        "required": 109521666048
+      }
+    },
+    {
+      "id": "space-plan",
+      "from": [
+        "docs/configuration.md#output-folder-read-errors-and-checks (the titles' sizes, plus a copy of titles with hand-picked tracks and of a play-all title that will be split)"
+      ],
+      "given": {
+        "titles": [
+          {
+            "index": 0,
+            "sizeBytes": 1000000000
+          },
+          {
+            "index": 1,
+            "sizeBytes": 500000000
+          }
+        ],
+        "handPicked": [
+          1
+        ],
+        "splitTitle": 0
+      },
+      "expect": {
+        "bytes": 3000000000,
+        "required": 3268435456
+      }
+    }
+  ]
+}

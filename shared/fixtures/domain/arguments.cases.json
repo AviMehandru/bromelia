@@ -1,0 +1,317 @@
+{
+  "functions": [
+    "ArgumentSplitter.split",
+    "ArgumentSplitter.quote",
+    "CommandArgs.build",
+    "StepFilter.applies",
+    "StepFilter.statusWord"
+  ],
+  "description": "User-script command lines (split like a POSIX shell before tokens are filled in; a lone {files} expands to one argument per file) and which steps run for an outcome.",
+  "cases": [
+    {
+      "id": "split",
+      "from": [
+        "macos TemplateTests.splitsArguments",
+        "windows TemplateTests.SplitsArguments",
+        "linux /logic/arguments"
+      ],
+      "given": {
+        "text": "-i \"my file.mkv\" --x='a b' c\\ d"
+      },
+      "expect": {
+        "split": [
+          "-i",
+          "my file.mkv",
+          "--x=a b",
+          "c d"
+        ]
+      }
+    },
+    {
+      "id": "split-empty-quoted",
+      "from": [
+        "macos TemplateTests.splitsArguments"
+      ],
+      "given": {
+        "text": "\"\" x"
+      },
+      "expect": {
+        "split": [
+          "",
+          "x"
+        ]
+      }
+    },
+    {
+      "id": "split-blank",
+      "from": [
+        "macos TemplateTests.splitsArguments"
+      ],
+      "given": {
+        "text": "  "
+      },
+      "expect": {
+        "split": []
+      }
+    },
+    {
+      "id": "quote-simple",
+      "from": [
+        "macos TemplateTests.splitsArguments"
+      ],
+      "given": {
+        "quote": "simple"
+      },
+      "expect": {
+        "quoted": "simple"
+      }
+    },
+    {
+      "id": "quote-apostrophe",
+      "from": [
+        "macos TemplateTests.splitsArguments"
+      ],
+      "given": {
+        "quote": "it's"
+      },
+      "expect": {
+        "quoted": "'it'\\''s'"
+      }
+    },
+    {
+      "id": "invocation",
+      "from": [
+        "macos TemplateTests.postProcessInvocation",
+        "windows TemplateTests.PostProcessInvocation",
+        "linux /logic/arguments"
+      ],
+      "given": {
+        "step": {
+          "command": {
+            "executable": "/bin/echo",
+            "arguments": "--dir {outputDir} {files} \"{disc} done\""
+          }
+        },
+        "values": {
+          "outputDir": "/out/My Disc",
+          "disc": "My Disc"
+        },
+        "files": [
+          "/out/a.mkv",
+          "/out/b c.mkv"
+        ]
+      },
+      "expect": {
+        "executable": "/bin/echo",
+        "arguments": [
+          "--dir",
+          "/out/My Disc",
+          "/out/a.mkv",
+          "/out/b c.mkv",
+          "My Disc done"
+        ]
+      }
+    },
+    {
+      "id": "invocation-interpreter",
+      "from": [
+        "macos TemplateTests.postProcessInvocation"
+      ],
+      "given": {
+        "step": {
+          "command": {
+            "executable": "~/x.py",
+            "interpreter": "/usr/bin/python3",
+            "arguments": ""
+          }
+        },
+        "values": {},
+        "files": [],
+        "home": "/Users/me"
+      },
+      "expect": {
+        "executable": "/usr/bin/python3",
+        "arguments": [
+          "/Users/me/x.py"
+        ]
+      }
+    },
+    {
+      "id": "run-condition-1",
+      "from": [
+        "macos TemplateTests.runConditions",
+        "windows TemplateTests.RunConditions",
+        "linux /logic/arguments"
+      ],
+      "given": {
+        "step": {
+          "runOn": "success"
+        },
+        "outcome": "succeeded"
+      },
+      "expect": {
+        "runs": true
+      }
+    },
+    {
+      "id": "run-condition-2",
+      "from": [
+        "macos TemplateTests.runConditions",
+        "windows TemplateTests.RunConditions",
+        "linux /logic/arguments"
+      ],
+      "given": {
+        "step": {
+          "runOn": "success"
+        },
+        "outcome": "failed"
+      },
+      "expect": {
+        "runs": false
+      }
+    },
+    {
+      "id": "run-condition-3",
+      "from": [
+        "macos TemplateTests.runConditions",
+        "windows TemplateTests.RunConditions",
+        "linux /logic/arguments"
+      ],
+      "given": {
+        "step": {
+          "runOn": "failure"
+        },
+        "outcome": "failed"
+      },
+      "expect": {
+        "runs": true
+      }
+    },
+    {
+      "id": "run-condition-4",
+      "from": [
+        "macos TemplateTests.runConditions",
+        "windows TemplateTests.RunConditions",
+        "linux /logic/arguments"
+      ],
+      "given": {
+        "step": {
+          "runOn": "failure"
+        },
+        "outcome": "cancelled"
+      },
+      "expect": {
+        "runs": true
+      }
+    },
+    {
+      "id": "run-condition-5",
+      "from": [
+        "macos TemplateTests.runConditions",
+        "windows TemplateTests.RunConditions",
+        "linux /logic/arguments"
+      ],
+      "given": {
+        "step": {
+          "runOn": "always",
+          "enabled": false
+        },
+        "outcome": "succeeded"
+      },
+      "expect": {
+        "runs": false
+      }
+    },
+    {
+      "id": "run-condition-6",
+      "from": [
+        "macos RipCheckTests.stepsForJobsWithReadErrors",
+        "windows SafetyTests.StepsForJobsWithReadErrors",
+        "linux /safety/errors-state"
+      ],
+      "given": {
+        "step": {
+          "runOn": "success"
+        },
+        "outcome": "succeededWithReadErrors"
+      },
+      "expect": {
+        "runs": false
+      }
+    },
+    {
+      "id": "run-condition-7",
+      "from": [
+        "macos RipCheckTests.stepsForJobsWithReadErrors",
+        "windows SafetyTests.StepsForJobsWithReadErrors",
+        "linux /safety/errors-state"
+      ],
+      "given": {
+        "step": {
+          "runOn": "failure"
+        },
+        "outcome": "succeededWithReadErrors"
+      },
+      "expect": {
+        "runs": true
+      }
+    },
+    {
+      "id": "run-condition-8",
+      "from": [
+        "rearchitecture-plan §20.2; skipped jobs never run steps (today: already archived → no post-processing)"
+      ],
+      "given": {
+        "step": {
+          "runOn": "failure"
+        },
+        "outcome": "interrupted"
+      },
+      "expect": {
+        "runs": true
+      }
+    },
+    {
+      "id": "run-condition-9",
+      "from": [
+        "rearchitecture-plan §20.2; skipped jobs never run steps (today: already archived → no post-processing)"
+      ],
+      "given": {
+        "step": {
+          "runOn": "always"
+        },
+        "outcome": "skipped"
+      },
+      "expect": {
+        "runs": false
+      }
+    },
+    {
+      "id": "status-words",
+      "from": [
+        "macos RipCheckTests.stepsForJobsWithReadErrors",
+        "docs/configuration.md#postprocessstep (BROMELIA_STATUS)"
+      ],
+      "given": {
+        "outcomes": [
+          "succeeded",
+          "succeededWithReadErrors",
+          "succeededStepsFailed",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ]
+      },
+      "expect": {
+        "statusWords": [
+          "success",
+          "errors",
+          "success",
+          "failed",
+          "cancelled",
+          "failed"
+        ]
+      }
+    }
+  ]
+}

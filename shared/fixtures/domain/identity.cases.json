@@ -1,0 +1,552 @@
+{
+  "functions": [
+    "LabelParser.parse",
+    "LabelParser.setDescription",
+    "Identity.resolve",
+    "FormatDetector.detect",
+    "FormatDetector.code",
+    "KindHeuristics.decide",
+    "KindHeuristics.episodeLike",
+    "MenuNumbers.parse",
+    "MenuNumbers.firstEpisode",
+    "DriveJoin.shortModel"
+  ],
+  "description": "What a disc is: its name and place in a set from the label, movie or TV, and the format. Today's macOS IdentityTests cases; Windows and Linux test the same labels.",
+  "cases": [
+    {
+      "id": "label-one-piece-s2-p7-d2",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "ONE_PIECE_S2_P7_D2"
+      },
+      "expect": {
+        "title": "One Piece",
+        "season": 2,
+        "part": 7,
+        "volume": null,
+        "disc": 2,
+        "looksLikeSeries": true
+      }
+    },
+    {
+      "id": "label-one-piece-s3-p1-d1",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "One_Piece_S3_P1_D1"
+      },
+      "expect": {
+        "title": "One Piece",
+        "season": 3,
+        "part": 1,
+        "volume": null,
+        "disc": 1,
+        "looksLikeSeries": true
+      }
+    },
+    {
+      "id": "label-the-lord-of-the-rings-disc-2",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "THE_LORD_OF_THE_RINGS_DISC_2"
+      },
+      "expect": {
+        "title": "The Lord of the Rings",
+        "season": null,
+        "part": null,
+        "volume": null,
+        "disc": 2,
+        "looksLikeSeries": false
+      }
+    },
+    {
+      "id": "label-friends-season-4-disc-3",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "FRIENDS_SEASON_4_DISC_3"
+      },
+      "expect": {
+        "title": "Friends",
+        "season": 4,
+        "part": null,
+        "volume": null,
+        "disc": 3,
+        "looksLikeSeries": true
+      }
+    },
+    {
+      "id": "label-breaking-bad-s1d2",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "BREAKING_BAD_S1D2"
+      },
+      "expect": {
+        "title": "Breaking Bad",
+        "season": 1,
+        "part": null,
+        "volume": null,
+        "disc": 2,
+        "looksLikeSeries": true
+      }
+    },
+    {
+      "id": "label-naruto-vol-12",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "NARUTO_VOL_12"
+      },
+      "expect": {
+        "title": "Naruto",
+        "season": null,
+        "part": null,
+        "volume": 12,
+        "disc": null,
+        "looksLikeSeries": true
+      }
+    },
+    {
+      "id": "label-blade-runner-2049",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "BLADE_RUNNER_2049"
+      },
+      "expect": {
+        "title": "Blade Runner 2049",
+        "season": null,
+        "part": null,
+        "volume": null,
+        "disc": null,
+        "looksLikeSeries": false
+      }
+    },
+    {
+      "id": "label-rocky-ii-ws",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "ROCKY_II_WS"
+      },
+      "expect": {
+        "title": "Rocky II",
+        "season": null,
+        "part": null,
+        "volume": null,
+        "disc": null,
+        "looksLikeSeries": false
+      }
+    },
+    {
+      "id": "label-spider-man-no-way-home",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "SPIDER-MAN_NO_WAY_HOME"
+      },
+      "expect": {
+        "title": "Spider-Man No Way Home",
+        "season": null,
+        "part": null,
+        "volume": null,
+        "disc": null,
+        "looksLikeSeries": false
+      }
+    },
+    {
+      "id": "label-the-matrix-disc-1",
+      "from": [
+        "macos IdentityTests.parsesLabels",
+        "linux /identity/labels"
+      ],
+      "given": {
+        "label": "The Matrix - Disc 1"
+      },
+      "expect": {
+        "title": "The Matrix",
+        "season": null,
+        "part": null,
+        "volume": null,
+        "disc": 1,
+        "looksLikeSeries": false
+      }
+    },
+    {
+      "id": "set-description",
+      "from": [
+        "macos IdentityTests.describesSet"
+      ],
+      "given": {
+        "label": "ONE_PIECE_S2_P7_D2"
+      },
+      "expect": {
+        "set": "Season 2 Part 7 Disc 2"
+      }
+    },
+    {
+      "id": "set-description-none",
+      "from": [
+        "macos IdentityTests.describesSet"
+      ],
+      "given": {
+        "label": "INCEPTION"
+      },
+      "expect": {
+        "set": ""
+      }
+    },
+    {
+      "id": "resolve-dvd-fixture",
+      "from": [
+        "macos IdentityTests.resolvesDVDFixture",
+        "windows ArchiveTests.ResolvesDvdFixture",
+        "linux /identity/resolve"
+      ],
+      "given": {
+        "listing": "info-dvd.txt",
+        "encrypted": false
+      },
+      "expect": {
+        "name": "One Piece",
+        "kind": "tv",
+        "format": "dvd",
+        "formatCode": "DVD",
+        "set": "Season 3 Part 1 Disc 1"
+      }
+    },
+    {
+      "id": "resolve-dvd-encrypted",
+      "from": [
+        "macos IdentityTests.resolvesDVDFixture"
+      ],
+      "given": {
+        "listing": "info-dvd.txt",
+        "encrypted": true
+      },
+      "expect": {
+        "formatCode": "DVDe"
+      }
+    },
+    {
+      "id": "resolve-overrides",
+      "from": [
+        "macos IdentityTests.resolvesDVDFixture"
+      ],
+      "given": {
+        "listing": "info-dvd.txt",
+        "encrypted": false,
+        "nameOverride": "One Piece (2001)",
+        "kindOverride": "movie"
+      },
+      "expect": {
+        "name": "One Piece (2001)",
+        "kind": "movie",
+        "reason": {
+          "code": "identity.reason.chosen"
+        }
+      }
+    },
+    {
+      "id": "resolve-bluray-metadata-title",
+      "from": [
+        "macos IdentityTests.prefersBlurayMetadataTitle",
+        "windows ArchiveTests.PrefersBlurayMetadataTitleAndDetectsUhd"
+      ],
+      "given": {
+        "listing": {
+          "attributes": {
+            "1": "Blu-ray disc",
+            "2": "The Dark Knight™",
+            "32": "DARK_KNIGHT_D1"
+          },
+          "titles": []
+        },
+        "encrypted": false
+      },
+      "expect": {
+        "name": "The Dark Knight",
+        "kind": "movie",
+        "formatCode": "BR",
+        "label": {
+          "disc": 1
+        }
+      }
+    },
+    {
+      "id": "format-uhd-by-video",
+      "from": [
+        "macos IdentityTests.detectsFormats",
+        "windows ArchiveTests.PrefersBlurayMetadataTitleAndDetectsUhd"
+      ],
+      "given": {
+        "listing": {
+          "attributes": {
+            "1": "Blu-ray disc"
+          },
+          "titles": [
+            {
+              "index": 0,
+              "tracks": [
+                {
+                  "index": 0,
+                  "kind": "video",
+                  "attributes": {
+                    "1": "Video",
+                    "19": "3840x2160"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "format": "uhd"
+      }
+    },
+    {
+      "id": "format-code-uhd-encrypted",
+      "from": [
+        "macos IdentityTests.detectsFormats"
+      ],
+      "given": {
+        "format": "uhd",
+        "encrypted": true
+      },
+      "expect": {
+        "formatCode": "4Ke"
+      }
+    },
+    {
+      "id": "format-from-flags-bluray",
+      "from": [
+        "macos IdentityTests.detectsFormats"
+      ],
+      "given": {
+        "flags": [
+          "blurayFiles",
+          "aacsFiles"
+        ]
+      },
+      "expect": {
+        "format": "bluray"
+      }
+    },
+    {
+      "id": "format-from-flags-dvd",
+      "from": [
+        "macos IdentityTests.detectsFormats"
+      ],
+      "given": {
+        "flags": [
+          "dvdFiles"
+        ]
+      },
+      "expect": {
+        "format": "dvd"
+      }
+    },
+    {
+      "id": "format-unknown",
+      "from": [
+        "macos IdentityTests.detectsFormats"
+      ],
+      "given": {},
+      "expect": {
+        "format": "unknown"
+      }
+    },
+    {
+      "id": "format-backup-index-uhd",
+      "from": [
+        "macos IdentityTests.detectsUHDBackupFolder",
+        "windows ArchiveTests.DetectsUhdBackupFolder"
+      ],
+      "given": {
+        "indexBdmv": "INDX0300xxxxxxxx"
+      },
+      "expect": {
+        "format": "uhd"
+      }
+    },
+    {
+      "id": "format-backup-index-bluray",
+      "from": [
+        "macos IdentityTests.detectsUHDBackupFolder"
+      ],
+      "given": {
+        "indexBdmv": "INDX0200xxxxxxxx"
+      },
+      "expect": {
+        "format": "bluray"
+      }
+    },
+    {
+      "id": "format-backup-video-ts",
+      "from": [
+        "macos DiscFormat.detect(backupFolder:) (today's code)"
+      ],
+      "given": {
+        "backupHasVideoTs": true
+      },
+      "expect": {
+        "format": "dvd"
+      }
+    },
+    {
+      "id": "kind-episode-length-titles",
+      "from": [
+        "macos IdentityTests.tvShowFromEpisodeLengthTitles",
+        "windows ArchiveTests.TvShowFromEpisodeLengthTitles",
+        "linux /identity/resolve"
+      ],
+      "given": {
+        "listing": {
+          "attributes": {
+            "1": "Blu-ray disc",
+            "32": "SOME_SHOW"
+          },
+          "titles": [
+            {
+              "index": 0,
+              "durationSeconds": 2710
+            },
+            {
+              "index": 1,
+              "durationSeconds": 2650
+            },
+            {
+              "index": 2,
+              "durationSeconds": 2690
+            },
+            {
+              "index": 3,
+              "durationSeconds": 2705
+            },
+            {
+              "index": 4,
+              "durationSeconds": 300
+            }
+          ]
+        }
+      },
+      "expect": {
+        "episodeLike": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "kind": "tv",
+        "reason": {
+          "code": "identity.reason.episodeTitles"
+        }
+      }
+    },
+    {
+      "id": "kind-play-all",
+      "from": [
+        "docs/configuration.md#naming-formats-and-episodes (a DVD menu plays three or more episode-length parts of one title)"
+      ],
+      "given": {
+        "label": "SOME_SHOW",
+        "playAllEpisodes": 6
+      },
+      "expect": {
+        "kind": "tv",
+        "reason": {
+          "code": "identity.reason.menuEpisodes",
+          "params": {
+            "count": 6
+          }
+        }
+      }
+    },
+    {
+      "id": "menu-numbers-first",
+      "from": [
+        "macos DVDNavigationTests.picksFirstEpisode",
+        "windows ArchiveTests.PicksFirstEpisodeAndMapsChapters",
+        "linux /dvd/jumps-and-numbers"
+      ],
+      "given": {
+        "numbers": [
+          138,
+          139,
+          140,
+          142,
+          143
+        ],
+        "count": 6
+      },
+      "expect": {
+        "firstEpisode": 138
+      }
+    },
+    {
+      "id": "menu-numbers-too-few",
+      "from": [
+        "macos DVDNavigationTests.picksFirstEpisode"
+      ],
+      "given": {
+        "numbers": [
+          5
+        ],
+        "count": 6
+      },
+      "expect": {
+        "firstEpisode": null
+      }
+    },
+    {
+      "id": "menu-numbers-in-text",
+      "from": [
+        "macos DVDNavigationTests.picksFirstEpisode"
+      ],
+      "given": {
+        "text": "EPISODE 138\nEpis0de #12 foo episode9"
+      },
+      "expect": {
+        "numbers": [
+          138,
+          12,
+          9
+        ]
+      }
+    },
+    {
+      "id": "drive-short-model",
+      "from": [
+        "macos DriveDetectionTests.disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults"
+      ],
+      "given": {
+        "identification": "BD-RE NEW DRIVE 3.00 SN"
+      },
+      "expect": {
+        "shortModel": "NEW DRIVE 3.00"
+      }
+    }
+  ]
+}

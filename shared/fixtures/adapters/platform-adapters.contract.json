@@ -1,0 +1,381 @@
+{
+  "functions": [
+    "ProcessLauncher.start",
+    "RunningProcess.stop",
+    "DriveControl.openRaw",
+    "DriveControl.closeTray",
+    "SettingsIsolation.prepare",
+    "PowerManager.inhibit",
+    "EngineLock.acquire",
+    "FileSystem.writeAtomically",
+    "FileSystem.openForReading",
+    "FileSystem.createDirectory"
+  ],
+  "description": "What every platform's adapters must do on the real OS (plan §26, 'Platform adapters'). These aren't run by a shared runner: each platform's adapter tests implement every case.",
+  "cases": [
+    {
+      "id": "stall-stops",
+      "from": [
+        "macos ReliabilityTests.stuckProcessIsStopped",
+        "windows SafetyTests.StuckProcessIsStopped",
+        "linux /reliability/stuck-process"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "echo started; sleep 60"
+        ],
+        "stopPolicy": "terminateFirst",
+        "stallTimeout": 2
+      },
+      "expect": {
+        "stalled": true,
+        "exitNonZero": true,
+        "within": 15,
+        "lines": [
+          "started"
+        ]
+      }
+    },
+    {
+      "id": "busy-not-stopped",
+      "from": [
+        "macos ReliabilityTests.busyProcessIsNotStopped",
+        "windows SafetyTests.BusyProcessIsNotStopped",
+        "linux /reliability/stuck-process"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "for i in 1 2 3 4 5 6; do echo $i; sleep 0.5; done"
+        ],
+        "stallTimeout": 2
+      },
+      "expect": {
+        "stalled": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "cancel-escalates",
+      "from": [
+        "linux /reliability/cancel-without-main-loop"
+      ],
+      "given": {
+        "command": "a child that ignores SIGINT",
+        "stopPolicy": "interruptFirst",
+        "cancelAfter": 0.5
+      },
+      "expect": {
+        "cancelled": true,
+        "within": 12,
+        "signals": [
+          "INT",
+          "KILL after 5 s"
+        ],
+        "rule": "Works without any main loop running (the watchdog has its own thread)."
+      }
+    },
+    {
+      "id": "terminate-first",
+      "from": [
+        "docs/architecture.md#stopping-processes (makemkvcon ignores SIGINT: SIGTERM, then SIGKILL after 5 s)"
+      ],
+      "given": {
+        "command": "a child that ignores SIGINT",
+        "stopPolicy": "terminateFirst"
+      },
+      "expect": {
+        "signals": [
+          "TERM",
+          "KILL after 5 s"
+        ]
+      }
+    },
+    {
+      "id": "abandon",
+      "from": [
+        "docs/architecture.md#stopping-processes (still there 30 s after SIGKILL → abandoned)"
+      ],
+      "given": {
+        "command": "a child stuck in the kernel"
+      },
+      "expect": {
+        "abandoned": true,
+        "within": 36
+      }
+    },
+    {
+      "id": "output-drained",
+      "from": [
+        "docs/architecture.md#stopping-processes (output read for at most 5 more seconds after exit)"
+      ],
+      "given": {
+        "command": "exits but leaves a child holding the pipe"
+      },
+      "expect": {
+        "returnsWithin": 6
+      }
+    },
+    {
+      "id": "process-group",
+      "from": [
+        "rearchitecture-plan §10.3 (posix_spawn + process group; Job Object; setpgid)"
+      ],
+      "given": {
+        "command": "a shell that starts a background child"
+      },
+      "expect": {
+        "stopKillsTheGroup": true
+      }
+    },
+    {
+      "id": "transcript",
+      "from": [
+        "docs/architecture.md#per-drive-makemkv-settings (every line, headed by the command line, followed by the exit status)"
+      ],
+      "given": {
+        "command": [
+          "/bin/echo",
+          "hi"
+        ],
+        "transcript": "t.txt"
+      },
+      "expect": {
+        "transcript": "==== <instant> $ /bin/echo hi\nhi\n==== <instant> exit status 0\n"
+      }
+    },
+    {
+      "id": "windows-drive-letters",
+      "from": [
+        "windows IntegrationFeatureTests.OnlyDriveLettersAreReadAsDevices"
+      ],
+      "given": {
+        "platform": "windows",
+        "paths": [
+          "e:",
+          "E:\\",
+          "C:\\Users\\me\\disc.bin",
+          "/dev/sr0",
+          "E:"
+        ],
+        "raw": [
+          true,
+          true,
+          true,
+          false,
+          false
+        ]
+      },
+      "expect": {
+        "devicePaths": [
+          "\\\\.\\E:",
+          "\\\\.\\E:",
+          "C:\\Users\\me\\disc.bin",
+          "/dev/sr0",
+          "E:"
+        ],
+        "rule": "Only a bare drive letter is read as a device; a file on C: is read as that file."
+      }
+    },
+    {
+      "id": "drutil-match",
+      "from": [
+        "macos IntegrationFeatureTests.drutilListIsMatchedByModel"
+      ],
+      "given": {
+        "platform": "macos",
+        "lines": [
+          "   Vendor   Product           Rev   Bus       SupportLevel",
+          "1  HL-DT-ST BD-RE  WH16NS60  1.02  USB       Unsupported",
+          "2  PIONEER  BD-RW   BDR-XS07 1.04  USB       Unsupported"
+        ],
+        "match": [
+          "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+          ""
+        ]
+      },
+      "expect": {
+        "indices": [
+          [
+            1
+          ],
+          [
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "id": "settings-isolation-home",
+      "from": [
+        "macos MakeMKVFileTests.environmentIsolatesSettings",
+        "windows MakeMKVFileTests.EnvironmentBuildsArguments",
+        "linux /makemkv/environment"
+      ],
+      "given": {
+        "platform": "macos|linux",
+        "settings": {
+          "dvd_MinimumTitleLength": "30"
+        }
+      },
+      "expect": {
+        "settingsFile": {
+          "macos": "<home>/Library/MakeMKV/settings.conf",
+          "linux": "<home>/.MakeMKV/settings.conf"
+        },
+        "environment": {
+          "HOME": "<home>"
+        },
+        "profileWritten": true
+      }
+    },
+    {
+      "id": "settings-isolation-registry",
+      "from": [
+        "docs/architecture.md#per-drive-makemkv-settings (Windows)",
+        "README.md limitations"
+      ],
+      "given": {
+        "platform": "windows",
+        "settings": {
+          "dvd_MinimumTitleLength": "30"
+        }
+      },
+      "expect": {
+        "registry": "HKCU\\Software\\MakeMKV gets the drive's values (other catalogue keys cleared) and the previous values back on the first output line, the exit or after 15 s; launches are serialised (MakemkvLaunch lease); a warning when the MakeMKV GUI runs"
+      }
+    },
+    {
+      "id": "power-guard",
+      "from": [
+        "macos ReliabilityTests.backgroundStepsKeepTheMacAwake",
+        "windows SafetyTests.BackgroundStepsKeepTheComputerAwake",
+        "linux /reliability/keep-awake"
+      ],
+      "given": {
+        "inhibit": "while held"
+      },
+      "expect": {
+        "macos": "IOPMAssertion (no idle sleep)",
+        "windows": "SetThreadExecutionState(ES_SYSTEM_REQUIRED) on a dedicated thread",
+        "linux": "logind Inhibit('sleep:idle', 'Bromelia', …, 'block'), fd kept open",
+        "replacingReleasesTheOldOne": true
+      }
+    },
+    {
+      "id": "power-no-logind",
+      "from": [
+        "linux /reliability/keep-awake-without-logind"
+      ],
+      "given": {
+        "platform": "linux",
+        "env": {
+          "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/nonexistent/bromelia-test-bus"
+        },
+        "inhibit": [
+          true,
+          false,
+          true
+        ]
+      },
+      "expect": {
+        "problemsReported": 1
+      }
+    },
+    {
+      "id": "engine-lock",
+      "from": [
+        "macos HeadlessTests.automationLock",
+        "windows AutomationLockTests.OneHolderAtATime",
+        "linux /state/automation-lock"
+      ],
+      "given": {
+        "lockFile": "<data>/run/engine.lock",
+        "holders": [
+          "first",
+          "second"
+        ]
+      },
+      "expect": {
+        "first": "acquires",
+        "second": {
+          "error": {
+            "code": "host.alreadyRunning",
+            "params": {
+              "pid": "<first's pid>"
+            }
+          }
+        },
+        "afterFirstReleases": "second acquires",
+        "note": "Replaces automation.lock (and its one-minute takeover): exactly one engine per user."
+      }
+    },
+    {
+      "id": "tls-identity",
+      "from": [
+        "macos WebTests.tlsIdentity",
+        "windows WebApiTests.ServesHttps",
+        "linux /web/tls"
+      ],
+      "given": {
+        "certificate": "a self-signed PEM certificate",
+        "key": "its PEM key"
+      },
+      "expect": {
+        "loads": true,
+        "wrongKey": "fails with server.startFailed {reason: tls.*}",
+        "macosKeychain": "never the login keychain"
+      }
+    },
+    {
+      "id": "file-system-durable-write",
+      "from": [
+        "rearchitecture-plan §9 FileSystem.writeAtomically, I3"
+      ],
+      "given": {
+        "write": "a.json"
+      },
+      "expect": {
+        "temporaryThenRename": true,
+        "fsyncFileAndFolder": {
+          "macos": "F_FULLFSYNC",
+          "windows": "FlushFileBuffers",
+          "linux": "fsync"
+        }
+      }
+    },
+    {
+      "id": "file-system-read-uncached",
+      "from": [
+        "rearchitecture-plan §22.3 (hash read back from disk)"
+      ],
+      "given": {
+        "openForReading": {
+          "bypassCache": true
+        }
+      },
+      "expect": {
+        "macos": "F_NOCACHE",
+        "windows": "FILE_FLAG_NO_BUFFERING",
+        "linux": "posix_fadvise(DONTNEED)"
+      }
+    },
+    {
+      "id": "file-system-never-creates-library-root",
+      "from": [
+        "rearchitecture-plan §9 createDirectory(parentsMustExist), I2"
+      ],
+      "given": {
+        "createDirectory": "<library>/Movies/X",
+        "libraryRootExists": false
+      },
+      "expect": {
+        "error": "the root isn't created"
+      }
+    }
+  ]
+}

@@ -1,0 +1,164 @@
+{
+  "functions": [
+    "HostOptions.parse"
+  ],
+  "description": "bromeliad's command line. Options given here (listen, port, token) are not saved to the configuration.",
+  "cases": [
+    {
+      "id": "all-options",
+      "from": [
+        "macos HeadlessTests.options",
+        "windows DaemonTests.Options",
+        "docs/docker.md (options)"
+      ],
+      "given": {
+        "args": [
+          "--config",
+          "~/b.json",
+          "-l",
+          "0.0.0.0",
+          "--port",
+          "8080",
+          "--token",
+          "t"
+        ]
+      },
+      "expect": {
+        "options": {
+          "config": "~/b.json",
+          "listen": "0.0.0.0",
+          "port": 8080,
+          "token": "t"
+        }
+      }
+    },
+    {
+      "id": "port-zero",
+      "from": [
+        "macos HeadlessTests.options",
+        "windows DaemonTests.Options",
+        "docs/docker.md (options)"
+      ],
+      "given": {
+        "args": [
+          "--port",
+          "0"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "config.portInvalid",
+          "params": {
+            "port": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "unknown",
+      "from": [
+        "macos HeadlessTests.options",
+        "windows DaemonTests.Options",
+        "docs/docker.md (options)"
+      ],
+      "given": {
+        "args": [
+          "--bogus"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "host.unknownOption",
+          "params": {
+            "option": "--bogus"
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-value",
+      "from": [
+        "macos HeadlessTests.options",
+        "windows DaemonTests.Options",
+        "docs/docker.md (options)"
+      ],
+      "given": {
+        "args": [
+          "--config"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "host.optionNeedsValue",
+          "params": {
+            "option": "--config"
+          }
+        }
+      }
+    },
+    {
+      "id": "ignores-cocoa-arguments",
+      "from": [
+        "macos HeadlessTests.options"
+      ],
+      "given": {
+        "args": [
+          "-NSDocumentRevisionsDebugMode",
+          "YES"
+        ],
+        "platform": "macos"
+      },
+      "expect": {
+        "options": {}
+      }
+    },
+    {
+      "id": "token-from-environment",
+      "from": [
+        "docs/docker.md (BROMELIA_WEB_TOKEN)"
+      ],
+      "given": {
+        "args": [],
+        "env": {
+          "BROMELIA_WEB_TOKEN": "t"
+        }
+      },
+      "expect": {
+        "options": {
+          "token": "t"
+        }
+      }
+    },
+    {
+      "id": "data-folder",
+      "from": [
+        "rearchitecture-plan §15.1 (--data)"
+      ],
+      "given": {
+        "args": [
+          "--data",
+          "/srv/bromelia"
+        ]
+      },
+      "expect": {
+        "options": {
+          "data": "/srv/bromelia"
+        }
+      }
+    },
+    {
+      "id": "client-subcommand",
+      "from": [
+        "rearchitecture-plan §7.1 (bromeliad status, rip, verify, config, diagnostics, install-service)"
+      ],
+      "given": {
+        "args": [
+          "status"
+        ]
+      },
+      "expect": {
+        "command": "status"
+      }
+    }
+  ]
+}
