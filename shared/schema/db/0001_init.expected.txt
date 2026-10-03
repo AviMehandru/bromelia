@@ -1,0 +1,233 @@
+table archive_units
+  id TEXT NOT NULL PK1
+  library_id TEXT NOT NULL
+  physical_disc_id TEXT
+  job_id TEXT
+  path TEXT NOT NULL
+  record_file TEXT NOT NULL
+  record_version INTEGER NOT NULL
+  state TEXT NOT NULL
+  status TEXT NOT NULL
+  name TEXT NOT NULL
+  kind TEXT NOT NULL
+  format TEXT NOT NULL
+  format_code TEXT NOT NULL
+  encrypted INTEGER NOT NULL DEFAULT 0
+  fingerprint TEXT
+  label TEXT NOT NULL DEFAULT ''
+  season INTEGER
+  part INTEGER
+  volume INTEGER
+  disc INTEGER
+  makemkv_version TEXT NOT NULL DEFAULT ''
+  bytes INTEGER NOT NULL DEFAULT 0
+  file_count INTEGER NOT NULL DEFAULT 0
+  attempts INTEGER NOT NULL DEFAULT 1
+  created_at TEXT NOT NULL
+  committed_at TEXT
+  fk physical_disc_id -> physical_discs(id) on delete set null
+  fk library_id -> libraries(id) on delete no action
+table checks
+  id TEXT NOT NULL PK1
+  unit_id TEXT
+  replica_id TEXT
+  folder TEXT NOT NULL
+  job_id TEXT
+  started_at TEXT NOT NULL
+  finished_at TEXT
+  result TEXT NOT NULL
+  files INTEGER NOT NULL DEFAULT 0
+  bytes INTEGER NOT NULL DEFAULT 0
+  changed TEXT NOT NULL DEFAULT '[]'
+  unreadable TEXT NOT NULL DEFAULT '[]'
+  missing TEXT NOT NULL DEFAULT '[]'
+  unlisted TEXT NOT NULL DEFAULT '[]'
+  error TEXT
+  fk replica_id -> replicas(id) on delete cascade
+  fk unit_id -> archive_units(id) on delete cascade
+table commit_intents
+  unit_id TEXT NOT NULL PK1
+  job_id TEXT NOT NULL
+  staging TEXT NOT NULL
+  destination TEXT NOT NULL
+  merge INTEGER NOT NULL DEFAULT 0
+  quarantine INTEGER NOT NULL DEFAULT 0
+  created_at TEXT NOT NULL
+  fk unit_id -> archive_units(id) on delete cascade
+table commit_items
+  unit_id TEXT NOT NULL PK1
+  seq INTEGER NOT NULL PK2
+  from_path TEXT NOT NULL
+  to_path TEXT NOT NULL
+  sha256 TEXT
+  is_dir INTEGER NOT NULL DEFAULT 0
+  moved INTEGER NOT NULL DEFAULT 0
+  fk unit_id -> commit_intents(unit_id) on delete cascade
+table disc_sets
+  id TEXT NOT NULL PK1
+  work_id TEXT
+  label_title TEXT NOT NULL DEFAULT ''
+  season INTEGER
+  part INTEGER
+  volume INTEGER
+  description TEXT NOT NULL DEFAULT ''
+  known_count INTEGER
+  fk work_id -> works(id) on delete set null
+table drive_stats_daily
+  drive_id TEXT NOT NULL PK1
+  day TEXT NOT NULL PK2
+  jobs INTEGER NOT NULL DEFAULT 0
+  failed_jobs INTEGER NOT NULL DEFAULT 0
+  read_error_jobs INTEGER NOT NULL DEFAULT 0
+  read_errors INTEGER NOT NULL DEFAULT 0
+  bytes_read INTEGER NOT NULL DEFAULT 0
+  seconds_reading REAL NOT NULL DEFAULT 0
+  fk drive_id -> drives(id) on delete cascade
+table drives
+  id TEXT NOT NULL PK1
+  identification TEXT NOT NULL
+  model TEXT NOT NULL DEFAULT ''
+  last_device TEXT NOT NULL DEFAULT ''
+  config_id TEXT
+  first_seen_at TEXT NOT NULL
+  last_seen_at TEXT NOT NULL
+table job_steps
+  job_id TEXT NOT NULL PK1
+  seq INTEGER NOT NULL PK2
+  kind TEXT NOT NULL
+  state TEXT NOT NULL
+  attempt INTEGER NOT NULL DEFAULT 1
+  started_at TEXT
+  finished_at TEXT
+  output TEXT
+  error TEXT
+  checkpoint TEXT
+  fk job_id -> jobs(id) on delete cascade
+table jobs
+  id TEXT NOT NULL PK1
+  kind TEXT NOT NULL
+  parent_id TEXT
+  state TEXT NOT NULL
+  outcome TEXT
+  error TEXT
+  blocked_by TEXT
+  decision TEXT
+  queue TEXT NOT NULL
+  position INTEGER NOT NULL DEFAULT 0
+  drive_id TEXT
+  media_generation INTEGER
+  automatic INTEGER NOT NULL DEFAULT 0
+  mode TEXT
+  title TEXT NOT NULL DEFAULT ''
+  fingerprint TEXT
+  request TEXT NOT NULL
+  plan TEXT
+  unit_id TEXT
+  created_at TEXT NOT NULL
+  started_at TEXT
+  finished_at TEXT
+  fk parent_id -> jobs(id) on delete no action
+table kv
+  key TEXT NOT NULL PK1
+  value TEXT NOT NULL
+  updated_at TEXT NOT NULL
+table libraries
+  id TEXT NOT NULL PK1
+  name TEXT NOT NULL
+  path TEXT NOT NULL
+  marker_id TEXT NOT NULL
+  attached_at TEXT NOT NULL
+  online INTEGER NOT NULL DEFAULT 0
+  last_seen_at TEXT
+table lookup_cache
+  provider TEXT NOT NULL PK1
+  request_key TEXT NOT NULL PK2
+  status INTEGER NOT NULL
+  response BLOB NOT NULL
+  fetched_at TEXT NOT NULL
+  expires_at TEXT NOT NULL
+table outbox
+  id TEXT NOT NULL PK1
+  target_id TEXT NOT NULL
+  job_id TEXT
+  title TEXT NOT NULL
+  body TEXT NOT NULL
+  status TEXT NOT NULL
+  created_at TEXT NOT NULL
+  attempts INTEGER NOT NULL DEFAULT 0
+  next_attempt_at TEXT
+  sent_at TEXT
+  last_error TEXT
+table parity
+  unit_id TEXT NOT NULL PK1
+  percent INTEGER NOT NULL
+  files TEXT NOT NULL DEFAULT '[]'
+  state TEXT NOT NULL
+  created_at TEXT NOT NULL
+  verified_at TEXT
+  fk unit_id -> archive_units(id) on delete cascade
+table physical_discs
+  id TEXT NOT NULL PK1
+  set_id TEXT
+  work_id TEXT
+  disc_number INTEGER
+  fingerprint TEXT
+  label TEXT NOT NULL DEFAULT ''
+  barcode TEXT
+  location TEXT
+  notes TEXT NOT NULL DEFAULT ''
+  created_at TEXT NOT NULL
+  fk work_id -> works(id) on delete set null
+  fk set_id -> disc_sets(id) on delete set null
+table replicas
+  id TEXT NOT NULL PK1
+  unit_id TEXT NOT NULL
+  target_id TEXT NOT NULL
+  path TEXT NOT NULL
+  state TEXT NOT NULL
+  verified_at TEXT
+  error TEXT
+  fk unit_id -> archive_units(id) on delete cascade
+table reservations
+  id TEXT NOT NULL PK1
+  job_id TEXT NOT NULL
+  volume_id TEXT NOT NULL
+  bytes INTEGER NOT NULL
+  created_at TEXT NOT NULL
+  fk job_id -> jobs(id) on delete cascade
+table unit_files
+  unit_id TEXT NOT NULL PK1
+  path TEXT NOT NULL PK2
+  size INTEGER NOT NULL
+  sha256 TEXT NOT NULL
+  role TEXT NOT NULL DEFAULT 'title'
+  title INTEGER
+  episode INTEGER
+  fk unit_id -> archive_units(id) on delete cascade
+table works
+  id TEXT NOT NULL PK1
+  kind TEXT NOT NULL
+  title TEXT NOT NULL
+  year INTEGER
+  tmdb_id INTEGER
+  imdb_id TEXT
+  created_at TEXT NOT NULL
+  updated_at TEXT NOT NULL
+index archive_units_fingerprint on archive_units: CREATE INDEX archive_units_fingerprint ON archive_units (fingerprint, status)
+index archive_units_library on archive_units: CREATE INDEX archive_units_library ON archive_units (library_id, path)
+index archive_units_name on archive_units: CREATE INDEX archive_units_name ON archive_units (name COLLATE NOCASE)
+index archive_units_previous_disc on archive_units: CREATE INDEX archive_units_previous_disc ON archive_units (kind, label, season, part, volume, disc)
+index checks_folder on checks: CREATE INDEX checks_folder ON checks (folder, finished_at)
+index checks_unit on checks: CREATE INDEX checks_unit ON checks (unit_id, finished_at)
+index disc_sets_work on disc_sets: CREATE INDEX disc_sets_work ON disc_sets (work_id)
+index jobs_active on jobs: CREATE INDEX jobs_active ON jobs (state, queue, position) WHERE state <> 'finished'
+index jobs_fingerprint on jobs: CREATE INDEX jobs_fingerprint ON jobs (fingerprint)
+index jobs_finished on jobs: CREATE INDEX jobs_finished ON jobs (finished_at) WHERE state = 'finished'
+index jobs_parent on jobs: CREATE INDEX jobs_parent ON jobs (parent_id)
+index outbox_pending on outbox: CREATE INDEX outbox_pending ON outbox (next_attempt_at) WHERE sent_at IS NULL
+index physical_discs_fingerprint on physical_discs: CREATE INDEX physical_discs_fingerprint ON physical_discs (fingerprint)
+index physical_discs_set on physical_discs: CREATE INDEX physical_discs_set ON physical_discs (set_id, disc_number)
+index reservations_volume on reservations: CREATE INDEX reservations_volume ON reservations (volume_id)
+index works_title on works: CREATE INDEX works_title ON works (title COLLATE NOCASE)
+index works_tmdb on works: CREATE UNIQUE INDEX works_tmdb ON works (kind, tmdb_id) WHERE tmdb_id IS NOT NULL
+user_version 1

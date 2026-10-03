@@ -684,12 +684,72 @@ def check_api():
             last = ev["seq"]
 
 
+# ---- database ---------------------------------------------------------------------
+
+def check_db():
+    import sqlite3
+    db_dir = SCHEMA / "db"
+    migrations = sorted(db_dir.glob("[0-9][0-9][0-9][0-9]_*.sql"))
+    R.check(bool(migrations), "no migrations in shared/schema/db")
+    con = sqlite3.connect(":memory:")
+    con.execute("PRAGMA foreign_keys = ON")
+    for n, m in enumerate(migrations, 1):
+        R.check(m.name.startswith(f"{n:04d}_"), f"{m.name}: migrations must be numbered 0001, 0002, … without gaps")
+        sql = m.read_text(encoding="utf-8")
+        R.check(re.search(rf"PRAGMA user_version = {n};\s*$", sql) is not None, f"{m.name}: must end with PRAGMA user_version = {n};")
+        R.check(not re.search(r"^\s*PRAGMA\s+(journal_mode|synchronous|foreign_keys)", sql, re.M | re.I), f"{m.name}: connection settings don't belong in a migration")
+        try:
+            con.executescript("BEGIN;" + sql.replace(f"PRAGMA user_version = {n};", "") + "COMMIT;")
+            con.execute(f"PRAGMA user_version = {n}")
+        except sqlite3.Error as e:
+            R.error(f"{m.name}: {e}")
+            return
+    lines = []
+    for (name,) in con.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"):
+        strict = con.execute("SELECT strict FROM pragma_table_list WHERE name = ?", (name,)).fetchone()
+        R.check(strict and strict[0] == 1, f"table {name} must be STRICT")
+        lines.append(f"table {name}")
+        for cid, col, typ, notnull, default, pk in con.execute(f"PRAGMA table_info({name})"):
+            lines.append(f"  {col} {typ}{' NOT NULL' if notnull else ''}{f' DEFAULT {default}' if default is not None else ''}{f' PK{pk}' if pk else ''}")
+        for fk in con.execute(f"PRAGMA foreign_key_list({name})"):
+            lines.append(f"  fk {fk[3]} -> {fk[2]}({fk[4]}) on delete {fk[6].lower()}")
+    for name, tbl, sql in con.execute("SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'index' AND sql IS NOT NULL ORDER BY name"):
+        lines.append(f"index {name} on {tbl}: {' '.join(sql.split())}")
+    lines.append(f"user_version {con.execute('PRAGMA user_version').fetchone()[0]}")
+    generated(db_dir / f"{migrations[-1].stem}.expected.txt", "\n".join(lines) + "\n")
+    # The constraints accept real rows.
+    now = "2026-10-02T21:53:04.123Z"
+    try:
+        con.executescript(f"""
+          INSERT INTO libraries VALUES ('archive', 'Archive', '/Volumes/Archive', 'm-1', '{now}', 1, '{now}');
+          INSERT INTO archive_units (id, library_id, path, record_file, record_version, state, status, name, kind, format, format_code, created_at)
+            VALUES ('u-1', 'archive', 'Movie', 'bromelia-u1.json', 3, 'committed', 'success', 'Movie', 'movie', 'bluray', 'BR', '{now}');
+          INSERT INTO unit_files VALUES ('u-1', 'Movie.mkv', 10, '{"a" * 64}', 'title', 0, NULL);
+          INSERT INTO jobs (id, kind, state, queue, request, created_at) VALUES ('j-1', 'videoDisc', 'queued', 'acquisition', '{{}}', '{now}');
+          INSERT INTO job_steps (job_id, seq, kind, state) VALUES ('j-1', 0, 'probe', 'pending');
+          INSERT INTO checks (id, unit_id, folder, started_at, result) VALUES ('c-1', 'u-1', '/Volumes/Archive/Movie', '{now}', 'ok');
+          INSERT INTO kv VALUES ('engine.lastStart', '"{now}"', '{now}');
+        """)
+        R.check(con.execute("PRAGMA foreign_key_check").fetchall() == [], "foreign key check failed on the sample rows")
+    except sqlite3.Error as e:
+        R.error(f"sample rows: {e}")
+    for bad in ["INSERT INTO jobs (id, kind, state, queue, request, created_at) VALUES ('j-2', 'videoDisc', 'nonsense', 'acquisition', '{}', 'x')",
+                "INSERT INTO kv VALUES ('k', 'not json', 'x')",
+                "INSERT INTO unit_files VALUES ('u-1', 'B.mkv', 'ten', 'abc', 'title', NULL, NULL)"]:
+        try:
+            con.execute(bad)
+            R.error(f"the schema accepted a bad row: {bad[:60]}…")
+        except sqlite3.Error:
+            pass
+
+
 SECTIONS = {
     "schemas": check_schemas,
     "config": check_config,
     "messages": check_messages,
     "documents": check_documents,
     "api": check_api,
+    "db": check_db,
     "fixtures": check_fixtures,
 }
 
