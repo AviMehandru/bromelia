@@ -38,6 +38,10 @@
 #include "bro-one-pass.h"
 #include "bro-space-estimate.h"
 #include "bro-title-rules.h"
+#include "bro-mode-chooser.h"
+#include "bro-profile-resolver.h"
+#include "bro-rule-matcher.h"
+#include "bro-step-filter.h"
 #include "bro-fingerprint.h"
 #include "bro-listing-builder.h"
 #include "bro-drive-join.h"
@@ -1729,6 +1733,187 @@ test_typed_views_fill_defaults (void)
   g_assert_cmpint (((BroIssue *) bad_issues->pdata[2])->code, ==, BRO_MSG_CONFIG_TLS_NEEDS_BOTH);
 }
 
+/* ---- rules ------------------------------------------------------------------------------------------- */
+
+static BroRuleFacts
+facts_of (BroJsonValue *f)
+{
+  return (BroRuleFacts) { JS (f, "name") ? JS (f, "name") : "", JS (f, "label") ? JS (f, "label") : "",
+                          JS (f, "formatCode") ? JS (f, "formatCode") : "", JS (f, "kind"), JS (f, "driveId"), JS (f, "profileId"),
+                          bro_json_value_get_bool (J (f, "automatic"), FALSE) };
+}
+
+/* Every key of @expected is in @actual with the same value (objects compared the same way, anything else exactly). */
+static void
+same_subset (GPtrArray *failures, const char *id, const char *path, BroJsonValue *expected, BroJsonValue *actual)
+{
+  if (expected->kind == BRO_JSON_VALUE_OBJECT) {
+    for (guint i = 0; i < expected->keys->len; i++) {
+      g_autofree char *p = g_strconcat (path, ".", expected->keys->pdata[i], NULL);
+      BroJsonValue *a = J (actual, expected->keys->pdata[i]);
+      if (!a)
+        bro_test_fail (failures, id, "%s is missing", p);
+      else
+        same_subset (failures, id, p, expected->items->pdata[i], a);
+    }
+    return;
+  }
+  bro_test_same_json (failures, id, path, expected, actual);
+}
+
+static gboolean
+not_drive_or_regex_case (const char *id)
+{
+  return !g_str_has_prefix (id, "drive-") && strcmp (id, "invalid-regex-issue") != 0;
+}
+
+static gboolean
+rule_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (J (given, "when")) {
+    BroJsonValue *w = J (given, "when");
+    BroRuleWhen when = { (char *) JS (w, "nameOrLabel"), (char *) JS (w, "name"), (char *) JS (w, "label"), strv_of (J (w, "formats")),
+                         strv_of (J (w, "kinds")), strv_of (J (w, "drives")), strv_of (J (w, "profiles")), J (w, "automatic") != NULL,
+                         bro_json_value_get_bool (J (w, "automatic"), FALSE) };
+    BroRuleFacts facts = facts_of (J (given, "facts"));
+    gboolean got = bro_rule_matcher_matches (&when, &facts);
+    if (!got != !bro_json_value_get_bool (J (expect, "matches"), FALSE))
+      bro_test_fail (failures, id, "matches: got %d", got);
+    g_strfreev (when.formats);
+    g_strfreev (when.kinds);
+    g_strfreev (when.drives);
+    g_strfreev (when.profiles);
+    return TRUE;
+  }
+  if (g_str_has_prefix (id, "mode-")) {
+    BroDiscFlags flags = { 0 };
+    BroJsonValue *list = J (given, "flags");
+    for (guint i = 0; i < bro_json_value_length (list); i++) {
+      const char *f = bro_json_value_get_string (bro_json_value_at (list, i), "");
+      if (strcmp (f, "dvdFiles") == 0)
+        flags.raw |= BRO_DISC_FLAGS_DVD_FILES;
+      else if (strcmp (f, "hdDvdFiles") == 0)
+        flags.raw |= BRO_DISC_FLAGS_HD_DVD_FILES;
+      else if (strcmp (f, "blurayFiles") == 0)
+        flags.raw |= BRO_DISC_FLAGS_BLURAY_FILES;
+      else
+        bro_test_fail (failures, id, "flag %s", f);
+    }
+    BroDiscFormat format = BRO_DISC_FORMAT_UNKNOWN;
+    if (JS (given, "format"))
+      bro_disc_format_from_wire (JS (given, "format"), &format);
+    BroDiscContent content = BRO_DISC_CONTENT_UNKNOWN;
+    if (JS (given, "content"))
+      bro_disc_content_from_wire (JS (given, "content"), &content);
+    g_autoptr (BroProfile) profile = bro_profile_new (J (given, "profile"));
+    BroRipMode mode;
+    gboolean has = bro_mode_chooser_mode (format, flags, content, profile, FALSE, &mode);
+    bro_test_same_string (failures, id, "mode", JS (expect, "mode"), has ? bro_rip_mode_to_wire (mode) : NULL);
+    return TRUE;
+  }
+  if (J (given, "config")) {
+    g_autoptr (BroConfig) config = decode_json (J (given, "config"));
+    BroRuleFacts facts = facts_of (J (given, "facts"));
+    g_autoptr (BroEffectiveProfile) e = bro_profile_resolver_resolve (config, JS (given, "drive"), &facts, J (given, "session"));
+    same_subset (failures, id, "profile", J (expect, "profile"), e->profile);
+    g_autoptr (BroJsonValue) steps = bro_json_value_new_array ();
+    for (int i = 0; e->steps[i]; i++)
+      bro_json_value_append (steps, bro_json_value_new_string (e->steps[i]));
+    bro_test_same_json (failures, id, "steps", J (expect, "steps"), steps);
+    g_autoptr (BroJsonValue) trace = bro_json_value_new_array ();
+    for (guint i = 0; i < e->trace->len; i++) {
+      BroResolveTrace *t = e->trace->pdata[i];
+      BroJsonValue *o = bro_json_value_new_object ();
+      bro_json_value_set (o, "layer", bro_json_value_new_string (bro_resolve_layer_to_wire (t->layer)));
+      if (t->id)
+        bro_json_value_set (o, "id", bro_json_value_new_string (t->id));
+      bro_json_value_append (trace, o);
+    }
+    bro_test_same_json (failures, id, "trace", J (expect, "trace"), trace);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void
+test_rule_cases (void)
+{
+  bro_test_run_cases_only ("domain/rules.cases.json", not_drive_or_regex_case, rule_case);
+}
+
+static gboolean
+only_step_filter (const char *id)
+{
+  return g_str_has_prefix (id, "run-condition") || strcmp (id, "status-words") == 0;
+}
+
+static gboolean
+step_filter_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (J (given, "outcomes")) {
+    BroJsonValue *outcomes = J (given, "outcomes");
+    g_autoptr (BroJsonValue) words = bro_json_value_new_array ();
+    for (guint i = 0; i < bro_json_value_length (outcomes); i++) {
+      BroOutcome o = BRO_OUTCOME_FAILED;
+      bro_outcome_from_wire (bro_json_value_get_string (bro_json_value_at (outcomes, i), ""), &o);
+      bro_json_value_append (words, bro_json_value_new_string (bro_status_word_to_wire (bro_step_filter_status_word (o))));
+    }
+    bro_test_same_json (failures, id, "statusWords", J (expect, "statusWords"), words);
+    return TRUE;
+  }
+  g_autoptr (BroJsonValue) json = bro_json_value_new_object ();
+  bro_json_value_set (json, "id", bro_json_value_new_string ("s"));
+  bro_json_value_set (json, "kind", bro_json_value_new_string ("command"));
+  BroJsonValue *step_json = J (given, "step");
+  for (guint i = 0; i < step_json->keys->len; i++)
+    bro_json_value_set (json, step_json->keys->pdata[i], bro_json_value_ref (step_json->items->pdata[i]));
+  g_autoptr (BroStepDefinition) step = bro_step_definition_decode (json);
+  BroOutcome outcome = BRO_OUTCOME_FAILED;
+  bro_outcome_from_wire (JS (given, "outcome"), &outcome);
+  gboolean runs = bro_step_filter_applies (step, outcome);
+  if (!runs != !bro_json_value_get_bool (J (expect, "runs"), FALSE))
+    bro_test_fail (failures, id, "runs: got %d", runs);
+  return TRUE;
+}
+
+static void
+test_step_filter_cases (void)
+{
+  bro_test_run_cases_only ("domain/arguments.cases.json", only_step_filter, step_filter_case);
+}
+
+static BroEffectiveProfile *
+resolve_text (const char *text, const char *name)
+{
+  g_autoptr (BroConfig) config = bro_config_codec_decode (text, -1, NULL);
+  BroRuleFacts facts = { name, "", "DVD", NULL, NULL, NULL, FALSE };
+  return bro_profile_resolver_resolve (config, NULL, &facts, NULL);
+}
+
+static void
+test_rule_profile_switch_and_removed_keys (void)
+{
+  g_autoptr (BroEffectiveProfile) e = resolve_text (
+    "{\"version\": 3,"
+    " \"profiles\": [{\"id\": \"default\", \"titles\": {\"strategy\": \"longest\"}}, {\"id\": \"anime\", \"titles\": {\"strategy\": \"all\"}}],"
+    " \"rules\": [{\"id\": \"a\", \"when\": {\"nameOrLabel\": \"piece\"}, \"then\": {\"profile\": \"anime\"}},"
+    "           {\"id\": \"b\", \"when\": {\"profiles\": [\"anime\"]}, \"then\": {\"set\": {\"titles\": {\"strategy\": null}}}},"
+    "           {\"id\": \"off\", \"enabled\": false, \"when\": {}, \"then\": {\"steps\": [\"x\"]}}]}",
+    "One Piece");
+  BroResolveLayer want[] = { BRO_RESOLVE_LAYER_DEFAULTS, BRO_RESOLVE_LAYER_DEFAULT_PROFILE, BRO_RESOLVE_LAYER_DRIVE_PROFILE,
+                             BRO_RESOLVE_LAYER_RULE, BRO_RESOLVE_LAYER_RULE };
+  g_assert_cmpuint (e->trace->len, ==, G_N_ELEMENTS (want));
+  for (guint i = 0; i < G_N_ELEMENTS (want); i++)
+    g_assert_cmpint (((BroResolveTrace *) e->trace->pdata[i])->layer, ==, want[i]);
+  /* Rule b removed the strategy, so the default comes back rather than the default profile's. */
+  g_autoptr (BroEffectiveProfile) defaults = resolve_text ("{\"version\": 3}", "");
+  g_assert_true (bro_json_value_equal (J (J (defaults->profile, "titles"), "strategy"), J (J (e->profile, "titles"), "strategy")));
+  GStrv keys = ((BroResolveTrace *) e->trace->pdata[4])->keys;
+  g_assert_cmpuint (g_strv_length (keys), ==, 1);
+  g_assert_cmpstr (keys[0], ==, "titles.strategy");
+  g_assert_null (e->steps[0]);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1760,5 +1945,8 @@ main (int argc, char **argv)
   g_test_add_func ("/config/codec", test_config_codec_cases);
   g_test_add_func ("/config/rule-regex", test_rule_regex_issues);
   g_test_add_func ("/config/typed-views", test_typed_views_fill_defaults);
+  g_test_add_func ("/rules/cases", test_rule_cases);
+  g_test_add_func ("/rules/step-filter", test_step_filter_cases);
+  g_test_add_func ("/rules/profile-switch", test_rule_profile_switch_and_removed_keys);
   return g_test_run ();
 }

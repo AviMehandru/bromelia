@@ -102,13 +102,18 @@ internal static class SchemaWalker
     /// <summary>The value with the schema's keys in order, unknown keys dropped (each reported), and, unless
     /// <paramref name="fill"/> is false or the node is sparse (x-inherit), missing keys filled with their defaults
     /// (an object without a default becomes {} and is filled in turn).</summary>
-    public static JsonValue Normalize(JsonValue value, JsonValue node, string path, bool fill, List<Issue> issues)
+    public static JsonValue Normalize(JsonValue value, JsonValue node, string path, bool fill, List<Issue> issues) =>
+        Normalize(value, node, path, fill, issues, false);
+
+    /// <summary>With <paramref name="full"/>, sparse objects are filled too: the bottom layer of
+    /// ProfileResolver.resolve, every profile field at its default.</summary>
+    public static JsonValue Normalize(JsonValue value, JsonValue node, string path, bool fill, List<Issue> issues, bool full)
     {
         if (value is JsonValue.Object o)
         {
             if (ObjectVariant(node) is { } obj)
             {
-                bool f = fill && !Inherits(node) && !Inherits(obj);
+                bool f = fill && (full || (!Inherits(node) && !Inherits(obj)));
                 var props = obj["properties"]!.AsObject!;
                 var members = new List<KeyValuePair<string, JsonValue>>();
                 var childIssues = new Dictionary<string, List<Issue>>();
@@ -125,7 +130,7 @@ internal static class SchemaWalker
                         else continue;
                     }
                     var list = childIssues[key] = new List<Issue>();
-                    members.Add(new(key, Normalize(child, prop, Join(path, key), f, list)));
+                    members.Add(new(key, Normalize(child, prop, Join(path, key), f, list, full)));
                 }
                 // Issues in document order: an unknown key where it was written, a known key's own issues there too.
                 foreach (var m in o.Members)
@@ -137,11 +142,11 @@ internal static class SchemaWalker
                 return new JsonValue.Object(members);
             }
             if (MapValues(node) is { } values)
-                return new JsonValue.Object(o.Members.Select(m => new KeyValuePair<string, JsonValue>(m.Key, Normalize(m.Value, values, Join(path, m.Key), fill, issues))).ToList());
+                return new JsonValue.Object(o.Members.Select(m => new KeyValuePair<string, JsonValue>(m.Key, Normalize(m.Value, values, Join(path, m.Key), fill, issues, full))).ToList());
             return value;
         }
         if (value is JsonValue.Array a && ArrayItems(node) is { } items)
-            return new JsonValue.Array(a.Items.Select((v, i) => Normalize(v, items, path + "[" + i.ToString(CultureInfo.InvariantCulture) + "]", fill, issues)).ToList());
+            return new JsonValue.Array(a.Items.Select((v, i) => Normalize(v, items, path + "[" + i.ToString(CultureInfo.InvariantCulture) + "]", fill, issues, full)).ToList());
         return value;
     }
 

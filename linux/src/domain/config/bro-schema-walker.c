@@ -167,12 +167,13 @@ forbidden (BroJsonValue *obj, const char *key, BroJsonValue *value)
 }
 
 BroJsonValue *
-_bro_schema_normalize (BroJsonValue *value, BroJsonValue *node, const char *path, gboolean fill, GPtrArray *issues)
+_bro_schema_normalize_full (BroJsonValue *value, BroJsonValue *node, const char *path, gboolean fill, gboolean full,
+                            GPtrArray *issues)
 {
   if (value->kind == BRO_JSON_VALUE_OBJECT) {
     BroJsonValue *obj = object_variant (node);
     if (obj) {
-      gboolean f = fill && !inherits (node) && !inherits (obj);
+      gboolean f = fill && (full || (!inherits (node) && !inherits (obj)));
       BroJsonValue *props = M (obj, "properties");
       BroJsonValue *out = bro_json_value_new_object ();
       g_autoptr (GHashTable) child_issues = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, (GDestroyNotify) g_ptr_array_unref);
@@ -197,7 +198,7 @@ _bro_schema_normalize (BroJsonValue *value, BroJsonValue *node, const char *path
         }
         GPtrArray *list = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_issue_free);
         g_autofree char *p = join (path, key);
-        bro_json_value_set (out, key, _bro_schema_normalize (child, prop, p, f, list));
+        bro_json_value_set (out, key, _bro_schema_normalize_full (child, prop, p, f, full, list));
         g_hash_table_insert (child_issues, (gpointer) key, list);
       }
       /* Issues in document order: an unknown key where it was written, a known key's own issues there too. */
@@ -219,7 +220,7 @@ _bro_schema_normalize (BroJsonValue *value, BroJsonValue *node, const char *path
       BroJsonValue *out = bro_json_value_new_object ();
       for (guint i = 0; i < value->keys->len; i++) {
         g_autofree char *p = join (path, value->keys->pdata[i]);
-        bro_json_value_set (out, value->keys->pdata[i], _bro_schema_normalize (value->items->pdata[i], values, p, fill, issues));
+        bro_json_value_set (out, value->keys->pdata[i], _bro_schema_normalize_full (value->items->pdata[i], values, p, fill, full, issues));
       }
       return out;
     }
@@ -232,11 +233,17 @@ _bro_schema_normalize (BroJsonValue *value, BroJsonValue *node, const char *path
     BroJsonValue *out = bro_json_value_new_array ();
     for (guint i = 0; i < value->items->len; i++) {
       g_autofree char *p = g_strdup_printf ("%s[%u]", path, i);
-      bro_json_value_append (out, _bro_schema_normalize (value->items->pdata[i], items, p, fill, issues));
+      bro_json_value_append (out, _bro_schema_normalize_full (value->items->pdata[i], items, p, fill, full, issues));
     }
     return out;
   }
   return bro_json_value_ref (value);
+}
+
+BroJsonValue *
+_bro_schema_normalize (BroJsonValue *value, BroJsonValue *node, const char *path, gboolean fill, GPtrArray *issues)
+{
+  return _bro_schema_normalize_full (value, node, path, fill, FALSE, issues);
 }
 
 /* ---- validation --------------------------------------------------------------------------------------- */

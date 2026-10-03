@@ -79,12 +79,13 @@ enum SchemaWalker {
 
     /// The value with the schema's keys in order, unknown keys dropped (each reported, in document order), and,
     /// unless `fill` is false or the node is sparse (x-inherit), missing keys filled with their defaults (an object
-    /// without a default becomes {} and is filled in turn).
-    static func normalize(_ value: JsonValue, _ node: JsonValue, _ path: String, fill: Bool, _ issues: inout [Issue]) -> JsonValue {
+    /// without a default becomes {} and is filled in turn). With `full`, sparse objects are filled too: the bottom
+    /// layer of ProfileResolver.resolve, every profile field at its default.
+    static func normalize(_ value: JsonValue, _ node: JsonValue, _ path: String, fill: Bool, full: Bool = false, _ issues: inout [Issue]) -> JsonValue {
         switch value {
         case .object(let members):
             if let obj = objectVariant(node) {
-                let f = fill && !inherits(node) && !inherits(obj)
+                let f = fill && (full || (!inherits(node) && !inherits(obj)))
                 let props = obj["properties"]?.members ?? []
                 var out: [(key: String, value: JsonValue)] = []
                 var childIssues: [String: [Issue]] = [:]
@@ -104,7 +105,7 @@ enum SchemaWalker {
                         }
                     }
                     var list: [Issue] = []
-                    out.append((key, normalize(child!, prop, join(path, key), fill: f, &list)))
+                    out.append((key, normalize(child!, prop, join(path, key), fill: f, full: full, &list)))
                     childIssues[key] = list
                 }
                 // Issues in document order: an unknown key where it was written, a known key's own issues there too.
@@ -118,12 +119,12 @@ enum SchemaWalker {
                 return .object(out)
             }
             if let values = mapValues(node) {
-                return .object(members.map { ($0.key, normalize($0.value, values, join(path, $0.key), fill: fill, &issues)) })
+                return .object(members.map { ($0.key, normalize($0.value, values, join(path, $0.key), fill: fill, full: full, &issues)) })
             }
             return value
         case .array(let items):
             guard let itemNode = arrayItems(node) else { return value }
-            return .array(items.enumerated().map { normalize($0.element, itemNode, "\(path)[\($0.offset)]", fill: fill, &issues) })
+            return .array(items.enumerated().map { normalize($0.element, itemNode, "\(path)[\($0.offset)]", fill: fill, full: full, &issues) })
         default:
             return value
         }

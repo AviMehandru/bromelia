@@ -17,6 +17,11 @@ BroJsonValue *_bro_schema_def (const char *name);
  * defaults. The same algorithm as tools/check-contracts.py's expand_defaults. */
 BroJsonValue *_bro_schema_normalize (BroJsonValue *value, BroJsonValue *node, const char *path, gboolean fill, GPtrArray *issues);
 
+/* The same; with @full, sparse objects are filled too: the bottom layer of bro_profile_resolver_resolve, every
+ * profile field at its default. */
+BroJsonValue *_bro_schema_normalize_full (BroJsonValue *value, BroJsonValue *node, const char *path, gboolean fill, gboolean full,
+                                          GPtrArray *issues);
+
 /* The issues (BroIssue *) of a value against a node: type, const, enum, required, minimum / maximum, pattern,
  * minProperties, oneOf / anyOf, allOf, if / then and not; config.secretInline for text where a SecretRef goes. */
 void _bro_schema_validate (BroJsonValue *value, BroJsonValue *node, const char *path, GPtrArray *issues);
