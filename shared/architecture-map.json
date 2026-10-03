@@ -5382,6 +5382,97 @@
               "BRO_DELIVERY_HTTP",
               "BRO_DELIVERY_APPRISE"
             ]
+          },
+          "doc": "How a notification goes out: http(request) or apprise(url), sent with the apprise command."
+        },
+        {
+          "name": "NotifyTarget",
+          "kind": "struct",
+          "doc": "A notification target of the configuration; the URL is the secret named by secret.",
+          "fields": [
+            "id",
+            "name",
+            "secret",
+            "enabled",
+            "onlyProblems"
+          ],
+          "swift": {
+            "name": "NotifyTarget",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Notify/NotifyTarget.swift"
+          },
+          "cs": {
+            "name": "NotifyTarget",
+            "file": "windows/src/Bromelia.Domain/Notify/NotifyTarget.cs"
+          },
+          "c": {
+            "name": "BroNotifyTarget",
+            "file": "linux/src/domain/notify/bro-notify-target.h"
+          }
+        },
+        {
+          "name": "TitleAndBody",
+          "kind": "struct",
+          "doc": "A notification's title and the lines of its body.",
+          "fields": [
+            "title",
+            "lines"
+          ],
+          "swift": {
+            "name": "TitleAndBody",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Notify/TitleAndBody.swift"
+          },
+          "cs": {
+            "name": "TitleAndBody",
+            "file": "windows/src/Bromelia.Domain/Notify/TitleAndBody.cs"
+          },
+          "c": {
+            "name": "BroTitleAndBody",
+            "file": "linux/src/domain/notify/bro-title-and-body.h"
+          }
+        },
+        {
+          "name": "JobSummary",
+          "kind": "struct",
+          "doc": "What a job notification says: the mode, what was ripped, how many files went where, and the job's error.",
+          "fields": [
+            "mode",
+            "what",
+            "files",
+            "path",
+            "error"
+          ],
+          "swift": {
+            "name": "JobSummary",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Notify/JobSummary.swift"
+          },
+          "cs": {
+            "name": "JobSummary",
+            "file": "windows/src/Bromelia.Domain/Notify/JobSummary.cs"
+          },
+          "c": {
+            "name": "BroJobSummary",
+            "file": "linux/src/domain/notify/bro-job-summary.h"
+          }
+        },
+        {
+          "name": "FolderCheck",
+          "kind": "struct",
+          "doc": "A checked archive folder and its result.",
+          "fields": [
+            "folder",
+            "result"
+          ],
+          "swift": {
+            "name": "FolderCheck",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Notify/FolderCheck.swift"
+          },
+          "cs": {
+            "name": "FolderCheck",
+            "file": "windows/src/Bromelia.Domain/Notify/FolderCheck.cs"
+          },
+          "c": {
+            "name": "BroFolderCheck",
+            "file": "linux/src/domain/notify/bro-folder-check.h"
           }
         }
       ],
@@ -5405,7 +5496,7 @@
             "targets",
             "status"
           ],
-          "returns": "[Target]",
+          "returns": "[NotifyTarget]",
           "swift": "NotifyRequests.targetsFor(_:status:)",
           "cs": "NotifyRequests.TargetsFor",
           "c": "bro_notify_requests_targets_for"

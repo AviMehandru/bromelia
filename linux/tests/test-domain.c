@@ -44,6 +44,8 @@
 #include "bro-profile-resolver.h"
 #include "bro-rule-matcher.h"
 #include "bro-step-filter.h"
+#include "bro-notify-messages.h"
+#include "bro-notify-requests.h"
 #include "bro-omdb-parse.h"
 #include "bro-omdb-requests.h"
 #include "bro-ranking.h"
@@ -2736,6 +2738,175 @@ test_metadata_cases (void)
   bro_test_run_cases ("domain/metadata.cases.json", metadata_case);
 }
 
+/* ---- notify ------------------------------------------------------------------------------------------ */
+
+static BroStatusWord
+status_word (const char *s)
+{
+  BroStatusWord w = BRO_STATUS_WORD_FAILED;
+  bro_status_word_from_wire (s ? s : "", &w);
+  return w;
+}
+
+/* A delivery against a fixture's expectation: the URL, the headers it names, the body as JSON or text, or the
+ * Apprise URL; delivery: null for none. */
+static void
+same_delivery (GPtrArray *failures, const char *id, BroJsonValue *expect, const BroDelivery *got)
+{
+  if (J (expect, "delivery")) {
+    if (got)
+      bro_test_fail (failures, id, "expected no delivery");
+    return;
+  }
+  if (JS (expect, "apprise")) {
+    bro_test_same_string (failures, id, "apprise", JS (expect, "apprise"), got && got->kind == BRO_DELIVERY_APPRISE ? got->url : NULL);
+    return;
+  }
+  if (!got || got->kind != BRO_DELIVERY_HTTP) {
+    bro_test_fail (failures, id, "expected an HTTP request");
+    return;
+  }
+  BroHttpRequestSpec *r = got->request;
+  bro_test_same_string (failures, id, "method", "POST", r->method);
+  if (JS (expect, "url"))
+    bro_test_same_string (failures, id, "url", JS (expect, "url"), r->url);
+  BroJsonValue *headers = J (expect, "headers");
+  for (guint k = 0; headers && k < headers->keys->len; k++) {
+    const char *value = NULL;
+    for (guint i = 0; i + 1 < r->headers->len && !value; i += 2)
+      if (strcmp (r->headers->pdata[i], headers->keys->pdata[k]) == 0)
+        value = r->headers->pdata[i + 1];
+    bro_test_same_string (failures, id, headers->keys->pdata[k], bro_json_value_get_string (headers->items->pdata[k], ""), value);
+  }
+  gsize n = 0;
+  const char *body = r->body ? g_bytes_get_data (r->body, &n) : "";
+  if (J (expect, "json")) {
+    g_autoptr (BroJsonValue) parsed = bro_json_value_parse (body, n);
+    g_autoptr (BroJsonValue) want = sorted_json (J (expect, "json"));
+    g_autoptr (BroJsonValue) have = parsed ? sorted_json (parsed) : bro_json_value_new_null ();
+    bro_test_same_json (failures, id, "json", want, have);
+  }
+  if (JS (expect, "text")) {
+    g_autofree char *text = g_strndup (body, n);
+    bro_test_same_string (failures, id, "text", JS (expect, "text"), text);
+  }
+}
+
+static gboolean
+notify_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (JS (given, "fixture")) {
+    g_autoptr (BroJsonValue) f = bro_test_fixture_json (JS (given, "fixture"));
+    BroJsonValue *cases = J (f, "cases");
+    for (guint i = 0; i < bro_json_value_length (cases); i++) {
+      BroJsonValue *c = bro_json_value_at (cases, i);
+      g_autoptr (BroDelivery) d = bro_notify_requests_build (JS (c, "url"), "T", "B", status_word (JS (c, "status")));
+      same_delivery (failures, JS (c, "url"), J (c, "expect"), d);
+    }
+    return TRUE;
+  }
+  if (JS (given, "url")) {
+    g_autoptr (BroDelivery) d = bro_notify_requests_build (JS (given, "url"), JS (given, "title"), JS (given, "body"), status_word (JS (given, "status")));
+    same_delivery (failures, id, expect, d);
+    return TRUE;
+  }
+  if (J (given, "targets")) {
+    BroJsonValue *list = J (given, "targets");
+    g_autofree BroNotifyTarget *targets = g_new0 (BroNotifyTarget, bro_json_value_length (list));
+    g_autoptr (GPtrArray) pointers = g_ptr_array_new ();
+    for (guint i = 0; i < bro_json_value_length (list); i++) {
+      BroJsonValue *t = bro_json_value_at (list, i);
+      targets[i] = (BroNotifyTarget) { JS (t, "id"), "", "url", TRUE, bro_json_value_get_bool (J (t, "onlyProblems"), FALSE) };
+      g_ptr_array_add (pointers, &targets[i]);
+    }
+    BroJsonValue *sent = J (expect, "sentTo");
+    for (guint k = 0; k < sent->keys->len; k++) {
+      g_autoptr (GPtrArray) got = bro_notify_requests_targets_for (pointers, status_word (sent->keys->pdata[k]));
+      g_autoptr (BroJsonValue) ids = bro_json_value_new_array ();
+      for (guint i = 0; i < got->len; i++)
+        bro_json_value_append (ids, bro_json_value_new_string (((BroNotifyTarget *) got->pdata[i])->id));
+      bro_test_same_json (failures, id, sent->keys->pdata[k], sent->items->pdata[k], ids);
+    }
+    return TRUE;
+  }
+  BroOutcome outcome = BRO_OUTCOME_FAILED;
+  bro_outcome_from_wire (JS (given, "outcome"), &outcome);
+  BroRipMode mode = BRO_RIP_MODE_MKV;
+  if (JS (given, "mode"))
+    bro_rip_mode_from_wire (JS (given, "mode"), &mode);
+  BroJobSummary job = { mode, JS (given, "what") ? JS (given, "what") : "", (int) bro_json_value_get_integer (J (given, "files"), 0),
+                        JS (given, "path") ? JS (given, "path") : "", NULL };
+  g_autoptr (BroTitleAndBody) m = bro_notify_messages_for_job (&job, outcome);
+  if (J (expect, "title")) {
+    g_autoptr (BroJsonValue) got = bro_bro_message_to_json (m->title);
+    bro_test_same_json (failures, id, "title", J (expect, "title"), got);
+  }
+  if (J (expect, "body")) {
+    g_autoptr (BroJsonValue) got = bro_bro_message_to_json (m->lines->pdata[0]);
+    if (m->lines->len != 1)
+      bro_test_fail (failures, id, "%u lines", m->lines->len);
+    bro_test_same_json (failures, id, "body", J (expect, "body"), got);
+  }
+  if (JS (expect, "text")) {
+    g_autoptr (BroJsonValue) json = bro_bro_message_to_json (JS (given, "mode") ? m->title : m->lines->pdata[0]);
+    g_autofree char *text = bro_test_english (json);
+    bro_test_same_string (failures, id, "text", JS (expect, "text"), text);
+  }
+  return TRUE;
+}
+
+static void
+test_notify_cases (void)
+{
+  bro_test_run_cases ("domain/notify.cases.json", notify_case);
+}
+
+static BroVerifyResult *
+checked (gboolean ok)
+{
+  const char *sums[] = { "a.mkv", NULL };
+  g_autoptr (GHashTable) hashes = g_hash_table_new (g_str_hash, g_str_equal);
+  g_hash_table_insert (hashes, (gpointer) "a.mkv", GINT_TO_POINTER (ok ? BRO_FILE_VERDICT_SAME : BRO_FILE_VERDICT_CHANGED));
+  return bro_verify_result_compare (sums, hashes, sums);
+}
+
+static char *
+english_of (const BroBroMessage *m)
+{
+  g_autoptr (BroJsonValue) json = bro_bro_message_to_json (m);
+  return bro_test_english (json);
+}
+
+static void
+test_check_notifications (void)
+{
+  g_autoptr (BroVerifyResult) good = checked (TRUE), bad = checked (FALSE);
+  BroFolderCheck two[] = { { "A", good }, { "B", good } };
+  g_autoptr (BroTitleAndBody) all_ok = bro_notify_messages_for_check (two, 2);
+  g_autofree char *t1 = english_of (all_ok->title), *l1 = english_of (all_ok->lines->pdata[0]);
+  g_assert_cmpstr (t1, ==, "Archive check: all 2 folder(s) OK");
+  g_assert_cmpuint (all_ok->lines->len, ==, 1);
+  g_assert_cmpstr (l1, ==, "Every file matches its checksum.");
+  BroFolderCheck many[13];
+  char names[12][8];
+  for (int i = 0; i < 12; i++) {
+    g_snprintf (names[i], sizeof names[i], "F%d", i);
+    many[i] = (BroFolderCheck) { names[i], bad };
+  }
+  many[12] = (BroFolderCheck) { "Good", good };
+  g_autoptr (BroTitleAndBody) damaged = bro_notify_messages_for_check (many, 13);
+  g_autofree char *t2 = english_of (damaged->title), *first = english_of (damaged->lines->pdata[0]);
+  g_assert_cmpstr (t2, ==, "Archive check: 12 of 13 folder(s) damaged");
+  g_assert_cmpuint (damaged->lines->len, ==, 11);
+  g_assert_cmpstr (first, ==, "F0: 1 changed of 1 file");
+  g_autofree char *more = english_of (damaged->lines->pdata[10]);
+  g_assert_cmpstr (more, ==, "… and 2 more");
+  BroJobSummary job = { BRO_RIP_MODE_BACKUP, "X", 0, "/p", NULL };
+  g_autoptr (BroTitleAndBody) cancelled = bro_notify_messages_for_job (&job, BRO_OUTCOME_CANCELLED);
+  g_autofree char *c = english_of (cancelled->lines->pdata[0]);
+  g_assert_cmpstr (c, ==, "Cancelled");
+}
+
 int
 main (int argc, char **argv)
 {
@@ -2777,5 +2948,7 @@ main (int argc, char **argv)
   g_test_add_func ("/dvdnav/cases", test_navigation_cases);
   g_test_add_func ("/dvdnav/menu-stills", test_menu_stills_and_buttons);
   g_test_add_func ("/metadata/cases", test_metadata_cases);
+  g_test_add_func ("/notify/cases", test_notify_cases);
+  g_test_add_func ("/notify/check", test_check_notifications);
   return g_test_run ();
 }

@@ -293,6 +293,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "check.notify.damaged",
   "check.notify.everyFileMatches",
   "check.notify.more",
+  "check.notify.folder",
   "post.running",
   "post.handbrakeMissing",
   "post.noMkv",

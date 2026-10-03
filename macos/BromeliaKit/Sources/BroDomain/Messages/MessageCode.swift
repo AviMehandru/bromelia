@@ -291,6 +291,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case checkNotifyDamaged = "check.notify.damaged"
     case checkNotifyEveryFileMatches = "check.notify.everyFileMatches"
     case checkNotifyMore = "check.notify.more"
+    case checkNotifyFolder = "check.notify.folder"
     case postRunning = "post.running"
     case postHandbrakeMissing = "post.handbrakeMissing"
     case postNoMkv = "post.noMkv"

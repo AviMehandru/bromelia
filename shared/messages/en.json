@@ -288,6 +288,7 @@
   "check.notify.damaged": "Archive check: {damaged} of {total} folder(s) damaged",
   "check.notify.everyFileMatches": "Every file matches its checksum.",
   "check.notify.more": "… and {count} more",
+  "check.notify.folder": "{folder}: {summary}",
   "post.running": "Post-processing",
   "post.handbrakeMissing": "{step}: HandBrakeCLI was not found. Install HandBrake's command line version, or set its location in the step.",
   "post.noMkv": "{step}: no MKV files to transcode",

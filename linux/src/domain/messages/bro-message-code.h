@@ -296,6 +296,7 @@ typedef enum {
   BRO_MSG_CHECK_NOTIFY_DAMAGED, /* check.notify.damaged */
   BRO_MSG_CHECK_NOTIFY_EVERY_FILE_MATCHES, /* check.notify.everyFileMatches */
   BRO_MSG_CHECK_NOTIFY_MORE, /* check.notify.more */
+  BRO_MSG_CHECK_NOTIFY_FOLDER, /* check.notify.folder */
   BRO_MSG_POST_RUNNING, /* post.running */
   BRO_MSG_POST_HANDBRAKE_MISSING, /* post.handbrakeMissing */
   BRO_MSG_POST_NO_MKV, /* post.noMkv */

@@ -1962,6 +1962,14 @@
       },
       "today": "AppModel.archiveCheckReport"
     },
+    "check.notify.folder": {
+      "kind": "notification",
+      "params": {
+        "folder": "path",
+        "summary": "message"
+      },
+      "today": "AppModel.archiveCheckReport (a damaged folder's line)"
+    },
     "post.running": {
       "kind": "progress",
       "today": "JobRunner.run phase"
