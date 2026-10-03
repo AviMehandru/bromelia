@@ -15,6 +15,9 @@ them (tools/check-architecture.py does that):
   --write     regenerate the generated files (config3-defaults.json, …) instead
               of failing when they differ
   --only S    run only the named sections (comma separated)
+  --export-scenarios DIR
+              write every scenario, disc, tool script and lines.yaml as JSON under DIR (same relative paths,
+              .json instead of .yaml), for runners that don't parse YAML
 
 Exit status 0 when everything holds, 1 otherwise.
 """
@@ -1060,7 +1063,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--write", action="store_true", help="regenerate generated files")
     ap.add_argument("--only", help="comma separated sections: " + ", ".join(SECTIONS))
+    ap.add_argument("--export-scenarios", metavar="DIR", help="write the scenarios as JSON into DIR and stop")
     args = ap.parse_args()
+    if args.export_scenarios:
+        out = Path(args.export_scenarios)
+        n = 0
+        for p in sorted(SCEN.rglob("*.yaml")):
+            target = out / p.relative_to(SCEN).with_suffix(".json")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(dump_json(load_yaml(p)), encoding="utf-8")
+            n += 1
+        print(f"wrote {n} file(s) to {out}")
+        return 0
     R.write = args.write
     names = args.only.split(",") if args.only else list(SECTIONS)
     for name in names:
