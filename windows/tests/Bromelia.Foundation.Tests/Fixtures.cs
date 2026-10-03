@@ -26,6 +26,9 @@ public static class Fixtures
 
     public static string Text(string relative) => File.ReadAllText(Path_(relative), Encoding.UTF8);
 
+    /// <summary>A file elsewhere in shared/ (schema/common.json, messages/codes.json).</summary>
+    public static JsonValue SharedJson(string relative) => Json("../" + relative);
+
     public static JsonValue Json(string relative) =>
         JsonValue.Parse(File.ReadAllBytes(Path_(relative))) ?? throw new InvalidOperationException(relative + " isn't JSON");
 

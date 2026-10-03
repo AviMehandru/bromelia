@@ -23,6 +23,9 @@ jobs:
         run: python3 tools/check-architecture.py --quiet
       - name: Layer rules
         run: python3 tools/check-layers.py --quiet
+      # The MessageCode enum of each platform is generated from shared/messages/codes.json.
+      - name: Generated message codes
+        run: python3 tools/gen-messages.py --check
 
   macos:
     name: macOS (SwiftUI)

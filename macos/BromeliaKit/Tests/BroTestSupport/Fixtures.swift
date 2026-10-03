@@ -23,6 +23,9 @@ public enum Fixtures {
 
     public static func text(_ relative: String) throws -> String { String(decoding: try bytes(relative), as: UTF8.self) }
 
+    /// A file elsewhere in shared/ (schema/common.json, messages/codes.json).
+    public static func sharedJson(_ relative: String) throws -> JsonValue { try json("../" + relative) }
+
     public static func json(_ relative: String) throws -> JsonValue {
         guard let v = JsonValue.parse(try bytes(relative)) else { throw FixtureError("\(relative) isn't JSON") }
         return v

@@ -103,6 +103,10 @@
       {
         "symbol": "BroFailure",
         "why": "Plan §6: the exception that carries a BroError across layers (Swift uses typed throws, C a BroError ** out-parameter)."
+      },
+      {
+        "symbol": "EnumWire",
+        "why": "C# enums have no raw values: EnumWire gives a case's camelCase wire form and parses it (Swift: String raw values; C: bro_<enum>_to_wire / _from_wire)."
       }
     ],
     "c": [
@@ -125,6 +129,14 @@
       {
         "symbol": "bro_http_request_spec_add_header",
         "why": "Builds the header list; Swift and C# pass the headers to the initialiser."
+      },
+      {
+        "symbol": "bro_*_to_wire",
+        "why": "An enum case's wire form (Swift: raw value; C#: EnumWire.Name)."
+      },
+      {
+        "symbol": "bro_*_from_wire",
+        "why": "An enum case from its wire form (Swift: init(rawValue:); C#: EnumWire.Parse)."
       }
     ]
   },
@@ -4639,7 +4651,53 @@
           }
         }
       ],
-      "functions": []
+      "functions": [
+        {
+          "name": "MessageCode.wire",
+          "params": [
+            "code"
+          ],
+          "returns": "String",
+          "doc": "The wire form: rip.readErrors.",
+          "swift": "MessageCode.wire(_:)",
+          "cs": "MessageCode.Wire",
+          "c": "bro_message_code_wire"
+        },
+        {
+          "name": "MessageCode.parse",
+          "params": [
+            "text"
+          ],
+          "returns": "MessageCode?",
+          "doc": "The code for a wire form.",
+          "swift": "MessageCode.parse(_:)",
+          "cs": "MessageCode.Parse",
+          "c": "bro_message_code_parse"
+        },
+        {
+          "name": "BroMessage.toError",
+          "params": [
+            "message",
+            "cause"
+          ],
+          "returns": "BroError",
+          "doc": "The message as an expected failure.",
+          "swift": "BroMessage.toError(_:cause:)",
+          "cs": "BroMessage.ToError",
+          "c": "bro_bro_message_to_error"
+        },
+        {
+          "name": "BroMessage.toJson",
+          "params": [
+            "message"
+          ],
+          "returns": "JsonValue",
+          "doc": "{code, params} as in shared/schema/common.json; params left out when empty.",
+          "swift": "BroMessage.toJson(_:)",
+          "cs": "BroMessage.ToJson",
+          "c": "bro_bro_message_to_json"
+        }
+      ]
     },
     "ports/process-launcher": {
       "layer": "ports",
