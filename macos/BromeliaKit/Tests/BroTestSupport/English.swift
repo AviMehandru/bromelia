@@ -6,19 +6,21 @@ import BroFoundation
 /// (The engine host's MessageRenderer, in Adapters, will do this properly.)
 public enum English {
     nonisolated(unsafe) static var texts: JsonValue?
+    nonisolated(unsafe) static var codes: JsonValue?
 
     public static func render(_ message: JsonValue) throws -> String {
         if texts == nil { texts = try Fixtures.sharedJson("messages/en.json") }
+        if codes == nil { codes = try Fixtures.sharedJson("messages/codes.json")["codes"] }
         let code = message["code"]?.string ?? ""
         let text = texts?[code]?.string ?? code
-        let rendered = try format(Array(text.unicodeScalars), message["params"] ?? .object([]), nil)
+        let rendered = try format(Array(text.unicodeScalars), message["params"] ?? .object([]), nil, code)
         if let cause = message["cause"], !cause.isNull { return rendered + " (" + (try render(cause)) + ")" }
         return rendered
     }
 
     private typealias S = [Unicode.Scalar]
 
-    private static func format(_ p: S, _ args: JsonValue, _ hash: Int64?) throws -> String {
+    private static func format(_ p: S, _ args: JsonValue, _ hash: Int64?, _ code: String) throws -> String {
         var out = String.UnicodeScalarView()
         var i = 0
         while i < p.count {
@@ -26,7 +28,7 @@ public enum English {
             if c == "#", let h = hash { out.append(contentsOf: String(h).unicodeScalars); i += 1; continue }
             if c != "{" { out.append(c); i += 1; continue }
             let end = try matching(p, i)
-            out.append(contentsOf: try argument(Array(p[(i + 1)..<end]), args).unicodeScalars)
+            out.append(contentsOf: try argument(Array(p[(i + 1)..<end]), args, code).unicodeScalars)
             i = end + 1
         }
         return String(out)
@@ -40,37 +42,38 @@ public enum English {
         throw FixtureError("unbalanced braces")
     }
 
-    private static func argument(_ body: S, _ args: JsonValue) throws -> String {
+    private static func argument(_ body: S, _ args: JsonValue, _ code: String) throws -> String {
         let parts = splitTop(body, 3)
         let name = String(String.UnicodeScalarView(parts[0])).trimmingSpaces
         let value = args[name]
-        if parts.count == 1 { return plain(value) }
+        // messages are joined with "; ", messageList with ", " (codes.json's paramTypes).
+        if parts.count == 1 { return plain(value, codes?[code]?["params"]?[name]?.string == "messageList" ? ", " : "; ") }
         switch String(String.UnicodeScalarView(parts[1])).trimmingSpaces {
         case "plural":
             let n = value?.int ?? 0
             let b = try branches(parts[2])
             let text = b["=\(n)"] ?? (n == 1 ? b["one"] : nil) ?? b["other"] ?? []
-            return try format(text, args, n)
+            return try format(text, args, n, code)
         case "select":
             let key: String
             if case .bool(let v)? = value { key = v ? "true" : "false" } else { key = plain(value) }
             let b = try branches(parts[2])
-            return try format(b[key] ?? b["other"] ?? [], args, nil)
+            return try format(b[key] ?? b["other"] ?? [], args, nil, code)
         case "bytes": return bytes(value?.int ?? 0)
         case "duration", "durationPrecise": return clock(Int64(value?.double ?? 0))
         default: return plain(value)
         }
     }
 
-    private static func plain(_ v: JsonValue?) -> String {
+    private static func plain(_ v: JsonValue?, _ messageJoin: String = "; ") -> String {
         switch v {
         case nil, .null?: return ""
         case .string(let s)?: return s
         case .integer(let i)?: return String(i)
         case .bool(let b)?: return b ? "true" : "false"
         case .array(let items)?:
-            if items.allSatisfy({ $0["code"] != nil }) { return items.map { (try? render($0)) ?? "" }.joined(separator: "; ") }
-            return items.map(plain).joined(separator: ", ")
+            if items.allSatisfy({ $0["code"] != nil }) { return items.map { (try? render($0)) ?? "" }.joined(separator: messageJoin) }
+            return items.map { plain($0) }.joined(separator: ", ")
         case let .object(m)? where m.contains(where: { $0.key == "code" }): return (try? render(v!)) ?? ""
         case let other?: return other.description
         }

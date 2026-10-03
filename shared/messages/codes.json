@@ -22,7 +22,8 @@
     "day": "A calendar day, YYYY-MM-DD, rendered as the locale's short date (en: as is).",
     "list": "A list of strings, rendered joined with ', '.",
     "message": "A nested BroMessage {code, params}, rendered from the catalogue.",
-    "messages": "A list of BroMessages, rendered and joined with '; '."
+    "messages": "A list of BroMessages, rendered and joined with '; '.",
+    "messageList": "A list of BroMessages, rendered and joined with ', ' (parts of one sentence, such as counts)."
   },
   "rendering": [
     "Texts are ICU MessageFormat: {x}, {x, plural, one {…} other {…}} (also =0), {x, select, a {…} other {…}}, plus the custom formats bytes, duration and durationPrecise.",
@@ -1881,7 +1882,7 @@
     "check.damaged": {
       "kind": "reason",
       "params": {
-        "parts": "messages",
+        "parts": "messageList",
         "files": "int",
         "unlisted": "int"
       },

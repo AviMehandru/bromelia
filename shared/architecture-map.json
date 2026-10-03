@@ -3342,7 +3342,24 @@
           "c": {
             "name": "BroArchiveRecord",
             "file": "linux/src/domain/archive-format/bro-archive-record.h"
-          }
+          },
+          "fields": [
+            "version",
+            "document",
+            "status",
+            "name",
+            "kind",
+            "label",
+            "volumeName",
+            "season",
+            "part",
+            "volume",
+            "disc",
+            "fingerprint",
+            "unitId",
+            "episodes",
+            "files"
+          ]
         },
         {
           "name": "ArchiveFiles",
@@ -3399,6 +3416,88 @@
           "c": {
             "name": "BroNotes",
             "file": "linux/src/domain/archive-format/bro-notes.h"
+          }
+        },
+        {
+          "name": "CheckResult",
+          "kind": "enum",
+          "doc": "The verdict of a unit's check (common.json's CheckResult).",
+          "cases": [
+            "ok",
+            "damaged",
+            "error",
+            "stopped"
+          ],
+          "swift": {
+            "name": "CheckResult",
+            "file": "macos/BromeliaKit/Sources/BroDomain/ArchiveFormat/CheckResult.swift",
+            "cases": [
+              ".ok",
+              ".damaged",
+              ".error",
+              ".stopped"
+            ]
+          },
+          "cs": {
+            "name": "CheckResult",
+            "file": "windows/src/Bromelia.Domain/ArchiveFormat/CheckResult.cs",
+            "cases": [
+              "Ok",
+              "Damaged",
+              "Error",
+              "Stopped"
+            ]
+          },
+          "c": {
+            "name": "BroCheckResult",
+            "file": "linux/src/domain/archive-format/bro-check-result.h",
+            "cases": [
+              "BRO_CHECK_RESULT_OK",
+              "BRO_CHECK_RESULT_DAMAGED",
+              "BRO_CHECK_RESULT_ERROR",
+              "BRO_CHECK_RESULT_STOPPED"
+            ]
+          }
+        },
+        {
+          "name": "FileVerdict",
+          "kind": "enum",
+          "doc": "What hashing one listed file found.",
+          "cases": [
+            "same",
+            "changed",
+            "missing",
+            "unreadable"
+          ],
+          "swift": {
+            "name": "FileVerdict",
+            "file": "macos/BromeliaKit/Sources/BroDomain/ArchiveFormat/FileVerdict.swift",
+            "cases": [
+              ".same",
+              ".changed",
+              ".missing",
+              ".unreadable"
+            ]
+          },
+          "cs": {
+            "name": "FileVerdict",
+            "file": "windows/src/Bromelia.Domain/ArchiveFormat/FileVerdict.cs",
+            "cases": [
+              "Same",
+              "Changed",
+              "Missing",
+              "Unreadable"
+            ]
+          },
+          "c": {
+            "name": "BroFileVerdict",
+            "file": "linux/src/domain/archive-format/bro-file-verdict.h",
+            "cases": [
+              "BRO_FILE_VERDICT_SAME",
+              "BRO_FILE_VERDICT_CHANGED",
+              "BRO_FILE_VERDICT_MISSING",
+              "BRO_FILE_VERDICT_UNREADABLE"
+            ]
           }
         }
       ],
@@ -3501,15 +3600,39 @@
         {
           "name": "Notes.render",
           "params": [
+            "jobId",
             "outcome",
             "error",
             "readErrors",
             "logs"
           ],
           "returns": "[BroMessage]",
-          "swift": "Notes.render(_:error:readErrors:logs:)",
+          "swift": "Notes.render(_:outcome:error:readErrors:logs:)",
           "cs": "Notes.Render",
           "c": "bro_notes_render"
+        },
+        {
+          "name": "Sha256Sums.hash",
+          "params": [
+            "bytes"
+          ],
+          "returns": "String",
+          "doc": "SHA-256 of bytes in memory, lower-case hex (files are hashed by the adapters, streaming).",
+          "swift": "Sha256Sums.hash(_:)",
+          "cs": "Sha256Sums.Hash",
+          "c": "bro_sha256_sums_hash"
+        },
+        {
+          "name": "ArchiveRecordCodec.archivedDisc",
+          "params": [
+            "record",
+            "folder"
+          ],
+          "returns": "ArchivedDisc?",
+          "doc": "The record as an archived TV disc for EpisodeContinuation: status success or errors, kind tv; the label's title from the volume name (else the label).",
+          "swift": "ArchiveRecordCodec.archivedDisc(_:folder:)",
+          "cs": "ArchiveRecordCodec.ArchivedDisc",
+          "c": "bro_archive_record_codec_archived_disc"
         }
       ]
     },

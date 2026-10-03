@@ -11,7 +11,12 @@
 
 #include "bro-argument-splitter.h"
 #include "bro-conflict-namer.h"
+#include "bro-archive-files.h"
+#include "bro-archive-record-codec.h"
 #include "bro-disc-flags.h"
+#include "bro-notes.h"
+#include "bro-sha256-sums.h"
+#include "bro-verify-result.h"
 #include "bro-layouts.h"
 #include "bro-sanitizer.h"
 #include "bro-template-engine.h"
@@ -1325,6 +1330,193 @@ test_tokens_and_template_layout (void)
   g_assert_cmpstr (p1->path, ==, "One Piece - Season 2 Part 7 Disc 2/backup");
 }
 
+/* ---- archive format ---------------------------------------------------------------------------------- */
+
+static GPtrArray *
+entries_of (BroJsonValue *v)
+{
+  GPtrArray *a = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_sum_entry_free);
+  for (guint i = 0; i < bro_json_value_length (v); i++)
+    g_ptr_array_add (a, bro_sum_entry_new (JS (bro_json_value_at (v, i), "path"), JS (bro_json_value_at (v, i), "sha256")));
+  return a;
+}
+
+static GStrv
+strv_of (BroJsonValue *v)
+{
+  GPtrArray *a = g_ptr_array_new ();
+  for (guint i = 0; i < bro_json_value_length (v); i++)
+    g_ptr_array_add (a, g_strdup (bro_json_value_get_string (bro_json_value_at (v, i), "")));
+  g_ptr_array_add (a, NULL);
+  return (GStrv) g_ptr_array_free (a, FALSE);
+}
+
+static gboolean
+archive_format_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  BroJsonValue *v;
+  if ((v = J (given, "bytes"))) {
+    g_autofree char *h = bro_sha256_sums_hash ((const guint8 *) v->string, strlen (v->string));
+    bro_test_same_string (failures, id, "sha256", JS (expect, "sha256"), h);
+  } else if ((v = J (given, "existing"))) {
+    g_autoptr (GPtrArray) entries = entries_of (J (given, "entries"));
+    g_autofree char *t = bro_sha256_sums_merge (v->string, entries);
+    bro_test_same_string (failures, id, "merged", JS (expect, "text"), t);
+  } else if ((v = J (given, "entries"))) {
+    g_autoptr (GPtrArray) entries = entries_of (v);
+    g_autofree char *t = bro_sha256_sums_render (entries);
+    bro_test_same_string (failures, id, "text", JS (expect, "text"), t);
+  } else if ((v = J (given, "text"))) {
+    g_autoptr (GPtrArray) entries = bro_sha256_sums_parse (v->string);
+    g_autoptr (BroJsonValue) actual = bro_json_value_new_array ();
+    for (guint i = 0; i < entries->len; i++) {
+      BroSumEntry *e = entries->pdata[i];
+      BroJsonValue *o = bro_json_value_new_object ();
+      put (o, "path", bro_json_value_new_string (e->path));
+      put (o, "sha256", bro_json_value_new_string (e->sha256));
+      bro_json_value_append (actual, o);
+    }
+    bro_test_same_json (failures, id, "entries", J (expect, "entries"), actual);
+  } else if ((v = J (given, "produced"))) {
+    g_auto (GStrv) produced = strv_of (v);
+    g_auto (GStrv) tree = strv_of (J (given, "tree"));
+    g_auto (GStrv) files = bro_archive_files_expand ((const char *const *) produced, (const char *const *) tree);
+    g_autoptr (BroJsonValue) actual = strv_json (files);
+    bro_test_same_json (failures, id, "relative", J (expect, "relative"), actual);
+  } else if ((v = J (given, "name"))) {
+    if (J (expect, "isOwnFile")) {
+      g_autoptr (BroJsonValue) a = bro_json_value_new_bool (bro_archive_files_is_own_file (v->string));
+      bro_test_same_json (failures, id, "own file", J (expect, "isOwnFile"), a);
+    } else {
+      g_autoptr (BroJsonValue) a = bro_json_value_new_bool (bro_archive_files_is_metadata_file (v->string));
+      bro_test_same_json (failures, id, "metadata file", J (expect, "isMetadataFile"), a);
+    }
+  } else if ((v = J (given, "sums"))) {
+    g_auto (GStrv) sums = strv_of (v);
+    g_auto (GStrv) folder = strv_of (J (given, "folder"));
+    g_autoptr (GHashTable) hashes = g_hash_table_new (g_str_hash, g_str_equal);
+    BroJsonValue *h = J (given, "hashes");
+    for (guint i = 0; h->keys && i < h->keys->len; i++) {
+      BroFileVerdict verdict = BRO_FILE_VERDICT_MISSING;
+      bro_file_verdict_from_wire (bro_json_value_get_string (h->items->pdata[i], ""), &verdict);
+      g_hash_table_insert (hashes, h->keys->pdata[i], GINT_TO_POINTER (verdict));
+    }
+    g_autoptr (BroVerifyResult) r = bro_verify_result_compare ((const char *const *) sums, hashes, (const char *const *) folder);
+    bro_test_same_string (failures, id, "result", JS (expect, "result"), bro_check_result_to_wire (r->result));
+    g_autoptr (BroJsonValue) summary = bro_bro_message_to_json (r->summary);
+    if (J (expect, "error")) {
+      bro_test_same_json (failures, id, "error", J (expect, "error"), summary);
+    } else {
+      g_autoptr (BroJsonValue) files = bro_json_value_new_integer (r->files);
+      bro_test_same_json (failures, id, "files", J (expect, "files"), files);
+      const char *keys[] = { "changed", "missing", "unreadable", "unlisted" };
+      GStrv lists[] = { r->changed, r->missing, r->unreadable, r->unlisted };
+      for (int k = 0; k < 4; k++)
+        if (J (expect, keys[k])) {
+          g_autoptr (BroJsonValue) list = strv_json (lists[k]);
+          bro_test_same_json (failures, id, keys[k], J (expect, keys[k]), list);
+        }
+      bro_test_same_json (failures, id, "summary", J (expect, "summary"), summary);
+      g_autofree char *text = bro_test_english (summary);
+      bro_test_same_string (failures, id, "summary text", JS (expect, "summaryText"), text);
+    }
+  } else {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static void
+test_archive_format_cases (void)
+{
+  bro_test_run_cases ("domain/archive-format.cases.json", archive_format_case);
+}
+
+static void
+test_version_3_records_round_trip (void)
+{
+  const char *names[] = { "archive/record3-movie-read-errors.json", "archive/record3-tv-play-all.json" };
+  for (int i = 0; i < 2; i++) {
+    gsize length;
+    g_autofree char *bytes = bro_test_fixture_text (names[i], &length);
+    g_autoptr (BroArchiveRecord) record = bro_archive_record_codec_decode (bytes, length);
+    g_assert_nonnull (record);
+    g_assert_cmpint (record->version, ==, 3);
+    g_autoptr (GBytes) encoded = bro_archive_record_codec_encode_v3 (record);
+    g_assert_cmpmem (g_bytes_get_data (encoded, NULL), g_bytes_get_size (encoded), bytes, length);
+    /* Keys out of order are written in the schema's order. */
+    BroJsonValue *doc = record->document;
+    for (guint a = 0, b = doc->keys->len - 1; a < b; a++, b--) {
+      gpointer k = doc->keys->pdata[a], v = doc->items->pdata[a];
+      doc->keys->pdata[a] = doc->keys->pdata[b];
+      doc->items->pdata[a] = doc->items->pdata[b];
+      doc->keys->pdata[b] = k;
+      doc->items->pdata[b] = v;
+    }
+    g_autoptr (GBytes) again = bro_archive_record_codec_encode_v3 (record);
+    g_assert_cmpmem (g_bytes_get_data (again, NULL), g_bytes_get_size (again), bytes, length);
+  }
+  gsize length;
+  g_autofree char *movie_bytes = bro_test_fixture_text ("archive/record3-movie-read-errors.json", &length);
+  g_autoptr (BroArchiveRecord) movie = bro_archive_record_codec_decode (movie_bytes, length);
+  g_assert_cmpstr (movie->status, ==, "errors");
+  g_assert_cmpstr (movie->unit_id, ==, "a1b2c3d4-0000-4000-8000-00000000abcd");
+  g_assert_null (bro_archive_record_codec_archived_disc (movie, "x"));
+  g_autofree char *tv_bytes = bro_test_fixture_text ("archive/record3-tv-play-all.json", &length);
+  g_autoptr (BroArchiveRecord) tv = bro_archive_record_codec_decode (tv_bytes, length);
+  g_autoptr (BroArchivedDisc) disc = bro_archive_record_codec_archived_disc (tv, "Shows/X");
+  int max = -1;
+  for (guint i = 0; i < tv->episodes->len; i++)
+    max = MAX (max, g_array_index (tv->episodes, int, i));
+  g_assert_cmpint (disc->last_episode, ==, max);
+}
+
+static void
+test_version_2_records_are_read (void)
+{
+  gsize length;
+  g_autofree char *bytes = bro_test_fixture_text ("archive/record2-sample-movie.json", &length);
+  g_autoptr (BroArchiveRecord) r = bro_archive_record_codec_decode (bytes, length);
+  g_assert_cmpint (r->version, ==, 2);
+  g_assert_cmpstr (r->status, ==, "success");
+  g_assert_cmpstr (r->name, ==, "Sample Movie");
+  g_assert_cmpstr (r->kind, ==, "movie");
+  g_assert_cmpstr (r->label, ==, "SAMPLE_MOVIE");
+  g_assert_cmpstr (r->fingerprint, ==, "v1:1111111111111111aaaaaaaaaaaaaaaa");
+  g_assert_cmpuint (r->files->len, ==, 1);
+  g_assert_null (r->unit_id);
+  g_assert_null (bro_archive_record_codec_decode ("{\"format\": \"other\"}", -1));
+  g_assert_null (bro_archive_record_codec_decode ("{\"format\": \"bromelia-archive\", \"version\": 4}", -1));
+}
+
+static void
+test_notes (void)
+{
+  BroId job;
+  g_strlcpy (job.value, "b2c3d4e5-0000-4000-8000-00000000abcd", sizeof job.value);
+  BroJsonValue *p = bro_json_value_new_object ();
+  bro_json_value_set (p, "count", bro_json_value_new_integer (1));
+  g_autoptr (BroBroError) error = bro_bro_error_new ("rip.readErrors", p, NULL);
+  g_autoptr (GPtrArray) read_errors = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_robot_message_free);
+  g_ptr_array_add (read_errors, bro_robot_message_new (2003, 516, "Error 'Scsi error - MEDIUM ERROR' occurred while reading"));
+  const char *logs[] = { "bromelia-a1b2c3d4-log.txt", "makemkv-a1b2c3d4-log.txt", NULL };
+  g_autoptr (GPtrArray) lines = bro_notes_render (&job, BRO_OUTCOME_SUCCEEDED_WITH_READ_ERRORS, error, read_errors, logs);
+  GString *text = g_string_new (NULL);
+  for (guint i = 0; i < lines->len; i++) {
+    g_autoptr (BroJsonValue) m = bro_bro_message_to_json (lines->pdata[i]);
+    g_autofree char *t = bro_test_english (m);
+    g_string_append_printf (text, "%s%s", i ? "\n" : "", t);
+  }
+  g_assert_cmpstr (text->str, ==,
+                   "Bromelia job b2c3d4e5-0000-4000-8000-00000000abcd: Completed with read errors.\n"
+                   "These files are NOT a finished archive. Rip the disc again (clean it first if it has read errors),\nor check the files yourself before using them.\n"
+                   "MakeMKV reported 1 read error while reading the disc, so the files may be damaged. They were kept apart from finished archives.\n"
+                   "Errors reported by MakeMKV while reading the disc:\n"
+                   "Error 'Scsi error - MEDIUM ERROR' occurred while reading\n"
+                   "The job's log is in this folder as bromelia-a1b2c3d4-log.txt, and everything MakeMKV printed as makemkv-a1b2c3d4-log.txt.");
+  g_string_free (text, TRUE);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1349,5 +1541,9 @@ main (int argc, char **argv)
   g_test_add_func ("/naming/cases", test_naming_cases);
   g_test_add_func ("/naming/arguments", test_argument_cases);
   g_test_add_func ("/naming/tokens-and-layout", test_tokens_and_template_layout);
+  g_test_add_func ("/archive-format/cases", test_archive_format_cases);
+  g_test_add_func ("/archive-format/records-v3", test_version_3_records_round_trip);
+  g_test_add_func ("/archive-format/records-v2", test_version_2_records_are_read);
+  g_test_add_func ("/archive-format/notes", test_notes);
   return g_test_run ();
 }

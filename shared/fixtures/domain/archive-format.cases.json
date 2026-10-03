@@ -47,6 +47,31 @@
       }
     },
     {
+      "id": "sums-render-code-point-order",
+      "from": [
+        "rebuild: SHA256SUMS is sorted in code point order (UTF-8 bytes, like LC_ALL=C sort), so its bytes are the same on every platform"
+      ],
+      "given": {
+        "entries": [
+          {
+            "path": "😀.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          {
+            "path": "Ａ.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          {
+            "path": "a.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          }
+        ]
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  Ａ.mkv\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  😀.mkv\n"
+      }
+    },
+    {
       "id": "sums-parse",
       "from": [
         "macos ChecksumTests.hashesFilesAndFolders"

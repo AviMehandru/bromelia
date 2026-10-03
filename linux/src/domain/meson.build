@@ -1,5 +1,6 @@
 # L1 Domain (rearchitecture plan §3.1): pure functions and value types. GLib's core only (no GIO, no GObject).
 bro_domain_inc = include_directories(
+  'archive-format',
   'config',
   'fingerprint',
   'identity',
@@ -14,6 +15,15 @@ bro_domain_inc = include_directories(
 
 bro_domain_lib = static_library('bro-domain',
   files(
+    'archive-format/bro-archive-files.c',
+    'archive-format/bro-archive-record-codec.c',
+    'archive-format/bro-archive-record.c',
+    'archive-format/bro-check-result.c',
+    'archive-format/bro-file-verdict.c',
+    'archive-format/bro-notes.c',
+    'archive-format/bro-sha256-sums.c',
+    'archive-format/bro-sum-entry.c',
+    'archive-format/bro-verify-result.c',
     'config/bro-drive-entry.c',
     'config/bro-drive-match.c',
     'config/bro-conflict-policy.c',

@@ -16,7 +16,7 @@ public static class Fingerprint
         if (listing.Titles.Count == 0) return null;
         var volume = listing.VolumeName.Length > 0 ? listing.VolumeName : listing.Name;
         var lines = listing.Titles.Select(t => FormattableString.Invariant($"{t.SourceTitleId ?? -1}|{t.DurationSeconds}|{t.SegmentMap}|{t.SizeBytes}"))
-            .OrderBy(l => l, StringComparer.Ordinal);
+            .OrderBy(l => l, CodePointOrder.Instance);
         var text = new StringBuilder(FormattableString.Invariant($"bromelia-disc-fingerprint 1\nvolume:{volume}\ntitles:{listing.Titles.Count}\n"));
         foreach (var l in lines) text.Append(l).Append('\n');
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant();
