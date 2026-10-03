@@ -1786,7 +1786,8 @@
           "c": {
             "name": "BroEditionClassifier",
             "file": "linux/src/domain/identity/bro-edition-classifier.h"
-          }
+          },
+          "phase": 7
         },
         {
           "name": "ExtrasClassifier",
@@ -1802,7 +1803,8 @@
           "c": {
             "name": "BroExtrasClassifier",
             "file": "linux/src/domain/identity/bro-extras-classifier.h"
-          }
+          },
+          "phase": 7
         },
         {
           "name": "MenuNumbers",
@@ -1893,6 +1895,179 @@
             "name": "BroDecision",
             "file": "linux/src/domain/identity/bro-decision.h"
           }
+        },
+        {
+          "name": "DiscFormat",
+          "kind": "enum",
+          "doc": "The disc's format.",
+          "cases": [
+            "dvd",
+            "bluray",
+            "uhd",
+            "hddvd",
+            "unknown"
+          ],
+          "swift": {
+            "name": "DiscFormat",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Identity/DiscFormat.swift",
+            "cases": [
+              ".dvd",
+              ".bluray",
+              ".uhd",
+              ".hddvd",
+              ".unknown"
+            ]
+          },
+          "cs": {
+            "name": "DiscFormat",
+            "file": "windows/src/Bromelia.Domain/Identity/DiscFormat.cs",
+            "cases": [
+              "Dvd",
+              "Bluray",
+              "Uhd",
+              "Hddvd",
+              "Unknown"
+            ]
+          },
+          "c": {
+            "name": "BroDiscFormat",
+            "file": "linux/src/domain/identity/bro-disc-format.h",
+            "cases": [
+              "BRO_DISC_FORMAT_DVD",
+              "BRO_DISC_FORMAT_BLURAY",
+              "BRO_DISC_FORMAT_UHD",
+              "BRO_DISC_FORMAT_HDDVD",
+              "BRO_DISC_FORMAT_UNKNOWN"
+            ]
+          }
+        },
+        {
+          "name": "FormatCode",
+          "kind": "struct",
+          "doc": "The format code of file names: DVD, BR, 4K, HDDVD or DISC, with an 'e' suffix for backups that weren't decrypted (common.json's FormatCode).",
+          "fields": [
+            "text"
+          ],
+          "swift": {
+            "name": "FormatCode",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Identity/FormatCode.swift"
+          },
+          "cs": {
+            "name": "FormatCode",
+            "file": "windows/src/Bromelia.Domain/Identity/FormatCode.cs"
+          },
+          "c": {
+            "name": "BroFormatCode",
+            "file": "linux/src/domain/identity/bro-format-code.h"
+          }
+        },
+        {
+          "name": "MediaKind",
+          "kind": "enum",
+          "doc": "A movie or a TV show.",
+          "cases": [
+            "movie",
+            "tv"
+          ],
+          "swift": {
+            "name": "MediaKind",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Identity/MediaKind.swift",
+            "cases": [
+              ".movie",
+              ".tv"
+            ]
+          },
+          "cs": {
+            "name": "MediaKind",
+            "file": "windows/src/Bromelia.Domain/Identity/MediaKind.cs",
+            "cases": [
+              "Movie",
+              "Tv"
+            ]
+          },
+          "c": {
+            "name": "BroMediaKind",
+            "file": "linux/src/domain/identity/bro-media-kind.h",
+            "cases": [
+              "BRO_MEDIA_KIND_MOVIE",
+              "BRO_MEDIA_KIND_TV"
+            ]
+          }
+        },
+        {
+          "name": "ContinuationQuery",
+          "kind": "struct",
+          "doc": "A TV disc whose episode numbering may continue another's: the show's name (after the lookup), the title of its label, its place in the set, and the highest episode already in its media-server season folder (if any).",
+          "fields": [
+            "name",
+            "labelTitle",
+            "season",
+            "part",
+            "volume",
+            "disc",
+            "seasonFolder",
+            "seasonFolderHighest"
+          ],
+          "swift": {
+            "name": "ContinuationQuery",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Identity/ContinuationQuery.swift"
+          },
+          "cs": {
+            "name": "ContinuationQuery",
+            "file": "windows/src/Bromelia.Domain/Identity/ContinuationQuery.cs"
+          },
+          "c": {
+            "name": "BroContinuationQuery",
+            "file": "linux/src/domain/identity/bro-continuation-query.h"
+          }
+        },
+        {
+          "name": "ArchivedDisc",
+          "kind": "struct",
+          "doc": "An archived disc of a TV show (from its archive record): its place in the set, its highest episode and its folder.",
+          "fields": [
+            "name",
+            "labelTitle",
+            "season",
+            "part",
+            "volume",
+            "disc",
+            "lastEpisode",
+            "folder"
+          ],
+          "swift": {
+            "name": "ArchivedDisc",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Identity/ArchivedDisc.swift"
+          },
+          "cs": {
+            "name": "ArchivedDisc",
+            "file": "windows/src/Bromelia.Domain/Identity/ArchivedDisc.cs"
+          },
+          "c": {
+            "name": "BroArchivedDisc",
+            "file": "linux/src/domain/identity/bro-archived-disc.h"
+          }
+        },
+        {
+          "name": "PreviousEpisode",
+          "kind": "struct",
+          "doc": "Where a disc's episode numbering continues: the last episode before it, and where that was found.",
+          "fields": [
+            "lastEpisode",
+            "source"
+          ],
+          "swift": {
+            "name": "PreviousEpisode",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Identity/PreviousEpisode.swift"
+          },
+          "cs": {
+            "name": "PreviousEpisode",
+            "file": "windows/src/Bromelia.Domain/Identity/PreviousEpisode.cs"
+          },
+          "c": {
+            "name": "BroPreviousEpisode",
+            "file": "linux/src/domain/identity/bro-previous-episode.h"
+          }
         }
       ],
       "functions": [
@@ -1921,10 +2096,11 @@
           "params": [
             "listing",
             "flags",
-            "indexBdmv"
+            "indexBdmv",
+            "hasVideoTs"
           ],
           "returns": "DiscFormat",
-          "swift": "FormatDetector.detect(_:flags:indexBdmv:)",
+          "swift": "FormatDetector.detect(_:flags:indexBdmv:hasVideoTs:)",
           "cs": "FormatDetector.Detect",
           "c": "bro_format_detector_detect"
         },
@@ -1971,7 +2147,8 @@
           "doc": "Backlog 11.",
           "swift": "EditionClassifier.classify(_:names:)",
           "cs": "EditionClassifier.Classify",
-          "c": "bro_edition_classifier_classify"
+          "c": "bro_edition_classifier_classify",
+          "phase": 7
         },
         {
           "name": "ExtrasClassifier.classify",
@@ -1982,7 +2159,8 @@
           "doc": "Backlog 12.",
           "swift": "ExtrasClassifier.classify(_:)",
           "cs": "ExtrasClassifier.Classify",
-          "c": "bro_extras_classifier_classify"
+          "c": "bro_extras_classifier_classify",
+          "phase": 7
         },
         {
           "name": "MenuNumbers.parse",
@@ -2011,7 +2189,7 @@
             "query",
             "candidates"
           ],
-          "returns": "Found?",
+          "returns": "PreviousEpisode?",
           "doc": "The previous disc's last episode (shared/fixtures/episode-continuation.json).",
           "swift": "EpisodeContinuation.choose(_:candidates:)",
           "cs": "EpisodeContinuation.Choose",

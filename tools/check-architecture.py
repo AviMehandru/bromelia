@@ -5,7 +5,8 @@
             function's owner type is in the map, the job enums match shared/schema/common.json, and every
             function a shared fixture names is in the map. Lint problems always fail.
   presence  for each platform: every type's file exists and defines it, every function is declared in its
-            owner type's file. Missing entries are reported; they fail only with --strict or for entries of
+            owner type's file. An entry may carry its own "phase" (a later one than its module's: backlog items of
+            plan §28 that the module will hold). Missing entries are reported; they fail only with --strict or for entries of
             a phase ≤ --require-phase.
   unmapped  public symbols in the layer folders that the map doesn't list (reported; fail with --strict).
 
@@ -168,7 +169,7 @@ class Checker:
                 f = ROOT / t[platform]["file"]
                 text = f.read_text(encoding="utf-8", errors="replace") if f.exists() else ""
                 if not text or not self.defines_type(platform, text, t[platform]["name"], t["kind"]):
-                    self.missing.append((platform, m["phase"], f"{key}: type {t[platform]['name']} ({t[platform]['file']})"))
+                    self.missing.append((platform, t.get("phase", m["phase"]), f"{key}: type {t[platform]['name']} ({t[platform]['file']})"))
             for fn in m["functions"]:
                 owner = fn["name"].split(".")[0]
                 entry = self.types[owner][0][1] if owner in self.types else None
@@ -177,7 +178,7 @@ class Checker:
                 if platform == "c" and f is not None and not text:
                     text = ""
                 if not text or not self.declares_function(platform, text, fn[platform]):
-                    self.missing.append((platform, m["phase"], f"{key}: {fn[platform]}"))
+                    self.missing.append((platform, fn.get("phase", m["phase"]), f"{key}: {fn[platform]}"))
         return req
 
     # ---- unmapped public symbols ------------------------------------------------------------------
@@ -246,7 +247,9 @@ class Checker:
             miss = [x for x in self.missing if x[0] == p]
             unm = [x for x in self.unmapped if x[0] == p]
             due = [x for x in miss if self.args.require_phase is not None and x[1] <= self.args.require_phase]
+            later = [x for x in miss if self.args.module and x[1] > min(m["phase"] for m in modules.values())]
             print(f"{PLATFORMS[p]}: {nt + nf - len(miss)} of {nt + nf} entries present, {len(miss)} missing"
+                  f"{f' ({len(later)} of a later phase)' if later else ''}"
                   f"{f' ({len(due)} due by phase {self.args.require_phase})' if self.args.require_phase is not None else ''}, {len(unm)} unmapped public symbol(s)")
             if not self.args.quiet:
                 for _, phase, what in (due if due else miss)[:20]:

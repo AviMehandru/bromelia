@@ -10,6 +10,12 @@
 #include "bro-step-state.h"
 
 #include "bro-disc-flags.h"
+#include "bro-episode-continuation.h"
+#include "bro-format-detector.h"
+#include "bro-identity.h"
+#include "bro-kind-heuristics.h"
+#include "bro-label-parser.h"
+#include "bro-menu-numbers.h"
 #include "bro-job-outcome.h"
 #include "bro-run-outcome.h"
 #include "bro-test-english.h"
@@ -906,6 +912,270 @@ test_stalled_and_cancelled_runs (void)
   g_assert_cmpint (c->status, ==, BRO_STATUS_WORD_CANCELLED);
 }
 
+/* ---- identity ---------------------------------------------------------------------------------------- */
+
+static GHashTable *
+attrs_of (BroJsonValue *a)
+{
+  GHashTable *t = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  for (guint i = 0; a && a->keys && i < a->keys->len; i++)
+    g_hash_table_insert (t, GINT_TO_POINTER (atoi (a->keys->pdata[i])), g_strdup (bro_json_value_get_string (a->items->pdata[i], "")));
+  return t;
+}
+
+/* A listing written in a fixture: a file name, or {attributes, titles} with tracks. */
+static BroListing *
+listing_from (BroJsonValue *v)
+{
+  if (v->kind == BRO_JSON_VALUE_STRING) {
+    g_autofree char *text = bro_test_fixture_text (v->string, NULL);
+    return listing_of (text);
+  }
+  BroListing *l = listing_of_titles (J (v, "titles"));
+  g_hash_table_unref (l->attributes);
+  l->attributes = attrs_of (J (v, "attributes"));
+  const char *a1 = g_hash_table_lookup (l->attributes, GINT_TO_POINTER (1));
+  const char *a2 = g_hash_table_lookup (l->attributes, GINT_TO_POINTER (2));
+  const char *a32 = g_hash_table_lookup (l->attributes, GINT_TO_POINTER (32));
+  g_free (l->type_text);
+  l->type_text = g_strdup (a1 ? a1 : "");
+  g_free (l->name);
+  l->name = g_strdup (a2 ? a2 : a32 ? a32 : "");
+  g_free (l->volume_name);
+  l->volume_name = g_strdup (a32 ? a32 : "");
+  BroJsonValue *titles = J (v, "titles");
+  for (guint i = 0; i < bro_json_value_length (titles); i++) {
+    BroTitle *t = l->titles->pdata[i];
+    BroJsonValue *tracks = J (bro_json_value_at (titles, i), "tracks");
+    for (guint k = 0; k < bro_json_value_length (tracks); k++) {
+      BroJsonValue *tj = bro_json_value_at (tracks, k);
+      BroTrack *tr = g_new0 (BroTrack, 1);
+      tr->index = bro_json_value_get_integer (J (tj, "index"), 0);
+      tr->kind = BRO_TRACK_KIND_UNKNOWN;
+      bro_track_kind_from_wire (JS (tj, "kind"), &tr->kind);
+      tr->codec = g_strdup ("");
+      tr->language = g_strdup ("");
+      tr->language_name = g_strdup ("");
+      tr->name = g_strdup ("");
+      tr->attributes = attrs_of (J (tj, "attributes"));
+      g_ptr_array_add (t->tracks, tr);
+    }
+  }
+  return l;
+}
+
+static BroJsonValue *
+opt_int (int v)
+{
+  return v >= 0 ? bro_json_value_new_integer (v) : bro_json_value_new_null ();
+}
+
+static BroJsonValue *
+label_json (const BroLabel *l)
+{
+  BroJsonValue *o = bro_json_value_new_object ();
+  put (o, "title", bro_json_value_new_string (l->title));
+  put (o, "season", opt_int (l->season));
+  put (o, "part", opt_int (l->part));
+  put (o, "volume", opt_int (l->volume));
+  put (o, "disc", opt_int (l->disc));
+  put (o, "looksLikeSeries", bro_json_value_new_bool (l->looks_like_series));
+  return o;
+}
+
+static void
+check_decision (GPtrArray *failures, const char *id, BroJsonValue *expect, const BroDecision *d)
+{
+  bro_test_same_string (failures, id, "kind", JS (expect, "kind"), bro_media_kind_to_wire (d->value));
+  g_autoptr (BroJsonValue) reason = bro_bro_message_to_json (d->reason);
+  bro_test_same_json (failures, id, "reason", J (expect, "reason"), reason);
+}
+
+static gboolean
+not_drive_case (const char *id)
+{
+  return !g_str_has_prefix (id, "drive-");
+}
+
+static gboolean
+identity_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  BroJsonValue *v;
+  if ((v = J (given, "label"))) {
+    g_autoptr (BroLabel) parsed = bro_label_parser_parse (bro_json_value_get_string (v, ""));
+    if (J (given, "playAllEpisodes")) {
+      g_autoptr (BroDecision) d = bro_kind_heuristics_decide (parsed, NULL, bro_json_value_get_integer (J (given, "playAllEpisodes"), 0));
+      check_decision (failures, id, expect, d);
+    } else if (J (expect, "set")) {
+      g_autofree char *set = bro_label_parser_set_description (parsed);
+      bro_test_same_string (failures, id, "set", JS (expect, "set"), set);
+    } else {
+      g_autoptr (BroJsonValue) actual = label_json (parsed);
+      bro_test_same_json (failures, id, "label", expect, actual);
+    }
+    return TRUE;
+  }
+  if ((v = J (given, "listing"))) {
+    g_autoptr (BroListing) listing = listing_from (v);
+    if (J (expect, "episodeLike")) {
+      g_autoptr (GPtrArray) like = bro_kind_heuristics_episode_like (listing->titles);
+      g_autoptr (BroJsonValue) indices = bro_json_value_new_array ();
+      for (guint i = 0; i < like->len; i++)
+        bro_json_value_append (indices, bro_json_value_new_integer (((BroTitle *) like->pdata[i])->index));
+      bro_test_same_json (failures, id, "episode-like", J (expect, "episodeLike"), indices);
+      g_autoptr (BroLabel) label = bro_label_parser_parse (listing->volume_name);
+      g_autoptr (BroDecision) d = bro_kind_heuristics_decide (label, listing, 0);
+      check_decision (failures, id, expect, d);
+    } else if (!J (given, "encrypted")) {
+      bro_test_same_string (failures, id, "format", JS (expect, "format"),
+                            bro_disc_format_to_wire (bro_format_detector_detect (listing, NULL, NULL, FALSE)));
+    } else {
+      g_autoptr (BroIdentityInputs) in = bro_identity_inputs_new (listing, "", bro_json_value_get_bool (J (given, "encrypted"), FALSE));
+      if (JS (given, "nameOverride")) {
+        g_free (in->name_override);
+        in->name_override = g_strdup (JS (given, "nameOverride"));
+      }
+      if (JS (given, "kindOverride"))
+        in->has_kind_override = bro_media_kind_from_wire (JS (given, "kindOverride"), &in->kind_override);
+      g_autoptr (BroIdentity) identity = bro_identity_resolve (in);
+      g_autofree char *set = bro_label_parser_set_description (identity->label);
+      g_autoptr (BroJsonValue) actual = bro_json_value_new_object ();
+      put (actual, "name", bro_json_value_new_string (identity->name));
+      put (actual, "kind", bro_json_value_new_string (bro_media_kind_to_wire (identity->kind)));
+      put (actual, "format", bro_json_value_new_string (bro_disc_format_to_wire (identity->format)));
+      put (actual, "formatCode", bro_json_value_new_string (identity->format_code.text));
+      put (actual, "set", bro_json_value_new_string (set));
+      put (actual, "reason", bro_bro_message_to_json (identity->reason));
+      put (actual, "label", label_json (identity->label));
+      for (guint i = 0; i < expect->keys->len; i++) {
+        const char *key = expect->keys->pdata[i];
+        BroJsonValue *want = expect->items->pdata[i];
+        if (strcmp (key, "label") == 0) {
+          for (guint k = 0; k < want->keys->len; k++)
+            bro_test_same_json (failures, id, want->keys->pdata[k], want->items->pdata[k], J (J (actual, "label"), want->keys->pdata[k]));
+        } else {
+          bro_test_same_json (failures, id, key, want, J (actual, key));
+        }
+      }
+    }
+    return TRUE;
+  }
+  if ((v = J (given, "format"))) {
+    BroDiscFormat f = BRO_DISC_FORMAT_UNKNOWN;
+    bro_disc_format_from_wire (bro_json_value_get_string (v, ""), &f);
+    BroFormatCode code = bro_format_detector_code (f, bro_json_value_get_bool (J (given, "encrypted"), FALSE));
+    bro_test_same_string (failures, id, "format code", JS (expect, "formatCode"), code.text);
+    return TRUE;
+  }
+  if ((v = J (given, "numbers"))) {
+    g_autoptr (GArray) numbers = ints_of (v);
+    int first;
+    g_autoptr (BroJsonValue) actual = bro_menu_numbers_first_episode (numbers, bro_json_value_get_integer (J (given, "count"), 0), &first)
+                                          ? bro_json_value_new_integer (first) : bro_json_value_new_null ();
+    bro_test_same_json (failures, id, "first episode", J (expect, "firstEpisode"), actual);
+    return TRUE;
+  }
+  if ((v = J (given, "text"))) {
+    g_autoptr (GArray) numbers = bro_menu_numbers_parse (bro_json_value_get_string (v, ""));
+    g_autoptr (BroJsonValue) actual = bro_json_value_new_array ();
+    for (guint i = 0; i < numbers->len; i++)
+      bro_json_value_append (actual, bro_json_value_new_integer (g_array_index (numbers, int, i)));
+    bro_test_same_json (failures, id, "numbers", J (expect, "numbers"), actual);
+    return TRUE;
+  }
+  if (J (expect, "format")) {
+    BroDiscFlags flags = { 0 };
+    BroJsonValue *f = J (given, "flags");
+    const char *names[] = { "dvdFiles", "hdDvdFiles", "blurayFiles", "aacsFiles", "bdsvmFiles" };
+    for (guint i = 0; i < bro_json_value_length (f); i++)
+      for (int b = 0; b < 5; b++)
+        if (g_strcmp0 (bro_json_value_get_string (bro_json_value_at (f, i), ""), names[b]) == 0)
+          flags.raw |= 1 << b;
+    BroDiscFormat detected = bro_format_detector_detect (NULL, f ? &flags : NULL, JS (given, "indexBdmv"),
+                                                         bro_json_value_get_bool (J (given, "backupHasVideoTs"), FALSE));
+    bro_test_same_string (failures, id, "format", JS (expect, "format"), bro_disc_format_to_wire (detected));
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void
+test_identity_cases (void)
+{
+  bro_test_run_cases_only ("domain/identity.cases.json", not_drive_case, identity_case);
+}
+
+static char *
+folder_of (const char *path)
+{
+  return g_strndup (path, strrchr (path, '/') - path);
+}
+
+/* shared/fixtures/episode-continuation.json: the records a case can see are the library's (the output root) and
+ * the history's folders; the season folder's file names give its highest episode. */
+static void
+test_episode_continuation_cases (void)
+{
+  g_autoptr (BroJsonValue) doc = bro_test_fixture_json ("episode-continuation.json");
+  g_autoptr (GPtrArray) records = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_archived_disc_free);
+  BroJsonValue *list = J (doc, "records");
+  for (guint i = 0; i < bro_json_value_length (list); i++) {
+    BroJsonValue *r = bro_json_value_at (list, i), *rec = J (r, "record"), *disc = J (rec, "disc");
+    const char *status = JS (rec, "status");
+    if (g_strcmp0 (JS (rec, "kind"), "tv") != 0 || (g_strcmp0 (status, "success") != 0 && g_strcmp0 (status, "errors") != 0))
+      continue;
+    const char *volume = JS (disc, "volumeName");
+    g_autoptr (BroLabel) label = bro_label_parser_parse (volume && volume[0] ? volume : JS (disc, "label"));
+    g_autofree char *folder = folder_of (JS (r, "path"));
+    BroArchivedDisc *d = bro_archived_disc_new (JS (rec, "name"), label->title, folder);
+    d->season = bro_json_value_get_integer (J (disc, "season"), -1);
+    d->part = bro_json_value_get_integer (J (disc, "part"), -1);
+    d->volume = bro_json_value_get_integer (J (disc, "volume"), -1);
+    d->disc = bro_json_value_get_integer (J (disc, "disc"), -1);
+    BroJsonValue *eps = J (rec, "episodes");
+    for (guint k = 0; k < bro_json_value_length (eps); k++)
+      d->last_episode = MAX (d->last_episode, (int) bro_json_value_get_integer (J (bro_json_value_at (eps, k), "episode"), -1));
+    g_ptr_array_add (records, d);
+  }
+  BroJsonValue *files = J (doc, "files"), *cases = J (doc, "cases");
+  for (guint i = 0; i < bro_json_value_length (cases); i++) {
+    BroJsonValue *c = bro_json_value_at (cases, i), *q = J (c, "query"), *folders = J (c, "folders");
+    g_autoptr (GPtrArray) visible = g_ptr_array_new ();
+    for (guint k = 0; k < records->len; k++) {
+      BroArchivedDisc *d = records->pdata[k];
+      gboolean seen = g_str_has_prefix (d->folder, "library/");
+      for (guint f = 0; !seen && f < bro_json_value_length (folders); f++)
+        seen = g_strcmp0 (bro_json_value_get_string (bro_json_value_at (folders, f), ""), d->folder) == 0;
+      if (seen)
+        g_ptr_array_add (visible, d);
+    }
+    g_autoptr (BroContinuationQuery) query = bro_continuation_query_new (JS (q, "name"), JS (q, "labelTitle"),
+                                                                         bro_json_value_get_integer (J (q, "disc"), 0));
+    query->season = bro_json_value_get_integer (J (q, "season"), -1);
+    query->part = bro_json_value_get_integer (J (q, "part"), -1);
+    query->volume = bro_json_value_get_integer (J (q, "volume"), -1);
+    const char *season_folder = JS (c, "seasonFolder");
+    if (season_folder) {
+      query->season_folder = g_strdup (season_folder);
+      g_autoptr (GPtrArray) names = g_ptr_array_new_with_free_func (g_free);
+      for (guint f = 0; f < bro_json_value_length (files); f++) {
+        const char *path = bro_json_value_get_string (bro_json_value_at (files, f), "");
+        g_autofree char *folder = folder_of (path);
+        if (strcmp (folder, season_folder) == 0)
+          g_ptr_array_add (names, g_strdup (strrchr (path, '/') + 1));
+      }
+      g_ptr_array_add (names, NULL);
+      int highest;
+      if (bro_episode_continuation_highest_in_season ((const char *const *) names->pdata, bro_json_value_get_integer (J (c, "season"), 0), &highest))
+        query->season_folder_highest = highest;
+    }
+    g_autoptr (BroPreviousEpisode) found = bro_episode_continuation_choose (query, visible);
+    gint64 expected = bro_json_value_get_integer (J (c, "expect"), -1);
+    if ((found ? found->last_episode : -1) != expected)
+      g_error ("%s: expected %" G_GINT64_FORMAT ", got %d", JS (c, "what"), expected, found ? found->last_episode : -1);
+  }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -925,5 +1195,7 @@ main (int argc, char **argv)
   g_test_add_func ("/titles/listing-match", test_listing_match);
   g_test_add_func ("/outcome/cases", test_outcome_cases);
   g_test_add_func ("/outcome/stalled-and-cancelled", test_stalled_and_cancelled_runs);
+  g_test_add_func ("/identity/cases", test_identity_cases);
+  g_test_add_func ("/identity/episode-continuation", test_episode_continuation_cases);
   return g_test_run ();
 }
