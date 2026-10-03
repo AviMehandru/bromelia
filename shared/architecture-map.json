@@ -1516,6 +1516,27 @@
           }
         },
         {
+          "name": "ByteFile",
+          "kind": "struct",
+          "doc": "A file of a ByteSource: its upper-case name and size in bytes.",
+          "fields": [
+            "name",
+            "size"
+          ],
+          "swift": {
+            "name": "ByteFile",
+            "file": "macos/BromeliaKit/Sources/BroDomain/DvdNav/ByteFile.swift"
+          },
+          "cs": {
+            "name": "ByteFile",
+            "file": "windows/src/Bromelia.Domain/DvdNav/ByteFile.cs"
+          },
+          "c": {
+            "name": "BroByteFile",
+            "file": "linux/src/domain/dvdnav/bro-byte-file.h"
+          }
+        },
+        {
           "name": "NavAnalysis",
           "kind": "struct",
           "swift": {
@@ -1529,6 +1550,56 @@
           "c": {
             "name": "BroNavAnalysis",
             "file": "linux/src/domain/dvdnav/bro-nav-analysis.h"
+          },
+          "fields": [
+            "titles",
+            "jumps",
+            "stills"
+          ],
+          "doc": "What analyse found: every title's chapters, how the menus and pre-commands reach chapters, and the menu stills."
+        },
+        {
+          "name": "NavTitle",
+          "kind": "struct",
+          "doc": "A disc title: its number, chapter lengths in seconds and the VOB id of each chapter.",
+          "fields": [
+            "number",
+            "chapters",
+            "chapterVobs"
+          ],
+          "swift": {
+            "name": "NavTitle",
+            "file": "macos/BromeliaKit/Sources/BroDomain/DvdNav/NavTitle.swift"
+          },
+          "cs": {
+            "name": "NavTitle",
+            "file": "windows/src/Bromelia.Domain/DvdNav/NavTitle.cs"
+          },
+          "c": {
+            "name": "BroNavTitle",
+            "file": "linux/src/domain/dvdnav/bro-nav-title.h"
+          }
+        },
+        {
+          "name": "NavJump",
+          "kind": "struct",
+          "doc": "How a chapter of a title is reached (the first way found): a menu, a button or a pre-command.",
+          "fields": [
+            "title",
+            "chapter",
+            "how"
+          ],
+          "swift": {
+            "name": "NavJump",
+            "file": "macos/BromeliaKit/Sources/BroDomain/DvdNav/NavJump.swift"
+          },
+          "cs": {
+            "name": "NavJump",
+            "file": "windows/src/Bromelia.Domain/DvdNav/NavJump.cs"
+          },
+          "c": {
+            "name": "BroNavJump",
+            "file": "linux/src/domain/dvdnav/bro-nav-jump.h"
           }
         },
         {
@@ -1543,6 +1614,8 @@
             "splitChapters",
             "duration",
             "chapterStarts",
+            "keptChapters",
+            "episodeDurations",
             "reasons"
           ],
           "swift": {
@@ -1556,6 +1629,27 @@
           "c": {
             "name": "BroEpisodePlan",
             "file": "linux/src/domain/dvdnav/bro-episode-plan.h"
+          }
+        },
+        {
+          "name": "ChapterRange",
+          "kind": "struct",
+          "doc": "The first and last disc chapter of an episode.",
+          "fields": [
+            "first",
+            "last"
+          ],
+          "swift": {
+            "name": "ChapterRange",
+            "file": "macos/BromeliaKit/Sources/BroDomain/DvdNav/ChapterRange.swift"
+          },
+          "cs": {
+            "name": "ChapterRange",
+            "file": "windows/src/Bromelia.Domain/DvdNav/ChapterRange.cs"
+          },
+          "c": {
+            "name": "BroChapterRange",
+            "file": "linux/src/domain/dvdnav/bro-chapter-range.h"
           }
         },
         {
@@ -1604,7 +1698,13 @@
           "c": {
             "name": "BroCellRef",
             "file": "linux/src/domain/dvdnav/bro-cell-ref.h"
-          }
+          },
+          "fields": [
+            "file",
+            "firstSector",
+            "endSector"
+          ],
+          "doc": "A menu still: the sectors [first, end) of one VOB/cell id in a menu VOB (input for MenuOcr)."
         }
       ],
       "functions": [
@@ -1687,10 +1787,43 @@
         {
           "name": "ByteSource.files",
           "params": [],
-          "returns": "[String]",
+          "returns": "[ByteFile]",
           "swift": "ByteSource.files()",
           "cs": "ByteSource.Files",
           "c": "bro_byte_source_files"
+        },
+        {
+          "name": "DvdNav.chapterRange",
+          "params": [
+            "plan",
+            "episode"
+          ],
+          "returns": "ChapterRange",
+          "swift": "DvdNav.chapterRange(_:episode:)",
+          "cs": "DvdNav.ChapterRange",
+          "c": "bro_dvd_nav_chapter_range"
+        },
+        {
+          "name": "DvdNav.isPlausible",
+          "params": [
+            "plan",
+            "strict"
+          ],
+          "returns": "Bool",
+          "swift": "DvdNav.isPlausible(_:strict:)",
+          "cs": "DvdNav.IsPlausible",
+          "c": "bro_dvd_nav_is_plausible"
+        },
+        {
+          "name": "DvdNav.matchesChapterCount",
+          "params": [
+            "plan",
+            "chapters"
+          ],
+          "returns": "Bool",
+          "swift": "DvdNav.matchesChapterCount(_:chapters:)",
+          "cs": "DvdNav.MatchesChapterCount",
+          "c": "bro_dvd_nav_matches_chapter_count"
         }
       ]
     },

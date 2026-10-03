@@ -44,6 +44,7 @@
 #include "bro-profile-resolver.h"
 #include "bro-rule-matcher.h"
 #include "bro-step-filter.h"
+#include "bro-dvd-nav.h"
 #include "bro-apprise-args.h"
 #include "bro-backup-structure.h"
 #include "bro-cd-ripper-args.h"
@@ -2211,6 +2212,262 @@ test_other_tool_arguments (void)
   g_assert_true (g_strv_equal ((const char *const *) hb, want_hb));
 }
 
+/* ---- dvdnav ------------------------------------------------------------------------------------------ */
+
+/* A folder of the fixtures, or files held in memory, as a BroByteSource (the adapters come in phase 2). */
+typedef struct {
+  BroByteSource parent;
+  char *dir;           /* a folder, or NULL */
+  GHashTable *memory;  /* name → GBytes * when dir is NULL */
+} TestByteSource;
+
+static GBytes *
+test_source_read (BroByteSource *source, const char *path, gint64 offset, gsize length)
+{
+  TestByteSource *t = (TestByteSource *) source;
+  g_autoptr (GBytes) all = NULL;
+  if (t->dir) {
+    g_autoptr (GDir) dir = g_dir_open (t->dir, 0, NULL);
+    const char *name;
+    while (dir && (name = g_dir_read_name (dir))) {
+      g_autofree char *upper = g_ascii_strup (name, -1);
+      if (strcmp (upper, path) != 0)
+        continue;
+      g_autofree char *full = g_build_filename (t->dir, name, NULL);
+      char *data;
+      gsize n;
+      if (g_file_get_contents (full, &data, &n, NULL))
+        all = g_bytes_new_take (data, n);
+    }
+  } else if (g_hash_table_lookup (t->memory, path)) {
+    all = g_bytes_ref (g_hash_table_lookup (t->memory, path));
+  }
+  if (!all || offset >= (gint64) g_bytes_get_size (all))
+    return g_bytes_new (NULL, 0);
+  return g_bytes_new_from_bytes (all, offset, MIN (length, g_bytes_get_size (all) - offset));
+}
+
+static int
+by_file_name (gconstpointer a, gconstpointer b)
+{
+  return strcmp ((*(BroByteFile *const *) a)->name, (*(BroByteFile *const *) b)->name);
+}
+
+static GPtrArray *
+test_source_files (BroByteSource *source)
+{
+  TestByteSource *t = (TestByteSource *) source;
+  GPtrArray *files = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_byte_file_free);
+  if (t->dir) {
+    g_autoptr (GDir) dir = g_dir_open (t->dir, 0, NULL);
+    const char *name;
+    while (dir && (name = g_dir_read_name (dir))) {
+      g_autofree char *upper = g_ascii_strup (name, -1);
+      g_autofree char *full = g_build_filename (t->dir, name, NULL);
+      g_autofree char *data = NULL;
+      gsize n = 0;
+      g_file_get_contents (full, &data, &n, NULL);
+      g_ptr_array_add (files, bro_byte_file_new (upper, n));
+    }
+  } else {
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init (&it, t->memory);
+    while (g_hash_table_iter_next (&it, &k, &v))
+      g_ptr_array_add (files, bro_byte_file_new (k, g_bytes_get_size (v)));
+  }
+  g_ptr_array_sort (files, by_file_name);
+  return files;
+}
+
+static BroEpisodePlan *
+first_plan (const char *golden)
+{
+  g_autofree char *rel = g_strconcat ("domain/", golden, NULL);
+  g_autoptr (BroJsonValue) g = bro_test_fixture_json (rel);
+  g_autofree char *dir = bro_test_fixture_path (JS (g, "input"));
+  TestByteSource source = { { test_source_read, test_source_files }, dir, NULL };
+  g_autoptr (BroNavAnalysis) a = bro_dvd_nav_analyse (&source.parent);
+  g_assert_nonnull (a);
+  GPtrArray *plans = bro_dvd_nav_plans (a);
+  g_assert_cmpuint (plans->len, >, 0);
+  BroEpisodePlan *plan = g_ptr_array_steal_index (plans, 0);
+  g_ptr_array_unref (plans);
+  return plan;
+}
+
+/* h:mm:ss.fff, as the fixtures write durations. */
+static char *
+hms (double s)
+{
+  int whole = (int) s;
+  return g_strdup_printf ("%d:%02d:%06.3f", whole / 3600, whole % 3600 / 60, fmod (s, 60));
+}
+
+static BroJsonValue *
+int_array_json (GArray *a)
+{
+  BroJsonValue *v = bro_json_value_new_array ();
+  for (guint i = 0; i < a->len; i++)
+    bro_json_value_append (v, bro_json_value_new_integer (g_array_index (a, int, i)));
+  return v;
+}
+
+static void
+test_finds_play_all_episodes (void)
+{
+  g_autoptr (GPtrArray) failures = g_ptr_array_new_with_free_func (g_free);
+  const char *id = "dvd-play-all";
+  g_autoptr (BroJsonValue) g = bro_test_fixture_json ("domain/dvd-play-all.navigation.expected.json");
+  BroJsonValue *want = J (J (g, "expect"), "plan");
+  g_autoptr (BroEpisodePlan) plan = first_plan ("dvd-play-all.navigation.expected.json");
+  g_assert_cmpint (plan->title, ==, bro_json_value_get_integer (J (want, "title"), -1));
+  g_autoptr (BroJsonValue) starts = int_array_json (plan->starts);
+  bro_test_same_json (failures, id, "starts", J (want, "starts"), starts);
+  g_assert_cmpint (plan->last_end, ==, bro_json_value_get_integer (J (want, "lastEnd"), -1));
+  bro_test_same_string (failures, id, "endRule", JS (want, "endRule"), plan->end_rule);
+  g_autoptr (BroJsonValue) tail = int_array_json (plan->tail);
+  bro_test_same_json (failures, id, "tail", J (want, "tail"), tail);
+  g_autoptr (BroJsonValue) split = int_array_json (plan->split_chapters);
+  bro_test_same_json (failures, id, "splitChapters", J (want, "splitChapters"), split);
+  g_autofree char *duration = hms (plan->duration);
+  bro_test_same_string (failures, id, "duration", JS (want, "duration"), duration);
+  g_autofree char *start8 = hms (g_array_index (plan->chapter_starts, double, 7));
+  bro_test_same_string (failures, id, "chapterStart8", JS (want, "chapterStart8"), start8);
+  BroJsonValue *ranges = J (want, "chapterRanges");
+  for (guint i = 0; i < ranges->keys->len; i++) {
+    BroChapterRange r = bro_dvd_nav_chapter_range (plan, atoi (ranges->keys->pdata[i]));
+    g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+    bro_json_value_append (got, bro_json_value_new_integer (r.first));
+    bro_json_value_append (got, bro_json_value_new_integer (r.last));
+    bro_test_same_json (failures, id, ranges->keys->pdata[i], ranges->items->pdata[i], got);
+  }
+  g_assert_true (!bro_dvd_nav_is_plausible (plan, TRUE) == !bro_json_value_get_bool (J (want, "plausibleStrict"), FALSE));
+  BroJsonValue *reasons = J (want, "reasons");
+  for (guint i = 0; i < reasons->keys->len; i++)
+    bro_test_same_string (failures, id, "reason", bro_json_value_get_string (reasons->items->pdata[i], ""), plan->reasons[atoi (reasons->keys->pdata[i])]);
+  g_assert_true (bro_dvd_nav_matches_chapter_count (plan, plan->kept_chapters));
+  g_assert_false (bro_dvd_nav_matches_chapter_count (plan, plan->kept_chapters - 2));
+  for (guint i = 0; i < failures->len; i++)
+    g_printerr ("%s\n", (char *) failures->pdata[i]);
+  g_assert_cmpuint (failures->len, ==, 0);
+}
+
+static gboolean
+navigation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (J (given, "bytes")) {
+    BroJsonValue *b = J (given, "bytes");
+    guint8 bytes[16] = { 0 };
+    gsize n = MIN (bro_json_value_length (b), sizeof bytes);
+    for (gsize i = 0; i < n; i++)
+      bytes[i] = bro_json_value_get_integer (bro_json_value_at (b, i), 0);
+    g_autoptr (BroJump) j = bro_dvd_nav_decode_jump (bytes, n);
+    g_autoptr (BroJsonValue) got = NULL;
+    if (!j) {
+      got = bro_json_value_new_null ();
+    } else {
+      got = bro_json_value_new_object ();
+      if (j->kind == BRO_JUMP_PTT) {
+        bro_json_value_set (got, "kind", bro_json_value_new_string ("ptt"));
+        bro_json_value_set (got, "titleNumber", j->has_title_number ? bro_json_value_new_integer (j->title_number) : bro_json_value_new_null ());
+        bro_json_value_set (got, "ptt", bro_json_value_new_integer (j->chapter));
+      } else {
+        bro_json_value_set (got, "kind", bro_json_value_new_string ("title"));
+        bro_json_value_set (got, "title", bro_json_value_new_integer (j->number));
+      }
+      bro_json_value_set (got, "condition", bro_json_value_new_string (j->condition));
+    }
+    bro_test_same_json (failures, id, "jump", J (expect, "jump"), got);
+    return TRUE;
+  }
+  g_autoptr (BroEpisodePlan) plan = first_plan (JS (given, "plan"));
+  g_autoptr (GArray) split = ints_of (J (given, "split"));
+  g_autoptr (GArray) starts = NULL;
+  BroJsonValue *ms = J (given, "mkvStarts");
+  if (ms && ms->kind == BRO_JSON_VALUE_STRING) {
+    /* "a chapter 00 at 0, then every disc chapter start + 0.02 s" */
+    starts = g_array_new (FALSE, FALSE, sizeof (double));
+    double zero = 0;
+    g_array_append_val (starts, zero);
+    for (guint i = 0; i < plan->chapter_starts->len; i++) {
+      double s2 = g_array_index (plan->chapter_starts, double, i) + 0.02;
+      g_array_append_val (starts, s2);
+    }
+  } else if (ms && ms->kind == BRO_JSON_VALUE_ARRAY) {
+    starts = g_array_new (FALSE, FALSE, sizeof (double));
+    for (guint i = 0; i < bro_json_value_length (ms); i++) {
+      double s2 = bro_json_value_get_number (bro_json_value_at (ms, i), 0);
+      g_array_append_val (starts, s2);
+    }
+  }
+  g_autoptr (GArray) chapters = bro_dvd_nav_mkv_chapters (split, plan, starts);
+  g_autoptr (BroJsonValue) got = chapters ? int_array_json (chapters) : bro_json_value_new_null ();
+  bro_test_same_json (failures, id, "chapters", J (expect, "chapters"), got);
+  return TRUE;
+}
+
+static void
+test_navigation_cases (void)
+{
+  bro_test_run_cases ("domain/dvdnav.cases.json", navigation_case);
+}
+
+/* A menu VOB of 48 sectors: NAV packs at sectors 0 (cell 1), 20 and 30 (cell 2); the first has a button that jumps
+ * to title 4. */
+static void
+nav_pack (guint8 *vob, int sector, int cell, gboolean button)
+{
+  int o = sector * 2048;
+  vob[o + 0x10] = 1;
+  vob[o + 0x11] = 0xBB;
+  vob[o + 0x28] = 1;
+  vob[o + 0x29] = 0xBF;
+  int dsi = o + 0x407;
+  vob[dsi + 0x19] = 1;
+  vob[dsi + 0x1B] = cell;
+  if (!button)
+    return;
+  int pci = o + 0x2D;
+  vob[pci + 0x60 + 16] = 1;
+  const guint8 cmd[] = { 48, 2, 0, 0, 0, 4, 0, 0 };
+  memcpy (vob + pci + 0x8E + 10, cmd, 8);
+}
+
+static void
+test_menu_stills_and_buttons (void)
+{
+  guint8 *vmg = g_malloc0 (0xD0), *vob = g_malloc0 (48 * 2048);
+  memcpy (vmg, "DVDVIDEO-VMG", 12);
+  nav_pack (vob, 0, 1, TRUE);
+  nav_pack (vob, 20, 2, FALSE);
+  nav_pack (vob, 30, 2, FALSE);
+  g_autoptr (GHashTable) memory = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, (GDestroyNotify) g_bytes_unref);
+  g_hash_table_insert (memory, (gpointer) "VIDEO_TS.IFO", g_bytes_new_take (vmg, 0xD0));
+  g_hash_table_insert (memory, (gpointer) "VIDEO_TS.VOB", g_bytes_new_take (vob, 48 * 2048));
+  TestByteSource source = { { test_source_read, test_source_files }, NULL, memory };
+  g_autoptr (BroNavAnalysis) a = bro_dvd_nav_analyse (&source.parent);
+  g_assert_nonnull (a);
+  GPtrArray *stills = bro_dvd_nav_still_cells (a);
+  g_assert_cmpuint (stills->len, ==, 2);
+  BroCellRef *s0 = stills->pdata[0], *s1 = stills->pdata[1];
+  g_assert_cmpstr (s0->file, ==, "VIDEO_TS.VOB");
+  g_assert_cmpint (s0->first_sector, ==, 0);
+  g_assert_cmpint (s0->end_sector, ==, 20);
+  g_assert_cmpint (s1->first_sector, ==, 20);
+  g_assert_cmpint (s1->end_sector, ==, 48);
+  g_assert_cmpuint (a->jumps->len, ==, 1);
+  BroNavJump *j = a->jumps->pdata[0];
+  g_assert_cmpint (j->title, ==, 4);
+  g_assert_cmpint (j->chapter, ==, 1);
+  g_assert_cmpstr (j->how, ==, "button JumpTT");
+  g_assert_cmpuint (a->titles->len, ==, 0);
+  g_autoptr (GHashTable) bad = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, (GDestroyNotify) g_bytes_unref);
+  g_hash_table_insert (bad, (gpointer) "VIDEO_TS.IFO", g_bytes_new_take (g_malloc0 (0x100), 0x100));
+  TestByteSource none = { { test_source_read, test_source_files }, NULL, bad };
+  g_assert_null (bro_dvd_nav_analyse (&none.parent));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -2248,5 +2505,8 @@ main (int argc, char **argv)
   g_test_add_func ("/media-args/cases", test_media_args_cases);
   g_test_add_func ("/media-args/command", test_command_cases);
   g_test_add_func ("/media-args/other-tools", test_other_tool_arguments);
+  g_test_add_func ("/dvdnav/play-all", test_finds_play_all_episodes);
+  g_test_add_func ("/dvdnav/cases", test_navigation_cases);
+  g_test_add_func ("/dvdnav/menu-stills", test_menu_stills_and_buttons);
   return g_test_run ();
 }
