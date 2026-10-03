@@ -1,0 +1,757 @@
+{
+  "$comment": "Routes of the engine's HTTP API (plan §13, §25). One route per EngineAPI method (operation), plus the server's own (login, logout, page, assets, diagnosticsDownload). Request and response bodies are $defs of api/dtos.json. Each platform's Router table is generated from this file, and the API contract tests check every route of every platform's Server against it.",
+  "conventions": [
+    "Bodies are JSON (application/json; charset=utf-8). Errors are ErrorBody with the status given for the code in shared/messages/codes.json; 401/403/404/405 come from the server.* codes.",
+    "Auth: over the Unix socket every route is allowed (peer credentials). Over TCP: 'read' routes need a read or control token (Bearer, or the login cookie); 'control' routes need a control token; 'none' routes need nothing. Every POST, PUT, PATCH and DELETE also needs the header X-Bromelia: 1 and, when the request has an Origin, one the server serves. Without any token configured, only Host localhost, 127.0.0.1 and [::1] (and server.allowedHosts) are served. No token is ever taken from the URL.",
+    "Path parameters: {driveId} DriveId, {sessionId} {jobId} {unitId} Uuid, {libraryId} {stepId} {targetId} EntryId, {name} a secret name or a file name.",
+    "Lists are paged with ?cursor= and ?limit=; the response's next is the cursor of the following page.",
+    "PUT /v1/config and PATCH /v1/sessions/{id} are optimistic: they carry the version / rev they were based on and get 409 when it is stale."
+  ],
+  "routes": [
+    {
+      "operation": "system",
+      "method": "GET",
+      "path": "/v1/system",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "SystemStatus"
+      }
+    },
+    {
+      "operation": "stop",
+      "method": "POST",
+      "path": "/v1/system/stop",
+      "auth": "control",
+      "response": {
+        "status": 202
+      },
+      "errors": [
+        "server.stopping"
+      ],
+      "note": "Asks the engine to stop: acquisitions are cancelled, then jobs settle (plan §15.1). The app's 'Quit Bromelia completely'."
+    },
+    {
+      "operation": "drives",
+      "method": "GET",
+      "path": "/v1/drives",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "Drives"
+      }
+    },
+    {
+      "operation": "eject",
+      "method": "POST",
+      "path": "/v1/drives/{driveId}/eject",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "drive.notFound",
+        "drive.busy",
+        "drive.ejectFailed"
+      ]
+    },
+    {
+      "operation": "closeTray",
+      "method": "POST",
+      "path": "/v1/drives/{driveId}/close-tray",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "drive.notFound",
+        "drive.closeTrayFailed"
+      ]
+    },
+    {
+      "operation": "closeAllTrays",
+      "method": "POST",
+      "path": "/v1/drives/close-trays",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "drive.closeTraysFailed"
+      ]
+    },
+    {
+      "operation": "rip",
+      "method": "POST",
+      "path": "/v1/drives/{driveId}/rip",
+      "auth": "control",
+      "request": "RipOptions",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "drive.notFound",
+        "drive.noDisc",
+        "drive.busy",
+        "disc.notVideo",
+        "session.notOpen",
+        "session.noTitlesChosen",
+        "session.nothingToRip",
+        "library.offline",
+        "library.none",
+        "makemkv.notFound"
+      ],
+      "note": "Rip with the drive's profile and title rules; with options.titles, those titles of the open session as MKV files."
+    },
+    {
+      "operation": "openSession",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "auth": "control",
+      "request": "SessionSource",
+      "response": {
+        "status": 201,
+        "body": "Session"
+      },
+      "errors": [
+        "drive.notFound",
+        "drive.noDisc",
+        "drive.busy",
+        "session.noTitlesHere",
+        "makemkv.notFound"
+      ],
+      "note": "Returns at once in state loading; the listing arrives with sessionChanged events."
+    },
+    {
+      "operation": "session",
+      "method": "GET",
+      "path": "/v1/sessions/{sessionId}",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "Session"
+      },
+      "errors": [
+        "session.notFound"
+      ]
+    },
+    {
+      "operation": "patchSession",
+      "method": "PATCH",
+      "path": "/v1/sessions/{sessionId}",
+      "auth": "control",
+      "request": "SessionPatch",
+      "response": {
+        "status": 200,
+        "body": "Session"
+      },
+      "errors": [
+        "session.notFound",
+        "session.stale",
+        "server.badRequest"
+      ]
+    },
+    {
+      "operation": "lookUp",
+      "method": "POST",
+      "path": "/v1/sessions/{sessionId}/lookup",
+      "auth": "control",
+      "response": {
+        "status": 202
+      },
+      "errors": [
+        "session.notFound"
+      ],
+      "note": "Search again online with the session's name, year and id."
+    },
+    {
+      "operation": "previewSession",
+      "method": "GET",
+      "path": "/v1/sessions/{sessionId}/preview",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "PlanPreview"
+      },
+      "errors": [
+        "session.notFound"
+      ]
+    },
+    {
+      "operation": "ripSession",
+      "method": "POST",
+      "path": "/v1/sessions/{sessionId}/rip",
+      "auth": "control",
+      "request": "RipOptions",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "session.notFound",
+        "session.noTitlesChosen",
+        "drive.busy",
+        "library.offline",
+        "library.none"
+      ]
+    },
+    {
+      "operation": "closeSession",
+      "method": "DELETE",
+      "path": "/v1/sessions/{sessionId}",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "session.notFound"
+      ]
+    },
+    {
+      "operation": "jobs",
+      "method": "GET",
+      "path": "/v1/jobs",
+      "auth": "read",
+      "query": "JobQuery",
+      "response": {
+        "status": 200,
+        "body": "JobPage"
+      }
+    },
+    {
+      "operation": "job",
+      "method": "GET",
+      "path": "/v1/jobs/{jobId}",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "JobDetail"
+      },
+      "errors": [
+        "job.notFound"
+      ]
+    },
+    {
+      "operation": "jobLog",
+      "method": "GET",
+      "path": "/v1/jobs/{jobId}/log",
+      "auth": "read",
+      "query": {
+        "after": "integer: the last seq the client has",
+        "render": "a language: also render text",
+        "format": "jsonl (default) or text: the rendered log, the end of it (at most 256 KB, from a line start)"
+      },
+      "response": {
+        "status": 200,
+        "body": "LogLines"
+      },
+      "errors": [
+        "job.notFound"
+      ]
+    },
+    {
+      "operation": "cancel",
+      "method": "POST",
+      "path": "/v1/jobs/{jobId}/cancel",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "job.notFound"
+      ]
+    },
+    {
+      "operation": "retry",
+      "method": "POST",
+      "path": "/v1/jobs/{jobId}/retry",
+      "auth": "control",
+      "request": "Retry",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "job.notFound",
+        "job.notRetryable",
+        "job.unknownStep",
+        "drive.notFound",
+        "drive.busy"
+      ]
+    },
+    {
+      "operation": "decide",
+      "method": "POST",
+      "path": "/v1/jobs/{jobId}/decide",
+      "auth": "control",
+      "request": "Answer",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "job.notFound",
+        "job.notAwaitingDecision",
+        "server.badRequest"
+      ]
+    },
+    {
+      "operation": "move",
+      "method": "POST",
+      "path": "/v1/jobs/{jobId}/move",
+      "auth": "control",
+      "request": "Move",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "job.notFound",
+        "job.notQueued"
+      ]
+    },
+    {
+      "operation": "startNow",
+      "method": "POST",
+      "path": "/v1/jobs/{jobId}/start-now",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "job.notFound",
+        "job.notQueued"
+      ]
+    },
+    {
+      "operation": "libraries",
+      "method": "GET",
+      "path": "/v1/libraries",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "Libraries"
+      }
+    },
+    {
+      "operation": "attachLibrary",
+      "method": "POST",
+      "path": "/v1/libraries",
+      "auth": "control",
+      "request": "AttachLibrary",
+      "response": {
+        "status": 201,
+        "body": "Library"
+      },
+      "errors": [
+        "library.pathMissing",
+        "library.alreadyAttached",
+        "library.markerMismatch"
+      ]
+    },
+    {
+      "operation": "rescan",
+      "method": "POST",
+      "path": "/v1/libraries/{libraryId}/rescan",
+      "auth": "control",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "library.notFound",
+        "library.offline"
+      ]
+    },
+    {
+      "operation": "units",
+      "method": "GET",
+      "path": "/v1/units",
+      "auth": "read",
+      "query": "UnitQuery",
+      "response": {
+        "status": 200,
+        "body": "UnitPage"
+      }
+    },
+    {
+      "operation": "unit",
+      "method": "GET",
+      "path": "/v1/units/{unitId}",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "UnitDetail"
+      },
+      "errors": [
+        "unit.notFound"
+      ]
+    },
+    {
+      "operation": "patchUnit",
+      "method": "PATCH",
+      "path": "/v1/units/{unitId}",
+      "auth": "control",
+      "request": "UnitPatch",
+      "response": {
+        "status": 200,
+        "body": "Unit"
+      },
+      "errors": [
+        "unit.notFound"
+      ]
+    },
+    {
+      "operation": "works",
+      "method": "GET",
+      "path": "/v1/works",
+      "auth": "read",
+      "query": {
+        "q": "search text",
+        "cursor": "",
+        "limit": ""
+      },
+      "response": {
+        "status": 200,
+        "body": "WorkPage"
+      }
+    },
+    {
+      "operation": "set",
+      "method": "GET",
+      "path": "/v1/sets/{setId}",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "DiscSet"
+      },
+      "errors": [
+        "server.notFound"
+      ]
+    },
+    {
+      "operation": "verify",
+      "method": "POST",
+      "path": "/v1/verify",
+      "auth": "control",
+      "request": "VerifyTarget",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "library.notFound",
+        "library.offline",
+        "library.pathMissing",
+        "unit.notFound",
+        "check.alreadyRunning"
+      ]
+    },
+    {
+      "operation": "repair",
+      "method": "POST",
+      "path": "/v1/units/{unitId}/repair",
+      "auth": "control",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "unit.notFound",
+        "repair.impossible"
+      ]
+    },
+    {
+      "operation": "replicate",
+      "method": "POST",
+      "path": "/v1/units/{unitId}/replicate",
+      "auth": "control",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "unit.notFound"
+      ]
+    },
+    {
+      "operation": "createParity",
+      "method": "POST",
+      "path": "/v1/units/{unitId}/parity",
+      "auth": "control",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "unit.notFound",
+        "tool.missing"
+      ]
+    },
+    {
+      "operation": "checks",
+      "method": "GET",
+      "path": "/v1/checks",
+      "auth": "read",
+      "query": {
+        "unitId": "",
+        "libraryId": "",
+        "result": "",
+        "cursor": "",
+        "limit": ""
+      },
+      "response": {
+        "status": 200,
+        "body": "CheckPage"
+      }
+    },
+    {
+      "operation": "config",
+      "method": "GET",
+      "path": "/v1/config",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "ConfigEnvelope"
+      }
+    },
+    {
+      "operation": "updateConfig",
+      "method": "PUT",
+      "path": "/v1/config",
+      "auth": "control",
+      "request": "UpdateConfig",
+      "response": {
+        "status": 200,
+        "body": "ConfigEnvelope"
+      },
+      "errors": [
+        "config.versionConflict",
+        "config.rejected",
+        "config.secretInline"
+      ],
+      "note": "422 with the issues when the document doesn't validate; nothing is saved."
+    },
+    {
+      "operation": "validateConfig",
+      "method": "POST",
+      "path": "/v1/config/validate",
+      "auth": "read",
+      "request": "UpdateConfig",
+      "response": {
+        "status": 200,
+        "body": "Issues"
+      }
+    },
+    {
+      "operation": "setSecret",
+      "method": "PUT",
+      "path": "/v1/secrets/{name}",
+      "auth": "control",
+      "request": "SecretValue",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "server.badRequest"
+      ]
+    },
+    {
+      "operation": "previewPlan",
+      "method": "POST",
+      "path": "/v1/config/preview",
+      "auth": "read",
+      "request": "PlanPreviewRequest",
+      "response": {
+        "status": 200,
+        "body": "PlanPreview"
+      },
+      "errors": [
+        "session.notFound",
+        "config.rejected"
+      ]
+    },
+    {
+      "operation": "exportConfig",
+      "method": "GET",
+      "path": "/v1/config/export",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "ExportBundle"
+      }
+    },
+    {
+      "operation": "importConfig",
+      "method": "POST",
+      "path": "/v1/config/import",
+      "auth": "control",
+      "request": "ImportBundle",
+      "response": {
+        "status": 200,
+        "body": "ConfigEnvelope"
+      },
+      "errors": [
+        "config.badBundle",
+        "config.rejected"
+      ]
+    },
+    {
+      "operation": "register",
+      "method": "POST",
+      "path": "/v1/makemkv/register",
+      "auth": "control",
+      "request": "RegisterKey",
+      "response": {
+        "status": 200,
+        "body": "TextResult"
+      },
+      "errors": [
+        "makemkv.notFound",
+        "makemkv.register.failed"
+      ]
+    },
+    {
+      "operation": "installBetaKey",
+      "method": "POST",
+      "path": "/v1/makemkv/beta-key",
+      "auth": "control",
+      "response": {
+        "status": 200,
+        "body": "TextResult"
+      },
+      "errors": [
+        "makemkv.notFound",
+        "makemkv.betaKey.fetchFailed"
+      ]
+    },
+    {
+      "operation": "firmware",
+      "method": "GET",
+      "path": "/v1/drives/{driveId}/firmware",
+      "auth": "read",
+      "response": {
+        "status": 200,
+        "body": "TextResult"
+      },
+      "errors": [
+        "drive.notFound",
+        "drive.busy",
+        "makemkv.notFound"
+      ]
+    },
+    {
+      "operation": "testStep",
+      "method": "POST",
+      "path": "/v1/steps/{stepId}/test",
+      "auth": "control",
+      "request": "TestStep",
+      "response": {
+        "status": 201,
+        "body": "Job"
+      },
+      "errors": [
+        "step.notFound",
+        "unit.notFound"
+      ]
+    },
+    {
+      "operation": "testNotification",
+      "method": "POST",
+      "path": "/v1/notifications/{targetId}/test",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "notify.notFound"
+      ]
+    },
+    {
+      "operation": "diagnosticsBundle",
+      "method": "POST",
+      "path": "/v1/diagnostics",
+      "auth": "control",
+      "response": {
+        "status": 201,
+        "body": "Diagnostics"
+      }
+    },
+    {
+      "operation": "diagnosticsDownload",
+      "method": "GET",
+      "path": "/v1/diagnostics/{name}",
+      "auth": "read",
+      "response": {
+        "status": 200
+      },
+      "errors": [
+        "server.notFound"
+      ],
+      "note": "application/zip; not an EngineAPI method (the Server serves the file named by Diagnostics.download)."
+    },
+    {
+      "operation": "events",
+      "method": "GET",
+      "path": "/v1/events",
+      "auth": "read",
+      "query": {
+        "jobLog": "comma separated job ids whose jobLog events to include"
+      },
+      "response": {
+        "status": 200,
+        "stream": "sse"
+      },
+      "note": "Server-Sent Events: a snapshot event first, then deltas (shared/schema/events.json). The SSE id is the event's seq; Last-Event-ID resumes; a client that fell behind gets a new snapshot."
+    },
+    {
+      "operation": "login",
+      "method": "POST",
+      "path": "/v1/login",
+      "auth": "none",
+      "request": "Login",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "server.tokenRequired"
+      ],
+      "note": "TCP only: checks a token and sets an HttpOnly, SameSite=Strict cookie. Not an EngineAPI method."
+    },
+    {
+      "operation": "logout",
+      "method": "POST",
+      "path": "/v1/logout",
+      "auth": "none",
+      "response": {
+        "status": 204
+      },
+      "note": "TCP only. Not an EngineAPI method."
+    },
+    {
+      "operation": "page",
+      "method": "GET",
+      "path": "/",
+      "auth": "none",
+      "response": {
+        "status": 200
+      },
+      "errors": [
+        "server.pageMissing"
+      ],
+      "note": "The web page (shared/web), bundled as a resource. Not an EngineAPI method."
+    },
+    {
+      "operation": "assets",
+      "method": "GET",
+      "path": "/assets/{path}",
+      "auth": "none",
+      "response": {
+        "status": 200
+      },
+      "errors": [
+        "server.notFound"
+      ],
+      "note": "Not an EngineAPI method."
+    }
+  ]
+}

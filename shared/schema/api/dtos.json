@@ -1,0 +1,870 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.bromelia.invalid/api/dtos.json",
+  "title": "EngineAPI data transfer objects",
+  "description": "Plain data exchanged by EngineAPI (plan §13.1): request bodies, responses and event payloads. LocalEngine returns them, the Server encodes them, RemoteEngine and the web page decode them. Responses may carry fields a client doesn't know (clients ignore them); requests must not (the server answers 400 server.badRequest).",
+  "$defs": {
+    "ErrorBody": {
+      "description": "Every 4xx / 5xx answer. The status comes from the code's 'http' in shared/messages/codes.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": { "$ref": "../common.json#/$defs/BroError" },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/Issue" } }
+      }
+    },
+    "Issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "code", "severity"],
+      "properties": {
+        "path": { "description": "Where in the document: drives[0].automation.delaySeconds.", "type": "string" },
+        "code": { "$ref": "../common.json#/$defs/MessageCode" },
+        "params": { "$ref": "../common.json#/$defs/Params" },
+        "severity": { "enum": ["warning", "error"] }
+      }
+    },
+    "SystemStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "engine", "makemkv", "tools", "problems", "libraries", "configVersion", "eventSeq"],
+      "properties": {
+        "version": { "description": "Bromelia's version.", "type": "string" },
+        "engine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pid", "startedAt", "platform"],
+          "properties": {
+            "pid": { "type": "integer" },
+            "startedAt": { "$ref": "../common.json#/$defs/Instant" },
+            "platform": { "enum": ["macos", "windows", "linux"] },
+            "dataDir": { "type": "string" }
+          }
+        },
+        "makemkv": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["found", "registration"],
+          "properties": {
+            "found": { "type": "boolean" },
+            "version": { "type": "string" },
+            "registration": { "enum": ["registered", "beta", "evaluation", "expired", "notStarted", "tooOld", "unknown"] },
+            "keyKind": { "enum": ["purchased", "beta", "none", "unknown"] }
+          }
+        },
+        "tools": { "type": "array", "items": { "$ref": "#/$defs/ToolInfo" } },
+        "problems": { "type": "array", "items": { "$ref": "#/$defs/Problem" } },
+        "libraries": { "type": "array", "items": { "$ref": "#/$defs/Library" } },
+        "configVersion": { "type": "integer", "minimum": 0 },
+        "eventSeq": { "description": "The sequence number of the last event published.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "ToolInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "found"],
+      "properties": {
+        "tool": { "enum": ["makemkvcon", "mkvmerge", "mkvextract", "ffmpeg", "tesseract", "handbrake", "cyanrip", "abcde", "par2", "apprise", "hdiutil", "drutil", "eject"] },
+        "found": { "type": "boolean" },
+        "path": { "type": "string" },
+        "version": { "type": "string" },
+        "why": { "description": "Why it wasn't found, or what it is needed for.", "$ref": "../common.json#/$defs/BroMessage" }
+      }
+    },
+    "Problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "code", "severity", "raisedAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "$ref": "../common.json#/$defs/MessageCode" },
+        "params": { "$ref": "../common.json#/$defs/Params" },
+        "severity": { "enum": ["warning", "error"] },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": { "enum": ["library", "drive", "job", "unit", "tool", "target", "notification"] },
+            "id": { "type": "string" }
+          }
+        },
+        "raisedAt": { "$ref": "../common.json#/$defs/Instant" },
+        "actions": {
+          "description": "What the UI can offer: installBetaKey (POST /v1/makemkv/beta-key), openSettings, attachLibrary, repair, retry.",
+          "type": "array",
+          "items": { "enum": ["installBetaKey", "openSettings", "attachLibrary", "repair", "retry"] }
+        }
+      }
+    },
+    "Library": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "path", "online"],
+      "properties": {
+        "id": { "$ref": "../common.json#/$defs/EntryId" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "online": { "type": "boolean" },
+        "reason": { "description": "Why it is offline.", "$ref": "../common.json#/$defs/BroMessage" },
+        "freeBytes": { "$ref": "../common.json#/$defs/Bytes" },
+        "totalBytes": { "$ref": "../common.json#/$defs/Bytes" },
+        "units": { "type": "integer", "minimum": 0 },
+        "lastSeenAt": { "$ref": "../common.json#/$defs/Instant" }
+      }
+    },
+    "AttachLibrary": {
+      "description": "Writes the marker .bromelia-library into an existing folder (the UI asks first) and adds the library to the configuration.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "$ref": "../common.json#/$defs/Path" },
+        "name": { "type": "string" }
+      }
+    },
+    "Drive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "connected", "state", "busy"],
+      "properties": {
+        "id": { "$ref": "../common.json#/$defs/DriveId" },
+        "configId": { "description": "The drives[] entry that matches it, if any.", "$ref": "../common.json#/$defs/EntryId" },
+        "name": { "description": "The entry's name, or a short form of the model.", "type": "string" },
+        "identification": { "description": "MakeMKV's drive name (model, firmware, usually serial).", "type": "string" },
+        "device": { "type": "string" },
+        "makemkvIndex": { "type": ["integer", "null"] },
+        "connected": { "description": "false: a configured drive that isn't attached now.", "type": "boolean" },
+        "state": { "enum": ["empty", "trayOpen", "loading", "present", "unavailable", "unmounting"] },
+        "medium": { "$ref": "#/$defs/Medium" },
+        "busy": { "type": "boolean" },
+        "jobId": { "$ref": "../common.json#/$defs/Uuid" },
+        "sessionId": { "$ref": "../common.json#/$defs/Uuid" },
+        "profileId": { "$ref": "../common.json#/$defs/EntryId" },
+        "ripOnInsert": { "type": "boolean" },
+        "countdown": { "description": "Seconds left before an automatic rip starts.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "Medium": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "label", "type", "content"],
+      "properties": {
+        "generation": { "description": "Increases with every disc inserted into this drive since the engine started.", "type": "integer", "minimum": 1 },
+        "label": { "type": "string" },
+        "type": { "$ref": "../common.json#/$defs/DiscType" },
+        "typeText": { "description": "e.g. 'Blu-ray (AACS)'.", "type": "string" },
+        "flags": { "type": "array", "items": { "enum": ["dvdFiles", "hdDvdFiles", "blurayFiles", "aacsFiles", "bdsvmFiles"] } },
+        "content": { "$ref": "../common.json#/$defs/DiscContent" },
+        "mountPath": { "type": ["string", "null"] }
+      }
+    },
+    "SessionSource": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["drive"], "properties": { "drive": { "$ref": "../common.json#/$defs/DriveId" } } },
+        { "type": "object", "additionalProperties": false, "required": ["iso"], "properties": { "iso": { "$ref": "../common.json#/$defs/Path" } } },
+        { "type": "object", "additionalProperties": false, "required": ["folder"], "properties": { "folder": { "$ref": "../common.json#/$defs/Path" } } },
+        { "description": "A file inside a disc structure (.IFO, .VOB, .mpls, .m2ts, …): the disc it belongs to is opened (SourceResolver).", "type": "object", "additionalProperties": false, "required": ["file"], "properties": { "file": { "$ref": "../common.json#/$defs/Path" } } }
+      ]
+    },
+    "Session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "rev", "source", "state", "choices"],
+      "properties": {
+        "id": { "$ref": "../common.json#/$defs/Uuid" },
+        "rev": { "description": "Increases with every change; PATCH must send the rev it saw (409 session.stale otherwise).", "type": "integer", "minimum": 1 },
+        "source": { "$ref": "#/$defs/SessionSource" },
+        "makemkvSource": { "description": "dev:…, iso:…, file:…", "type": "string" },
+        "state": { "enum": ["loading", "ready", "failed"] },
+        "operation": { "$ref": "../common.json#/$defs/BroMessage" },
+        "error": { "$ref": "../common.json#/$defs/BroError" },
+        "listing": { "$ref": "#/$defs/Listing" },
+        "fingerprint": { "oneOf": [{ "$ref": "../common.json#/$defs/Fingerprint" }, { "type": "null" }] },
+        "archivedBefore": { "type": "array", "items": { "$ref": "#/$defs/ArchivedRef" } },
+        "identity": { "$ref": "#/$defs/Identity" },
+        "candidates": { "type": "array", "items": { "$ref": "#/$defs/Candidate" } },
+        "selection": { "description": "Why each title is in or out under the effective title rules.", "type": "array", "items": { "$ref": "#/$defs/TitleTrace" } },
+        "choices": { "$ref": "#/$defs/SessionChoices" },
+        "libreDrive": { "type": ["string", "null"] },
+        "notices": { "description": "MakeMKV notices shown on the disc page (LibreDrive required, key expired, …).", "type": "array", "items": { "$ref": "../common.json#/$defs/BroMessage" } },
+        "log": { "description": "makemkvcon commands and messages of the listing.", "type": "array", "items": { "$ref": "#/$defs/LogLine" } }
+      }
+    },
+    "SessionChoices": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "titles": {
+          "description": "Every title of the listing with whether it is ticked; tracks = the stream indices kept (hand-picked tracks); name = the output file name.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["index", "selected"],
+            "properties": {
+              "index": { "type": "integer", "minimum": 0 },
+              "selected": { "type": "boolean" },
+              "tracks": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+              "name": { "type": "string" }
+            }
+          }
+        },
+        "name": { "description": "Movie or show name typed for the disc; '' = from the disc.", "type": "string" },
+        "kind": { "oneOf": [{ "$ref": "../common.json#/$defs/MediaKind" }, { "type": "null" }] },
+        "year": { "type": ["integer", "null"] },
+        "onlineId": { "description": "A TMDb or IMDb id or web address (OnlineId).", "type": "string" },
+        "firstEpisode": { "type": ["integer", "null"], "minimum": 1 },
+        "library": { "oneOf": [{ "$ref": "../common.json#/$defs/EntryId" }, { "type": "null" }] },
+        "profile": { "oneOf": [{ "$ref": "../common.json#/$defs/EntryId" }, { "type": "null" }] }
+      }
+    },
+    "SessionPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rev", "choices"],
+      "properties": {
+        "rev": { "type": "integer", "minimum": 1 },
+        "choices": { "description": "Merged over the current choices (RFC 7386); titles entries are matched by index.", "$ref": "#/$defs/SessionChoices" }
+      }
+    },
+    "Listing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "volumeName", "type", "titles"],
+      "properties": {
+        "name": { "type": "string" },
+        "volumeName": { "type": "string" },
+        "type": { "$ref": "../common.json#/$defs/DiscType" },
+        "typeText": { "type": "string" },
+        "reportedTitleCount": { "type": "integer" },
+        "titles": { "type": "array", "items": { "$ref": "#/$defs/Title" } },
+        "attributes": { "description": "Every CINFO attribute, by AttributeId name.", "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "Title": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "durationSeconds", "chapters", "sizeBytes", "tracks"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "sourceTitleId": { "type": ["integer", "null"] },
+        "sourceFile": { "type": "string" },
+        "name": { "type": "string" },
+        "comment": { "type": "string" },
+        "duration": { "type": "string" },
+        "durationSeconds": { "type": "integer", "minimum": 0 },
+        "chapters": { "type": "integer", "minimum": 0 },
+        "sizeBytes": { "$ref": "../common.json#/$defs/Bytes" },
+        "segmentMap": { "type": "string" },
+        "outputFileName": { "type": "string" },
+        "angle": { "type": ["integer", "null"] },
+        "tracks": { "type": "array", "items": { "$ref": "#/$defs/Track" } },
+        "attributes": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "Track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "kind"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "kind": { "$ref": "../common.json#/$defs/TrackKind" },
+        "codec": { "type": "string" },
+        "language": { "description": "ISO 639-2 code.", "type": "string" },
+        "languageName": { "type": "string" },
+        "name": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "flags": { "type": "array", "items": { "type": "string" } },
+        "attributes": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "Identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "format", "formatCode", "encrypted", "label", "reason"],
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "$ref": "../common.json#/$defs/MediaKind" },
+        "format": { "$ref": "../common.json#/$defs/DiscFormat" },
+        "formatCode": { "$ref": "../common.json#/$defs/FormatCode" },
+        "encrypted": { "type": "boolean" },
+        "label": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": { "type": "string" },
+            "season": { "type": ["integer", "null"] },
+            "part": { "type": ["integer", "null"] },
+            "volume": { "type": ["integer", "null"] },
+            "disc": { "type": ["integer", "null"] },
+            "set": { "type": "string" },
+            "looksLikeSeries": { "type": "boolean" }
+          }
+        },
+        "reason": { "$ref": "../common.json#/$defs/BroMessage" }
+      }
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "title", "choiceId"],
+      "properties": {
+        "provider": { "enum": ["tmdb", "omdb"] },
+        "title": { "type": "string" },
+        "year": { "type": ["integer", "null"] },
+        "kind": { "oneOf": [{ "$ref": "../common.json#/$defs/MediaKind" }, { "type": "null" }] },
+        "tmdbId": { "type": ["integer", "null"] },
+        "imdbId": { "type": ["string", "null"] },
+        "overview": { "type": "string" },
+        "poster": { "type": "string" },
+        "choiceId": { "description": "What to put in choices.onlineId to pick it: 'tv/1668', 'tt0108778'.", "type": "string" }
+      }
+    },
+    "ArchivedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["folder", "archivedAt"],
+      "properties": {
+        "unitId": { "$ref": "../common.json#/$defs/Uuid" },
+        "folder": { "type": "string" },
+        "archivedAt": { "$ref": "../common.json#/$defs/Day" }
+      }
+    },
+    "TitleTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "selected", "reason"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "selected": { "type": "boolean" },
+        "reason": { "$ref": "../common.json#/$defs/BroMessage" }
+      }
+    },
+    "PlanPreviewRequest": {
+      "description": "What a job would do, without running it: for an open session, or for a listing and an unsaved configuration (the settings forms' live preview).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": { "$ref": "../common.json#/$defs/Uuid" },
+        "driveId": { "$ref": "../common.json#/$defs/DriveId" },
+        "profileId": { "$ref": "../common.json#/$defs/EntryId" },
+        "listing": { "$ref": "#/$defs/Listing" },
+        "config": { "description": "A draft configuration to preview instead of the saved one.", "$ref": "../config-3.json" },
+        "choices": { "$ref": "#/$defs/SessionChoices" }
+      }
+    },
+    "PlanPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileId", "rules", "mode", "titles", "outputs", "library", "spaceRequiredBytes", "steps"],
+      "properties": {
+        "profileId": { "$ref": "../common.json#/$defs/EntryId" },
+        "trace": { "description": "ProfileResolver's layers, in order: which setting came from where.", "type": "array", "items": { "$ref": "#/$defs/ResolveStep" } },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/RuleTrace" } },
+        "mode": { "$ref": "../common.json#/$defs/RipMode" },
+        "identity": { "$ref": "#/$defs/Identity" },
+        "titles": { "type": "array", "items": { "$ref": "#/$defs/TitleTrace" } },
+        "onePass": { "oneOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["minLength"], "properties": { "minLength": { "type": "integer" } } }] },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/PlannedPath" } },
+        "library": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "online"],
+          "properties": { "id": { "$ref": "../common.json#/$defs/EntryId" }, "online": { "type": "boolean" } }
+        },
+        "spaceRequiredBytes": { "$ref": "../common.json#/$defs/Bytes" },
+        "steps": { "type": "array", "items": { "$ref": "../common.json#/$defs/EntryId" } },
+        "warnings": { "type": "array", "items": { "$ref": "../common.json#/$defs/BroMessage" } }
+      }
+    },
+    "ResolveStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "keys"],
+      "properties": {
+        "layer": { "enum": ["defaults", "defaultProfile", "driveProfile", "driveOverrides", "rule", "session"] },
+        "id": { "description": "The profile, drive or rule id.", "type": "string" },
+        "keys": { "description": "The profile keys this layer set.", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "RuleTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "matched"],
+      "properties": {
+        "ruleId": { "$ref": "../common.json#/$defs/EntryId" },
+        "matched": { "type": "boolean" },
+        "why": { "description": "The first condition that didn't hold.", "type": "string" }
+      }
+    },
+    "PlannedPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "role"],
+      "properties": {
+        "path": { "description": "Relative to the library.", "$ref": "../common.json#/$defs/RelativePath" },
+        "role": { "enum": ["title", "episode", "closingClip", "playAll", "backup", "image", "audio", "discInfo", "record", "sums", "log", "nfo", "poster"] },
+        "title": { "type": "integer" },
+        "episode": { "type": "integer" }
+      }
+    },
+    "RipOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "$ref": "../common.json#/$defs/VideoMode" },
+        "profile": { "$ref": "../common.json#/$defs/EntryId" },
+        "library": { "$ref": "../common.json#/$defs/EntryId" },
+        "titles": { "description": "Rip these titles of the open session as MKV files (the web page's ?titles=0,2,5).", "type": "array", "items": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "Job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "queue", "title", "automatic", "createdAt"],
+      "properties": {
+        "id": { "$ref": "../common.json#/$defs/Uuid" },
+        "kind": { "$ref": "../common.json#/$defs/JobKind" },
+        "state": { "$ref": "../common.json#/$defs/JobState" },
+        "outcome": { "$ref": "../common.json#/$defs/Outcome" },
+        "queue": { "$ref": "../common.json#/$defs/Queue" },
+        "position": { "description": "Place in its queue while queued.", "type": "integer", "minimum": 0 },
+        "parentId": { "$ref": "../common.json#/$defs/Uuid" },
+        "driveId": { "$ref": "../common.json#/$defs/DriveId" },
+        "sessionId": { "$ref": "../common.json#/$defs/Uuid" },
+        "title": { "description": "Disc label or name, for lists.", "type": "string" },
+        "mode": { "$ref": "../common.json#/$defs/RipMode" },
+        "automatic": { "type": "boolean" },
+        "createdAt": { "$ref": "../common.json#/$defs/Instant" },
+        "startedAt": { "$ref": "../common.json#/$defs/Instant" },
+        "finishedAt": { "$ref": "../common.json#/$defs/Instant" },
+        "progress": { "$ref": "#/$defs/Progress" },
+        "blockedBy": { "$ref": "../common.json#/$defs/BroMessage" },
+        "decision": { "$ref": "#/$defs/Decision" },
+        "error": { "$ref": "../common.json#/$defs/BroError" },
+        "unitId": { "$ref": "../common.json#/$defs/Uuid" },
+        "outputPath": { "type": "string" },
+        "fingerprint": { "$ref": "../common.json#/$defs/Fingerprint" },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "files": { "type": "integer", "minimum": 0 },
+            "warnings": { "type": "integer", "minimum": 0 },
+            "errors": { "type": "integer", "minimum": 0 },
+            "readErrors": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "Progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "stepIndex", "stepCount", "fraction", "operation"],
+      "properties": {
+        "step": { "$ref": "../common.json#/$defs/StepKind" },
+        "stepIndex": { "type": "integer", "minimum": 0 },
+        "stepCount": { "type": "integer", "minimum": 1 },
+        "fraction": { "description": "0–1 of the whole job.", "type": "number", "minimum": 0, "maximum": 1 },
+        "currentFraction": { "description": "0–1 of the current item.", "type": "number", "minimum": 0, "maximum": 1 },
+        "operation": { "$ref": "../common.json#/$defs/BroMessage" },
+        "current": { "description": "The item being worked on (MakeMKV's current operation, a file).", "type": "string" },
+        "secondsLeft": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "Decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "question", "answers"],
+      "properties": {
+        "id": { "type": "string" },
+        "question": { "$ref": "../common.json#/$defs/BroMessage" },
+        "answers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label"],
+            "properties": { "id": { "type": "string" }, "label": { "$ref": "../common.json#/$defs/BroMessage" } }
+          }
+        }
+      }
+    },
+    "Answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decisionId", "answer"],
+      "properties": { "decisionId": { "type": "string" }, "answer": { "type": "string" } }
+    },
+    "JobDetail": {
+      "allOf": [
+        { "$ref": "#/$defs/Job" },
+        {
+          "type": "object",
+          "required": ["steps", "files", "commands"],
+          "properties": {
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["seq", "kind", "state"],
+                "properties": {
+                  "seq": { "type": "integer", "minimum": 0 },
+                  "kind": { "$ref": "../common.json#/$defs/StepKind" },
+                  "state": { "$ref": "../common.json#/$defs/StepState" },
+                  "startedAt": { "$ref": "../common.json#/$defs/Instant" },
+                  "finishedAt": { "$ref": "../common.json#/$defs/Instant" },
+                  "error": { "$ref": "../common.json#/$defs/BroError" },
+                  "summary": { "$ref": "../common.json#/$defs/BroMessage" }
+                }
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "size": { "$ref": "../common.json#/$defs/Bytes" },
+                  "sha256": { "$ref": "../common.json#/$defs/Sha256" },
+                  "role": { "type": "string" }
+                }
+              }
+            },
+            "commands": { "description": "Every command line the job ran (command transparency).", "type": "array", "items": { "type": "string" } },
+            "children": { "type": "array", "items": { "$ref": "../common.json#/$defs/Uuid" } },
+            "logBytes": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "JobQuery": {
+      "description": "Query string of GET /v1/jobs.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": { "type": "string", "description": "Comma separated JobStates." },
+        "outcome": { "type": "string" },
+        "kind": { "type": "string" },
+        "queue": { "$ref": "../common.json#/$defs/Queue" },
+        "driveId": { "$ref": "../common.json#/$defs/DriveId" },
+        "unitId": { "$ref": "../common.json#/$defs/Uuid" },
+        "cursor": { "type": "string" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+      }
+    },
+    "JobPage": {
+      "allOf": [{ "$ref": "../common.json#/$defs/Page" }, { "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/Job" } } } }]
+    },
+    "LogLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "t", "severity", "code"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 0 },
+        "t": { "$ref": "../common.json#/$defs/Instant" },
+        "severity": { "$ref": "../common.json#/$defs/Severity" },
+        "code": { "$ref": "../common.json#/$defs/MessageCode" },
+        "params": { "$ref": "../common.json#/$defs/Params" },
+        "text": { "description": "Rendered by the engine when the request asks for ?render=<lang> (the CLI, the plain web log).", "type": "string" }
+      }
+    },
+    "LogLines": { "type": "array", "items": { "$ref": "#/$defs/LogLine" } },
+    "Retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fromStep": { "$ref": "../common.json#/$defs/StepKind" },
+        "driveId": { "description": "Read-error retries: the drive to use.", "$ref": "../common.json#/$defs/DriveId" },
+        "titles": { "description": "Read-error retries: only these titles (default: the damaged ones).", "type": "array", "items": { "type": "integer" } },
+        "makemkvSettings": { "description": "Overrides for this attempt, e.g. a higher io_ErrorRetryCount.", "type": "object", "additionalProperties": { "type": "string" } },
+        "asBackup": { "type": "boolean" }
+      }
+    },
+    "Move": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by"],
+      "properties": { "by": { "description": "Negative = earlier in the queue.", "type": "integer" } }
+    },
+    "Unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "libraryId", "path", "state", "status", "name", "kind", "createdAt"],
+      "properties": {
+        "id": { "$ref": "../common.json#/$defs/Uuid" },
+        "libraryId": { "$ref": "../common.json#/$defs/EntryId" },
+        "path": { "description": "The unit's folder, relative to the library.", "type": "string" },
+        "state": { "$ref": "../common.json#/$defs/UnitState" },
+        "status": { "$ref": "../common.json#/$defs/UnitStatus" },
+        "name": { "type": "string" },
+        "kind": { "$ref": "../common.json#/$defs/MediaKind" },
+        "format": { "$ref": "../common.json#/$defs/DiscFormat" },
+        "formatCode": { "type": "string" },
+        "disc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "label": { "type": "string" },
+            "season": { "type": ["integer", "null"] },
+            "part": { "type": ["integer", "null"] },
+            "volume": { "type": ["integer", "null"] },
+            "disc": { "type": ["integer", "null"] },
+            "set": { "type": "string" }
+          }
+        },
+        "fingerprint": { "oneOf": [{ "$ref": "../common.json#/$defs/Fingerprint" }, { "type": "null" }] },
+        "createdAt": { "$ref": "../common.json#/$defs/Instant" },
+        "committedAt": { "$ref": "../common.json#/$defs/Instant" },
+        "bytes": { "$ref": "../common.json#/$defs/Bytes" },
+        "files": { "type": "integer", "minimum": 0 },
+        "lastCheck": { "$ref": "#/$defs/CheckSummary" },
+        "replicas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["targetId", "state"],
+            "properties": {
+              "targetId": { "$ref": "../common.json#/$defs/EntryId" },
+              "state": { "enum": ["pending", "copying", "verified", "stale", "failed"] },
+              "verifiedAt": { "$ref": "../common.json#/$defs/Instant" }
+            }
+          }
+        },
+        "parity": { "oneOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["percent", "state"], "properties": { "percent": { "type": "integer" }, "state": { "enum": ["pending", "ready", "stale", "failed"] } } }] },
+        "physical": { "$ref": "#/$defs/Physical" },
+        "workId": { "type": "string" },
+        "setId": { "type": "string" }
+      }
+    },
+    "Physical": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "barcode": { "type": ["string", "null"] }, "location": { "type": ["string", "null"] } }
+    },
+    "UnitPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "physical": { "$ref": "#/$defs/Physical" } }
+    },
+    "UnitDetail": {
+      "allOf": [
+        { "$ref": "#/$defs/Unit" },
+        {
+          "type": "object",
+          "required": ["fileList", "checks"],
+          "properties": {
+            "fileList": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "size", "sha256"],
+                "properties": { "path": { "type": "string" }, "size": { "$ref": "../common.json#/$defs/Bytes" }, "sha256": { "$ref": "../common.json#/$defs/Sha256" }, "role": { "type": "string" } }
+              }
+            },
+            "checks": { "type": "array", "items": { "$ref": "#/$defs/Check" } },
+            "record": { "description": "The archive record as stored in the unit's folder (v2 or v3).", "type": "object" }
+          }
+        }
+      ]
+    },
+    "UnitQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "q": { "description": "Search in names, labels and barcodes.", "type": "string" },
+        "libraryId": { "$ref": "../common.json#/$defs/EntryId" },
+        "status": { "$ref": "../common.json#/$defs/UnitStatus" },
+        "state": { "$ref": "../common.json#/$defs/UnitState" },
+        "fingerprint": { "$ref": "../common.json#/$defs/Fingerprint" },
+        "damaged": { "type": "boolean" },
+        "cursor": { "type": "string" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+      }
+    },
+    "UnitPage": {
+      "allOf": [{ "$ref": "../common.json#/$defs/Page" }, { "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/Unit" } } } }]
+    },
+    "Work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "$ref": "../common.json#/$defs/MediaKind" },
+        "title": { "type": "string" },
+        "year": { "type": ["integer", "null"] },
+        "tmdbId": { "type": ["integer", "null"] },
+        "imdbId": { "type": ["string", "null"] },
+        "units": { "type": "integer", "minimum": 0 },
+        "sets": { "type": "array", "items": { "$ref": "#/$defs/DiscSet" } }
+      }
+    },
+    "WorkPage": {
+      "allOf": [{ "$ref": "../common.json#/$defs/Page" }, { "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/Work" } } } }]
+    },
+    "DiscSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "discs", "missing"],
+      "properties": {
+        "id": { "type": "string" },
+        "workId": { "type": "string" },
+        "season": { "type": ["integer", "null"] },
+        "part": { "type": ["integer", "null"] },
+        "volume": { "type": ["integer", "null"] },
+        "description": { "type": "string" },
+        "knownCount": { "description": "How many discs the set has, when known (typed, or the highest disc number seen).", "type": ["integer", "null"] },
+        "discs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["disc"],
+            "properties": { "disc": { "type": "integer" }, "unitId": { "$ref": "../common.json#/$defs/Uuid" }, "status": { "$ref": "../common.json#/$defs/UnitStatus" } }
+          }
+        },
+        "missing": { "description": "Disc numbers below knownCount with no unit (backlog 8: Season 2: discs 1, 2 of 4).", "type": "array", "items": { "type": "integer" } }
+      }
+    },
+    "VerifyTarget": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["library"], "properties": { "library": { "$ref": "../common.json#/$defs/EntryId" } } },
+        { "type": "object", "additionalProperties": false, "required": ["unit"], "properties": { "unit": { "$ref": "../common.json#/$defs/Uuid" } } },
+        { "description": "Any folder: every folder below it with a SHA256SUMS (today's Verify Archive…).", "type": "object", "additionalProperties": false, "required": ["path"], "properties": { "path": { "$ref": "../common.json#/$defs/Path" } } },
+        { "description": "Every online library.", "type": "object", "additionalProperties": false, "required": ["all"], "properties": { "all": { "const": true } } }
+      ]
+    },
+    "CheckSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkedAt", "result", "summary"],
+      "properties": {
+        "checkedAt": { "$ref": "../common.json#/$defs/Instant" },
+        "result": { "$ref": "../common.json#/$defs/CheckResult" },
+        "summary": { "$ref": "../common.json#/$defs/BroMessage" }
+      }
+    },
+    "Check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "folder", "startedAt", "result", "files", "changed", "unreadable", "missing", "unlisted", "summary"],
+      "properties": {
+        "id": { "type": "string" },
+        "unitId": { "$ref": "../common.json#/$defs/Uuid" },
+        "folder": { "type": "string" },
+        "replicaOf": { "description": "Target id when this checked a replica.", "$ref": "../common.json#/$defs/EntryId" },
+        "startedAt": { "$ref": "../common.json#/$defs/Instant" },
+        "finishedAt": { "$ref": "../common.json#/$defs/Instant" },
+        "result": { "$ref": "../common.json#/$defs/CheckResult" },
+        "files": { "type": "integer", "minimum": 0 },
+        "bytes": { "$ref": "../common.json#/$defs/Bytes" },
+        "changed": { "type": "array", "items": { "type": "string" } },
+        "unreadable": { "type": "array", "items": { "type": "string" } },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "unlisted": { "type": "array", "items": { "type": "string" } },
+        "error": { "$ref": "../common.json#/$defs/BroMessage" },
+        "summary": { "$ref": "../common.json#/$defs/BroMessage" }
+      }
+    },
+    "CheckPage": {
+      "allOf": [{ "$ref": "../common.json#/$defs/Page" }, { "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/Check" } } } }]
+    },
+    "ConfigEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "doc", "issues", "secrets"],
+      "properties": {
+        "version": { "description": "Revision of the saved document (not the schema version); PUT must send it.", "type": "integer", "minimum": 0 },
+        "doc": { "$ref": "../config-3.json" },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/Issue" } },
+        "secrets": {
+          "description": "Every secret the document refers to, with whether it has a value. Values are never returned.",
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": false, "required": ["name", "set"], "properties": { "name": { "type": "string" }, "set": { "type": "boolean" } } }
+        }
+      }
+    },
+    "UpdateConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "doc"],
+      "properties": { "version": { "type": "integer", "minimum": 0 }, "doc": { "$ref": "../config-3.json" } }
+    },
+    "Issues": { "type": "array", "items": { "$ref": "#/$defs/Issue" } },
+    "SecretValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": { "value": { "description": "'' removes the secret.", "type": "string" } }
+    },
+    "ExportBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "version", "config"],
+      "properties": {
+        "format": { "const": "bromelia-config" },
+        "version": { "const": 3 },
+        "config": { "$ref": "../config-3.json" }
+      }
+    },
+    "ImportBundle": {
+      "description": "An ExportBundle, or today's {format: 'bromelia-drives', version: 1, drives, presets}.",
+      "type": "object",
+      "required": ["format", "version"],
+      "properties": { "format": { "enum": ["bromelia-config", "bromelia-drives"] }, "version": { "enum": [1, 3] } }
+    },
+    "RegisterKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": { "key": { "type": "string", "minLength": 1 } }
+    },
+    "TextResult": {
+      "description": "What a MakeMKV command printed (registration, firmware).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "lines"],
+      "properties": { "ok": { "type": "boolean" }, "lines": { "type": "array", "items": { "type": "string" } }, "message": { "$ref": "../common.json#/$defs/BroMessage" } }
+    },
+    "TestStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unitId"],
+      "properties": { "unitId": { "$ref": "../common.json#/$defs/Uuid" } }
+    },
+    "Diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "createdAt"],
+      "properties": {
+        "path": { "description": "A zip with the logs, the configuration without secrets, versions, drives and the last makemkvcon output (backlog 17).", "type": "string" },
+        "sizeBytes": { "$ref": "../common.json#/$defs/Bytes" },
+        "createdAt": { "$ref": "../common.json#/$defs/Instant" },
+        "download": { "description": "Route that serves the zip.", "type": "string" }
+      }
+    },
+    "Login": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token"],
+      "properties": { "token": { "type": "string" } }
+    },
+    "Accepted": {
+      "description": "202: the work was started; follow it through the events or the job.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "jobId": { "$ref": "../common.json#/$defs/Uuid" } }
+    },
+    "Drives": { "type": "array", "items": { "$ref": "#/$defs/Drive" } },
+    "Libraries": { "type": "array", "items": { "$ref": "#/$defs/Library" } }
+  }
+}

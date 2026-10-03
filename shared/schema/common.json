@@ -39,9 +39,18 @@
       "type": "string",
       "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
     },
-    "Seconds": { "type": "number", "minimum": 0 },
-    "Bytes": { "type": "integer", "minimum": 0 },
-    "Sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "Seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "Bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "Fingerprint": {
       "description": "Disc fingerprint, version 1 (docs/configuration.md, 'Discs archived before'). Byte for byte as today.",
       "type": "string",
@@ -62,118 +71,342 @@
       "type": "string",
       "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
     },
-    "Severity": { "enum": ["debug", "info", "warning", "error"] },
+    "Severity": {
+      "enum": [
+        "debug",
+        "info",
+        "warning",
+        "error"
+      ]
+    },
     "ParamValue": {
-      "description": "A message parameter: a string, number, boolean, or a list of them.",
+      "description": "A message parameter: a string, number, boolean, a list of them, a nested message (type message) or a list of messages (type messages).",
       "oneOf": [
-        { "type": ["string", "number", "boolean", "null"] },
-        { "type": "array", "items": { "type": ["string", "number", "boolean"] } }
+        {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        {
+          "$ref": "#/$defs/BroMessage"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BroMessage"
+          },
+          "minItems": 1
+        }
       ]
     },
     "Params": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/ParamValue" }
+      "additionalProperties": {
+        "$ref": "#/$defs/ParamValue"
+      }
     },
     "BroMessage": {
       "description": "What the engine says, as a code with parameters. Clients render it with shared/messages/<lang>.json.",
       "type": "object",
-      "required": ["code"],
+      "required": [
+        "code"
+      ],
       "additionalProperties": false,
       "properties": {
-        "code": { "$ref": "#/$defs/MessageCode" },
-        "params": { "$ref": "#/$defs/Params" },
-        "severity": { "$ref": "#/$defs/Severity" }
+        "code": {
+          "$ref": "#/$defs/MessageCode"
+        },
+        "params": {
+          "$ref": "#/$defs/Params"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        }
       }
     },
     "BroError": {
       "description": "An expected failure: a code, its parameters and optionally the error that caused it.",
       "type": "object",
-      "required": ["code"],
+      "required": [
+        "code"
+      ],
       "additionalProperties": false,
       "properties": {
-        "code": { "$ref": "#/$defs/MessageCode" },
-        "params": { "$ref": "#/$defs/Params" },
-        "cause": { "$ref": "#/$defs/BroError" }
+        "code": {
+          "$ref": "#/$defs/MessageCode"
+        },
+        "params": {
+          "$ref": "#/$defs/Params"
+        },
+        "cause": {
+          "$ref": "#/$defs/BroError"
+        }
       }
     },
     "SecretRef": {
       "description": "A secret kept outside the configuration. Resolved from the keystore, then the environment variable BROMELIA_SECRET_<NAME> (upper case, '.' → '_'), then <data>/secrets/<name>.",
       "type": "object",
-      "required": ["secret"],
+      "required": [
+        "secret"
+      ],
       "additionalProperties": false,
       "properties": {
-        "secret": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9]*(\\.[A-Za-z0-9_-]+)*$" }
+        "secret": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*(\\.[A-Za-z0-9_-]+)*$"
+        }
       }
     },
     "RipMode": {
       "description": "What a video-disc job makes. audioCD and dataImage are chosen from the disc's content, never configured as a profile mode.",
-      "enum": ["mkv", "backup", "backupDecrypted", "backupThenMkv", "infoOnly", "audioCD", "dataImage"]
+      "enum": [
+        "mkv",
+        "backup",
+        "backupDecrypted",
+        "backupThenMkv",
+        "infoOnly",
+        "audioCD",
+        "dataImage"
+      ]
     },
     "VideoMode": {
-      "enum": ["mkv", "backup", "backupDecrypted", "backupThenMkv", "infoOnly"]
+      "enum": [
+        "mkv",
+        "backup",
+        "backupDecrypted",
+        "backupThenMkv",
+        "infoOnly"
+      ]
     },
-    "DiscFormat": { "enum": ["dvd", "bluray", "uhd", "hddvd", "unknown"] },
+    "DiscFormat": {
+      "enum": [
+        "dvd",
+        "bluray",
+        "uhd",
+        "hddvd",
+        "unknown"
+      ]
+    },
     "FormatCode": {
       "description": "DVD, BR, 4K (HDDVD, DISC); with an 'e' suffix for backups that were not decrypted.",
-      "enum": ["DVD", "BR", "4K", "HDDVD", "DISC", "DVDe", "BRe", "4Ke", "HDDVDe", "DISCe"]
+      "enum": [
+        "DVD",
+        "BR",
+        "4K",
+        "HDDVD",
+        "DISC",
+        "DVDe",
+        "BRe",
+        "4Ke",
+        "HDDVDe",
+        "DISCe"
+      ]
     },
     "DiscType": {
       "description": "The {type} token: from the drive's flags or the listing.",
-      "enum": ["dvd", "bd", "hddvd", "disc"]
+      "enum": [
+        "dvd",
+        "bd",
+        "hddvd",
+        "disc"
+      ]
     },
-    "DiscContent": { "enum": ["video", "audio", "data", "blank", "unknown"] },
-    "MediaKind": { "enum": ["movie", "tv"] },
+    "DiscContent": {
+      "enum": [
+        "video",
+        "audio",
+        "data",
+        "blank",
+        "unknown"
+      ]
+    },
+    "MediaKind": {
+      "enum": [
+        "movie",
+        "tv"
+      ]
+    },
     "Layout": {
       "description": "templates: the profile's folder and file templates. mediaServer: the Plex / Jellyfin / Emby names (Naming/Layouts).",
-      "enum": ["templates", "mediaServer"]
+      "enum": [
+        "templates",
+        "mediaServer"
+      ]
     },
     "JobKind": {
-      "enum": ["videoDisc", "audioCd", "dataDisc", "readErrorRetry", "verify", "replicate", "parity", "repair", "rescan", "runCommand", "transcode"]
+      "enum": [
+        "videoDisc",
+        "audioCd",
+        "dataDisc",
+        "readErrorRetry",
+        "verify",
+        "replicate",
+        "parity",
+        "repair",
+        "rescan",
+        "runCommand",
+        "transcode"
+      ]
     },
     "JobState": {
       "description": "Where a job is (plan §20.2). A finished job also has an Outcome.",
-      "enum": ["queued", "waitingForResources", "running", "blocked", "awaitingDecision", "finished"]
+      "enum": [
+        "queued",
+        "waitingForResources",
+        "running",
+        "blocked",
+        "awaitingDecision",
+        "finished"
+      ]
     },
     "Outcome": {
       "description": "How a job ended (plan §20.2, decided by Domain/Outcome JobOutcome.decide).",
-      "enum": ["succeeded", "succeededWithReadErrors", "succeededStepsFailed", "failed", "cancelled", "skipped", "interrupted"]
+      "enum": [
+        "succeeded",
+        "succeededWithReadErrors",
+        "succeededStepsFailed",
+        "failed",
+        "cancelled",
+        "skipped",
+        "interrupted"
+      ]
     },
     "StatusWord": {
       "description": "The status given to user scripts (BROMELIA_STATUS), notifications and the manifest, as today: success, errors (read errors), failed, cancelled. skipped and interrupted are new; skipped jobs never run steps.",
-      "enum": ["success", "errors", "failed", "cancelled", "skipped", "interrupted"]
+      "enum": [
+        "success",
+        "errors",
+        "failed",
+        "cancelled",
+        "skipped",
+        "interrupted"
+      ]
     },
     "StepKind": {
       "enum": [
-        "awaitMedia", "probe", "reconcile", "readNavigation", "identify", "plan", "decide", "acquire", "release",
-        "verifyRips", "transform", "name", "seal", "commit", "publish", "protect", "postProcess", "notify",
-        "ripAudio", "imageData", "mergeAttempts",
-        "verifyUnit", "replicate", "parity", "repair", "rescan", "runCommand", "transcode"
+        "awaitMedia",
+        "probe",
+        "reconcile",
+        "readNavigation",
+        "identify",
+        "plan",
+        "decide",
+        "acquire",
+        "release",
+        "verifyRips",
+        "transform",
+        "name",
+        "seal",
+        "commit",
+        "publish",
+        "protect",
+        "postProcess",
+        "notify",
+        "ripAudio",
+        "imageData",
+        "mergeAttempts",
+        "verifyUnit",
+        "replicate",
+        "parity",
+        "repair",
+        "rescan",
+        "runCommand",
+        "transcode"
       ]
     },
-    "StepState": { "enum": ["pending", "running", "succeeded", "failed", "skipped", "cancelled", "interrupted"] },
-    "Queue": { "enum": ["acquisition", "processing", "maintenance"] },
+    "StepState": {
+      "enum": [
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "skipped",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "Queue": {
+      "enum": [
+        "acquisition",
+        "processing",
+        "maintenance"
+      ]
+    },
     "AlreadyArchived": {
       "description": "A disc archived before, in an automatic rip: skip (outcome skipped, disc ejected when ejectWhenDone), ask (an AwaitingDecision question, disc left in the drive), ripAgain.",
-      "enum": ["skip", "ask", "ripAgain"]
+      "enum": [
+        "skip",
+        "ask",
+        "ripAgain"
+      ]
     },
-    "TrackKind": { "enum": ["video", "audio", "subtitle", "attachment", "unknown"] },
+    "TrackKind": {
+      "enum": [
+        "video",
+        "audio",
+        "subtitle",
+        "attachment",
+        "unknown"
+      ]
+    },
     "UnitState": {
       "description": "committing: the intent is recorded, items are being moved. committed: in the library. quarantined: in _Quarantine. missing: a rescan didn't find it.",
-      "enum": ["committing", "committed", "quarantined", "missing"]
+      "enum": [
+        "committing",
+        "committed",
+        "quarantined",
+        "missing"
+      ]
     },
     "UnitStatus": {
       "description": "success: a finished archive. errors: every title was saved but MakeMKV reported read errors. incomplete: failed or cancelled.",
-      "enum": ["success", "errors", "incomplete"]
+      "enum": [
+        "success",
+        "errors",
+        "incomplete"
+      ]
     },
-    "CheckResult": { "enum": ["ok", "damaged", "error", "stopped"] },
+    "CheckResult": {
+      "enum": [
+        "ok",
+        "damaged",
+        "error",
+        "stopped"
+      ]
+    },
     "Page": {
       "description": "A page of results. Fetch the next page with ?cursor=<next>.",
       "type": "object",
-      "required": ["items"],
+      "required": [
+        "items"
+      ],
       "properties": {
-        "items": { "type": "array" },
-        "next": { "type": ["string", "null"] },
-        "total": { "type": "integer", "minimum": 0 }
+        "items": {
+          "type": "array"
+        },
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     }
   }

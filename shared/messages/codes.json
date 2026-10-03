@@ -394,6 +394,7 @@
       "params": {
         "reason": "message"
       },
+      "http": 502,
       "today": "AppModel.installBetaKey"
     },
     "makemkv.betaKey.http": {
@@ -425,6 +426,7 @@
       "params": {
         "text": "string"
       },
+      "http": 422,
       "today": "AppModel.register"
     },
     "makemkv.driveScanFailed": {
@@ -1164,6 +1166,7 @@
       "params": {
         "device": "string"
       },
+      "http": 500,
       "today": "JobRunner.run / AppModel.eject"
     },
     "drive.closeTrayFailed": {
@@ -1171,10 +1174,12 @@
       "params": {
         "drive": "string"
       },
+      "http": 500,
       "today": "AppModel.closeTray"
     },
     "drive.closeTraysFailed": {
       "kind": "error",
+      "http": 500,
       "today": "AppModel.closeAllTrays"
     },
     "drive.notFound": {
@@ -2145,6 +2150,7 @@
     },
     "session.noTitlesHere": {
       "kind": "error",
+      "http": 422,
       "today": "AppModel.open"
     },
     "session.noTitles": {
@@ -2622,6 +2628,7 @@
       "params": {
         "file": "string"
       },
+      "http": 409,
       "today": "new (backlog 3)"
     },
     "internal.unexpected": {

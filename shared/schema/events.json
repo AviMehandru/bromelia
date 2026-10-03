@@ -1,0 +1,840 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.bromelia.invalid/events.json",
+  "title": "EngineEvent",
+  "description": "Every event clients see (plan §11.2, §25): GET /v1/events streams them as Server-Sent Events, with 'event: <type>', 'id: <seq>' and the whole envelope as 'data'. seq increases by one per event (a gap means events were dropped, and the server sends a snapshot instead). Internal events (DeviceEvent, StepFinished, LeaseChanged) are never streamed. Clients ignore event types they don't know.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Snapshot"
+    },
+    {
+      "$ref": "#/$defs/DriveChanged"
+    },
+    {
+      "$ref": "#/$defs/DriveRemoved"
+    },
+    {
+      "$ref": "#/$defs/MediumArrived"
+    },
+    {
+      "$ref": "#/$defs/MediumRemoved"
+    },
+    {
+      "$ref": "#/$defs/SessionChanged"
+    },
+    {
+      "$ref": "#/$defs/SessionClosed"
+    },
+    {
+      "$ref": "#/$defs/JobChanged"
+    },
+    {
+      "$ref": "#/$defs/JobFinished"
+    },
+    {
+      "$ref": "#/$defs/JobLog"
+    },
+    {
+      "$ref": "#/$defs/QueueChanged"
+    },
+    {
+      "$ref": "#/$defs/ProblemRaised"
+    },
+    {
+      "$ref": "#/$defs/ProblemCleared"
+    },
+    {
+      "$ref": "#/$defs/LibraryChanged"
+    },
+    {
+      "$ref": "#/$defs/MaintenanceProgress"
+    },
+    {
+      "$ref": "#/$defs/ConfigChanged"
+    },
+    {
+      "$ref": "#/$defs/AutomationCountdown"
+    },
+    {
+      "$ref": "#/$defs/ToolsChanged"
+    }
+  ],
+  "$defs": {
+    "Snapshot": {
+      "description": "The whole client-visible state. Sent first on every connection, and again instead of the missed deltas when a client fell behind (the client replaces its store).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "snapshot"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "system",
+            "drives",
+            "sessions",
+            "jobs",
+            "queues",
+            "problems",
+            "libraries",
+            "configVersion"
+          ],
+          "properties": {
+            "system": {
+              "$ref": "api/dtos.json#/$defs/SystemStatus"
+            },
+            "drives": {
+              "type": "array",
+              "items": {
+                "$ref": "api/dtos.json#/$defs/Drive"
+              }
+            },
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "api/dtos.json#/$defs/Session"
+              }
+            },
+            "jobs": {
+              "description": "Every job that isn't finished, and the last 50 finished ones.",
+              "type": "array",
+              "items": {
+                "$ref": "api/dtos.json#/$defs/Job"
+              }
+            },
+            "queues": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "acquisition",
+                "processing",
+                "maintenance"
+              ],
+              "properties": {
+                "acquisition": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "common.json#/$defs/Uuid"
+                  }
+                },
+                "processing": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "common.json#/$defs/Uuid"
+                  }
+                },
+                "maintenance": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "common.json#/$defs/Uuid"
+                  }
+                }
+              }
+            },
+            "problems": {
+              "type": "array",
+              "items": {
+                "$ref": "api/dtos.json#/$defs/Problem"
+              }
+            },
+            "libraries": {
+              "type": "array",
+              "items": {
+                "$ref": "api/dtos.json#/$defs/Library"
+              }
+            },
+            "configVersion": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "DriveChanged": {
+      "description": "A drive appeared, or its state, medium, busy flag or countdown changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "driveChanged"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "drive"
+          ],
+          "properties": {
+            "drive": {
+              "$ref": "api/dtos.json#/$defs/Drive"
+            }
+          }
+        }
+      }
+    },
+    "DriveRemoved": {
+      "description": "A drive without a configuration entry was disconnected (configured drives stay, with connected: false).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "driveRemoved"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "driveId"
+          ],
+          "properties": {
+            "driveId": {
+              "$ref": "common.json#/$defs/DriveId"
+            }
+          }
+        }
+      }
+    },
+    "MediumArrived": {
+      "description": "A disc is in the drive and readable. generation counts discs per drive.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "mediumArrived"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "driveId",
+            "generation",
+            "medium"
+          ],
+          "properties": {
+            "driveId": {
+              "$ref": "common.json#/$defs/DriveId"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "medium": {
+              "$ref": "api/dtos.json#/$defs/Medium"
+            }
+          }
+        }
+      }
+    },
+    "MediumRemoved": {
+      "description": "The disc left the drive.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "mediumRemoved"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "driveId",
+            "generation"
+          ],
+          "properties": {
+            "driveId": {
+              "$ref": "common.json#/$defs/DriveId"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "SessionChanged": {
+      "description": "An open disc's listing, choices, identity or candidates changed; session.rev increased.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "sessionChanged"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "session"
+          ],
+          "properties": {
+            "session": {
+              "$ref": "api/dtos.json#/$defs/Session"
+            }
+          }
+        }
+      }
+    },
+    "SessionClosed": {
+      "description": "The session ended (closed, or its disc was removed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "sessionClosed"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessionId"
+          ],
+          "properties": {
+            "sessionId": {
+              "$ref": "common.json#/$defs/Uuid"
+            }
+          }
+        }
+      }
+    },
+    "JobChanged": {
+      "description": "A job was created or its state, step, progress (at most 10 a second), decision or block changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "jobChanged"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "api/dtos.json#/$defs/Job"
+            }
+          }
+        }
+      }
+    },
+    "JobFinished": {
+      "description": "A job reached its outcome. Follows the last jobChanged of the job.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "jobFinished"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "api/dtos.json#/$defs/Job"
+            }
+          }
+        }
+      }
+    },
+    "JobLog": {
+      "description": "New log lines of a job the client subscribed to (?jobLog=<id>).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "jobLog"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jobId",
+            "lines"
+          ],
+          "properties": {
+            "jobId": {
+              "$ref": "common.json#/$defs/Uuid"
+            },
+            "lines": {
+              "type": "array",
+              "items": {
+                "$ref": "api/dtos.json#/$defs/LogLine"
+              }
+            }
+          }
+        }
+      }
+    },
+    "QueueChanged": {
+      "description": "The order of a queue changed (a job was added, moved, started or removed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "queueChanged"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "queue",
+            "order"
+          ],
+          "properties": {
+            "queue": {
+              "$ref": "common.json#/$defs/Queue"
+            },
+            "order": {
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/Uuid"
+              }
+            }
+          }
+        }
+      }
+    },
+    "ProblemRaised": {
+      "description": "A problem that every UI shows until it is cleared.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "problemRaised"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "problem"
+          ],
+          "properties": {
+            "problem": {
+              "$ref": "api/dtos.json#/$defs/Problem"
+            }
+          }
+        }
+      }
+    },
+    "ProblemCleared": {
+      "description": "A problem was resolved.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "problemCleared"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "problemId",
+            "code"
+          ],
+          "properties": {
+            "problemId": {
+              "type": "string"
+            },
+            "code": {
+              "$ref": "common.json#/$defs/MessageCode"
+            }
+          }
+        }
+      }
+    },
+    "LibraryChanged": {
+      "description": "A library went online or offline, or its free space or unit count changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "libraryChanged"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "library"
+          ],
+          "properties": {
+            "library": {
+              "$ref": "api/dtos.json#/$defs/Library"
+            }
+          }
+        }
+      }
+    },
+    "MaintenanceProgress": {
+      "description": "Progress of a verify, replicate, parity or repair job, with what it found so far.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "maintenanceProgress"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jobId",
+            "fraction"
+          ],
+          "properties": {
+            "jobId": {
+              "$ref": "common.json#/$defs/Uuid"
+            },
+            "unitId": {
+              "$ref": "common.json#/$defs/Uuid"
+            },
+            "fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "bytesDone": {
+              "$ref": "common.json#/$defs/Bytes"
+            },
+            "bytesTotal": {
+              "$ref": "common.json#/$defs/Bytes"
+            },
+            "folders": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "damaged": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "current": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "ConfigChanged": {
+      "description": "The configuration was saved (by any client, or the file was edited).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "configChanged"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "AutomationCountdown": {
+      "description": "Seconds left before an automatic rip of the drive's disc starts; cancelled: the countdown was stopped.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "automationCountdown"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "driveId",
+            "generation",
+            "secondsLeft"
+          ],
+          "properties": {
+            "driveId": {
+              "$ref": "common.json#/$defs/DriveId"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "secondsLeft": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cancelled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "ToolsChanged": {
+      "description": "Tools were found or lost (after a configuration change or a refresh).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "type": {
+          "const": "toolsChanged"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tools"
+          ],
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "api/dtos.json#/$defs/ToolInfo"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -569,7 +569,7 @@ def check_messages():
         R.check(not set(e.get("params", {})) & set(e.get("data", {})), f"codes.json: {code}: a parameter is both shown and data")
         if "http" in e:
             R.check(e["kind"] in ("error", "problem", "issue"), f"codes.json: {code}: only errors have an HTTP status")
-            R.check(e["http"] in (400, 401, 403, 404, 405, 409, 422, 500, 503, 507), f"codes.json: {code}: unusual HTTP status {e['http']}")
+            R.check(e["http"] in (400, 401, 403, 404, 405, 409, 422, 500, 502, 503, 507), f"codes.json: {code}: unusual HTTP status {e['http']}")
         if "severity" in e:
             R.check(e["severity"] in ("debug", "info", "warning", "error"), f"codes.json: {code}: bad severity")
     # Every code that another contract mentions must exist.
@@ -637,11 +637,59 @@ def check_documents():
         validate(load_json(p), "manifest-2.json", what=rel(p))
 
 
+# ---- API and events -------------------------------------------------------------
+
+def check_api():
+    routes = load_json(SCHEMA / "api" / "routes.json")["routes"]
+    dtos = load_json(SCHEMA / "api" / "dtos.json")["$defs"]
+    codes = message_codes()
+    seen_ops, seen_paths = set(), set()
+    params = {"driveId", "sessionId", "jobId", "unitId", "libraryId", "stepId", "targetId", "setId", "name", "path"}
+    for r in routes:
+        what = f"routes.json {r['method']} {r['path']}"
+        R.check(r["operation"] not in seen_ops, f"{what}: operation {r['operation']} is used twice")
+        R.check((r["method"], r["path"]) not in seen_paths, f"{what}: route is listed twice")
+        seen_ops.add(r["operation"])
+        seen_paths.add((r["method"], r["path"]))
+        R.check(r["method"] in ("GET", "POST", "PUT", "PATCH", "DELETE"), f"{what}: bad method")
+        R.check(r["auth"] in ("none", "read", "control"), f"{what}: bad auth")
+        R.check(r["method"] == "GET" or r["auth"] != "read" or r["operation"] in ("validateConfig", "previewPlan"),
+                f"{what}: a write route should need control")
+        for p in re.findall(r"\{(\w+)\}", r["path"]):
+            R.check(p in params, f"{what}: unknown path parameter {p}")
+        for key in ("request",):
+            if key in r:
+                R.check(r[key] in dtos, f"{what}: {key} {r[key]} isn't in dtos.json")
+        if isinstance(r.get("query"), str):
+            R.check(r["query"] in dtos, f"{what}: query {r['query']} isn't in dtos.json")
+        body = r["response"].get("body")
+        R.check(body is None or body in dtos, f"{what}: response {body} isn't in dtos.json")
+        R.check(body is None or r["response"]["status"] in (200, 201), f"{what}: only 200 and 201 have a body")
+        for code in r.get("errors", []):
+            if R.check(code in codes, f"{what}: unknown error code {code}"):
+                R.check("http" in codes[code], f"{what}: {code} has no HTTP status in codes.json")
+    samples = load_json(FIXTURES / "api" / "api-samples.json")
+    for name, items in samples.items():
+        if name == "comment":
+            continue
+        if R.check(name in dtos, f"api-samples.json: {name} isn't a DTO"):
+            for i, item in enumerate(items):
+                validate(item, "api/dtos.json", name, what=f"api-samples.json {name}[{i}]")
+    with open(FIXTURES / "api" / "events-sample.jsonl", encoding="utf-8") as f:
+        last = 0
+        for n, line in enumerate(f, 1):
+            ev = json.loads(line)
+            validate(ev, "events.json", what=f"events-sample.jsonl:{n}")
+            R.check(ev["seq"] == last + 1, f"events-sample.jsonl:{n}: seq should be {last + 1}")
+            last = ev["seq"]
+
+
 SECTIONS = {
     "schemas": check_schemas,
     "config": check_config,
     "messages": check_messages,
     "documents": check_documents,
+    "api": check_api,
     "fixtures": check_fixtures,
 }
 
