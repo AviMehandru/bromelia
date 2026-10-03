@@ -1,0 +1,14 @@
+title: Media server layout names the main feature after the movie and puts extras in Other/
+from:
+  - macos IntegrationJobTests.moviesAreNamedForMediaServers
+  - docs/configuration.md#media-server-layout
+given:
+  disc: {volume: SAMPLE_MOVIE, type: bluray, titles: [{duration: "1:50:00", source: 1}, {duration: "0:05:00", source: 2}]}
+  profile: {naming: {layout: mediaServer}}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      files:
+        under: library
+        include: ["Movies/Sample Movie/Sample Movie.mkv", "Movies/Sample Movie/Other/Sample Movie - Playlist 00002.mkv"]

@@ -1,0 +1,17 @@
+title: The online lookup's canonical title and year name a movie in the media server layout; the runners-up are logged
+from:
+  - docs/configuration.md#online-lookup
+  - README.md (online lookup)
+given:
+  disc: {volume: DUNE, type: bluray, titles: [{duration: "2:35:00", source: 1}]}
+  profile: {naming: {layout: mediaServer}}
+  configPatch: {metadata: {provider: tmdb, apiKey: {secret: metadata.apiKey}}}
+  http:
+    - {method: GET, url: "https://api.themoviedb.org/3/search/movie?*", status: 200, file: tmdb-search-movie.json}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      files: {under: library, include: ["Movies/Dune (1984)/Dune (1984).mkv"]}
+      log: {job: job, include: [metadata.match]}
+      record: {folder: "library/Movies/Dune (1984)", json: {work: {provider: tmdb, title: Dune, year: 1984, tmdbId: 841}}}

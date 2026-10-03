@@ -1,0 +1,18 @@
+title: A commit interrupted between moving items is rolled forward from its intent at startup
+from:
+  - rearchitecture-plan §22.3 (a crash between 4 and 6 rolls forward)
+  - invariants I1, I3, I5
+given:
+  disc: sample-movie
+  profile: {titles: {skipDuplicates: false}}
+steps:
+  - rip: {iso: true, titles: [0, 1], as: job}
+  - kill: {at: "commit.afterMove:1"}
+  - restart: {}
+  - expect:
+      job: {name: job, outcome: succeeded, unit: {state: committed}}
+      files:
+        under: "library/Sample Movie"
+        include: ["Sample Movie - Rip - Playlist 00001 - BR.mkv", "Sample Movie - Rip - Playlist 00002 - BR.mkv", "SHA256SUMS", "bromelia-{unit8}.json"]
+      sums: {folder: "library/Sample Movie", ok: true}
+      db: {commit_intents: {count: 0}, archive_units: {count: 1, rows: [{state: committed}]}}

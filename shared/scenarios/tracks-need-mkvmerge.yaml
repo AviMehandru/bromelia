@@ -1,0 +1,13 @@
+title: Hand-picked tracks without mkvmerge fail the job before ripping
+from:
+  - macos JobRunner (Choosing individual tracks requires mkvmerge)
+  - README.md limitations (individual track selection needs mkvmerge)
+given:
+  disc: sample-movie-one-title
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [0], tracks: {"0": [0]}}
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: rip.needsMkvmergeForTracks}}
+      calls: {makemkvcon: {exclude: [" mkv "]}}

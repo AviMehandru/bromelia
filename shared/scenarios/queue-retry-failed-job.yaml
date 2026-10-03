@@ -1,0 +1,15 @@
+title: A failed job can be retried; the retry is a new job with the same request
+from:
+  - README.md (retry)
+  - rearchitecture-plan §13.1 (retry)
+given:
+  disc: sample-movie-one-title
+  tools: {makemkvcon: tools/makemkvcon-fails-nothing-written.yaml}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: failed}
+  - tools: {makemkvcon: tools/makemkvcon-saves.yaml}
+  - retry: {job: job, as: again}
+  - expect:
+      job: {name: again, outcome: succeeded}

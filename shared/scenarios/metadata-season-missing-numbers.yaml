@@ -1,0 +1,19 @@
+title: When the season doesn't list every episode number of the disc, no episode gets a title and the log says why
+from:
+  - docs/configuration.md#online-lookup (episode titles)
+  - README.md limitations (absolute numbers such as 138)
+given:
+  disc: {volume: FRIENDS_S2_D1, type: dvd, titles: [{duration: "0:22:00", source: 1}]}
+  profile: {naming: {layout: mediaServer}}
+  configPatch: {metadata: {provider: tmdb, apiKey: {secret: metadata.apiKey}, nfo: false}}
+  http:
+    - {method: GET, url: "https://api.themoviedb.org/3/search/tv?*", status: 200, file: tmdb-search-tv.json}
+    - {method: GET, url: "https://api.themoviedb.org/3/tv/1668/season/2?*", status: 200, file: tmdb-season.json}
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [0], firstEpisode: 138}
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      log: {job: job, include: [metadata.seasonMissing], exclude: [metadata.episodeTitles]}
+      files: {under: "library/TV Shows/Friends (1994)", include: ["Season 02/Friends (1994) - S02E138.mkv"]}

@@ -1,0 +1,16 @@
+title: A notification that can't be delivered is logged in the job's log and kept in the outbox for a retry
+from:
+  - docs/configuration.md#notifications (failures are written to the job log)
+  - rearchitecture-plan §15.2 (outbox)
+given:
+  disc: sample-movie-one-title
+  configPatch:
+    notifications: {targets: [{id: hook, url: {secret: notifications.hook}}]}
+  http:
+    - {method: POST, url: "http://127.0.0.1:9/hook", status: 500}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      log: {job: job, include: [notify.httpFailed]}
+      db: {outbox: {count: 1, rows: [{attempts: 1, sent_at: null}]}}

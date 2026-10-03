@@ -1,0 +1,30 @@
+title: A finished rip is moved out of staging into the library, with checksums, a record and the logs
+from:
+  - macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder
+  - docs/configuration.md#output-folder-read-errors-and-checks
+  - docs/configuration.md#archive-files
+given:
+  disc: sample-movie
+  profile: {titles: {skipDuplicates: false}}
+steps:
+  - rip: {iso: true, titles: [0, 1], as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, noError: true, files: 2, unit: {state: committed, status: success}}
+      files:
+        under: library
+        exactly:
+          - "Sample Movie/SHA256SUMS"
+          - "Sample Movie/Sample Movie - Rip - Playlist 00001 - BR.mkv"
+          - "Sample Movie/Sample Movie - Rip - Playlist 00002 - BR.mkv"
+          - "Sample Movie/bromelia-{unit8}.json"
+          - "Sample Movie/bromelia-{unit8}-log.txt"
+          - "Sample Movie/makemkv-{unit8}-log.txt"
+      sums: {folder: "library/Sample Movie", ok: true, files: ["Sample Movie - Rip - Playlist 00001 - BR.mkv", "Sample Movie - Rip - Playlist 00002 - BR.mkv"]}
+      record: {folder: "library/Sample Movie", json: {format: bromelia-archive, version: 3, status: success, name: Sample Movie, kind: movie}}
+      transcript:
+        job: job
+        runs: 2
+        contains: ["TCOUNT:2", 'TINFO:1,27,0,"title_t01.mkv"', "Copy complete. 1 titles saved.", "exit status 0"]
+      calls: {makemkvcon: {counts: {" mkv ": 1}, include: [" all "]}}
+      db:
+        archive_units: {count: 1, rows: [{state: committed, status: success, path: Sample Movie}]}

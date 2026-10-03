@@ -1,0 +1,28 @@
+title: Verifying re-hashes every listed file and reports changed, missing and unlisted files per folder; Bromelia's own files and media server metadata aren't reported
+from:
+  - macos ArchiveCheckTests.verifiesArchives
+  - linux /archive/verify
+  - docs/configuration.md#archive-check
+given:
+  units:
+    - {folder: library/Good, name: Good, files: [Good.mkv, Backup/BDMV/index.bdmv]}
+    - {folder: "library/TV Shows/Bad", name: Bad, kind: tv, files: ["Season 01/E01.mkv", "Season 01/E02.mkv", "Season 01/E03.mkv"]}
+  files:
+    "library/.bromelia/staging/1234/SHA256SUMS": "0000000000000000000000000000000000000000000000000000000000000000  x.mkv\n"
+steps:
+  - flip: {path: "library/TV Shows/Bad/Season 01/E01.mkv", byte: 3}
+  - delete: "library/TV Shows/Bad/Season 01/E02.mkv"
+  - write: {path: "library/TV Shows/Bad/Season 01/E01.srt", text: "1\n00:00:01,000 --> 00:00:02,000\nHi\n"}
+  - write: {path: "library/TV Shows/Bad/Season 01/E02.nfo", text: "<episodedetails/>"}
+  - write: {path: "library/TV Shows/Bad/poster.jpg", text: "jpg"}
+  - write: {path: "library/TV Shows/Bad/makemkv-debug-log-1.txt", text: log}
+  - verify: {library: lib, as: check}
+  - expect:
+      job: {name: check, kind: verify, outcome: succeeded}
+      db:
+        checks:
+          count: 2
+          rows:
+            - {folder: "{root}/library/Good", result: ok, files: 2, unlisted: "[]"}
+            - {folder: "{root}/library/TV Shows/Bad", result: damaged, files: 3, changed: '["Season 01/E01.mkv"]', missing: '["Season 01/E02.mkv"]', unlisted: '["Season 01/E01.srt"]'}
+      problems: {active: [check.damagedFound]}

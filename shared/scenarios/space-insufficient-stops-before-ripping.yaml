@@ -1,0 +1,12 @@
+title: A rip that wouldn't fit stops before anything is written
+from:
+  - macos ReliabilityTests.notEnoughFreeSpaceStopsBeforeRipping
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  disc: {volume: SAMPLE_MOVIE, type: bluray, titles: [{duration: "0:00:10", source: 1, size: 1152921504606846976}]}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: space.insufficient}}
+      calls: {makemkvcon: {exclude: [" mkv "]}}
+      files: {under: library, exactly: []}

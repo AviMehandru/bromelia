@@ -1,0 +1,14 @@
+title: A chosen title that isn't in the new listing fails the job before ripping
+from:
+  - macos SafetyTests.aChosenTitleMissingFromTheListingFailsTheJob
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  disc: sample-movie
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [1]}
+  - swapDisc: sample-movie-one-title
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: disc.titleGone, params: {title: 1}}}
+      calls: {makemkvcon: {exclude: [" mkv "]}}

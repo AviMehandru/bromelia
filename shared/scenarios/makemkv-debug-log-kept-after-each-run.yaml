@@ -1,0 +1,15 @@
+title: MakeMKV's debug log is kept after every run, since MakeMKV starts it afresh each time
+from:
+  - macos SafetyTests.makeMKVsDebugLogIsKeptAfterEachRun
+  - docs/architecture.md#per-drive-makemkv-settings
+  - docs/configuration.md#archive-files
+given:
+  disc: sample-movie-one-title
+  profile: {makemkv: {settings: {app_ShowDebug: "1"}}}
+  tools: {makemkvcon: tools/makemkvcon-debug-log.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      debugLog: {job: job, runs: 2, order: ["Debug log of the listing", "Debug log of the rip"]}
+      files: {under: "library/Sample Movie", include: ["makemkv-{unit8}-debug-log.txt"]}

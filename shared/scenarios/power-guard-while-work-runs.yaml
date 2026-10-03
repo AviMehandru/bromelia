@@ -1,0 +1,27 @@
+title: The computer is kept awake while a rip or a background step runs; turning preventSleep off releases it at once
+from:
+  - macos ReliabilityTests.backgroundStepsKeepTheMacAwake
+  - windows SafetyTests.BackgroundStepsKeepTheComputerAwake
+  - linux /reliability/keep-awake
+  - docs/architecture.md#sleep
+given:
+  disc: sample-movie-one-title
+  configPatch:
+    steps: [{id: slow, kind: command, background: true, command: {executable: slow}}]
+  profile: {steps: [slow]}
+  tools: {slow: tools/slow-step.yaml}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      when: {job: job, step: acquire}
+      power: {held: true, changes: [true]}
+  - expect:
+      when: {job: job, state: finished}
+      power: {held: true}
+  - config: {power: {preventSleep: false}}
+  - expect:
+      when: {event: configChanged}
+      power: {held: false, changes: [true, false]}
+  - config: {power: {preventSleep: true}}
+  - expect:
+      power: {held: false, changes: [true, false, true, false]}

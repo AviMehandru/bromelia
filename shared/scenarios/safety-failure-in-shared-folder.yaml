@@ -1,0 +1,23 @@
+title: A failure in a folder other jobs share is quarantined without touching the shared folder; the logs go with the files
+from:
+  - macos SafetyTests.failureInASharedFolderUsesASubfolder
+  - docs/configuration.md#output-folder-read-errors-and-checks
+  - docs/configuration.md#archive-files
+given:
+  disc: sample-movie-one-title
+  profile: {naming: {folderTemplate: "", conflictPolicy: merge}}
+  files: {"library/other.mkv": keep}
+  tools: {makemkvcon: tools/makemkvcon-fails-file-written.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job: {name: job, outcome: failed}
+      files:
+        under: library
+        exactly:
+          - "other.mkv"
+          - "_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt"
+          - "_Quarantine/Sample Movie [INCOMPLETE]/bromelia-{unit8}-log.txt"
+          - "_Quarantine/Sample Movie [INCOMPLETE]/makemkv-{unit8}-log.txt"
+          - "_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv"
+      file: {path: "library/other.mkv", text: keep}

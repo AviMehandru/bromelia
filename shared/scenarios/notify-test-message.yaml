@@ -1,0 +1,12 @@
+title: A test notification is sent to one target on request
+from:
+  - rearchitecture-plan §13.1 (testNotification)
+given:
+  configPatch:
+    notifications: {targets: [{id: hook, url: {secret: notifications.hook}}]}
+  http:
+    - {method: POST, url: "http://127.0.0.1:9/hook", status: 204}
+steps:
+  - testNotification: {target: hook}
+  - expect:
+      notifications: {count: 1, sent: [{target: hook, title: {code: notify.test.title}}]}

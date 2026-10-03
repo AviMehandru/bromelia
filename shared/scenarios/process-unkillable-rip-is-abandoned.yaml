@@ -1,0 +1,13 @@
+title: A makemkvcon that doesn't end even after SIGKILL is abandoned 30 s later, so the job can end
+from:
+  - docs/architecture.md#stopping-processes
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  disc: sample-movie-one-title
+  configPatch: {limits: {stallTimeoutMinutes: 1}}
+  tools: {makemkvcon: tools/makemkvcon-stalls-unkillable.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - advance: 100
+  - expect:
+      job: {name: job, outcome: failed, error: {code: makemkv.stalled, params: {abandoned: true}}}

@@ -1,0 +1,19 @@
+title: A HandBrake step encodes every MKV of the unit (not ISOs), never replacing a file
+from:
+  - macos HandBrakeTests.encodesEveryMKVWithoutReplacingAnything
+  - docs/configuration.md#postprocessstep (HandBrake steps)
+given:
+  units:
+    - {folder: library/Show, name: Show, kind: tv, status: success, files: [A.mkv, B.mkv, C.iso]}
+  files: {"library/Show/Encoded/A.mkv": old}
+  configPatch:
+    steps: [{id: transcode, name: Transcode, kind: handbrake}]
+  tools: {HandBrakeCLI: tools/handbrake-copies.yaml}
+steps:
+  - testStep: {step: transcode, unit: library/Show, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, kind: transcode}
+      file: {path: "library/Show/Encoded/A.mkv", text: old}
+  - expect:
+      files: {under: library/Show/Encoded, exactly: ["A (2).mkv", "A.mkv", "B.mkv"]}
+      calls: {HandBrakeCLI: {count: 2, include: ["--preset H.265 MKV 1080p30 -i {root}/library/Show/A.mkv -o {root}/library/Show/Encoded/A (2).mkv"]}}

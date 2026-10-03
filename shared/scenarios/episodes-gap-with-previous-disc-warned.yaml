@@ -1,0 +1,15 @@
+title: A first episode typed for the disc wins over the previous disc's, and the gap is logged
+from:
+  - docs/configuration.md#naming-formats-and-episodes (the log warns about the gap or overlap)
+given:
+  disc: one-piece-s2-p7-d2-navigation
+  units:
+    - {folder: "library/One Piece - Season 2 Part 7 Disc 1", name: One Piece, kind: tv, label: ONE_PIECE_S2_P7_D1, season: 2, part: 7, disc: 1, episodes: [137], record: 3}
+  tools: {mkvmerge: tools/mkvmerge-splits.yaml}
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, firstEpisode: 140}
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      log: {job: job, include: [episodes.previousDiscGap]}

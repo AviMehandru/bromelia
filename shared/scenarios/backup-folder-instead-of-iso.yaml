@@ -1,0 +1,19 @@
+title: When MakeMKV writes a folder instead of the ISO asked for, the checked folder is kept and the MKV step reads it
+from:
+  - macos ReliabilityTests.folderWrittenInsteadOfAnISOIsKeptAsAFolder
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  drives:
+    - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
+  profile: {backup: {format: iso}, mode: {default: backupThenMkv}}
+  tools: {makemkvcon: tools/makemkvcon-backup-folder-for-iso.yaml}
+steps:
+  - rip: {drive: drive, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, mode: backupThenMkv}
+      log: {job: job, include: [backup.folderInsteadOfIso]}
+      files:
+        under: "library/Sample Movie"
+        include: ["backup/Sample Movie - Backup - BR/BDMV/index.bdmv", "Sample Movie - Rip - Playlist 00001 - BR.mkv"]
+        exclude: ["backup/Sample Movie - Backup - BR.iso"]
+      calls: {makemkvcon: {include: ["mkv file:"]}}

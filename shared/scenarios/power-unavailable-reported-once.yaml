@@ -1,0 +1,16 @@
+title: When the computer can't be kept awake (no logind on the system bus), that is reported once and work carries on
+from:
+  - linux /reliability/keep-awake-without-logind
+  - docs/architecture.md#sleep
+  - docs/docker.md (without the system bus socket the log says once that it can't)
+given:
+  disc: sample-movie-one-title
+  configPatch: {power: {preventSleep: true}}
+  platform: linux
+steps:
+  - rip: {iso: true, as: first}
+  - rip: {iso: true, as: second}
+  - expect:
+      job: {name: second, outcome: succeeded}
+      problems: {active: [power.unavailable]}
+      events: {include: [{type: problemRaised, data: {problem: {code: power.unavailable}}}]}

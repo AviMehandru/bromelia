@@ -1,0 +1,12 @@
+title: Only one check runs at a time
+from:
+  - macos ArchiveCheckTests.verifiesFromTheApp (one at a time)
+  - macos AppModel.webAction verify (A check is already running)
+given:
+  units:
+    - {folder: library/A, name: A, files: [a.mkv]}
+steps:
+  - verify: {library: lib, as: first}
+  - api: {method: POST, path: /v1/verify, body: {library: lib}, headers: {X-Bromelia: "1"}, as: second}
+  - expect:
+      response: {as: second, status: 409, error: {code: check.alreadyRunning}}

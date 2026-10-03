@@ -1,0 +1,17 @@
+title: Opening a disc reads its listing, picks titles with the profile's rules (with the reason for each), identifies it and fingerprints it
+from:
+  - README.md (open a disc; title and track tree; live preview of title rules)
+  - docs/architecture.md#makemkvcon (open disc)
+  - docs/configuration.md (title rules)
+given:
+  disc: one-piece-s3-p1-d1
+  profile: {titles: {strategy: longest}}
+steps:
+  - open: {iso: true, as: disc}
+  - expect:
+      session:
+        name: disc
+        state: ready
+        fingerprint: "v1:975fb16e865898de86ce51c559e479fc"
+        identity: {name: One Piece, kind: tv, format: dvd, formatCode: DVD}
+        selection: [{index: 0, selected: true}, {index: 1, selected: false, reason: {code: titles.reason.notLongest}}, {index: 2, selected: false, reason: {code: titles.reason.notLongest}}]

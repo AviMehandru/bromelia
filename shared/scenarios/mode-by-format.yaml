@@ -1,0 +1,13 @@
+title: A mode for the disc's format replaces the profile's mode in automatic and quick rips
+from:
+  - macos IntegrationJobTests.formatModesReplaceTheConfiguredMode
+  - docs/configuration.md#driveconfig (formatModes)
+given:
+  disc: sample-movie-one-title
+  profile: {mode: {byFormat: {bluray: infoOnly}}}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, mode: infoOnly, files: 1}
+      files: {under: "library/Sample Movie", include: ["disc-info.json"]}
+      calls: {makemkvcon: {exclude: [" mkv "]}}

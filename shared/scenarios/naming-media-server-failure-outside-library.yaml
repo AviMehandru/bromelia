@@ -1,0 +1,12 @@
+title: In the media server layout a failed job is quarantined outside the library's show and movie folders
+from:
+  - docs/configuration.md#media-server-layout
+given:
+  disc: sample-movie-one-title
+  profile: {naming: {layout: mediaServer}}
+  tools: {makemkvcon: tools/makemkvcon-fails-file-written.yaml}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: failed}
+      files: {under: library, include: ["_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv"], exclude: ["Movies"]}

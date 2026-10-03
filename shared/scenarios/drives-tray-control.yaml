@@ -1,0 +1,17 @@
+title: Close one tray, close all trays, and eject from the API
+from:
+  - "README.md (trays: close one drive's tray or all trays)"
+  - docs/configuration.md#web-page (Eject, Close tray)
+given:
+  drives:
+    - {id: a, identification: "BD-RE A 1.00", device: /dev/a, disc: sample-movie-one-title}
+    - {id: b, identification: "BD-RE B 1.00", device: /dev/b}
+steps:
+  - eject: {drive: a}
+  - openTray: {drive: b}
+  - expect:
+      drives: [{id: a, state: trayOpen}, {id: b, state: trayOpen}]
+  - api: {method: POST, path: /v1/drives/close-trays, headers: {X-Bromelia: "1"}, as: close}
+  - expect:
+      response: {as: close, status: 204}
+      drives: [{id: a, state: empty}, {id: b, state: empty}]

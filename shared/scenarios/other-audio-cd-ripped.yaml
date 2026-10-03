@@ -1,0 +1,14 @@
+title: An audio CD is ripped with cyanrip in staging, without makemkvcon, and archived with checksums
+from:
+  - macos IntegrationJobTests.audioCDsUseTheAudioCommand
+  - docs/configuration.md#other-discs
+given:
+  drives:
+    - {id: drive, identification: "DVD+RW TEST 1.00", device: /dev/fake9, disc: audio-cd}
+  tools: {cyanrip: tools/cyanrip-writes-album.yaml}
+steps:
+  - rip: {drive: drive, as: job}
+  - expect:
+      job: {name: job, kind: audioCd, outcome: succeeded}
+      files: {under: library, include: ["*/Artist - Album/01 - Track.flac"]}
+      calls: {makemkvcon: {none: true}, cyanrip: {include: ["-d /dev/fake9 -o flac"]}}

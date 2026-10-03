@@ -1,0 +1,22 @@
+title: A title that failed keeps MakeMKV's file name, in an INCOMPLETE folder in quarantine
+from:
+  - macos SafetyTests.failedTitleIsKeptUnderMakeMKVsNameInAnIncompleteFolder
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  disc: sample-movie-three-titles
+  profile: {titles: {skipDuplicates: false}}
+  tools: {makemkvcon: tools/makemkvcon-title-1-fails.yaml}
+steps:
+  - rip: {iso: true, titles: [0, 1], as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: rip.failed}, errorText: "Failed to save title 1", unit: {state: quarantined, status: incomplete}}
+      files:
+        under: library
+        include:
+          - "_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt"
+          - "_Quarantine/Sample Movie [INCOMPLETE]/title_t01.mkv"
+          - "_Quarantine/Sample Movie [INCOMPLETE]/bromelia-{unit8}-log.txt"
+        exclude:
+          - "_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS"
+          - "Sample Movie"
+      calls: {makemkvcon: {counts: {" mkv ": 2}}}

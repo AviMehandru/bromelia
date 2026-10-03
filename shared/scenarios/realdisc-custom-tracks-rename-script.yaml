@@ -1,0 +1,17 @@
+title: "A real disc image: title choice, mkvmerge track removal, renaming, a post-processing script and the manifest"
+realDisc: {env: BROMELIA_TEST_ISO, note: "Runs only when BROMELIA_TEST_ISO is set (TEST_RUNNER_BROMELIA_TEST_ISO for xcodebuild); uses the real makemkvcon and mkvmerge, not the scripted tools."}
+from:
+  - macos IntegrationTests.ripsTitleWithCustomTracksRenameAndScript
+  - README.md#testing
+given:
+  profile: {naming: {folderTemplate: "{type}/{disc}", fileNameTemplate: "{disc} - {n:2}"}, steps: [record]}
+  configPatch:
+    steps: [{id: record, kind: command, command: {executable: /bin/sh, arguments: "-c 'echo \"$BROMELIA_STATUS|$BROMELIA_FILE_COUNT|$1\" > \"$0\"' {root}/post.txt {outputDir}"}}]
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [1], tracks: {"1": [0, 1]}}
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, files: 1}
+      file: {path: post.txt, contains: ["success|1|"]}
+      manifest: {job: job, json: {status: success}}

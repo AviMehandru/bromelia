@@ -1,0 +1,12 @@
+title: Opening a file inside a disc structure opens the disc it belongs to
+from:
+  - macos ParityTests.opensTheDiscAFileBelongsTo
+  - README.md (open a file inside a disc)
+given:
+  files: {"Rips/Disc/VIDEO_TS/VTS_01_1.VOB": x, "Rips/Disc/VIDEO_TS/VIDEO_TS.IFO": x}
+  disc: one-piece-s3-p1-d1
+steps:
+  - open: {file: "{root}/Rips/Disc/VIDEO_TS/VTS_01_1.VOB", as: disc}
+  - expect:
+      session: {name: disc, makemkvSource: "file:{root}/Rips/Disc", state: ready}
+      calls: {makemkvcon: {include: ["info file:{root}/Rips/Disc"]}}

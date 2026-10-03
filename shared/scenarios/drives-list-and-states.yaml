@@ -1,0 +1,17 @@
+title: The drive list shows every drive with its device, tray state, disc label and type; configured drives that aren't attached stay listed
+from:
+  - macos DriveDetectionTests.disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults
+  - README.md (drive list with drive model, device, tray state, disc label and disc type)
+given:
+  configPatch:
+    drives: [{id: gone, name: Old drive, match: {driveName: "BD-RE GONE 1.00"}}]
+  drives:
+    - {id: full, identification: "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325", device: /dev/rdisk4, disc: {volume: MOVIE_DISC, type: bluray, titles: [{duration: "1:00:00", source: 1}]}}
+    - {id: empty, identification: "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00", device: /dev/rdisk6}
+steps:
+  - openTray: {drive: empty}
+  - expect:
+      drives:
+        - {id: full, connected: true, state: present, device: /dev/rdisk4, medium: {label: MOVIE_DISC, type: bd}}
+        - {id: empty, connected: true, state: trayOpen}
+        - {id: gone, configId: gone, name: Old drive, connected: false}

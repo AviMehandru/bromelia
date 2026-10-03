@@ -1,0 +1,11 @@
+title: Without cyanrip or abcde an audio CD fails with a clear message
+from:
+  - macos IntegrationJobTests.missingAudioRipperFailsClearly
+  - docs/configuration.md#other-discs
+given:
+  drives:
+    - {id: drive, identification: "DVD+RW TEST 1.00", device: /dev/fake9, disc: audio-cd}
+steps:
+  - rip: {drive: drive, as: job}
+  - expect:
+      job: {name: job, kind: audioCd, outcome: failed, error: {code: other.audioNeedsRipper}}

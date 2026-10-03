@@ -1,0 +1,17 @@
+title: After a restart, a queued automatic job whose drive now holds another disc is cancelled
+from:
+  - rearchitecture-plan §20.4 (automatic jobs are cancelled with disc.changed if the drive's media generation moved on)
+  - docs/architecture.md#unfinished-jobs (the disc in the drive may have changed since)
+given:
+  configPatch: {automation: {defaults: {ripOnInsert: true, delaySeconds: 0}}}
+  drives:
+    - {id: drive, identification: "BD-RE TEST 1.00", device: /dev/test0}
+steps:
+  - insert: {drive: drive, disc: sample-movie-one-title}
+  - kill: {at: "beforeStep:probe"}
+  - remove: {drive: drive}
+  - insert: {drive: drive, disc: {volume: ANOTHER, type: bluray, titles: [{duration: "0:00:10", source: 1}]}}
+  - restart: {}
+  - expect:
+      jobs: {count: 2}
+      events: {include: [{type: jobFinished, data: {job: {outcome: cancelled, error: {code: disc.changed}}}}]}

@@ -1,0 +1,13 @@
+title: Listening on the network without a token is refused, and HTTPS needs both the certificate and its key
+from:
+  - macos IntegrationFeatureTests.webRequestsAndAccess (startProblem)
+  - macos WebTests.tlsIdentity
+  - linux /web/tls
+  - docs/configuration.md#web-page
+steps:
+  - api: {method: PUT, path: /v1/config, body: {version: 1, doc: {version: 3, libraries: [{id: lib, path: "{root}/library"}], server: {tcp: {enabled: true, address: 0.0.0.0}}}}, headers: {X-Bromelia: "1"}, as: open}
+  - api: {method: PUT, path: /v1/config, body: {version: 1, doc: {version: 3, libraries: [{id: lib, path: "{root}/library"}], server: {tls: {certificate: /nonexistent/cert.pem}}}}, headers: {X-Bromelia: "1"}, as: halfTls}
+  - expect:
+      response: {as: open, status: 422, error: {code: config.rejected}, json: {issues: [{path: server.tcp.address, code: config.networkNeedsToken}]}}
+  - expect:
+      response: {as: halfTls, status: 422, json: {issues: [{path: server.tls.key, code: config.tlsNeedsBoth}]}}

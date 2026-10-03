@@ -1,0 +1,12 @@
+title: Rescans while a disc stays in don't start another automatic rip
+from:
+  - macos DriveDetectionTests.autoRipQueuesOnInsertOnly (rescans do not queue duplicates)
+given:
+  configPatch: {automation: {pollIntervalSeconds: 10, defaults: {ripOnInsert: true, delaySeconds: 0}}}
+  drives:
+    - {id: drive, identification: "BD-RE TEST 1.00", device: /dev/test0}
+steps:
+  - insert: {drive: drive, disc: sample-movie-one-title}
+  - advance: 300
+  - expect:
+      jobs: {count: 1, outcomes: [succeeded]}

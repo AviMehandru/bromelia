@@ -1,0 +1,18 @@
+title: Without the archive record the logs stay in the job's folder only; the note names that log
+from:
+  - macos SafetyTests.logsFollowFilesOnlyWithTheArchiveRecord
+  - docs/configuration.md#archive-files
+given:
+  disc: sample-movie-one-title
+  profile: {archive: {archiveRecord: false}}
+  tools: {makemkvcon: tools/makemkvcon-fails-file-written.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job: {name: job, outcome: failed}
+      files:
+        under: "library/_Quarantine/Sample Movie [INCOMPLETE]"
+        exactly: ["INCOMPLETE.txt", "title_t00.mkv"]
+      file: {path: "library/_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt", contains: ["{root}/data/jobs/{jobId}/"], excludes: ["bromelia-{unit8}-log.txt"]}
+  - expect:
+      file: {path: "data/jobs/{jobId:job}/makemkv.txt", exists: true}

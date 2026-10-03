@@ -1,0 +1,13 @@
+title: "Recorded makemkvcon run rip-disk-full: exit 0, no file written → failed"
+from:
+  - shared/fixtures/rip-outcomes.json
+  - macos RecordedRunTests.everyRecordedRunEndsAsExpected
+  - docs/architecture.md#stopping-processes
+given:
+  disc: sample-movie
+  tools: {makemkvcon: tools/makemkvcon-recorded-rip-disk-full.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job: {name: job, outcome: failed, errorText: "free space"}
+      files: {under: library, exactly: []}

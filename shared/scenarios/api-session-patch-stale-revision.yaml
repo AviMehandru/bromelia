@@ -1,0 +1,11 @@
+title: "Two clients changing the same open disc: a patch based on an old revision is refused"
+from:
+  - rearchitecture-plan §15.3 (409 if rev is stale)
+given:
+  disc: sample-movie
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [0]}
+  - api: {method: PATCH, path: "/v1/sessions/{sessionId:disc}", body: {rev: 1, choices: {titles: [{index: 1, selected: true}]}}, headers: {X-Bromelia: "1"}, as: stale}
+  - expect:
+      response: {as: stale, status: 409, error: {code: session.stale}}

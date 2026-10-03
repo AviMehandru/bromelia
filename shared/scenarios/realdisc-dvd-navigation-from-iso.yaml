@@ -1,0 +1,10 @@
+title: "The play-all analysis and menu OCR straight from the DVD ISO"
+realDisc: {env: BROMELIA_TEST_DVD_ISO, note: "Runs only when BROMELIA_TEST_DVD_ISO is set (TEST_RUNNER_BROMELIA_TEST_DVD_ISO for xcodebuild); uses the real makemkvcon and mkvmerge, not the scripted tools."}
+from:
+  - macos DVDNavigationTests.readsISO
+  - README.md#testing
+steps:
+  - open: {iso: true, as: disc}
+  - rip: {iso: true, titles: [], mode: infoOnly, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}

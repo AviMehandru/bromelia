@@ -1,0 +1,13 @@
+title: Backup then MKV without keepAfterMkv removes the backup once the MKV files are made
+from:
+  - docs/configuration.md#driveconfig (keepBackupAfterMKV)
+given:
+  drives:
+    - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
+  profile: {mode: {default: backupThenMkv}, backup: {keepAfterMkv: false}}
+steps:
+  - rip: {drive: drive, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      log: {job: job, include: [backup.removed]}
+      files: {under: "library/Sample Movie", include: ["Sample Movie - Rip - Playlist 00001 - BR.mkv"], exclude: ["backup"]}

@@ -1,0 +1,36 @@
+title: Inserting a disc into a drive set to rip on insert starts a countdown, then an automatic job with the drive's profile
+from:
+  - macos DriveDetectionTests.autoRipQueuesOnInsertOnly
+  - windows DriveDetectionTests.AutoRipQueuesOnInsertOnly
+  - linux /state/auto-rip
+  - README.md (automatic ripping on disc insert with a cancellable countdown)
+given:
+  configPatch:
+    profiles: [{id: default, name: Test profile}, {id: archive, name: Archive, mode: {default: backupThenMkv}}]
+    drives:
+      - {id: left, name: Left, match: {driveName: "BD-RE TEST DRIVE 1.00 SERIAL1"}, profile: archive,
+         automation: {ripOnInsert: true, delaySeconds: 60, ejectWhenDone: false, ejectOnFailure: false, waitForMountSeconds: 0, alreadyArchived: skip, desktopNotification: false, playSound: false}}
+  drives:
+    - {id: left, identification: "BD-RE  TEST DRIVE 1.00 SERIAL1", device: /dev/rdisk9, disc: {volume: OLD, type: bluray, titles: [{duration: "0:30:00", source: 1}]}}
+    - {id: right, identification: "DVD OTHER 2.00", device: /dev/rdisk10}
+steps:
+  - expect:
+      note: A disc already in the drive when the engine starts doesn't start a rip.
+      jobs: {count: 0}
+  - remove: {drive: left}
+  - insert: {drive: left, disc: {volume: MOVIE, type: bluray, titles: [{duration: "0:30:00", source: 1}]}}
+  - expect:
+      when: {event: automationCountdown}
+      events: {include: [{type: automationCountdown, data: {secondsLeft: 60}}]}
+      jobs: {count: 0}
+  - advance: 60
+  - expect:
+      jobs: {count: 1, kinds: [videoDisc]}
+      events: {include: [{type: jobChanged, data: {job: {automatic: true, mode: backupThenMkv, title: MOVIE}}}]}
+  - insert: {drive: right, disc: {volume: X, type: dvd, titles: [{duration: "0:30:00", source: 1}]}}
+  - advance: 120
+  - expect:
+      jobs: {count: 1}
+      drives:
+        - {id: left, configId: left, name: Left, ripOnInsert: true}
+        - {id: right, ripOnInsert: false}

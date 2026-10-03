@@ -1,0 +1,15 @@
+title: A failed step marked affectsOutcome gives succeededStepsFailed; the archive stays committed
+from:
+  - rearchitecture-plan §20.3 (a failed post-processing step never turns a good archive into a failed job)
+  - docs/configuration.md#postprocessstep (failJobOnError)
+given:
+  disc: sample-movie-one-title
+  configPatch:
+    steps: [{id: upload, name: Upload, kind: command, affectsOutcome: true, command: {executable: script}}]
+  profile: {steps: [upload]}
+  tools: {script: tools/script-fails.yaml}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeededStepsFailed, unit: {state: committed, status: success}}
+      files: {under: library, include: ["Sample Movie/SHA256SUMS"]}

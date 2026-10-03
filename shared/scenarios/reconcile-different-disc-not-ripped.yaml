@@ -1,0 +1,16 @@
+title: The disc in the drive isn't the one that was opened, so nothing is ripped
+from:
+  - macos SafetyTests.aDifferentDiscIsNotRipped
+  - docs/configuration.md#output-folder-read-errors-and-checks
+  - docs/architecture.md#makemkvcon
+given:
+  disc: {volume: OTHER_DISC, type: bluray, titles: [{duration: "0:00:10", source: 1}]}
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [0]}
+  - swapDisc: sample-movie-one-title
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: disc.changed, params: {why: {code: disc.changed.volume, params: {old: OTHER_DISC, new: SAMPLE_MOVIE}}}}, steps: [probe, reconcile]}
+      calls: {makemkvcon: {exclude: [" mkv "]}}
+      files: {under: library, exactly: []}

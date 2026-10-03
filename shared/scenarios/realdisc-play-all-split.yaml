@@ -1,0 +1,28 @@
+title: "One_Piece_S2_P7_D2.iso: title 11 is split into episodes 138–143 (menu OCR) with checksums; a DVD rule's step runs, a Blu-ray one doesn't"
+realDisc: {env: BROMELIA_TEST_PLAYALL_ISO, note: "Runs only when BROMELIA_TEST_PLAYALL_ISO is set (TEST_RUNNER_BROMELIA_TEST_PLAYALL_ISO for xcodebuild); uses the real makemkvcon and mkvmerge, not the scripted tools."}
+from:
+  - macos IntegrationTests.splitsPlayAllTitleIntoEpisodes
+  - README.md#testing
+given:
+  profile: {titles: {strategy: indices, indexBase: source, indexPattern: "11"}, episodes: {keepPlayAll: false}}
+  configPatch:
+    steps:
+      - {id: dvd, kind: command, command: {executable: /bin/sh, arguments: "-c 'echo \"$BROMELIA_NAME|$BROMELIA_FORMAT|$BROMELIA_FILE_COUNT\" > plugin.txt'"}}
+      - {id: br, kind: command, command: {executable: /bin/sh, arguments: "-c 'touch wrong-plugin.txt'"}}
+    rules:
+      - {id: dvdRule, when: {nameOrLabel: "one piece", formats: [DVD]}, then: {steps: [dvd]}}
+      - {id: brRule, when: {nameOrLabel: "one piece", formats: ["BR*"]}, then: {steps: [br]}}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, files: 7}
+      files:
+        under: "library/One Piece - Season 2 Part 7 Disc 2"
+        include:
+          - "One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv"
+          - "One Piece - Episode 143 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 36-42 - DVD.mkv"
+          - "One Piece - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 43 - DVD.mkv"
+          - "plugin.txt"
+        exclude: ["wrong-plugin.txt"]
+      file: {path: "library/One Piece - Season 2 Part 7 Disc 2/plugin.txt", text: "One Piece|DVD|7\n"}
+      sums: {folder: "library/One Piece - Season 2 Part 7 Disc 2", ok: true}

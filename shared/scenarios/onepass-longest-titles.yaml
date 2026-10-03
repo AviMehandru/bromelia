@@ -1,0 +1,15 @@
+title: The three longest titles are ripped in one makemkvcon run with a minimum length that leaves out the rest
+from:
+  - macos OnePassJobTests.longestTitlesAreRippedInOnePass
+  - docs/architecture.md#makemkvcon (one pass)
+  - README.md (one pass for several titles)
+given:
+  disc: {volume: SAMPLE_MOVIE, type: bluray, titles: [{duration: "0:00:30", source: 1}, {duration: "0:00:05", source: 2}, {duration: "0:00:20", source: 3}, {duration: "0:00:40", source: 4}, {duration: "0:00:10", source: 5}]}
+  profile: {titles: {strategy: longest, longestCount: 3}}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, files: 3}
+      calls: {makemkvcon: {counts: {" mkv ": 1}, include: ["--minlength=11", "mkv iso:{root}/test.iso all "]}}
+      record: {job: job, json: {titles: [{sourceTitleId: 1}, {sourceTitleId: 3}, {sourceTitleId: 4}]}}
+      log: {job: job, include: [rip.onePass]}

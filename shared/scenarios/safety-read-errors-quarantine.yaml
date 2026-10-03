@@ -1,0 +1,30 @@
+title: Read errors during the rip keep the files apart, in quarantine, with a note
+from:
+  - macos SafetyTests.readErrorsKeepTheFilesApart
+  - docs/configuration.md#output-folder-read-errors-and-checks
+  - docs/architecture.md#staging-read-errors-and-checks
+given:
+  disc: sample-movie-one-title
+  tools: {makemkvcon: tools/makemkvcon-read-error.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job:
+        name: job
+        outcome: succeededWithReadErrors
+        error: {code: rip.readErrors, params: {count: 1}}
+        unit: {state: quarantined, status: errors}
+        counts: {readErrors: 1}
+      files:
+        under: library
+        exactly:
+          - "_Quarantine/Sample Movie [READ ERRORS]/READ ERRORS.txt"
+          - "_Quarantine/Sample Movie [READ ERRORS]/SHA256SUMS"
+          - "_Quarantine/Sample Movie [READ ERRORS]/Sample Movie - Rip - Playlist 00001 - BR.mkv"
+          - "_Quarantine/Sample Movie [READ ERRORS]/bromelia-{unit8}.json"
+          - "_Quarantine/Sample Movie [READ ERRORS]/bromelia-{unit8}-log.txt"
+          - "_Quarantine/Sample Movie [READ ERRORS]/makemkv-{unit8}-log.txt"
+      file: {path: "library/_Quarantine/Sample Movie [READ ERRORS]/READ ERRORS.txt", contains: ["NOT a finished archive", "MEDIUM ERROR"]}
+      record: {folder: "library/_Quarantine/Sample Movie [READ ERRORS]", json: {status: errors, titles: [{index: 0, readErrors: 1}]}}
+      manifest: {job: job, json: {status: errors, outcome: succeededWithReadErrors}}
+      sums: {folder: "library/_Quarantine/Sample Movie [READ ERRORS]", ok: true}

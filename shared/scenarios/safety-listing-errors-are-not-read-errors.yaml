@@ -1,0 +1,12 @@
+title: Errors while reading the listing don't mark the rip as damaged
+from:
+  - macos SafetyTests.listingErrorsAreNotReadErrors
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  disc: sample-movie-one-title
+  tools: {makemkvcon: tools/makemkvcon-listing-read-error.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, counts: {readErrors: 0}}
+      files: {under: library, include: ["Sample Movie/SHA256SUMS"]}

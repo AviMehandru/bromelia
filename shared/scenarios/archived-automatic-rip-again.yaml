@@ -1,0 +1,14 @@
+title: With alreadyArchived ripAgain the disc is ripped as usual and the log says it was archived before
+from:
+  - macos ArchiveCheckTests.discsArchivedBefore
+  - docs/configuration.md#archive-check
+given:
+  drives:
+    - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
+  configPatch: {automation: {defaults: {alreadyArchived: ripAgain}}}
+steps:
+  - rip: {drive: drive, as: first}
+  - rip: {drive: drive, automatic: true, as: again}
+  - expect:
+      job: {name: again, outcome: succeeded}
+      log: {job: again, include: [disc.archivedBefore]}

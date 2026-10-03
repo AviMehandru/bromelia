@@ -1,0 +1,17 @@
+title: A library folder without its marker is offline; Bromelia never writes the marker or creates the root on its own
+from:
+  - rearchitecture-plan §22.1 I2
+  - claudeDocs/bromelia-handoff.md backlog 1 (never create the output root itself)
+given:
+  disc: sample-movie-one-title
+  libraries: [{id: lib, path: library, marker: false}]
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, state: blocked, blockedBy: {code: library.offline}}
+      file: {path: library/.bromelia-library, exists: false}
+  - attachLibrary: {path: "{root}/library", as: attach}
+  - advance: 30
+  - expect:
+      job: {name: job, outcome: succeeded}
+      file: {path: library/.bromelia-library, exists: true}

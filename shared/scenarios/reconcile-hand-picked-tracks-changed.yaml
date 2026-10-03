@@ -1,0 +1,15 @@
+title: A title with hand-picked tracks whose track list changed fails the job before ripping
+from:
+  - macos RipCheckTests.matchesTitlesAcrossListings
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  disc: sample-movie-one-title
+  tools: {mkvmerge: tools/mkvmerge-matches-listing.yaml}
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [0], tracks: {"0": [0]}}
+  - swapDisc: {volume: SAMPLE_MOVIE, type: bluray, listing: info-dvd.txt}
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: failed}
+      calls: {makemkvcon: {exclude: [" mkv "]}}

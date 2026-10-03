@@ -1,0 +1,35 @@
+title: Episodes get SxxEyy names, and the next disc of the season is added to the same show and season folders
+from:
+  - macos IntegrationJobTests.episodesAreNamedForMediaServers
+  - linux /integrations/media-server-names
+  - docs/configuration.md#media-server-layout
+  - docs/architecture.md#services (media server layout merges folders)
+given:
+  disc: {volume: SAMPLE_SHOW_S2_D1, type: bluray, titles: [{duration: "0:22:00", source: 1}, {duration: "0:22:30", source: 2}, {duration: "0:21:40", source: 3}]}
+  profile: {naming: {layout: mediaServer}}
+steps:
+  - rip: {iso: true, as: first}
+  - expect:
+      job: {name: first, outcome: succeeded}
+      files:
+        under: "library/TV Shows/Sample Show"
+        include: ["Season 02/Sample Show - S02E01.mkv", "Season 02/Sample Show - S02E02.mkv", "Season 02/Sample Show - S02E03.mkv"]
+  - swapDisc: {volume: SAMPLE_SHOW_S2_D2, type: bluray, titles: [{duration: "0:22:00", source: 1}, {duration: "0:22:30", source: 2}, {duration: "0:21:40", source: 3}]}
+  - open: {iso: true, as: disc2}
+  - choose: {session: disc2, firstEpisode: 4}
+  - rip: {session: disc2, as: second}
+  - expect:
+      job: {name: second, outcome: succeeded}
+      files:
+        under: "library/TV Shows/Sample Show"
+        include:
+          - "Season 02/Sample Show - S02E01.mkv"
+          - "Season 02/Sample Show - S02E02.mkv"
+          - "Season 02/Sample Show - S02E03.mkv"
+          - "Season 02/Sample Show - S02E04.mkv"
+          - "Season 02/Sample Show - S02E05.mkv"
+          - "Season 02/Sample Show - S02E06.mkv"
+          - "bromelia-{unit8:first}.json"
+          - "bromelia-{unit8:second}.json"
+      sums: {folder: "library/TV Shows/Sample Show", ok: true}
+      record: {folder: "library/TV Shows/Sample Show", job: second, json: {files: [{path: "Season 02/Sample Show - S02E04.mkv"}, {path: "Season 02/Sample Show - S02E05.mkv"}, {path: "Season 02/Sample Show - S02E06.mkv"}]}}

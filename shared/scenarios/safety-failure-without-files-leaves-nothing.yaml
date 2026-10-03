@@ -1,0 +1,13 @@
+title: A job that saved nothing leaves no folder
+from:
+  - macos SafetyTests.failureWithoutFilesLeavesNoFolder
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  disc: sample-movie-one-title
+  tools: {makemkvcon: tools/makemkvcon-fails-nothing-written.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: rip.failed}}
+      files: {under: library, exactly: []}
+      db: {archive_units: {count: 0}}

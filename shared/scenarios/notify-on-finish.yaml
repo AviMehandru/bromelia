@@ -1,0 +1,19 @@
+title: Notifications go to every enabled target when a job finishes; onlyProblems targets only hear about problems
+from:
+  - macos IntegrationFeatureTests.notificationReachesAWebhook
+  - docs/configuration.md#notifications
+given:
+  disc: sample-movie-one-title
+  configPatch:
+    notifications:
+      targets:
+        - {id: hook, url: {secret: notifications.hook}}
+        - {id: problems, url: {secret: notifications.problems}, onlyProblems: true}
+  http:
+    - {method: POST, url: "http://127.0.0.1:9/hook", status: 204}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      notifications: {count: 1, sent: [{target: hook, title: {code: notify.title.job}, status: success}]}
+      db: {outbox: {count: 1, rows: [{target_id: hook, status: success}]}}

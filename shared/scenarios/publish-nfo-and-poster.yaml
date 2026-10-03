@@ -1,0 +1,20 @@
+title: A media server unit with an online match gets the movie's .nfo and the poster; an existing .nfo is never replaced, and neither is in SHA256SUMS
+from:
+  - docs/configuration.md#media-server-layout (Kodi / Jellyfin / Emby metadata)
+  - shared/fixtures/nfo
+given:
+  disc: {volume: THE_MATRIX, type: bluray, titles: [{duration: "2:16:00", source: 1}]}
+  profile: {naming: {layout: mediaServer}}
+  configPatch: {metadata: {provider: tmdb, apiKey: {secret: metadata.apiKey}}}
+  http:
+    - {method: GET, url: "https://api.themoviedb.org/3/search/movie?*", status: 200, file: scenario-http/tmdb-search-matrix.json}
+    - {method: GET, url: "https://api.themoviedb.org/3/movie/603?*", status: 200, file: tmdb-movie.json}
+    - {method: GET, url: "https://image.tmdb.org/t/p/original/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg", status: 200, body: jpeg}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      file: {path: "library/Movies/The Matrix (1999)/The Matrix (1999).nfo", text: "<<shared/fixtures/nfo/movie.nfo>>"}
+  - expect:
+      files: {under: "library/Movies/The Matrix (1999)", include: ["poster.jpg", "The Matrix (1999).mkv"]}
+      sums: {folder: "library/Movies/The Matrix (1999)", ok: true, files: ["The Matrix (1999).mkv"]}

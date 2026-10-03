@@ -1,0 +1,19 @@
+title: Cancelling the countdown means no job is created
+from:
+  - macos DriveDetectionTests.autoRipQueuesOnInsertOnly (cancelling a waiting job finishes it without running anything)
+  - README.md (cancellable countdown)
+given:
+  configPatch: {automation: {defaults: {ripOnInsert: true, delaySeconds: 30}}}
+  drives:
+    - {id: drive, identification: "BD-RE TEST 1.00", device: /dev/test0}
+steps:
+  - insert: {drive: drive, disc: sample-movie-one-title}
+  - expect:
+      when: {event: automationCountdown}
+      jobs: {count: 0}
+  - cancelCountdown: {drive: drive}
+  - advance: 60
+  - expect:
+      jobs: {count: 0}
+      events: {include: [{type: automationCountdown, data: {cancelled: true}}]}
+      calls: {makemkvcon: {exclude: [" mkv "]}}

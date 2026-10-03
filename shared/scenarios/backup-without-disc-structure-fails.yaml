@@ -1,0 +1,16 @@
+title: A backup without a disc structure fails the check; it is kept in quarantine with the logs, but counts as nothing produced
+from:
+  - macos ReliabilityTests.folderWithoutADiscIsNotAcceptedAsAnISO
+  - docs/configuration.md#output-folder-read-errors-and-checks
+given:
+  drives:
+    - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
+  profile: {backup: {format: iso}}
+  tools: {makemkvcon: tools/makemkvcon-backup-junk.yaml}
+steps:
+  - rip: {drive: drive, mode: backupDecrypted, as: job}
+  - expect:
+      job: {name: job, outcome: failed, files: 0, error: {code: backup.checkFailed, params: {problem: {code: structure.noDiscFolder}}}}
+      files:
+        under: "library/_Quarantine/Sample Movie [INCOMPLETE]"
+        include: ["INCOMPLETE.txt", "bromelia-{unit8}-log.txt", "makemkv-{unit8}-log.txt"]

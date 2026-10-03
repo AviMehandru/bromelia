@@ -1,0 +1,23 @@
+title: Rules add steps for matching discs only (by name or label, and by format code)
+from:
+  - macos IntegrationTests.splitsPlayAllTitleIntoEpisodes (plugins)
+  - macos NamingTests.pluginMatching
+  - docs/configuration.md#postprocessstep (matchName, matchFormats)
+given:
+  disc: one-piece-s3-p1-d1
+  profile: {titles: {strategy: longest}}
+  configPatch:
+    steps:
+      - {id: dvdPlugin, kind: command, command: {executable: script, arguments: "{root}/dvd.txt"}}
+      - {id: brPlugin, kind: command, command: {executable: script, arguments: "{root}/br.txt"}}
+    rules:
+      - {id: onePieceDvds, when: {nameOrLabel: "one piece", formats: [DVD]}, then: {steps: [dvdPlugin]}}
+      - {id: blurays, when: {nameOrLabel: "one piece", formats: ["BR*"]}, then: {steps: [brPlugin]}}
+  tools: {script: tools/script-records-status.yaml}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      file: {path: dvd.txt, exists: true}
+  - expect:
+      file: {path: br.txt, exists: false}

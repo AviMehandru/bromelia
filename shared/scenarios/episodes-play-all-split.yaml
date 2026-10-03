@@ -1,0 +1,23 @@
+title: A DVD "play all" title is split into episodes where its menus start them, plus the closing clip, and the unsplit title is kept
+from:
+  - README.md (TV episodes from play all titles)
+  - docs/configuration.md#naming-formats-and-episodes
+  - docs/architecture.md#identity-episodes-and-archiving
+  - macos DVDNavigationTests.findsPlayAllEpisodes
+given:
+  disc: one-piece-s2-p7-d2-navigation
+  tools: {mkvmerge: tools/mkvmerge-splits.yaml}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, files: 8}
+      files:
+        under: "library/One Piece - Season 2 Part 7 Disc 2"
+        include:
+          - "One Piece - Episode 01 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv"
+          - "One Piece - Episode 06 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 36-42 - DVD.mkv"
+          - "One Piece - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 43 - DVD.mkv"
+          - "One Piece - Season 2 Part 7 Disc 2 - Rip - Title 11 - DVD.mkv"
+      log: {job: job, include: [episodes.plan, episodes.range, episodes.split]}
+      calls: {mkvmerge: {include: ["--split chapters:8,15,22,29,36,43"]}}
+      record: {folder: "library/One Piece - Season 2 Part 7 Disc 2", json: {kind: tv}}

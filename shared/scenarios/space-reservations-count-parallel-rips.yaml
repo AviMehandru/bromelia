@@ -1,0 +1,19 @@
+title: Two rips on one volume reserve their space, so the second doesn't count on room the first will use
+from:
+  - rearchitecture-plan §21 (space reservations)
+  - README.md (a job that wouldn't fit stops before writing)
+given:
+  freeBytes: 30000000000
+  drives:
+    - {id: left, identification: "BD-RE LEFT 1.00", device: /dev/left, disc: {volume: BIG_ONE, type: bluray, titles: [{duration: "2:00:00", source: 1, size: 20000000000}]}}
+    - {id: right, identification: "BD-RE RIGHT 1.00", device: /dev/right, disc: {volume: BIG_TWO, type: bluray, titles: [{duration: "2:00:00", source: 1, size: 20000000000}]}}
+  tools: {makemkvcon: tools/makemkvcon-stalls.yaml}
+steps:
+  - rip: {drive: left, as: first}
+  - expect:
+      when: {job: first, step: acquire}
+      job: {name: first, state: running}
+  - rip: {drive: right, as: second}
+  - expect:
+      when: {job: second, state: finished}
+      job: {name: second, outcome: failed, error: {code: space.insufficient}}

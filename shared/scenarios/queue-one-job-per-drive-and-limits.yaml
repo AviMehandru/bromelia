@@ -1,0 +1,23 @@
+title: Drives rip in parallel, one job per drive; limits.acquisitions caps rips across drives; the queue can be reordered and started now
+from:
+  - README.md (parallel rips, one job per drive at a time, optional global limit, queue reorder, cancel, retry, start now)
+  - docs/configuration.md#top-level (maxConcurrentJobs)
+  - rearchitecture-plan §21
+given:
+  configPatch: {limits: {acquisitions: 1}}
+  drives:
+    - {id: a, identification: "BD-RE A 1.00", device: /dev/a, disc: sample-movie-one-title}
+    - {id: b, identification: "BD-RE B 1.00", device: /dev/b, disc: sample-movie-one-title}
+  tools: {makemkvcon: tools/makemkvcon-stalls.yaml}
+steps:
+  - rip: {drive: a, as: first}
+  - rip: {drive: b, as: second}
+  - rip: {drive: a, as: third}
+  - expect:
+      when: {job: first, step: acquire}
+      job: {name: second, state: waitingForResources}
+  - move: {job: third, by: -1}
+  - cancel: first
+  - expect:
+      when: {job: second, step: acquire}
+      job: {name: third, state: waitingForResources}

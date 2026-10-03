@@ -1,0 +1,16 @@
+title: With autoUpdateBetaKey, an expired key gets MakeMKV's current beta key from the forum, registered with makemkvcon reg
+from:
+  - docs/configuration.md (autoUpdateBetaKey; MakeMKV messages shown outside the log)
+  - docker.md (registration)
+  - macos ParityTests.readsTheBetaKeyFromTheForumPage
+given:
+  disc: sample-movie-one-title
+  configPatch: {makemkv: {autoUpdateBetaKey: true}}
+  tools: {makemkvcon: tools/makemkvcon-key-expired.yaml}
+  http:
+    - {method: GET, url: "https://forum.makemkv.com/forum/viewtopic.php?t=1053", status: 200, file: domain/beta-key-page.html}
+steps:
+  - rip: {iso: true, as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: makemkv.keyExpired}}
+      calls: {makemkvcon: {include: ["reg T-"]}}
