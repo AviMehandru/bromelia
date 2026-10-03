@@ -68,7 +68,17 @@ Unless `given` says otherwise:
   `cyanrip`, `abcde`, `apprise`.
 - **Network.** HTTP requests are answered from `given.http` (`{method, url}` → recorded response file in
   `shared/fixtures/lookup/` or an inline body); anything else fails with `http.failed`.
-- **Catalogue.** Empty, unless `given.units` adds archive units (rows plus their folders and records).
+- **Catalogue.** Empty, unless `given.units` adds archive units. Each one is a folder (relative to the root) with
+  its `files` (each holding `contents of <name>, long enough to hash`), a `SHA256SUMS` listing them, a record
+  (`record: 2` writes today's `bromelia.json`, `3` or nothing a `bromelia-<unit8>.json`) carrying `name`, `kind`,
+  `label`, `season`, `part`, `volume`, `disc`, `episodes`, `status` and `archivedAt`, and, unless
+  `inCatalogue: false`, the database rows a commit would have made. `fingerprintOf` gives it the fingerprint of a
+  disc (a name in `discs/` or an inline disc).
+- **Libraries.** `given.libraries` replaces the default library: `{id, path, marker}` (`marker: false` = a folder
+  without `.bromelia-library`, so the library is offline).
+- **Free space.** `given.freeBytes` is what the fake FileSystem reports for every volume (default: 1 TB).
+- **Platform.** `given.platform` makes the platform-specific fakes behave like that OS (`linux`: logind is
+  unreachable unless the test root provides a bus); default: the platform running the scenario.
 
 ### Steps
 
@@ -106,8 +116,12 @@ them; a `kill` at a point that is never reached fails the scenario.
 Every key is optional; all given keys must hold. Lists of files are matched after sorting. `json` subsets match
 recursively: objects by the keys given, lists element by element (same length).
 
-**Placeholders** in expected paths and texts: `{root}` the scenario root; `{unit8}` and `{jobId}` the unit short id
-and job id of the job named in the same `expect` (or of the only job), `{unit8:<job>}` / `{jobId:<job>}` of another.
+**Placeholders** in steps, expected paths and texts: `{root}` the scenario root; `{unit8}` and `{jobId}` the unit
+short id and job id of the job named in the same `expect` (or of the only job); `{unit8:<name>}` / `{jobId:<name>}`
+of another job, where the name is a job's `as` or an `api` step's `as` whose response was a Job;
+`{driveId:<drive>}` the DriveId of a fake drive; `{sessionId:<session>}` an open session's id.
+
+`file.text` may be `<<shared/fixtures/…>>`: the file must equal that fixture byte for byte.
 
 | Key | Checks |
 | --- | --- |
@@ -131,6 +145,13 @@ and job id of the job named in the same `expect` (or of the only job), `{unit8:<
 
 `when` on an `expect` step runs until the condition holds instead of until everything settles:
 `when: {job: j, step: acquire}` (the step started), `{event: automationCountdown}`, `{job: j, state: running}`.
+
+### Real-disc scenarios
+
+`realDisc: {env}` marks a scenario that needs a real disc image (today's `BROMELIA_TEST_*ISO` tests). It runs only
+when that variable is set, with the real makemkvcon, mkvmerge, ffmpeg and tesseract instead of scripted tools;
+`iso: true` is the image, and `drive: realdisc` is the image attached as a device (macOS `hdiutil attach -nomount`,
+Linux a loop device, Windows the file itself). Their expectations are what today's integration tests check.
 
 ## Discs (`discs/*.yaml`)
 

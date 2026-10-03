@@ -105,6 +105,19 @@
       "note": "Rip with the drive's profile and title rules; with options.titles, those titles of the open session as MKV files."
     },
     {
+      "operation": "cancelCountdown",
+      "method": "POST",
+      "path": "/v1/drives/{driveId}/cancel-countdown",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "drive.notFound"
+      ],
+      "note": "Stops an automatic rip's countdown. Not in plan §13.1's list: AutomationService.cancelCountdown (§11.1) needs a route, and today's apps offer it (cancelling a waiting automatic job)."
+    },
+    {
       "operation": "openSession",
       "method": "POST",
       "path": "/v1/sessions",
