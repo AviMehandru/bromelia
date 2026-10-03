@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <Compile Include="..\Bromelia.Foundation.Tests\Fixtures.cs" Link="Fixtures.cs" />
+    <Compile Include="..\Bromelia.Foundation.Tests\English.cs" Link="English.cs" />
   </ItemGroup>
 
   <ItemGroup>

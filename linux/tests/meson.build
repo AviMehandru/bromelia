@@ -5,7 +5,7 @@ test_core = executable('test-core', 'test-core.c', dependencies: bromelia_core_d
 test('core', test_core, env: test_env, timeout: 600)
 
 # The rebuild's layers: one test binary per layer, against shared/fixtures.
-bro_test_support = static_library('bro-test-support', 'bro-test-fixtures.c', dependencies: bro_foundation_dep)
+bro_test_support = static_library('bro-test-support', 'bro-test-fixtures.c', 'bro-test-english.c', dependencies: bro_foundation_dep)
 bro_test_support_dep = declare_dependency(link_with: bro_test_support, include_directories: include_directories('.'),
   dependencies: bro_foundation_dep)
 

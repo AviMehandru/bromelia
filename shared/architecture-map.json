@@ -137,6 +137,10 @@
       {
         "symbol": "bro_*_from_wire",
         "why": "An enum case from its wire form (Swift: init(rawValue:); C#: EnumWire.Parse)."
+      },
+      {
+        "symbol": "bro_process_exit_status",
+        "why": "A ProcessExit with only an exit status (Swift and C# use default arguments)."
       }
     ]
   },
@@ -3142,6 +3146,51 @@
             "name": "BroOutcomePolicy",
             "file": "linux/src/domain/outcome/bro-outcome-policy.h"
           }
+        },
+        {
+          "name": "ProcessExit",
+          "kind": "struct",
+          "fields": [
+            "status",
+            "signal",
+            "stalled",
+            "abandoned",
+            "cancelled"
+          ],
+          "swift": {
+            "name": "ProcessExit",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Outcome/ProcessExit.swift"
+          },
+          "cs": {
+            "name": "ProcessExit",
+            "file": "windows/src/Bromelia.Domain/Outcome/ProcessExit.cs"
+          },
+          "c": {
+            "name": "BroProcessExit",
+            "file": "linux/src/domain/outcome/bro-process-exit.h"
+          },
+          "doc": "How a process ended: exit status, signal, the silence that stopped it (stalled), abandoned after KILL, cancelled. A Domain type because RunOutcome.classify takes it; the RunningProcess port returns it."
+        },
+        {
+          "name": "Decided",
+          "kind": "struct",
+          "doc": "A job's outcome and the error that explains it.",
+          "fields": [
+            "outcome",
+            "error"
+          ],
+          "swift": {
+            "name": "Decided",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Outcome/Decided.swift"
+          },
+          "cs": {
+            "name": "Decided",
+            "file": "windows/src/Bromelia.Domain/Outcome/Decided.cs"
+          },
+          "c": {
+            "name": "BroDecided",
+            "file": "linux/src/domain/outcome/bro-decided.h"
+          }
         }
       ],
       "functions": [
@@ -4879,6 +4928,55 @@
               "BRO_RESUMABILITY_NOT_RESUMABLE"
             ]
           }
+        },
+        {
+          "name": "StatusWord",
+          "kind": "enum",
+          "doc": "The status given to user scripts (BROMELIA_STATUS), notifications and the manifest.",
+          "cases": [
+            "success",
+            "errors",
+            "failed",
+            "cancelled",
+            "skipped",
+            "interrupted"
+          ],
+          "swift": {
+            "name": "StatusWord",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/StatusWord.swift",
+            "cases": [
+              ".success",
+              ".errors",
+              ".failed",
+              ".cancelled",
+              ".skipped",
+              ".interrupted"
+            ]
+          },
+          "cs": {
+            "name": "StatusWord",
+            "file": "windows/src/Bromelia.Domain/Jobs/StatusWord.cs",
+            "cases": [
+              "Success",
+              "Errors",
+              "Failed",
+              "Cancelled",
+              "Skipped",
+              "Interrupted"
+            ]
+          },
+          "c": {
+            "name": "BroStatusWord",
+            "file": "linux/src/domain/jobs/bro-status-word.h",
+            "cases": [
+              "BRO_STATUS_WORD_SUCCESS",
+              "BRO_STATUS_WORD_ERRORS",
+              "BRO_STATUS_WORD_FAILED",
+              "BRO_STATUS_WORD_CANCELLED",
+              "BRO_STATUS_WORD_SKIPPED",
+              "BRO_STATUS_WORD_INTERRUPTED"
+            ]
+          }
         }
       ],
       "functions": []
@@ -5152,29 +5250,6 @@
           "c": {
             "name": "BroOutputLine",
             "file": "linux/src/ports/bro-output-line.h"
-          }
-        },
-        {
-          "name": "ProcessExit",
-          "kind": "struct",
-          "fields": [
-            "status",
-            "signal",
-            "stalled",
-            "abandoned",
-            "cancelled"
-          ],
-          "swift": {
-            "name": "ProcessExit",
-            "file": "macos/BromeliaKit/Sources/BroPorts/ProcessExit.swift"
-          },
-          "cs": {
-            "name": "ProcessExit",
-            "file": "windows/src/Bromelia.Ports/ProcessExit.cs"
-          },
-          "c": {
-            "name": "BroProcessExit",
-            "file": "linux/src/ports/bro-process-exit.h"
           }
         },
         {

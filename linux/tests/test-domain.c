@@ -10,6 +10,9 @@
 #include "bro-step-state.h"
 
 #include "bro-disc-flags.h"
+#include "bro-job-outcome.h"
+#include "bro-run-outcome.h"
+#include "bro-test-english.h"
 #include "bro-duration.h"
 #include "bro-listing-match.h"
 #include "bro-one-pass.h"
@@ -785,6 +788,124 @@ test_listing_match (void)
   g_assert_cmpint (t->code, ==, BRO_MSG_DISC_CHANGED_TITLES);
 }
 
+/* ---- outcome ----------------------------------------------------------------------------------------- */
+
+static BroJsonValue *
+error_json (const BroBroError *e)
+{
+  BroJsonValue *o = bro_json_value_new_object ();
+  put (o, "code", bro_json_value_new_string (e->code));
+  if (bro_json_value_length (e->params) > 0)
+    put (o, "params", bro_json_value_ref (e->params));
+  if (e->cause)
+    put (o, "cause", error_json (e->cause));
+  return o;
+}
+
+static BroStepResult *
+step_of (BroJsonValue *s)
+{
+  BroStepKind kind = 0;
+  BroStepState state = 0;
+  bro_step_kind_from_wire (JS (s, "kind"), &kind);
+  bro_step_state_from_wire (JS (s, "state"), &state);
+  BroStepResult *r = bro_step_result_new (kind, state);
+  BroJsonValue *e = J (s, "error");
+  if (e)
+    r->error = bro_bro_error_new (JS (e, "code"), J (e, "params") ? bro_json_value_ref (J (e, "params")) : NULL, NULL);
+  r->read_errors = bro_json_value_get_integer (J (s, "readErrors"), 0);
+  r->quarantined = bro_json_value_get_bool (J (s, "quarantined"), FALSE);
+  const char *notice = JS (s, "notice");
+  if (notice) {
+    BroMakemkvNoticeKind k = strcmp (notice, "keyExpired") == 0 ? BRO_MAKEMKV_NOTICE_KEY_EXPIRED
+                             : strcmp (notice, "evaluationNotStarted") == 0 ? BRO_MAKEMKV_NOTICE_EVALUATION_NOT_STARTED
+                             : strcmp (notice, "versionTooOld") == 0 ? BRO_MAKEMKV_NOTICE_VERSION_TOO_OLD
+                                                                     : BRO_MAKEMKV_NOTICE_LIBRE_DRIVE_REQUIRED;
+    r->notice = bro_makemkv_notice_new (k, NULL);
+  }
+  BroJsonValue *skip = J (s, "skip");
+  if (skip) {
+    BroMessageCode code = 0;
+    bro_message_code_parse (JS (skip, "code"), &code);
+    r->skip = bro_bro_message_new (code, J (skip, "params") ? bro_json_value_ref (J (skip, "params")) : NULL, BRO_SEVERITY_INFO);
+  }
+  r->affects_outcome = bro_json_value_get_bool (J (s, "affectsOutcome"), TRUE);
+  return r;
+}
+
+static BroRunAccumulator *
+accumulate_data (const char *fixture)
+{
+  BroRunAccumulator *acc = bro_run_accumulator_new (TRUE, -1, NULL);
+  g_autofree char *text = bro_test_fixture_text (fixture, NULL);
+  g_auto (GStrv) lines = g_strsplit (text, "\n", -1);
+  for (int i = 0; lines[i]; i++) {
+    g_autoptr (BroRobotEvent) e = bro_robot_parse_line (lines[i]);
+    if (e)
+      bro_run_accumulator_feed (acc, e);
+  }
+  return acc;
+}
+
+static gboolean
+outcome_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (J (given, "fixture")) {
+    g_autoptr (BroRunAccumulator) acc = accumulate_data (JS (given, "fixture"));
+    BroProcessExit exit = bro_process_exit_status (bro_json_value_get_integer (J (given, "exitCode"), 0));
+    g_autoptr (BroRunOutcome) run = bro_run_outcome_classify (acc, &exit, bro_json_value_get_integer (J (given, "producedFiles"), 0));
+    bro_test_same_string (failures, id, "status word", JS (expect, "statusWord"), bro_status_word_to_wire (run->status));
+    g_autoptr (BroJsonValue) failed = bro_json_value_new_bool (run->status == BRO_STATUS_WORD_FAILED);
+    g_autoptr (BroJsonValue) read_errors = bro_json_value_new_bool (run->status == BRO_STATUS_WORD_ERRORS);
+    bro_test_same_json (failures, id, "failed", J (expect, "failed"), failed);
+    bro_test_same_json (failures, id, "read errors", J (expect, "readErrors"), read_errors);
+    g_autoptr (BroJsonValue) error = run->error ? bro_bro_message_to_json (run->error) : NULL;
+    g_autofree char *text = error ? bro_test_english (error) : NULL;
+    const char *part = JS (expect, "errorContains");
+    if (part ? !text || !strstr (text, part) : text != NULL)
+      bro_test_fail (failures, id, "error \"%s\" should contain \"%s\"", text ? text : "none", part ? part : "(no error)");
+    return TRUE;
+  }
+  if (J (given, "steps")) {
+    g_autoptr (GPtrArray) steps = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_result_free);
+    BroJsonValue *list = J (given, "steps");
+    for (guint i = 0; i < bro_json_value_length (list); i++)
+      g_ptr_array_add (steps, step_of (bro_json_value_at (list, i)));
+    BroOutcomePolicy policy = { 0 };
+    g_autoptr (BroDecided) d = bro_job_outcome_decide (steps, bro_json_value_get_bool (J (given, "cancelled"), FALSE), &policy);
+    bro_test_same_string (failures, id, "outcome", JS (expect, "outcome"), bro_outcome_to_wire (d->outcome));
+    if (J (expect, "error")) {
+      g_autoptr (BroJsonValue) actual = d->error ? error_json (d->error) : bro_json_value_new_null ();
+      bro_test_same_json (failures, id, "error", J (expect, "error"), actual);
+    } else if (d->outcome == BRO_OUTCOME_SUCCEEDED && d->error) {
+      bro_test_fail (failures, id, "a success with an error");
+    }
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void
+test_outcome_cases (void)
+{
+  bro_test_run_cases ("domain/outcome.cases.json", outcome_case);
+}
+
+static void
+test_stalled_and_cancelled_runs (void)
+{
+  g_autoptr (BroRunAccumulator) acc = bro_run_accumulator_new (TRUE, -1, NULL);
+  BroProcessExit stalled = { -1, 9, 600, TRUE, FALSE };
+  g_autoptr (BroRunOutcome) run = bro_run_outcome_classify (acc, &stalled, 0);
+  g_assert_cmpint (run->status, ==, BRO_STATUS_WORD_FAILED);
+  g_autoptr (BroJsonValue) error = bro_bro_message_to_json (run->error);
+  g_autofree char *text = bro_test_english (error);
+  g_assert_cmpstr (text, ==, "makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry.");
+  BroProcessExit cancelled = { 143, 15, -1, FALSE, TRUE };
+  g_autoptr (BroRunOutcome) c = bro_run_outcome_classify (acc, &cancelled, 1);
+  g_assert_cmpint (c->status, ==, BRO_STATUS_WORD_CANCELLED);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -802,5 +923,7 @@ main (int argc, char **argv)
   g_test_add_func ("/titles/rules", test_title_rules_cases);
   g_test_add_func ("/titles/one-pass-and-space", test_one_pass_and_space_cases);
   g_test_add_func ("/titles/listing-match", test_listing_match);
+  g_test_add_func ("/outcome/cases", test_outcome_cases);
+  g_test_add_func ("/outcome/stalled-and-cancelled", test_stalled_and_cancelled_runs);
   return g_test_run ();
 }
