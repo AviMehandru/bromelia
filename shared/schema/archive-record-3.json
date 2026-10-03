@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.bromelia.invalid/archive-record-3.json",
+  "title": "Bromelia archive record, version 3",
+  "description": "bromelia-<unit8>.json in a unit's folder (plan §22.3, written by SealStep with ArchiveRecordCodec.encodeV3). It describes one unit for people, for rescans and for the previous-disc search, without Bromelia's database. Fields whose meaning is unchanged keep their version 2 path (status, name, kind, disc.*, episodes[].episode, files[]), so readers of both versions share code. Messages are stored as codes with parameters and also as English text, because a record outlives the message catalogue it was written with. Writers emit keys in this order, two-space indented, with a final newline; readers ignore unknown keys.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "unit", "status", "name", "kind", "disc", "acquisition", "job", "titles", "episodes", "files"],
+  "properties": {
+    "format": { "const": "bromelia-archive" },
+    "version": { "const": 3 },
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "short"],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Uuid" },
+        "short": { "$ref": "common.json#/$defs/ShortId" },
+        "library": { "description": "Library id when the unit was committed.", "$ref": "common.json#/$defs/EntryId" }
+      }
+    },
+    "status": {
+      "description": "success: a finished archive. errors: every title was saved but MakeMKV reported read errors (the unit is in _Quarantine).",
+      "enum": ["success", "errors"]
+    },
+    "name": { "type": "string" },
+    "kind": { "$ref": "common.json#/$defs/MediaKind" },
+    "work": {
+      "description": "The online match, when there was one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "title"],
+      "properties": {
+        "provider": { "enum": ["tmdb", "omdb"] },
+        "title": { "type": "string" },
+        "year": { "type": ["integer", "null"] },
+        "tmdbId": { "type": ["integer", "null"] },
+        "imdbId": { "type": ["string", "null"] },
+        "chosen": { "description": "An id chosen for the disc, not a search result.", "type": "boolean" }
+      }
+    },
+    "disc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "volumeName", "type", "format", "formatCode", "encrypted"],
+      "properties": {
+        "label": { "type": "string" },
+        "volumeName": { "type": "string" },
+        "type": { "description": "MakeMKV's disc type text (CINFO 1), e.g. 'DVD disc'.", "type": "string" },
+        "format": { "$ref": "common.json#/$defs/DiscFormat" },
+        "formatCode": { "$ref": "common.json#/$defs/FormatCode" },
+        "encrypted": { "type": "boolean" },
+        "season": { "type": ["integer", "null"] },
+        "part": { "type": ["integer", "null"] },
+        "volume": { "type": ["integer", "null"] },
+        "disc": { "type": ["integer", "null"] },
+        "set": { "description": "Place in the set, e.g. 'Season 2 Part 7 Disc 2'.", "type": "string" },
+        "fingerprint": { "oneOf": [{ "$ref": "common.json#/$defs/Fingerprint" }, { "type": "null" }] },
+        "libreDrive": { "description": "'v06.3 id=…' when the drive read the disc in LibreDrive mode.", "type": ["string", "null"] }
+      }
+    },
+    "physical": {
+      "description": "Backlog 9: where the disc is kept.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "barcode": { "description": "UPC / EAN.", "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] }
+      }
+    },
+    "acquisition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "rip", "source", "drive", "makemkv", "bromelia"],
+      "properties": {
+        "mode": { "$ref": "common.json#/$defs/RipMode" },
+        "rip": { "enum": ["Rip", "Backup"] },
+        "source": { "description": "makemkvcon source: dev:…, iso:…, file:…, or the device for audio and data discs.", "type": "string" },
+        "drive": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "common.json#/$defs/DriveId" },
+            "name": { "type": "string" },
+            "model": { "type": "string" }
+          }
+        },
+        "profile": { "$ref": "common.json#/$defs/EntryId" },
+        "rules": { "description": "Rules that matched, in order.", "type": "array", "items": { "$ref": "common.json#/$defs/EntryId" } },
+        "makemkv": { "description": "MakeMKV's version line (message 1005), '' when makemkvcon wasn't used.", "type": "string" },
+        "bromelia": { "type": "string" },
+        "tools": { "description": "Versions of the other tools used: mkvmerge, cyanrip, …", "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "startedAt", "finishedAt"],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Uuid" },
+        "startedAt": { "$ref": "common.json#/$defs/Instant" },
+        "finishedAt": { "$ref": "common.json#/$defs/Instant" }
+      }
+    },
+    "titles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "sourceTitleId", "sourceFile", "duration", "durationSeconds", "chapters", "sizeBytes", "segmentMap"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "sourceTitleId": { "type": ["integer", "null"] },
+          "sourceFile": { "type": "string" },
+          "duration": { "description": "h:mm:ss as MakeMKV prints it.", "type": "string" },
+          "durationSeconds": { "type": "integer", "minimum": 0 },
+          "chapters": { "type": "integer", "minimum": 0 },
+          "sizeBytes": { "$ref": "common.json#/$defs/Bytes" },
+          "segmentMap": { "type": "string" },
+          "readErrors": { "description": "Read errors MakeMKV reported for this title in the attempt that was kept.", "type": "integer", "minimum": 0, "default": 0 }
+        }
+      }
+    },
+    "episodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "episode", "sourceTitleId", "firstChapter", "lastChapter"],
+        "properties": {
+          "file": { "$ref": "common.json#/$defs/RelativePath" },
+          "episode": { "type": ["integer", "null"] },
+          "sourceTitleId": { "type": "integer" },
+          "firstChapter": { "type": "integer", "minimum": 1 },
+          "lastChapter": { "type": "integer", "minimum": 1 },
+          "title": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "files": {
+      "description": "Every file of the unit that SHA256SUMS lists, paths relative to the record's folder.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size", "sha256"],
+        "properties": {
+          "path": { "$ref": "common.json#/$defs/RelativePath" },
+          "size": { "$ref": "common.json#/$defs/Bytes" },
+          "sha256": { "$ref": "common.json#/$defs/Sha256" },
+          "role": {
+            "description": "title: an MKV of a title; episode: one of a split title; closingClip: what follows the last episode; playAll: the unsplit title kept; backup: a file of a backup; image: a data-disc ISO; audio: an audio CD's files; discInfo: disc-info.json.",
+            "enum": ["title", "episode", "closingClip", "playAll", "backup", "image", "audio", "discInfo"]
+          },
+          "title": { "description": "Title index of the file.", "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "attempts": {
+      "description": "Every acquisition of this disc that went into the unit (backlog 5): the first rip and each retry of damaged titles.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["job", "startedAt", "titles"],
+        "properties": {
+          "job": { "$ref": "common.json#/$defs/Uuid" },
+          "drive": { "$ref": "common.json#/$defs/DriveId" },
+          "startedAt": { "$ref": "common.json#/$defs/Instant" },
+          "titles": { "description": "Title index → read errors in that attempt.", "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+          "kept": { "description": "Title indices whose files from this attempt were kept.", "type": "array", "items": { "type": "integer" } }
+        }
+      }
+    },
+    "parity": {
+      "description": "PAR2 recovery data (backlog 3), in .bromelia-parity/.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["percent", "files"],
+      "properties": {
+        "percent": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "files": { "type": "array", "items": { "$ref": "common.json#/$defs/RelativePath" } }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "warnings": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "problems": {
+      "description": "Errors and read errors of the job (v2 errorMessages and readErrors). MakeMKV's own messages use the code makemkv.message with its code and text.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "text"],
+        "properties": {
+          "code": { "$ref": "common.json#/$defs/MessageCode" },
+          "params": { "$ref": "common.json#/$defs/Params" },
+          "text": { "type": "string" },
+          "readError": { "description": "Reported while reading the disc for the rip or backup.", "type": "boolean" }
+        }
+      }
+    },
+    "logs": {
+      "description": "Log files copied into the folder: bromelia-<unit8>-log.txt, makemkv-<unit8>-log.txt, makemkv-<unit8>-debug-log.txt.",
+      "type": "array",
+      "items": { "$ref": "common.json#/$defs/RelativePath" }
+    }
+  }
+}

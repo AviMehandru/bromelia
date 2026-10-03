@@ -1,0 +1,47 @@
+{
+  "format": "bromelia-archive",
+  "version": 2,
+  "status": "success",
+  "name": "Sample Movie",
+  "kind": "movie",
+  "disc": {
+    "label": "SAMPLE_MOVIE",
+    "volumeName": "SAMPLE_MOVIE",
+    "type": "Blu-ray disc",
+    "format": "bluray",
+    "formatCode": "BR",
+    "encrypted": false,
+    "fingerprint": "v1:1111111111111111aaaaaaaaaaaaaaaa"
+  },
+  "rip": "Rip",
+  "mode": "mkv",
+  "source": "iso:/nonexistent/test.iso",
+  "driveName": "Test drive",
+  "makemkv": "MakeMKV v1.18.1 darwin(arm64-release)",
+  "jobId": "6E2B8F0A-1C3D-4E5F-8A9B-0C1D2E3F4A5B",
+  "startedAt": "2024-05-01T10:00:00Z",
+  "finishedAt": "2024-05-01T10:00:05Z",
+  "titles": [
+    {
+      "index": 0,
+      "sourceTitleId": 1,
+      "sourceFile": "00001.mpls",
+      "duration": "0:00:10",
+      "chapters": 0,
+      "sizeBytes": 0,
+      "segmentMap": "1"
+    }
+  ],
+  "episodes": [],
+  "files": [
+    {
+      "path": "Sample Movie - Rip - Playlist 00001 - BR.mkv",
+      "size": 10,
+      "sha256": "11627bf56a07cd8553b8d5bf43efdb575578b0af3f7a162d6943f8cc64b4d2cf"
+    }
+  ],
+  "warnings": 0,
+  "errors": 0,
+  "errorMessages": [],
+  "readErrors": []
+}

@@ -1,0 +1,170 @@
+{
+  "format": "bromelia-archive",
+  "version": 3,
+  "unit": {
+    "id": "3f2a9c10-5b7d-4e21-9a0b-7c6d5e4f3a21",
+    "short": "3f2a9c10",
+    "library": "library"
+  },
+  "status": "success",
+  "name": "One Piece",
+  "kind": "tv",
+  "disc": {
+    "label": "ONE_PIECE_S2_P7_D2",
+    "volumeName": "ONE_PIECE_S2_P7_D2",
+    "type": "DVD disc",
+    "format": "dvd",
+    "formatCode": "DVD",
+    "encrypted": false,
+    "season": 2,
+    "part": 7,
+    "volume": null,
+    "disc": 2,
+    "set": "Season 2 Part 7 Disc 2",
+    "fingerprint": "v1:975fb16e865898de86ce51c559e479fc",
+    "libreDrive": null
+  },
+  "acquisition": {
+    "mode": "mkv",
+    "rip": "Rip",
+    "source": "iso:/Rips/One_Piece_S2_P7_D2.iso",
+    "drive": {},
+    "profile": "default",
+    "rules": [
+      "rule-one-piece"
+    ],
+    "makemkv": "MakeMKV v2.0.0 darwin(arm64-release)",
+    "bromelia": "3.0.0",
+    "tools": {
+      "mkvmerge": "mkvmerge v88.0"
+    }
+  },
+  "job": {
+    "id": "9d1e2f30-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+    "startedAt": "2026-10-02T20:00:00.000Z",
+    "finishedAt": "2026-10-02T20:41:12.250Z"
+  },
+  "titles": [
+    {
+      "index": 0,
+      "sourceTitleId": 11,
+      "sourceFile": "",
+      "duration": "2:21:51",
+      "durationSeconds": 8511,
+      "chapters": 43,
+      "sizeBytes": 7900000000,
+      "segmentMap": "1-7,8-14,15-21,22-28,29-35,36-42,43",
+      "readErrors": 0
+    }
+  ],
+  "episodes": [
+    {
+      "file": "One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv",
+      "episode": 138,
+      "sourceTitleId": 11,
+      "firstChapter": 1,
+      "lastChapter": 7,
+      "title": null
+    },
+    {
+      "file": "One Piece - Episode 139 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 8-14 - DVD.mkv",
+      "episode": 139,
+      "sourceTitleId": 11,
+      "firstChapter": 8,
+      "lastChapter": 14,
+      "title": null
+    },
+    {
+      "file": "One Piece - Episode 140 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 15-21 - DVD.mkv",
+      "episode": 140,
+      "sourceTitleId": 11,
+      "firstChapter": 15,
+      "lastChapter": 21,
+      "title": null
+    },
+    {
+      "file": "One Piece - Episode 141 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 22-28 - DVD.mkv",
+      "episode": 141,
+      "sourceTitleId": 11,
+      "firstChapter": 22,
+      "lastChapter": 28,
+      "title": null
+    },
+    {
+      "file": "One Piece - Episode 142 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 29-35 - DVD.mkv",
+      "episode": 142,
+      "sourceTitleId": 11,
+      "firstChapter": 29,
+      "lastChapter": 35,
+      "title": null
+    },
+    {
+      "file": "One Piece - Episode 143 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 36-42 - DVD.mkv",
+      "episode": 143,
+      "sourceTitleId": 11,
+      "firstChapter": 36,
+      "lastChapter": 42,
+      "title": null
+    }
+  ],
+  "files": [
+    {
+      "path": "One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv",
+      "size": 1300000000,
+      "sha256": "03236700acbc700f94f9ee5462cf4a1e973a02d22ab0ded87430233233dcf277",
+      "role": "episode",
+      "title": 0
+    },
+    {
+      "path": "One Piece - Episode 139 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 8-14 - DVD.mkv",
+      "size": 1300000001,
+      "sha256": "4a01cc174a66c4add3aada68619f2da5d6d4329a55987421fb39068876da1265",
+      "role": "episode",
+      "title": 0
+    },
+    {
+      "path": "One Piece - Episode 140 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 15-21 - DVD.mkv",
+      "size": 1300000002,
+      "sha256": "3c97eda891b8a20ae60dbcb7255218e3afb344dddfe5e14e883a896319c523c2",
+      "role": "episode",
+      "title": 0
+    },
+    {
+      "path": "One Piece - Episode 141 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 22-28 - DVD.mkv",
+      "size": 1300000003,
+      "sha256": "359d3a4c0440a3517f224dbbc1e69cb7e6ca369f55bd1a79963cf805ce21b252",
+      "role": "episode",
+      "title": 0
+    },
+    {
+      "path": "One Piece - Episode 142 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 29-35 - DVD.mkv",
+      "size": 1300000004,
+      "sha256": "575d40b7f72a8456523c3ac913d848c184ea8690978e1a045f87c6ca3b44dfb6",
+      "role": "episode",
+      "title": 0
+    },
+    {
+      "path": "One Piece - Episode 143 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 36-42 - DVD.mkv",
+      "size": 1300000005,
+      "sha256": "42fc10c93e82773f79c27858be580b179164c43650d89170b7a1e0b93ee75f5d",
+      "role": "episode",
+      "title": 0
+    },
+    {
+      "path": "One Piece - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 43 - DVD.mkv",
+      "size": 20000000,
+      "sha256": "dfa871fecdf2ea3483209e4c2b2a708ed00569985f3b456e483246160cb75ba7",
+      "role": "closingClip",
+      "title": 0
+    }
+  ],
+  "counts": {
+    "warnings": 1,
+    "errors": 0
+  },
+  "problems": [],
+  "logs": [
+    "bromelia-3f2a9c10-log.txt",
+    "makemkv-3f2a9c10-log.txt"
+  ]
+}

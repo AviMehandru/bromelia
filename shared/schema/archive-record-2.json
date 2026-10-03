@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.bromelia.invalid/archive-record-2.json",
+  "title": "Bromelia archive record, version 2 (read only)",
+  "description": "bromelia.json / bromelia (N).json as today's three apps write it. The rebuilt engine never writes this version but reads it (ArchiveRecordCodec.decode) when it rescans a library or looks for the previous disc of a set. Records written by older builds may lack any field, so nothing is required except format; unknown fields are allowed.",
+  "type": "object",
+  "required": ["format"],
+  "properties": {
+    "format": { "const": "bromelia-archive" },
+    "version": { "const": 2 },
+    "status": { "enum": ["success", "errors", "failed", "cancelled"] },
+    "name": { "type": "string" },
+    "kind": { "$ref": "common.json#/$defs/MediaKind" },
+    "disc": {
+      "type": "object",
+      "properties": {
+        "label": { "type": "string" },
+        "volumeName": { "type": "string" },
+        "type": { "type": "string" },
+        "format": { "$ref": "common.json#/$defs/DiscFormat" },
+        "formatCode": { "type": "string" },
+        "encrypted": { "type": "boolean" },
+        "season": { "type": ["integer", "null"] },
+        "part": { "type": ["integer", "null"] },
+        "volume": { "type": ["integer", "null"] },
+        "disc": { "type": ["integer", "null"] },
+        "fingerprint": { "type": ["string", "null"] }
+      }
+    },
+    "rip": { "enum": ["Rip", "Backup"] },
+    "mode": { "$ref": "common.json#/$defs/RipMode" },
+    "source": { "type": "string" },
+    "driveName": { "type": "string" },
+    "makemkv": { "type": "string" },
+    "jobId": { "type": "string" },
+    "startedAt": { "type": ["string", "null"] },
+    "finishedAt": { "type": ["string", "null"] },
+    "titles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index": { "type": "integer" },
+          "sourceTitleId": { "type": ["integer", "null"] },
+          "sourceFile": { "type": "string" },
+          "duration": { "type": "string" },
+          "chapters": { "type": "integer" },
+          "sizeBytes": { "type": "integer" },
+          "segmentMap": { "type": "string" }
+        }
+      }
+    },
+    "episodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string" },
+          "episode": { "type": ["integer", "null"] },
+          "sourceTitleId": { "type": "integer" },
+          "firstChapter": { "type": "integer" },
+          "lastChapter": { "type": "integer" },
+          "title": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "size": { "type": "integer" },
+          "sha256": { "type": "string" }
+        }
+      }
+    },
+    "warnings": { "type": "integer" },
+    "errors": { "type": "integer" },
+    "errorMessages": { "type": "array", "items": { "type": "string" } },
+    "readErrors": { "type": "array", "items": { "type": "string" } },
+    "libreDrive": { "type": ["string", "null"] }
+  }
+}

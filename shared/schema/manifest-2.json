@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.bromelia.invalid/manifest-2.json",
+  "title": "Post-processing manifest, version 2",
+  "description": "jobs/<id>/manifest.json, named by BROMELIA_MANIFEST and {manifest} for every step (plan §19, 'User scripts'). User scripts read it, so every version 1 field keeps its name, type and meaning; version 2 only adds fields (manifestVersion, unitId, outcome, …). Paths are absolute and point to where the files are after the commit. status keeps the four version 1 words that scripts test.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestVersion",
+    "jobId",
+    "status",
+    "outcome",
+    "mode",
+    "driveName",
+    "driveId",
+    "devicePath",
+    "source",
+    "discName",
+    "discType",
+    "outputDirectory",
+    "files",
+    "titles",
+    "name",
+    "kind",
+    "format",
+    "formatCode",
+    "encrypted",
+    "episodes",
+    "checksums",
+    "startedAt"
+  ],
+  "properties": {
+    "manifestVersion": {
+      "description": "2. Version 1 manifests have no such field.",
+      "const": 2
+    },
+    "jobId": {
+      "$ref": "common.json#/$defs/Uuid"
+    },
+    "unitId": {
+      "oneOf": [
+        {
+          "$ref": "common.json#/$defs/Uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "description": "success, errors, failed or cancelled (BROMELIA_STATUS).",
+      "enum": [
+        "success",
+        "errors",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "outcome": {
+      "$ref": "common.json#/$defs/Outcome"
+    },
+    "mode": {
+      "$ref": "common.json#/$defs/RipMode"
+    },
+    "driveName": {
+      "type": "string"
+    },
+    "driveId": {
+      "description": "The drive configuration's id ('' for none).",
+      "type": "string"
+    },
+    "devicePath": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "discName": {
+      "type": "string"
+    },
+    "discType": {
+      "$ref": "common.json#/$defs/DiscType"
+    },
+    "outputDirectory": {
+      "type": "string"
+    },
+    "library": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "path": {
+          "$ref": "common.json#/$defs/Path"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/Path"
+      }
+    },
+    "titles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "name",
+          "duration",
+          "chapters",
+          "sourceTitleId"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "string"
+          },
+          "chapters": {
+            "type": "integer"
+          },
+          "sourceTitleId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "movie",
+        "tv",
+        ""
+      ]
+    },
+    "format": {
+      "description": "The disc format, as in version 1.",
+      "oneOf": [
+        {
+          "$ref": "common.json#/$defs/DiscFormat"
+        },
+        {
+          "const": ""
+        }
+      ]
+    },
+    "formatCode": {
+      "type": "string"
+    },
+    "encrypted": {
+      "type": "boolean"
+    },
+    "season": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "part": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "volume": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "discNumber": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "discSet": {
+      "description": "BROMELIA_DISC_SET, e.g. 'Season 2 Part 7 Disc 2'.",
+      "type": "string"
+    },
+    "releaseYear": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "tmdbId": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "imdbId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "episodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "episode",
+          "sourceTitleId",
+          "firstChapter",
+          "lastChapter"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "episode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "sourceTitleId": {
+            "type": "integer"
+          },
+          "firstChapter": {
+            "type": "integer"
+          },
+          "lastChapter": {
+            "type": "integer"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "checksumFile": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "checksums": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "size",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "$ref": "common.json#/$defs/Bytes"
+          },
+          "sha256": {
+            "$ref": "common.json#/$defs/Sha256"
+          }
+        }
+      }
+    },
+    "startedAt": {
+      "$ref": "common.json#/$defs/Instant"
+    },
+    "finishedAt": {
+      "oneOf": [
+        {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "description": "The job's error, rendered in English (BROMELIA_ERROR).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "errorCode": {
+      "oneOf": [
+        {
+          "$ref": "common.json#/$defs/BroError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step": {
+      "description": "The step this manifest was written for.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

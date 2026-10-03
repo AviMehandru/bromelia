@@ -338,7 +338,7 @@ def check_config():
     validate(defaults, "config-3.json", what="expanded defaults")
     # The bottom layer of ProfileResolver.resolve: every profile field at its default.
     bottom = expand_defaults({"id": "default", "name": "Default"}, {"$ref": "#/$defs/Profile"}, schema_id("config-3.json"), sparse=False)
-    generated(cfg_dir / "config3-profile-defaults.json", dump_json(bottom))
+    generated(cfg_dir / "profile3-defaults.json", dump_json(bottom))
     validate(bottom, "config-3.json", "Profile", what="profile defaults")
     # Migration cases.
     cases = load_json(cfg_dir / "config-migration-cases.json")
@@ -444,9 +444,31 @@ def check_fixtures():
                 R.error(f"{rel(p)}: {e}")
 
 
+# ---- archive records and manifests ------------------------------------------
+
+def check_documents():
+    arch = FIXTURES / "archive"
+    for p in sorted(arch.glob("record3-*.json")):
+        doc = load_json(p)
+        validate(doc, "archive-record-3.json", what=rel(p))
+        for prob in doc.get("problems", []):
+            R.check(prob["code"] in message_codes(), f"{rel(p)}: unknown code {prob['code']}")
+        R.check(doc["unit"]["short"] == doc["unit"]["id"][:8], f"{rel(p)}: unit.short isn't the first 8 digits of unit.id")
+        listed = {f["path"] for f in doc["files"]}
+        for e in doc["episodes"]:
+            R.check(e["file"] in listed, f"{rel(p)}: episode file {e['file']} isn't in files")
+    for p in sorted(arch.glob("record2-*.json")):
+        validate(load_json(p), "archive-record-2.json", what=rel(p))
+    for r in load_json(FIXTURES / "episode-continuation.json")["records"]:
+        validate(r["record"], "archive-record-2.json", what=f"episode-continuation.json {r['path']}")
+    for p in sorted(arch.glob("manifest2-*.json")):
+        validate(load_json(p), "manifest-2.json", what=rel(p))
+
+
 SECTIONS = {
     "schemas": check_schemas,
     "config": check_config,
+    "documents": check_documents,
     "fixtures": check_fixtures,
 }
 

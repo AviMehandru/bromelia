@@ -1,0 +1,147 @@
+{
+  "format": "bromelia-archive",
+  "version": 3,
+  "unit": {
+    "id": "a1b2c3d4-0000-4000-8000-00000000abcd",
+    "short": "a1b2c3d4",
+    "library": "library"
+  },
+  "status": "errors",
+  "name": "Inception",
+  "kind": "movie",
+  "work": {
+    "provider": "tmdb",
+    "title": "Inception",
+    "year": 2010,
+    "tmdbId": 27205,
+    "imdbId": "tt1375666",
+    "chosen": false
+  },
+  "disc": {
+    "label": "INCEPTION",
+    "volumeName": "INCEPTION",
+    "type": "Blu-ray disc",
+    "format": "bluray",
+    "formatCode": "BR",
+    "encrypted": false,
+    "season": null,
+    "part": null,
+    "volume": null,
+    "disc": null,
+    "set": "",
+    "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+    "libreDrive": "v06.3 id=4FBA32AEC678"
+  },
+  "physical": {
+    "barcode": "883929143561",
+    "location": "Shelf B3"
+  },
+  "acquisition": {
+    "mode": "backupThenMkv",
+    "rip": "Rip",
+    "source": "disc:0",
+    "drive": {
+      "id": "drv-0123456789abcdef",
+      "name": "Left drive",
+      "model": "HL-DT-ST BD-RE WH16NS60"
+    },
+    "profile": "profile-left",
+    "makemkv": "MakeMKV v2.0.0 linux(x64-release)",
+    "bromelia": "3.0.0",
+    "tools": {}
+  },
+  "job": {
+    "id": "b2c3d4e5-0000-4000-8000-00000000abcd",
+    "startedAt": "2026-10-01T10:00:00.000Z",
+    "finishedAt": "2026-10-01T11:02:03.004Z"
+  },
+  "titles": [
+    {
+      "index": 0,
+      "sourceTitleId": 800,
+      "sourceFile": "00800.mpls",
+      "duration": "2:28:07",
+      "durationSeconds": 8887,
+      "chapters": 16,
+      "sizeBytes": 31000000000,
+      "segmentMap": "1,2,3",
+      "readErrors": 2
+    },
+    {
+      "index": 3,
+      "sourceTitleId": 801,
+      "sourceFile": "00801.mpls",
+      "duration": "0:14:00",
+      "durationSeconds": 840,
+      "chapters": 2,
+      "sizeBytes": 2100000000,
+      "segmentMap": "4",
+      "readErrors": 0
+    }
+  ],
+  "episodes": [],
+  "files": [
+    {
+      "path": "Inception (2010).mkv",
+      "size": 31000000000,
+      "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+      "role": "title",
+      "title": 0
+    },
+    {
+      "path": "Other/Inception (2010) - Playlist 00801.mkv",
+      "size": 2100000000,
+      "sha256": "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d",
+      "role": "title",
+      "title": 3
+    },
+    {
+      "path": "Backup/Inception (2010) - Backup - BR/BDMV/index.bdmv",
+      "size": 280,
+      "sha256": "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6",
+      "role": "backup"
+    }
+  ],
+  "attempts": [
+    {
+      "job": "b2c3d4e5-0000-4000-8000-00000000abcd",
+      "drive": "drv-0123456789abcdef",
+      "startedAt": "2026-10-01T10:00:00.000Z",
+      "titles": {
+        "0": 2,
+        "3": 0
+      },
+      "kept": [
+        0,
+        3
+      ]
+    }
+  ],
+  "counts": {
+    "warnings": 0,
+    "errors": 2
+  },
+  "problems": [
+    {
+      "code": "makemkv.message",
+      "params": {
+        "makemkvCode": 2003,
+        "text": "Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'"
+      },
+      "text": "Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'",
+      "readError": true
+    },
+    {
+      "code": "rip.readErrors",
+      "params": {
+        "count": 2
+      },
+      "text": "MakeMKV reported 2 read errors while reading the disc, so the files may be damaged. They were kept apart from finished archives."
+    }
+  ],
+  "logs": [
+    "bromelia-a1b2c3d4-log.txt",
+    "makemkv-a1b2c3d4-log.txt",
+    "makemkv-a1b2c3d4-debug-log.txt"
+  ]
+}
