@@ -97,6 +97,37 @@
       "note": "macos/Bromelia and windows/src/Bromelia.App hold today's apps until phase 4 replaces them."
     }
   },
+  "idioms": {
+    "swift": [],
+    "cs": [
+      {
+        "symbol": "BroFailure",
+        "why": "Plan §6: the exception that carries a BroError across layers (Swift uses typed throws, C a BroError ** out-parameter)."
+      }
+    ],
+    "c": [
+      {
+        "symbol": "bro_json_value_*",
+        "why": "Plan §6: C has no enums with values, so JsonValue's cases get constructors and accessors (bro_json_value_new_string, bro_json_value_member, …); Swift and C# use cases and records."
+      },
+      {
+        "symbol": "bro_bro_error_set",
+        "why": "Plan §6: sets a BroError ** out-parameter when it isn't NULL, like g_set_error; Swift and C# throw."
+      },
+      {
+        "symbol": "bro_cancellation_token_is_cancelled",
+        "why": "A property in Swift and C# (isCancelled / IsCancelled)."
+      },
+      {
+        "symbol": "bro_cancellation_token_disconnect",
+        "why": "Removes an onCancel handler; Swift and C# return a closure / IDisposable for that."
+      },
+      {
+        "symbol": "bro_http_request_spec_add_header",
+        "why": "Builds the header list; Swift and C# pass the headers to the initialiser."
+      }
+    ]
+  },
   "modules": {
     "foundation/core": {
       "layer": "foundation",
@@ -229,16 +260,52 @@
           "doc": "A JSON value for params and records, with stable key order when written.",
           "swift": {
             "name": "JsonValue",
-            "file": "macos/BromeliaKit/Sources/BroFoundation/JsonValue.swift"
+            "file": "macos/BromeliaKit/Sources/BroFoundation/JsonValue.swift",
+            "cases": [
+              ".null",
+              ".bool",
+              ".integer",
+              ".number",
+              ".string",
+              ".array",
+              ".object"
+            ]
           },
           "cs": {
             "name": "JsonValue",
-            "file": "windows/src/Bromelia.Foundation/JsonValue.cs"
+            "file": "windows/src/Bromelia.Foundation/JsonValue.cs",
+            "cases": [
+              "Null",
+              "Bool",
+              "Integer",
+              "Number",
+              "String",
+              "Array",
+              "Object"
+            ]
           },
           "c": {
             "name": "BroJsonValue",
-            "file": "linux/src/foundation/bro-json-value.h"
-          }
+            "file": "linux/src/foundation/bro-json-value.h",
+            "cases": [
+              "BRO_JSON_VALUE_NULL",
+              "BRO_JSON_VALUE_BOOL",
+              "BRO_JSON_VALUE_INTEGER",
+              "BRO_JSON_VALUE_NUMBER",
+              "BRO_JSON_VALUE_STRING",
+              "BRO_JSON_VALUE_ARRAY",
+              "BRO_JSON_VALUE_OBJECT"
+            ]
+          },
+          "cases": [
+            "null",
+            "bool",
+            "integer",
+            "number",
+            "string",
+            "array",
+            "object"
+          ]
         }
       ],
       "functions": [
@@ -294,6 +361,17 @@
           "c": "bro_duration_format_clock"
         },
         {
+          "name": "JsonValue.parse",
+          "params": [
+            "text"
+          ],
+          "returns": "JsonValue?",
+          "doc": "Strict JSON; keys keep their order; a repeated key keeps its first position and its last value. Null when the text isn't JSON.",
+          "swift": "JsonValue.parse(_:)",
+          "cs": "JsonValue.Parse",
+          "c": "bro_json_value_parse"
+        },
+        {
           "name": "JsonValue.encodeCanonical",
           "params": [
             "value"
@@ -303,6 +381,37 @@
           "swift": "JsonValue.encodeCanonical(_:)",
           "cs": "JsonValue.EncodeCanonical",
           "c": "bro_json_value_encode_canonical"
+        },
+        {
+          "name": "CancellationToken.cancel",
+          "params": [],
+          "returns": "",
+          "doc": "Cancels the token and runs its handlers once.",
+          "swift": "CancellationToken.cancel()",
+          "cs": "CancellationToken.Cancel",
+          "c": "bro_cancellation_token_cancel"
+        },
+        {
+          "name": "CancellationToken.onCancel",
+          "params": [
+            "handler"
+          ],
+          "returns": "Unregister",
+          "doc": "Runs handler once on cancellation (straight away if already cancelled).",
+          "swift": "CancellationToken.onCancel(_:)",
+          "cs": "CancellationToken.OnCancel",
+          "c": "bro_cancellation_token_on_cancel"
+        },
+        {
+          "name": "CancellationToken.child",
+          "params": [
+            "of:parent"
+          ],
+          "returns": "CancellationToken",
+          "doc": "A token cancelled with its parent, or on its own.",
+          "swift": "CancellationToken.child(of:)",
+          "cs": "CancellationToken.Child",
+          "c": "bro_cancellation_token_child"
         }
       ]
     },

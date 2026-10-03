@@ -1,3 +1,7 @@
+# The rebuild's layers (rearchitecture plan §4), one static library each.
+subdir('foundation')
+
+# Today's app.
 core_sources = files(
   'bro-robot.c',
   'bro-config.c',

@@ -34,6 +34,10 @@ jobs:
         run: |
           xcodebuild -project Bromelia.xcodeproj -scheme Bromelia -destination 'platform=macOS' \
             -derivedDataPath build/DerivedData test
+      # The rebuild's layers (BromeliaKit): Foundation, Domain and Ports against shared/fixtures.
+      - name: BromeliaKit tests
+        working-directory: macos/BromeliaKit
+        run: swift test
 
   windows:
     name: Windows (WinUI 3)
@@ -46,6 +50,12 @@ jobs:
       - name: Test core
         working-directory: windows
         run: dotnet test tests/Bromelia.Core.Tests/Bromelia.Core.Tests.csproj
+      # The rebuild's layers: Foundation, Domain and Ports against shared/fixtures.
+      - name: Test rebuild layers
+        working-directory: windows
+        run: |
+          dotnet test tests/Bromelia.Foundation.Tests/Bromelia.Foundation.Tests.csproj
+          dotnet test tests/Bromelia.Domain.Tests/Bromelia.Domain.Tests.csproj
       # The WinUI app is built with Visual Studio's MSBuild, not `dotnet build`: Windows App SDK 1.6
       # loads its PRI tasks (Microsoft.Build.Packaging.Pri.Tasks.dll) from Visual Studio's
       # MSBuild\Microsoft\VisualStudio\v<version>\AppxPackage folder, which the .NET SDK does not ship.

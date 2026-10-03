@@ -18,6 +18,7 @@ gtk_dep = dependency('gtk4', version: '>= 4.12', required: build_ui)
 adw_dep = dependency('libadwaita-1', version: '>= 1.5', required: build_ui)
 
 cc = meson.get_compiler('c')
+libm_dep = cc.find_library('m', required: false)
 add_project_arguments(
   '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_76',
   '-DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_76',

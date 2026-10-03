@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- L0 Foundation (rearchitecture plan §3): types every layer uses. No I/O, no clock, no dependencies. -->
+  <PropertyGroup>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <RootNamespace>Bromelia.Foundation</RootNamespace>
+    <AssemblyName>Bromelia.Foundation</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

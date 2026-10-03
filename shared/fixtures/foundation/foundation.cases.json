@@ -1,0 +1,371 @@
+{
+  "functions": [
+    "Id.short",
+    "Instant.parse",
+    "Instant.format",
+    "Duration.parseClock",
+    "Duration.formatClock",
+    "JsonValue.parse",
+    "JsonValue.encodeCanonical"
+  ],
+  "description": "Foundation: short ids, instants, clock durations and canonical JSON (the bytes Python's json.dumps(value, indent=2, ensure_ascii=False) + \"\\n\" writes). Instant cases: format(parse(given)) or null when it doesn't parse. Duration cases: parseClock, then formatClock of the result. JSON cases: encodeCanonical(parse(given)), or null when parse rejects the text.",
+  "cases": [
+    {
+      "id": "id-short",
+      "given": {
+        "id": "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+      },
+      "expect": {
+        "short": "3f2504e0"
+      }
+    },
+    {
+      "id": "instant-1",
+      "given": {
+        "instant": "2026-10-03T10:10:28.608Z"
+      },
+      "expect": {
+        "formatted": "2026-10-03T10:10:28.608Z"
+      }
+    },
+    {
+      "id": "instant-2",
+      "given": {
+        "instant": "2026-10-03T10:10:28Z"
+      },
+      "expect": {
+        "formatted": "2026-10-03T10:10:28.000Z"
+      }
+    },
+    {
+      "id": "instant-3",
+      "given": {
+        "instant": "2026-10-03T12:10:28.5+02:00"
+      },
+      "expect": {
+        "formatted": "2026-10-03T10:10:28.500Z"
+      }
+    },
+    {
+      "id": "instant-4",
+      "given": {
+        "instant": "1999-12-31T23:59:59.999-01:30"
+      },
+      "expect": {
+        "formatted": "2000-01-01T01:29:59.999Z"
+      }
+    },
+    {
+      "id": "instant-5",
+      "given": {
+        "instant": "not a time"
+      },
+      "expect": {
+        "formatted": null
+      }
+    },
+    {
+      "id": "instant-6",
+      "given": {
+        "instant": ""
+      },
+      "expect": {
+        "formatted": null
+      }
+    },
+    {
+      "id": "instant-7",
+      "given": {
+        "instant": "2026-13-01T00:00:00Z"
+      },
+      "expect": {
+        "formatted": null
+      }
+    },
+    {
+      "id": "duration-1",
+      "given": {
+        "clock": "2:44:48"
+      },
+      "expect": {
+        "seconds": 9888,
+        "formatted": "2:44:48"
+      }
+    },
+    {
+      "id": "duration-2",
+      "given": {
+        "clock": "0:00:59"
+      },
+      "expect": {
+        "seconds": 59,
+        "formatted": "0:00:59"
+      }
+    },
+    {
+      "id": "duration-3",
+      "given": {
+        "clock": "44:48"
+      },
+      "expect": {
+        "seconds": 2688,
+        "formatted": "0:44:48"
+      }
+    },
+    {
+      "id": "duration-4",
+      "given": {
+        "clock": "100:00:00"
+      },
+      "expect": {
+        "seconds": 360000,
+        "formatted": "100:00:00"
+      }
+    },
+    {
+      "id": "duration-5",
+      "given": {
+        "clock": "1:x:05"
+      },
+      "expect": {
+        "seconds": 3605,
+        "formatted": "1:00:05"
+      }
+    },
+    {
+      "id": "duration-6",
+      "given": {
+        "clock": ""
+      },
+      "expect": {
+        "seconds": null,
+        "formatted": null
+      }
+    },
+    {
+      "id": "json-1",
+      "given": {
+        "json": "{\"b\": 1, \"a\": [true, false, null], \"c\": {}, \"d\": [], \"e\": \"x\"}"
+      },
+      "expect": {
+        "canonical": "{\n  \"b\": 1,\n  \"a\": [\n    true,\n    false,\n    null\n  ],\n  \"c\": {},\n  \"d\": [],\n  \"e\": \"x\"\n}\n"
+      }
+    },
+    {
+      "id": "json-2",
+      "given": {
+        "json": "[1.0, 0.5, -0.0, 1e16, 1e15, 0.0001, 0.00001, 123456789.125, 3.141592653589793, 1e-7, -2.5e300, 9007199254740993]"
+      },
+      "expect": {
+        "canonical": "[\n  1.0,\n  0.5,\n  -0.0,\n  1e+16,\n  1000000000000000.0,\n  0.0001,\n  1e-05,\n  123456789.125,\n  3.141592653589793,\n  1e-07,\n  -2.5e+300,\n  9007199254740993\n]\n"
+      }
+    },
+    {
+      "id": "json-3",
+      "given": {
+        "json": "{\"esc\": \"quote \\\" backslash \\\\ slash \\/ nl \\n tab \\t cr \\r bs \\b ff \\f ctl \\u0001 del \\u007f\"}"
+      },
+      "expect": {
+        "canonical": "{\n  \"esc\": \"quote \\\" backslash \\\\ slash / nl \\n tab \\t cr \\r bs \\b ff \\f ctl \\u0001 del \"\n}\n"
+      }
+    },
+    {
+      "id": "json-4",
+      "given": {
+        "json": "{\"unicode\": \"caf\\u00e9 日本 \\ud83d\\ude00 \\u2028\"}"
+      },
+      "expect": {
+        "canonical": "{\n  \"unicode\": \"café 日本 😀  \"\n}\n"
+      }
+    },
+    {
+      "id": "json-5",
+      "given": {
+        "json": "{\"k\": 1, \"j\": 2, \"k\": 3}"
+      },
+      "expect": {
+        "canonical": "{\n  \"k\": 3,\n  \"j\": 2\n}\n"
+      }
+    },
+    {
+      "id": "json-6",
+      "given": {
+        "json": "  [ [ [ ] ] , { \"nested\" : { \"deep\" : [ 1 , 2 ] } } ]  "
+      },
+      "expect": {
+        "canonical": "[\n  [\n    []\n  ],\n  {\n    \"nested\": {\n      \"deep\": [\n        1,\n        2\n      ]\n    }\n  }\n]\n"
+      }
+    },
+    {
+      "id": "json-7",
+      "given": {
+        "json": "-12"
+      },
+      "expect": {
+        "canonical": "-12\n"
+      }
+    },
+    {
+      "id": "json-8",
+      "given": {
+        "json": "\"just a string\""
+      },
+      "expect": {
+        "canonical": "\"just a string\"\n"
+      }
+    },
+    {
+      "id": "json-9",
+      "given": {
+        "json": "true"
+      },
+      "expect": {
+        "canonical": "true\n"
+      }
+    },
+    {
+      "id": "json-10",
+      "given": {
+        "json": "null"
+      },
+      "expect": {
+        "canonical": "null\n"
+      }
+    },
+    {
+      "id": "json-11",
+      "given": {
+        "json": "0.1"
+      },
+      "expect": {
+        "canonical": "0.1\n"
+      }
+    },
+    {
+      "id": "json-12",
+      "given": {
+        "json": "100"
+      },
+      "expect": {
+        "canonical": "100\n"
+      }
+    },
+    {
+      "id": "json-13",
+      "given": {
+        "json": "-9223372036854775808"
+      },
+      "expect": {
+        "canonical": "-9223372036854775808\n"
+      }
+    },
+    {
+      "id": "json-invalid-1",
+      "given": {
+        "json": "{\"a\": 1,}"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-2",
+      "given": {
+        "json": "[1 2]"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-3",
+      "given": {
+        "json": "01"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-4",
+      "given": {
+        "json": "\"unterminated"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-5",
+      "given": {
+        "json": "{\"a\" 1}"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-6",
+      "given": {
+        "json": "tru"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-7",
+      "given": {
+        "json": "1."
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-8",
+      "given": {
+        "json": "-"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-9",
+      "given": {
+        "json": "[1] x"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-10",
+      "given": {
+        "json": "\"tab\there\""
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-11",
+      "given": {
+        "json": ".5"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-12",
+      "given": {
+        "json": ""
+      },
+      "expect": {
+        "canonical": null
+      }
+    }
+  ]
+}

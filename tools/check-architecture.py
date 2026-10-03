@@ -9,10 +9,18 @@
             a phase ≤ --require-phase.
   unmapped  public symbols in the layer folders that the map doesn't list (reported; fail with --strict).
 
-Usage: tools/check-architecture.py [--platform swift|cs|c] [--require-phase N] [--strict] [--quiet]
+  idioms    the map's "idioms" section lists, per platform, public symbols that a language idiom of plan §6 needs
+            and the other platforms don't have (C#'s BroFailure, C's accessors and boxed-type helpers). They
+            aren't reported as unmapped. A C# type nested in a mapped enum and named after one of its cases (an
+            enum with values, written as records) counts as mapped too.
+
+Usage: tools/check-architecture.py [--platform swift|cs|c] [--module KEY] [--require-phase N] [--strict] [--quiet]
+  --module KEY  only the modules whose key is KEY or starts with KEY/ (e.g. domain/robot, ports); the unmapped
+                symbols are those in the files of those modules' types
 Needs only the Python 3 standard library.
 """
 import argparse
+import fnmatch
 import json
 import re
 import sys
@@ -106,6 +114,13 @@ class Checker:
                 owner = f["name"].split(".")[0]
                 if owner not in self.types:
                     self.lint_errors.append(f"{key}: {f['name']}: its owner type {owner} isn't in the map")
+        for platform, entries in self.doc.get("idioms", {}).items():
+            if platform not in PLATFORMS:
+                self.lint_errors.append(f"idioms: unknown platform {platform}")
+                continue
+            for i in entries:
+                if not i.get("symbol") or not i.get("why"):
+                    self.lint_errors.append(f"idioms ({platform}): every entry needs a symbol and a why: {i}")
         for name, entries in self.types.items():
             if len(entries) > 1:
                 self.lint_errors.append(f"type {name} is in {', '.join(k for k, _ in entries)}")
@@ -140,9 +155,14 @@ class Checker:
             return re.search(rf"\b{re.escape(fn)}\s*[(<]", text)
         return re.search(rf"\b{re.escape(spelled)}\s*\(", text)
 
+    def selected(self):
+        sel = self.args.module
+        return {k: m for k, m in self.doc["modules"].items()
+                if not sel or k == sel or k.startswith(sel.rstrip("/") + "/")}
+
     def presence(self, platform):
         req = self.args.require_phase
-        for key, m in self.doc["modules"].items():
+        for key, m in self.selected().items():
             for t in m["types"]:
                 f = ROOT / t[platform]["file"]
                 text = f.read_text(encoding="utf-8", errors="replace") if f.exists() else ""
@@ -163,11 +183,22 @@ class Checker:
     def unmapped_symbols(self, platform):
         layers = self.doc["layers"]
         known_types = {t[platform]["name"] for es in self.types.values() for _, t in es}
+        idioms = [i["symbol"] for i in self.doc.get("idioms", {}).get(platform, [])]
+        known_types |= set(idioms)
+        if platform == "cs":
+            known_types |= {c for es in self.types.values() for _, t in es for c in t["cs"].get("cases", [])}
+        only = None
+        if self.args.module:
+            only = {(ROOT / t[platform]["file"]).resolve() for m in self.selected().values() for t in m["types"]}
         known_funcs = set()
         for m in self.doc["modules"].values():
             for fn in m["functions"]:
                 s = fn[platform]
                 known_funcs.add(s if platform == "c" else s.split(".", 1)[1].split("(")[0])
+        known_funcs |= set(idioms)
+
+        def known(name, pool):
+            return name in pool or any(fnmatch.fnmatchcase(name, i) for i in idioms)
         for lname in ("foundation", "domain", "ports"):
             roots = layers[lname][platform]
             for root in roots if isinstance(roots, list) else [roots]:
@@ -175,22 +206,24 @@ class Checker:
                 if not base.exists():
                     continue
                 for f in sorted(base.rglob({"swift": "*.swift", "cs": "*.cs", "c": "*.h"}[platform])):
+                    if "/obj/" in f.as_posix() or "/bin/" in f.as_posix() or (only is not None and f.resolve() not in only):
+                        continue
                     text = f.read_text(encoding="utf-8", errors="replace")
                     rel = f.relative_to(ROOT)
                     if platform == "swift":
                         for m in re.finditer(r"\bpublic\s+(?:final\s+)?(?:struct|enum|class|protocol|actor)\s+(\w+)", text):
-                            if m.group(1) not in known_types:
+                            if not known(m.group(1), known_types):
                                 self.unmapped.append((platform, f"{rel}: type {m.group(1)}"))
                         for m in re.finditer(r"\bpublic\s+(?:static\s+)?func\s+(\w+)", text):
-                            if m.group(1) not in known_funcs:
+                            if not known(m.group(1), known_funcs):
                                 self.unmapped.append((platform, f"{rel}: func {m.group(1)}"))
                     elif platform == "cs":
-                        for m in re.finditer(r"\bpublic\s+(?:(?:sealed|static|abstract|readonly|partial)\s+)*(?:class|record|struct|interface|enum)\s+(\w+)", text):
-                            if m.group(1) not in known_types:
+                        for m in re.finditer(r"\bpublic\s+(?:(?:sealed|static|abstract|readonly|partial)\s+)*(?:class|record(?:\s+struct|\s+class)?|struct|interface|enum)\s+(\w+)", text):
+                            if not known(m.group(1), known_types):
                                 self.unmapped.append((platform, f"{rel}: type {m.group(1)}"))
                     else:
                         for m in re.finditer(r"^[A-Za-z_][\w\s\*]*?\b(bro_\w+)\s*\(", text, re.M):
-                            if m.group(1) not in known_funcs and not m.group(1).endswith(("_get_type", "_free", "_copy", "_new", "_ref", "_unref")):
+                            if not known(m.group(1), known_funcs) and not m.group(1).endswith(("_get_type", "_free", "_copy", "_new", "_ref", "_unref")):
                                 self.unmapped.append((platform, f"{rel}: {m.group(1)}"))
 
     def run(self):
@@ -204,10 +237,10 @@ class Checker:
             print(f"lint: {e}")
         if self.lint_errors:
             status = 1
-        modules = self.doc["modules"]
+        modules = self.selected()
         nt = sum(len(m["types"]) for m in modules.values())
         nf = sum(len(m["functions"]) for m in modules.values())
-        print(f"architecture map: {len(modules)} modules, {nt} types, {nf} functions; {len(self.lint_errors)} lint problem(s)")
+        print(f"architecture map{f' ({self.args.module})' if self.args.module else ''}: {len(modules)} modules, {nt} types, {nf} functions; {len(self.lint_errors)} lint problem(s)")
         for p in platforms:
             miss = [x for x in self.missing if x[0] == p]
             unm = [x for x in self.unmapped if x[0] == p]
@@ -229,6 +262,7 @@ class Checker:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--platform", choices=list(PLATFORMS))
+    ap.add_argument("--module", help="only this module, or the modules under this prefix")
     ap.add_argument("--require-phase", type=int, help="fail on missing entries of this phase or earlier")
     ap.add_argument("--strict", action="store_true", help="fail on any missing entry or unmapped symbol")
     ap.add_argument("--quiet", action="store_true", help="only the summary")

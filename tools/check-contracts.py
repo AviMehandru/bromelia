@@ -907,7 +907,9 @@ def _check_expect(ex, names, codes, what):
 # ---- coverage of today's tests and docs -----------------------------------------------
 
 def current_tests():
-    """Every test of today's three suites: 'macos Suite.test', 'windows Class.Test', 'linux /path'."""
+    """Every test of today's three suites: 'macos Suite.test', 'windows Class.Test', 'linux /path'. The rebuild's
+    own test suites (BromeliaKit/Tests, windows/tests/Bromelia.<Layer>.Tests, linux/tests/test-<layer>.c) test
+    the fixtures themselves and aren't counted."""
     tests = []
     for p in sorted((ROOT / "macos" / "BromeliaTests").glob("*.swift")):
         cur, pending = None, False
@@ -925,7 +927,7 @@ def current_tests():
                 pending = False
             elif pending and not (st[:1] in ("(", '"', "]", "@", "/") or st == "" or st.endswith(",")):
                 pending = False
-    for p in sorted((ROOT / "windows" / "tests").rglob("*.cs")):
+    for p in sorted((ROOT / "windows" / "tests" / "Bromelia.Core.Tests").rglob("*.cs")):
         if "/obj/" in str(p) or "/bin/" in str(p):
             continue
         cur, pending = None, False
@@ -943,7 +945,7 @@ def current_tests():
             if m and pending:
                 tests.append(f"windows {cur}.{m.group(1)}")
             pending = False
-    for p in sorted((ROOT / "linux" / "tests").glob("*.c")):
+    for p in sorted((ROOT / "linux" / "tests").glob("test-core*.c")):
         tests += [f"linux {m.group(1)}" for m in re.finditer(r'g_test_add_func \("([^"]+)"', p.read_text(encoding="utf-8"))]
     return tests
 

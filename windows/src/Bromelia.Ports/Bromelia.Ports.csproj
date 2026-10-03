@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- L2 Ports (rearchitecture plan §9): the interfaces between the engine and the outside world. No logic. -->
+  <PropertyGroup>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <RootNamespace>Bromelia.Ports</RootNamespace>
+    <AssemblyName>Bromelia.Ports</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bromelia.Foundation\Bromelia.Foundation.csproj" />
+    <ProjectReference Include="..\Bromelia.Domain\Bromelia.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

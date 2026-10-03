@@ -10,3 +10,4 @@ obj/
 builddir*/
 _build/
 node_modules/
+.build/
