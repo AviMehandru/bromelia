@@ -415,6 +415,101 @@ def _check_references(doc, what):
         R.check(len(entries) == len(set(entries)), f"{what}: duplicate {kind} ids")
 
 
+
+# ---- ICU MessageFormat (the subset en.json uses) ------------------------------
+
+class IcuError(ValueError):
+    pass
+
+
+def icu_parse(text):
+    """Parses an ICU message into a list of arguments: (name, type, style, branches). Raises IcuError.
+    Supports {x}, {x, number|bytes|duration|durationPrecise}, {x, plural, =0 {…} one {…} other {…}} and
+    {x, select, key {…} other {…}}. A single apostrophe is literal unless it quotes { or } (ICU's default)."""
+    args = []
+    pos = _icu_message(text, 0, args, in_plural=False, depth=0)
+    if pos != len(text):
+        raise IcuError(f"unexpected '{text[pos]}' at {pos}")
+    return args
+
+
+def _icu_message(t, i, args, in_plural, depth):
+    while i < len(t):
+        c = t[i]
+        if c == "'" and i + 1 < len(t) and t[i + 1] in "{}'":
+            end = t.find("'", i + 2) if t[i + 1] != "'" else i + 1
+            if end < 0:
+                raise IcuError("unterminated quote")
+            i = end + 1
+        elif c == "{":
+            i = _icu_arg(t, i + 1, args, depth)
+        elif c == "}":
+            return i
+        else:
+            i += 1
+    return i
+
+
+def _icu_arg(t, i, args, depth):
+    m = re.match(r"\s*([A-Za-z][A-Za-z0-9]*)\s*", t[i:])
+    if not m:
+        raise IcuError(f"argument name expected at {i}")
+    name = m.group(1)
+    i += m.end()
+    if i < len(t) and t[i] == "}":
+        args.append((name, None, None, None))
+        return i + 1
+    if i >= len(t) or t[i] != ",":
+        raise IcuError(f"',' or '}}' expected after {name}")
+    m = re.match(r"\s*([A-Za-z]+)\s*", t[i + 1:])
+    if not m:
+        raise IcuError(f"format expected after {name}")
+    kind = m.group(1)
+    i += 1 + m.end()
+    if kind in ("plural", "select", "selectordinal"):
+        if i >= len(t) or t[i] != ",":
+            raise IcuError(f"{name}: branches expected")
+        i += 1
+        branches = {}
+        while True:
+            m = re.match(r"\s*(=\d+|[A-Za-z][A-Za-z0-9_]*)\s*", t[i:])
+            if not m:
+                break
+            key = m.group(1)
+            i += m.end()
+            if i >= len(t) or t[i] != "{":
+                raise IcuError(f"{name}: '{{' expected after branch {key}")
+            sub = []
+            end = _icu_message(t, i + 1, sub, in_plural=kind != "select", depth=depth + 1)
+            if end >= len(t) or t[end] != "}":
+                raise IcuError(f"{name}: branch {key} isn't closed")
+            branches[key] = sub
+            for a in sub:
+                args.append(a)
+            i = end + 1
+        while i < len(t) and t[i].isspace():
+            i += 1
+        if i >= len(t) or t[i] != "}":
+            raise IcuError(f"{name}: '}}' expected after the branches")
+        if "other" not in branches:
+            raise IcuError(f"{name}: a {kind} needs an 'other' branch")
+        args.append((name, kind, None, branches))
+        return i + 1
+    style = None
+    if i < len(t) and t[i] == ",":
+        m = re.match(r"\s*([^}]*)", t[i + 1:])
+        style = m.group(1).strip()
+        i += 1 + m.end()
+    if i >= len(t) or t[i] != "}":
+        raise IcuError(f"{name}: '}}' expected")
+    args.append((name, kind, style, None))
+    return i + 1
+
+
+def icu_argument_names(text):
+    return {a[0] for a in icu_parse(text)}
+
+
 # ---- messages (used by other sections) -------------------------------------
 
 _codes = None
@@ -426,6 +521,83 @@ def message_codes():
         p = SHARED / "messages" / "codes.json"
         _codes = load_json(p)["codes"] if p.exists() else {}
     return _codes
+
+
+CODE_RE = re.compile(r"^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$")
+FORMATS_FOR = {"plural": {"int"}, "select": {"string", "bool"}, "number": {"int"}, "bytes": {"bytes"},
+               "duration": {"duration"}, "durationPrecise": {"duration"}, None: None}
+
+
+def check_messages():
+    doc = load_json(SHARED / "messages" / "codes.json")
+    codes = doc["codes"]
+    kinds, types = set(doc["kinds"]), set(doc["paramTypes"])
+    for lang_file in sorted((SHARED / "messages").glob("*.json")):
+        if lang_file.name == "codes.json":
+            continue
+        texts = load_json(lang_file)
+        missing, extra = set(codes) - set(texts), set(texts) - set(codes)
+        R.check(not missing, f"{lang_file.name}: no text for {sorted(missing)[:10]}")
+        R.check(not extra, f"{lang_file.name}: text for unknown codes {sorted(extra)[:10]}")
+        for code, text in texts.items():
+            if code not in codes:
+                continue
+            try:
+                args = icu_parse(text)
+            except IcuError as e:
+                R.error(f"{lang_file.name}: {code}: {e}")
+                continue
+            params = codes[code].get("params", {})
+            names = {a[0] for a in args}
+            R.check(names == set(params), f"{lang_file.name}: {code} uses {sorted(names)}, codes.json declares {sorted(params)}")
+            for name, kind, style, branches in args:
+                ptype = params.get(name)
+                allowed = FORMATS_FOR.get(kind, "?")
+                if allowed == "?":
+                    R.error(f"{lang_file.name}: {code}: unknown format {kind}")
+                elif allowed is not None and ptype not in allowed:
+                    R.error(f"{lang_file.name}: {code}: {{{name}, {kind}}} needs a {'/'.join(sorted(allowed))} parameter, not {ptype}")
+                if kind is None and ptype in ("bytes", "duration"):
+                    R.error(f"{lang_file.name}: {code}: {name} is {ptype}; render it with {{{name}, {ptype}}}")
+                if kind == "select" and ptype == "bool":
+                    R.check(set(branches) <= {"true", "false", "other"}, f"{lang_file.name}: {code}: a bool select takes true / false / other")
+    for code, e in codes.items():
+        R.check(bool(CODE_RE.match(code)), f"codes.json: {code} isn't a valid code")
+        R.check(e.get("kind") in kinds, f"codes.json: {code}: unknown kind {e.get('kind')}")
+        for name, t in {**e.get("params", {}), **e.get("data", {})}.items():
+            R.check(t in types, f"codes.json: {code}: {name} has the unknown type {t}")
+        R.check(not set(e.get("params", {})) & set(e.get("data", {})), f"codes.json: {code}: a parameter is both shown and data")
+        if "http" in e:
+            R.check(e["kind"] in ("error", "problem", "issue"), f"codes.json: {code}: only errors have an HTTP status")
+            R.check(e["http"] in (400, 401, 403, 404, 405, 409, 422, 500, 503, 507), f"codes.json: {code}: unusual HTTP status {e['http']}")
+        if "severity" in e:
+            R.check(e["severity"] in ("debug", "info", "warning", "error"), f"codes.json: {code}: bad severity")
+    # Every code that another contract mentions must exist.
+    for p in sorted(list(SHARED.rglob("*.json")) + list(SHARED.rglob("*.yaml"))):
+        if p.parent == SHARED / "messages" or "catalog" in p.parts or "web" in p.parts:
+            continue
+        doc = load_yaml(p) if p.suffix == ".yaml" else load_json(p)
+        for code in _codes_in(doc):
+            R.check(code in codes, f"{rel(p)}: unknown message code {code}")
+
+
+def _codes_in(node, key=None):
+    """Values of 'code' keys (and of keys ending in 'Code', 'reason' objects) that look like message codes."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in ("code", "errorCode", "problem", "operation", "blockedBy") and isinstance(v, str) and CODE_RE.match(v):
+                yield v
+            elif k in ("code", "errorCode", "problem", "operation", "blockedBy", "log", "logs", "noLog") and isinstance(v, list):
+                for item in v:
+                    if isinstance(item, str) and CODE_RE.match(item):
+                        yield item
+                    else:
+                        yield from _codes_in(item, k)
+            else:
+                yield from _codes_in(v, k)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _codes_in(v, key)
 
 
 # ---- fixtures ---------------------------------------------------------------
@@ -468,6 +640,7 @@ def check_documents():
 SECTIONS = {
     "schemas": check_schemas,
     "config": check_config,
+    "messages": check_messages,
     "documents": check_documents,
     "fixtures": check_fixtures,
 }

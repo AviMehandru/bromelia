@@ -1,0 +1,2636 @@
+{
+  "comment": "Every message and error code the engine emits (plan §16). The engine never builds sentences: it emits {code, params} and each client renders the text from <lang>.json (en.json is the reference). tools/check-contracts.py checks that every code has English text, that the text uses exactly the declared parameters with matching formats, and that every code used by the other contracts and the scenarios exists here.",
+  "kinds": {
+    "error": "A BroError code: why a job, step or request failed. 'http' is the status the server answers with when it is returned by an API route.",
+    "log": "A job or engine log line; 'severity' is its default.",
+    "progress": "The operation a job is doing (ctx.progress), shown next to its progress.",
+    "reason": "A part of another message, passed as a parameter of type message (title rules, rip checks, causes).",
+    "label": "The display name of a value (an outcome, a mode, a drive state).",
+    "issue": "A configuration validation issue (ConfigValidator, with a JSON path).",
+    "problem": "A ProblemService kind: shown as a banner until it is cleared. Problems can also be errors.",
+    "notification": "Title or body of a notification.",
+    "note": "Text of an INCOMPLETE / READ ERRORS note file.",
+    "decision": "A question a job asks (AwaitingDecision)."
+  },
+  "paramTypes": {
+    "string": "Text, shown as is.",
+    "int": "An integer; may be used with plural.",
+    "bool": "true / false; used with select (keys true and other).",
+    "path": "A file or folder path, shown as is.",
+    "bytes": "A byte count, rendered with {x, bytes} like a file manager (1.2 GB).",
+    "duration": "Seconds, rendered with {x, duration} as h:mm:ss (m:ss under an hour) or with {x, durationPrecise} as h:mm:ss.sss.",
+    "day": "A calendar day, YYYY-MM-DD, rendered as the locale's short date (en: as is).",
+    "list": "A list of strings, rendered joined with ', '.",
+    "message": "A nested BroMessage {code, params}, rendered from the catalogue.",
+    "messages": "A list of BroMessages, rendered and joined with '; '."
+  },
+  "rendering": [
+    "Texts are ICU MessageFormat: {x}, {x, plural, one {…} other {…}} (also =0), {x, select, a {…} other {…}}, plus the custom formats bytes, duration and durationPrecise.",
+    "A BroError with a cause renders as '<error> (<cause>)'.",
+    "MakeMKV's own messages (makemkv.message) keep MakeMKV's English text; they are not translated.",
+    "File and folder names made by Naming (archive names, episode fallbacks) are never translated: they are part of the archive format."
+  ],
+  "codes": {
+    "job.started": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "jobId": "string"
+      },
+      "today": "JobRunner.run: \"Bromelia job …\""
+    },
+    "job.source": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "mode": "string",
+        "source": "string",
+        "profile": "string"
+      },
+      "today": "JobRunner.run: \"<mode> from <source> using configuration “<drive>”\""
+    },
+    "job.finished": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "outcome": "string",
+        "elapsed": "duration"
+      },
+      "today": "JobRunner.run: \"Finished: <state> in <time>\""
+    },
+    "job.cancelledByUser": {
+      "kind": "error",
+      "severity": "warning",
+      "today": "JobRunner.run: \"Cancelled by user\" / \"Job cancelled\""
+    },
+    "job.notFound": {
+      "kind": "error",
+      "data": {
+        "jobId": "string"
+      },
+      "http": 404,
+      "today": "AppModel.webAction: \"No such job\""
+    },
+    "job.notRetryable": {
+      "kind": "error",
+      "http": 409
+    },
+    "job.notAwaitingDecision": {
+      "kind": "error",
+      "http": 409
+    },
+    "job.notQueued": {
+      "kind": "error",
+      "http": 409
+    },
+    "job.unknownStep": {
+      "kind": "error",
+      "params": {
+        "step": "string"
+      },
+      "http": 400
+    },
+    "job.op.starting": {
+      "kind": "progress",
+      "today": "JobRunner.run phase \"Starting\""
+    },
+    "job.op.cancelling": {
+      "kind": "progress",
+      "today": "JobRunner.cancel phase"
+    },
+    "job.op.automatic": {
+      "kind": "progress",
+      "today": "AppModel phase \"Automatic rip\""
+    },
+    "outcome.succeeded": {
+      "kind": "label",
+      "today": "JobState.label"
+    },
+    "outcome.succeededWithReadErrors": {
+      "kind": "label",
+      "today": "JobState.label"
+    },
+    "outcome.succeededStepsFailed": {
+      "kind": "label"
+    },
+    "outcome.failed": {
+      "kind": "label",
+      "today": "JobState.label"
+    },
+    "outcome.cancelled": {
+      "kind": "label",
+      "today": "JobState.label"
+    },
+    "outcome.skipped": {
+      "kind": "label"
+    },
+    "outcome.interrupted": {
+      "kind": "label"
+    },
+    "jobState.queued": {
+      "kind": "label"
+    },
+    "jobState.waitingForResources": {
+      "kind": "label"
+    },
+    "jobState.running": {
+      "kind": "label"
+    },
+    "jobState.blocked": {
+      "kind": "label"
+    },
+    "jobState.awaitingDecision": {
+      "kind": "label"
+    },
+    "jobState.finished": {
+      "kind": "label"
+    },
+    "mode.mkv": {
+      "kind": "label",
+      "today": "RipMode.label"
+    },
+    "modeShort.mkv": {
+      "kind": "label",
+      "today": "RipMode.shortLabel"
+    },
+    "mode.backup": {
+      "kind": "label",
+      "today": "RipMode.label"
+    },
+    "modeShort.backup": {
+      "kind": "label",
+      "today": "RipMode.shortLabel"
+    },
+    "mode.backupDecrypted": {
+      "kind": "label",
+      "today": "RipMode.label"
+    },
+    "modeShort.backupDecrypted": {
+      "kind": "label",
+      "today": "RipMode.shortLabel"
+    },
+    "mode.backupThenMkv": {
+      "kind": "label",
+      "today": "RipMode.label"
+    },
+    "modeShort.backupThenMkv": {
+      "kind": "label",
+      "today": "RipMode.shortLabel"
+    },
+    "mode.infoOnly": {
+      "kind": "label",
+      "today": "RipMode.label"
+    },
+    "modeShort.infoOnly": {
+      "kind": "label",
+      "today": "RipMode.shortLabel"
+    },
+    "mode.audioCD": {
+      "kind": "label",
+      "today": "RipMode.label"
+    },
+    "modeShort.audioCD": {
+      "kind": "label",
+      "today": "RipMode.shortLabel"
+    },
+    "mode.dataImage": {
+      "kind": "label",
+      "today": "RipMode.label"
+    },
+    "modeShort.dataImage": {
+      "kind": "label",
+      "today": "RipMode.shortLabel"
+    },
+    "driveState.empty": {
+      "kind": "label",
+      "today": "DriveState.displayName"
+    },
+    "driveState.trayOpen": {
+      "kind": "label",
+      "today": "DriveState.displayName"
+    },
+    "driveState.present": {
+      "kind": "label",
+      "today": "DriveState.displayName"
+    },
+    "driveState.loading": {
+      "kind": "label",
+      "today": "DriveState.displayName"
+    },
+    "driveState.unavailable": {
+      "kind": "label",
+      "today": "DriveState.displayName"
+    },
+    "driveState.unmounting": {
+      "kind": "label",
+      "today": "DriveState.displayName"
+    },
+    "process.command": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "command": "string"
+      },
+      "today": "\"$ <command line>\""
+    },
+    "process.output": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "line": "string"
+      },
+      "today": "raw tool output lines"
+    },
+    "process.couldNotStart": {
+      "kind": "error",
+      "params": {
+        "tool": "string",
+        "reason": "string"
+      },
+      "today": "JobRunner: \"Could not start makemkvcon: …\" / \"Could not start <tool>: …\""
+    },
+    "process.stalled": {
+      "kind": "error",
+      "params": {
+        "tool": "string",
+        "minutes": "int"
+      },
+      "today": "JobRunner.executeOtherDisc"
+    },
+    "process.abandoned": {
+      "kind": "error",
+      "params": {
+        "tool": "string"
+      },
+      "today": "ProcessRunner abandoned flag"
+    },
+    "process.failed": {
+      "kind": "error",
+      "params": {
+        "tool": "string",
+        "status": "int"
+      },
+      "today": "JobRunner.executeOtherDisc"
+    },
+    "process.savedNothing": {
+      "kind": "error",
+      "params": {
+        "tool": "string"
+      },
+      "today": "JobRunner.executeOtherDisc"
+    },
+    "process.exitStatus": {
+      "kind": "reason",
+      "params": {
+        "status": "int"
+      },
+      "today": "RunSummary.reason fallback"
+    },
+    "process.timedOut": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "label": "string",
+        "seconds": "int"
+      },
+      "today": "PostProcessor.invoke"
+    },
+    "process.exited": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "label": "string",
+        "status": "int"
+      },
+      "today": "PostProcessor.invoke"
+    },
+    "makemkv.message": {
+      "kind": "log",
+      "params": {
+        "text": "string"
+      },
+      "data": {
+        "makemkvCode": "int"
+      },
+      "today": "every robot MSG line; the text is MakeMKV's own (not translated)"
+    },
+    "makemkv.notFound": {
+      "kind": "problem",
+      "http": 503,
+      "today": "AppModel: \"makemkvcon was not found…\""
+    },
+    "makemkv.keyExpired": {
+      "kind": "problem",
+      "today": "MakeMKVNotice.explanation (5052, 5055)"
+    },
+    "makemkv.evaluationNotStarted": {
+      "kind": "problem",
+      "today": "MakeMKVNotice.explanation"
+    },
+    "makemkv.tooOld": {
+      "kind": "problem",
+      "today": "MakeMKVNotice.explanation (5021)"
+    },
+    "makemkv.libreDrive": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "detail": "string"
+      },
+      "today": "MakeMKVNotice.explanation (1011)"
+    },
+    "makemkv.libreDriveRequired": {
+      "kind": "error",
+      "today": "MakeMKVNotice.explanation (2024)"
+    },
+    "makemkv.stalled": {
+      "kind": "error",
+      "params": {
+        "minutes": "int",
+        "abandoned": "bool"
+      },
+      "today": "JobRunner.runMakeMKV"
+    },
+    "makemkv.settingsFile": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.execute"
+    },
+    "makemkv.profileFile": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.execute"
+    },
+    "makemkv.registryValues": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "profile": "string"
+      },
+      "today": "Windows MakeMKV.cs"
+    },
+    "makemkv.guiRunning": {
+      "kind": "log",
+      "severity": "warning",
+      "today": "README Limitations (Windows); new: RegistrySwapIsolation warns (plan §10.3)"
+    },
+    "makemkv.betaKey.updated": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "keyPrefix": "string",
+        "result": "string"
+      },
+      "today": "AppModel.installBetaKey"
+    },
+    "makemkv.betaKey.fetchFailed": {
+      "kind": "error",
+      "params": {
+        "reason": "message"
+      },
+      "today": "AppModel.installBetaKey"
+    },
+    "makemkv.betaKey.http": {
+      "kind": "reason",
+      "params": {
+        "status": "int"
+      },
+      "today": "BetaKey.fetch"
+    },
+    "makemkv.betaKey.notFound": {
+      "kind": "reason",
+      "today": "BetaKey.fetch"
+    },
+    "makemkv.betaKey.purchasedKept": {
+      "kind": "log",
+      "severity": "info",
+      "today": "BetaKey.mayReplace"
+    },
+    "makemkv.register.ok": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "text": "string"
+      },
+      "today": "AppModel.register"
+    },
+    "makemkv.register.failed": {
+      "kind": "error",
+      "params": {
+        "text": "string"
+      },
+      "today": "AppModel.register"
+    },
+    "makemkv.driveScanFailed": {
+      "kind": "error",
+      "params": {
+        "reason": "message"
+      },
+      "today": "AppModel.rescan"
+    },
+    "makemkv.titleProgress": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "name": "string"
+      },
+      "today": "JobRunner.handle PRGT"
+    },
+    "disc.op.reading": {
+      "kind": "progress",
+      "today": "JobRunner.scanDisc phase"
+    },
+    "disc.readingAgain": {
+      "kind": "log",
+      "severity": "info",
+      "today": "JobRunner.execute"
+    },
+    "disc.usingOpenedListing": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "reason": "message"
+      },
+      "today": "JobRunner.execute (backups)"
+    },
+    "disc.continuingWithoutListing": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "reason": "message"
+      },
+      "today": "JobRunner.execute (backups)"
+    },
+    "disc.changed": {
+      "kind": "error",
+      "params": {
+        "why": "message"
+      },
+      "http": 409,
+      "today": "JobRunner.execute"
+    },
+    "disc.changed.volume": {
+      "kind": "reason",
+      "params": {
+        "old": "string",
+        "new": "string"
+      },
+      "today": "ListingMatcher.differentDisc"
+    },
+    "disc.changed.titles": {
+      "kind": "reason",
+      "today": "ListingMatcher.differentDisc"
+    },
+    "disc.changed.generation": {
+      "kind": "reason",
+      "today": "new: RecoveryService and AwaitMedia (plan §20.4)"
+    },
+    "disc.titleNotInListing": {
+      "kind": "error",
+      "params": {
+        "title": "int"
+      },
+      "today": "ListingMatcher.map"
+    },
+    "disc.titleGone": {
+      "kind": "error",
+      "params": {
+        "title": "int",
+        "duration": "string",
+        "source": "string"
+      },
+      "today": "ListingMatcher.map"
+    },
+    "disc.tracksChanged": {
+      "kind": "error",
+      "params": {
+        "title": "int"
+      },
+      "today": "ListingMatcher.map"
+    },
+    "disc.noTitles": {
+      "kind": "error",
+      "params": {
+        "source": "string",
+        "reason": "message"
+      },
+      "today": "JobRunner.scanDisc"
+    },
+    "disc.found": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int",
+        "name": "string"
+      },
+      "today": "JobRunner.scanDisc"
+    },
+    "disc.titleNumbersChanged": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "changes": "list"
+      },
+      "today": "JobRunner.applyTitleMap"
+    },
+    "disc.noInformation": {
+      "kind": "error",
+      "today": "JobRunner.execute"
+    },
+    "disc.notVideo": {
+      "kind": "error",
+      "params": {
+        "drive": "string"
+      },
+      "http": 409,
+      "today": "AppModel.quickRip"
+    },
+    "disc.waitingForMount": {
+      "kind": "progress",
+      "today": "JobRunner.execute phase"
+    },
+    "disc.mounted": {
+      "kind": "log",
+      "severity": "info",
+      "today": "JobRunner.execute"
+    },
+    "disc.notMounted": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "seconds": "int"
+      },
+      "today": "JobRunner.execute"
+    },
+    "disc.lookingForArchives": {
+      "kind": "progress",
+      "today": "JobRunner.checkAlreadyArchived phase"
+    },
+    "disc.archivedBefore": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "folder": "path",
+        "day": "day"
+      },
+      "today": "JobRunner.checkAlreadyArchived"
+    },
+    "disc.alreadyArchived": {
+      "kind": "error",
+      "params": {
+        "folder": "path",
+        "day": "day"
+      },
+      "data": {
+        "unitId": "string"
+      },
+      "today": "JobRunner.checkAlreadyArchived (skip)"
+    },
+    "disc.alreadyArchivedAsk": {
+      "kind": "error",
+      "params": {
+        "folder": "path",
+        "day": "day"
+      },
+      "data": {
+        "unitId": "string"
+      },
+      "today": "JobRunner.checkAlreadyArchived (ask)"
+    },
+    "titles.noneChosenExist": {
+      "kind": "error",
+      "today": "JobRunner.chooseTitles"
+    },
+    "titles.manualRequired": {
+      "kind": "error",
+      "params": {
+        "profile": "string"
+      },
+      "today": "JobRunner.chooseTitles"
+    },
+    "titles.noneMatched": {
+      "kind": "error",
+      "today": "JobRunner.chooseTitles"
+    },
+    "titles.selected": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "title": "int",
+        "duration": "string",
+        "chapters": "int"
+      },
+      "today": "JobRunner.chooseTitles"
+    },
+    "titles.skipped": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "title": "int",
+        "duration": "string",
+        "chapters": "int",
+        "reason": "message"
+      },
+      "today": "JobRunner.chooseTitles"
+    },
+    "titles.invalidInclude": {
+      "kind": "error",
+      "today": "TitleSelector.evaluate"
+    },
+    "titles.invalidExclude": {
+      "kind": "error",
+      "today": "TitleSelector.evaluate"
+    },
+    "titles.reason.selected": {
+      "kind": "reason",
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.excluded": {
+      "kind": "reason",
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.shorterThan": {
+      "kind": "reason",
+      "params": {
+        "duration": "string"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.longerThan": {
+      "kind": "reason",
+      "params": {
+        "duration": "string"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.fewerChapters": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.moreChapters": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.smallerThan": {
+      "kind": "reason",
+      "params": {
+        "mb": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.largerThan": {
+      "kind": "reason",
+      "params": {
+        "mb": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.noIncludeMatch": {
+      "kind": "reason",
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.excludeMatch": {
+      "kind": "reason",
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.alternateAngle": {
+      "kind": "reason",
+      "params": {
+        "angle": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.duplicateOf": {
+      "kind": "reason",
+      "params": {
+        "title": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.notLongest": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.notInPattern": {
+      "kind": "reason",
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.invalidPattern": {
+      "kind": "reason",
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.chooseManually": {
+      "kind": "reason",
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "titles.reason.overLimit": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "TitleSelector.evaluate reasons"
+    },
+    "rip.needsMkvmergeForTracks": {
+      "kind": "error",
+      "today": "JobRunner.execute"
+    },
+    "rip.ripping": {
+      "kind": "progress",
+      "params": {
+        "count": "int"
+      },
+      "today": "JobRunner.ripTitles phase"
+    },
+    "rip.rippingTitle": {
+      "kind": "progress",
+      "params": {
+        "title": "int",
+        "n": "int",
+        "of": "int"
+      },
+      "today": "JobRunner.ripTitles phase"
+    },
+    "rip.titleFailed": {
+      "kind": "log",
+      "severity": "error",
+      "params": {
+        "title": "string",
+        "reason": "message"
+      },
+      "today": "JobRunner.ripTitles"
+    },
+    "rip.failed": {
+      "kind": "error",
+      "params": {
+        "reason": "message"
+      },
+      "today": "JobRunner.ripTitles"
+    },
+    "rip.titlesFailed": {
+      "kind": "error",
+      "params": {
+        "count": "int",
+        "reasons": "messages"
+      },
+      "today": "JobRunner.ripTitles"
+    },
+    "rip.titleReason": {
+      "kind": "reason",
+      "params": {
+        "title": "string",
+        "reason": "message"
+      },
+      "today": "JobRunner.ripTitles"
+    },
+    "rip.keptUnderMakemkvName": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.ripTitles"
+    },
+    "rip.checkFailed": {
+      "kind": "log",
+      "severity": "error",
+      "params": {
+        "title": "int",
+        "problem": "message"
+      },
+      "today": "JobRunner.ripTitles"
+    },
+    "rip.readErrors": {
+      "kind": "error",
+      "params": {
+        "count": "int"
+      },
+      "today": "JobRunner.run"
+    },
+    "rip.onePass": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int",
+        "minLength": "int",
+        "others": "int"
+      },
+      "today": "JobRunner.onePassListing"
+    },
+    "rip.onePassMismatch": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "minLength": "int"
+      },
+      "today": "JobRunner.onePassListing"
+    },
+    "rip.onePassListing": {
+      "kind": "progress",
+      "today": "JobRunner.onePassListing phase"
+    },
+    "rip.renamed": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "from": "string",
+        "to": "string"
+      },
+      "today": "JobRunner.rename"
+    },
+    "rip.renameFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string",
+        "reason": "string"
+      },
+      "today": "JobRunner.rename"
+    },
+    "rip.discInfoWritten": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.writeDiscInfo (silent today)"
+    },
+    "ripcheck.cannotCheck": {
+      "kind": "log",
+      "severity": "warning",
+      "today": "JobRunner.verify"
+    },
+    "ripcheck.checking": {
+      "kind": "progress",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.verify phase"
+    },
+    "ripcheck.unreadable": {
+      "kind": "reason",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.verify"
+    },
+    "ripcheck.mismatch": {
+      "kind": "reason",
+      "params": {
+        "file": "string",
+        "problems": "messages"
+      },
+      "today": "JobRunner.verify"
+    },
+    "ripcheck.noTracks": {
+      "kind": "reason",
+      "today": "RipVerifier.check"
+    },
+    "ripcheck.noVideo": {
+      "kind": "reason",
+      "today": "RipVerifier.check"
+    },
+    "ripcheck.duration": {
+      "kind": "reason",
+      "params": {
+        "actual": "duration",
+        "expected": "duration"
+      },
+      "today": "RipVerifier.check"
+    },
+    "ripcheck.noDuration": {
+      "kind": "reason",
+      "today": "RipVerifier.check"
+    },
+    "ripcheck.moreTracks": {
+      "kind": "reason",
+      "params": {
+        "have": "int",
+        "listed": "int"
+      },
+      "today": "RipVerifier.check"
+    },
+    "ripcheck.chapters": {
+      "kind": "reason",
+      "params": {
+        "have": "int",
+        "listed": "int"
+      },
+      "today": "RipVerifier.check"
+    },
+    "ripcheck.note": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string",
+        "note": "message"
+      },
+      "today": "JobRunner.verify"
+    },
+    "ripcheck.checked": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string",
+        "duration": "duration",
+        "tracks": "int",
+        "chapters": "int"
+      },
+      "today": "JobRunner.verify"
+    },
+    "ripcheck.trackSubset": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string",
+        "have": "int",
+        "total": "int"
+      },
+      "today": "JobRunner.verify"
+    },
+    "remux.removing": {
+      "kind": "progress",
+      "today": "JobRunner.remux phase"
+    },
+    "remux.unreadable": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.remux"
+    },
+    "remux.layoutDiffers": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.remux"
+    },
+    "remux.kept": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "kept": "int",
+        "total": "int",
+        "file": "string"
+      },
+      "today": "JobRunner.remux"
+    },
+    "remux.replaceFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string",
+        "reason": "string"
+      },
+      "today": "JobRunner.remux"
+    },
+    "remux.failed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.remux"
+    },
+    "backup.needsDrive": {
+      "kind": "error",
+      "http": 400,
+      "today": "JobRunner.backup"
+    },
+    "backup.backingUp": {
+      "kind": "progress",
+      "params": {
+        "decrypted": "bool"
+      },
+      "today": "JobRunner.backup phase"
+    },
+    "backup.failed": {
+      "kind": "error",
+      "params": {
+        "reason": "message"
+      },
+      "today": "JobRunner.backup"
+    },
+    "backup.checkFailed": {
+      "kind": "error",
+      "params": {
+        "problem": "message"
+      },
+      "today": "JobRunner.backup"
+    },
+    "backup.saved": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.backup"
+    },
+    "backup.folderInsteadOfIso": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "folder": "string"
+      },
+      "today": "JobRunner.backup"
+    },
+    "backup.renamed": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "name": "string"
+      },
+      "today": "JobRunner.backup"
+    },
+    "backup.removed": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.execute (keepBackupAfterMKV off)"
+    },
+    "structure.notCreated": {
+      "kind": "reason",
+      "params": {
+        "name": "string"
+      },
+      "today": "BackupVerifier.problem"
+    },
+    "structure.isFolder": {
+      "kind": "reason",
+      "params": {
+        "name": "string"
+      },
+      "today": "BackupVerifier.problem"
+    },
+    "structure.unreadable": {
+      "kind": "reason",
+      "params": {
+        "name": "string"
+      },
+      "today": "BackupVerifier.problem"
+    },
+    "structure.notImage": {
+      "kind": "reason",
+      "params": {
+        "name": "string"
+      },
+      "today": "BackupVerifier.problem"
+    },
+    "structure.notFolder": {
+      "kind": "reason",
+      "params": {
+        "name": "string"
+      },
+      "today": "BackupVerifier.problem"
+    },
+    "structure.bdmvIndexMissing": {
+      "kind": "reason",
+      "today": "BackupVerifier.problem"
+    },
+    "structure.videoTsIfoMissing": {
+      "kind": "reason",
+      "today": "BackupVerifier.problem"
+    },
+    "structure.noDiscFolder": {
+      "kind": "reason",
+      "today": "BackupVerifier.problem"
+    },
+    "space.report": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "free": "bytes",
+        "need": "bytes"
+      },
+      "today": "JobRunner.checkFreeSpace"
+    },
+    "space.insufficient": {
+      "kind": "error",
+      "params": {
+        "path": "path",
+        "need": "bytes",
+        "free": "bytes"
+      },
+      "http": 507,
+      "today": "JobRunner.checkFreeSpace"
+    },
+    "space.makemkvWarning": {
+      "kind": "error",
+      "params": {
+        "text": "string"
+      },
+      "today": "JobRunner.runMakeMKV (message 5038)"
+    },
+    "drive.renumbered": {
+      "kind": "error",
+      "params": {
+        "index": "int",
+        "now": "string",
+        "expected": "string"
+      },
+      "today": "JobRunner.handle DRV"
+    },
+    "drive.ejecting": {
+      "kind": "progress",
+      "today": "JobRunner.run phase"
+    },
+    "drive.ejected": {
+      "kind": "log",
+      "severity": "info",
+      "today": "JobRunner.run"
+    },
+    "drive.ejectFailed": {
+      "kind": "error",
+      "severity": "warning",
+      "params": {
+        "device": "string"
+      },
+      "today": "JobRunner.run / AppModel.eject"
+    },
+    "drive.closeTrayFailed": {
+      "kind": "error",
+      "params": {
+        "drive": "string"
+      },
+      "today": "AppModel.closeTray"
+    },
+    "drive.closeTraysFailed": {
+      "kind": "error",
+      "today": "AppModel.closeAllTrays"
+    },
+    "drive.notFound": {
+      "kind": "error",
+      "data": {
+        "driveId": "string"
+      },
+      "http": 404,
+      "today": "AppModel.webAction"
+    },
+    "drive.noDisc": {
+      "kind": "error",
+      "http": 409,
+      "today": "AppModel.webAction"
+    },
+    "drive.busy": {
+      "kind": "error",
+      "http": 409,
+      "today": "AppModel.webAction / DiscSession \"The drive is busy with a job.\""
+    },
+    "episodes.readingMenus": {
+      "kind": "progress",
+      "today": "JobRunner.prepareEpisodes phase"
+    },
+    "episodes.cannotOpenVideoTs": {
+      "kind": "log",
+      "severity": "warning",
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.plan": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "title": "int",
+        "count": "int",
+        "starts": "list",
+        "lastEnd": "int",
+        "endRule": "string",
+        "hasTail": "bool",
+        "tail": "list"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.chapterMismatch": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "title": "int"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.notEpisodes": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "lengths": "list"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.readingNumbers": {
+      "kind": "progress",
+      "today": "JobRunner.prepareEpisodes phase"
+    },
+    "episodes.range": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "first": "int",
+        "last": "int",
+        "how": "message"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.how.typed": {
+      "kind": "reason",
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.how.menu": {
+      "kind": "reason",
+      "params": {
+        "numbers": "list"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.how.menuUnclear": {
+      "kind": "reason",
+      "params": {
+        "numbers": "list"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.how.ocrUnavailable": {
+      "kind": "reason",
+      "today": "EpisodeSplitter.ocrEpisodeNumbers"
+    },
+    "episodes.how.previousDisc": {
+      "kind": "reason",
+      "params": {
+        "last": "int",
+        "source": "string"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.how.fromOne": {
+      "kind": "reason",
+      "params": {
+        "why": "message"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.how.noNumber": {
+      "kind": "reason",
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.previousDiscGap": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "last": "int",
+        "source": "string",
+        "first": "int",
+        "how": "message"
+      },
+      "today": "JobRunner.prepareEpisodes"
+    },
+    "episodes.lookingForPrevious": {
+      "kind": "progress",
+      "today": "JobRunner.previousDisc phase"
+    },
+    "episodes.splitNeedsMkvmerge": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.splitEpisodes"
+    },
+    "episodes.splitting": {
+      "kind": "progress",
+      "today": "JobRunner.splitEpisodes phase"
+    },
+    "episodes.durationMismatch": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string",
+        "actual": "duration",
+        "expected": "duration"
+      },
+      "today": "JobRunner.splitEpisodes"
+    },
+    "episodes.chaptersMisaligned": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.splitEpisodes"
+    },
+    "episodes.splitFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.splitEpisodes"
+    },
+    "episodes.split": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string",
+        "count": "int",
+        "closingClip": "bool"
+      },
+      "today": "JobRunner.splitEpisodes"
+    },
+    "episodes.removedPlayAll": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.splitEpisodes"
+    },
+    "identity.resolved": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "kind": "string",
+        "name": "string",
+        "hasSet": "bool",
+        "set": "string",
+        "format": "string",
+        "formatCode": "string",
+        "reason": "message"
+      },
+      "today": "JobRunner.resolveIdentity"
+    },
+    "identity.reason.chosen": {
+      "kind": "reason",
+      "today": "MediaIdentity.resolve"
+    },
+    "identity.reason.labelMarkers": {
+      "kind": "reason",
+      "today": "MediaIdentity.resolve"
+    },
+    "identity.reason.menuEpisodes": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "MediaIdentity.resolve"
+    },
+    "identity.reason.episodeTitles": {
+      "kind": "reason",
+      "today": "MediaIdentity.resolve"
+    },
+    "identity.reason.none": {
+      "kind": "reason",
+      "today": "MediaIdentity.resolve"
+    },
+    "identity.reason.provider": {
+      "kind": "reason",
+      "params": {
+        "provider": "string",
+        "kind": "string"
+      },
+      "today": "JobRunner.resolveIdentity"
+    },
+    "identity.modeByFormat": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "format": "string",
+        "mode": "string"
+      },
+      "today": "JobRunner.execute (formatModes)"
+    },
+    "metadata.lookingUp": {
+      "kind": "progress",
+      "params": {
+        "query": "string"
+      },
+      "today": "JobRunner.lookUpMetadata phase"
+    },
+    "metadata.lookingUpId": {
+      "kind": "progress",
+      "params": {
+        "id": "string"
+      },
+      "today": "JobRunner.lookUpMetadata phase"
+    },
+    "metadata.match": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "provider": "string",
+        "label": "string",
+        "hasIds": "bool",
+        "ids": "list",
+        "how": "message"
+      },
+      "today": "JobRunner.use"
+    },
+    "metadata.how.chosen": {
+      "kind": "reason",
+      "today": "JobRunner.lookUpMetadata"
+    },
+    "metadata.how.only": {
+      "kind": "reason",
+      "today": "JobRunner.lookUpMetadata"
+    },
+    "metadata.how.best": {
+      "kind": "reason",
+      "params": {
+        "count": "int",
+        "others": "list",
+        "more": "bool"
+      },
+      "today": "JobRunner.lookUpMetadata"
+    },
+    "metadata.notFound": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "provider": "string",
+        "query": "string",
+        "hasYear": "bool",
+        "year": "int"
+      },
+      "today": "JobRunner.lookUpMetadata"
+    },
+    "metadata.idNotFound": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "provider": "string",
+        "id": "string"
+      },
+      "today": "JobRunner.lookUpMetadata"
+    },
+    "metadata.notAnId": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "text": "string"
+      },
+      "today": "JobRunner.lookUpMetadata"
+    },
+    "metadata.failed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "name": "string",
+        "reason": "message"
+      },
+      "today": "JobRunner.lookUpMetadata"
+    },
+    "metadata.http": {
+      "kind": "reason",
+      "params": {
+        "provider": "string",
+        "status": "int"
+      },
+      "today": "MetadataLookup"
+    },
+    "metadata.idUnsupported": {
+      "kind": "reason",
+      "params": {
+        "provider": "string",
+        "id": "string",
+        "omdb": "bool"
+      },
+      "today": "MetadataLookup.lookup"
+    },
+    "metadata.emptyAnswer": {
+      "kind": "reason",
+      "today": "MediaServerMetadata.download"
+    },
+    "metadata.episodeTitlesLooking": {
+      "kind": "progress",
+      "today": "JobRunner.lookUpEpisodeTitles phase"
+    },
+    "metadata.noEpisodes": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "provider": "string",
+        "season": "int",
+        "title": "string"
+      },
+      "today": "JobRunner.lookUpEpisodeTitles"
+    },
+    "metadata.seasonMissing": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "season": "int",
+        "title": "string",
+        "provider": "string",
+        "first": "int",
+        "last": "int",
+        "missing": "list"
+      },
+      "today": "JobRunner.lookUpEpisodeTitles"
+    },
+    "metadata.episodeTitles": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "provider": "string",
+        "season": "int",
+        "titles": "list"
+      },
+      "today": "JobRunner.lookUpEpisodeTitles"
+    },
+    "metadata.episodeTitlesFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "reason": "message"
+      },
+      "today": "JobRunner.lookUpEpisodeTitles"
+    },
+    "http.status": {
+      "kind": "reason",
+      "params": {
+        "status": "int"
+      },
+      "today": "NotificationSender / poster download"
+    },
+    "http.failed": {
+      "kind": "reason",
+      "params": {
+        "reason": "string"
+      },
+      "today": "the platform's network error text"
+    },
+    "publish.writing": {
+      "kind": "progress",
+      "today": "JobRunner.writeMediaServerMetadata phase"
+    },
+    "publish.written": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "files": "list",
+        "more": "int"
+      },
+      "today": "JobRunner.writeMediaServerMetadata"
+    },
+    "publish.writeFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "JobRunner.writeMediaServerMetadata"
+    },
+    "publish.posterFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "host": "string",
+        "reason": "message"
+      },
+      "today": "JobRunner.writeMediaServerMetadata"
+    },
+    "archive.outputFolder": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.prepareOutput"
+    },
+    "archive.hashing": {
+      "kind": "progress",
+      "today": "JobRunner.hashProducedFiles phase"
+    },
+    "archive.hashFailed": {
+      "kind": "error",
+      "params": {
+        "file": "string",
+        "reason": "string"
+      },
+      "today": "JobRunner.hashProducedFiles"
+    },
+    "archive.moving": {
+      "kind": "progress",
+      "today": "JobRunner.finishOutput phase"
+    },
+    "archive.moved": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int",
+        "path": "path"
+      },
+      "today": "JobRunner.finishOutput"
+    },
+    "archive.keptApart": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "count": "int",
+        "path": "path"
+      },
+      "today": "JobRunner.finishOutput"
+    },
+    "archive.moveFailed": {
+      "kind": "log",
+      "severity": "error",
+      "params": {
+        "item": "string",
+        "from": "path",
+        "reason": "string"
+      },
+      "today": "JobRunner.finishOutput"
+    },
+    "archive.someNotMoved": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.finishOutput"
+    },
+    "archive.checksumsWritten": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int",
+        "file": "string"
+      },
+      "today": "JobRunner.writeArchive"
+    },
+    "archive.writeFailed": {
+      "kind": "error",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "JobRunner.writeArchive"
+    },
+    "archive.recordWritten": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.writeArchiveRecord"
+    },
+    "archive.renameFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "JobRunner.markedFolder"
+    },
+    "archive.synced": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int"
+      },
+      "today": "new: SealStep (invariant I3, backlog 4)"
+    },
+    "archive.note.title": {
+      "kind": "note",
+      "params": {
+        "jobId": "string",
+        "outcome": "string"
+      },
+      "today": "JobRunner.writeNote"
+    },
+    "archive.note.notFinished": {
+      "kind": "note",
+      "today": "JobRunner.writeNote"
+    },
+    "archive.note.readErrors": {
+      "kind": "note",
+      "today": "JobRunner.writeNote"
+    },
+    "archive.note.logs": {
+      "kind": "note",
+      "params": {
+        "log": "string",
+        "hasMakemkv": "bool",
+        "makemkvLog": "string"
+      },
+      "today": "JobRunner.writeNote"
+    },
+    "archive.note.fullLog": {
+      "kind": "note",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.writeNote"
+    },
+    "commit.rolledForward": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "unit": "string"
+      },
+      "today": "new: LibraryService.rollForward (plan §22.3)"
+    },
+    "commit.merged": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int",
+        "path": "path"
+      },
+      "today": "JobRunner.finishOutput (media server merge)"
+    },
+    "commit.quarantined": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.finishOutput marked folders"
+    },
+    "library.offline": {
+      "kind": "problem",
+      "params": {
+        "library": "string",
+        "path": "path"
+      },
+      "http": 409,
+      "today": "new (backlog 1, invariant I2)"
+    },
+    "library.none": {
+      "kind": "problem",
+      "http": 409,
+      "today": "new (backlog 1)"
+    },
+    "library.back": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "library": "string"
+      },
+      "today": "new (backlog 1)"
+    },
+    "library.markerMismatch": {
+      "kind": "error",
+      "params": {
+        "path": "path",
+        "found": "string",
+        "expected": "string"
+      },
+      "http": 409,
+      "today": "new (backlog 1)"
+    },
+    "library.folderExists": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "http": 409,
+      "today": "JobRunner.resolveOutputDirectory (conflictPolicy skip)"
+    },
+    "library.notFound": {
+      "kind": "error",
+      "data": {
+        "libraryId": "string"
+      },
+      "http": 404
+    },
+    "library.pathMissing": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "http": 400,
+      "today": "AppModel.webAction verify"
+    },
+    "library.alreadyAttached": {
+      "kind": "error",
+      "params": {
+        "path": "path",
+        "library": "string"
+      },
+      "http": 409
+    },
+    "unit.notFound": {
+      "kind": "error",
+      "data": {
+        "unitId": "string"
+      },
+      "http": 404
+    },
+    "check.ok": {
+      "kind": "reason",
+      "params": {
+        "files": "int",
+        "unlisted": "int"
+      },
+      "today": "ArchiveVerifier.FolderCheck.summary"
+    },
+    "check.damaged": {
+      "kind": "reason",
+      "params": {
+        "parts": "messages",
+        "files": "int",
+        "unlisted": "int"
+      },
+      "today": "ArchiveVerifier.FolderCheck.summary"
+    },
+    "check.part.changed": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "ArchiveVerifier.FolderCheck.summary"
+    },
+    "check.part.unreadable": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "ArchiveVerifier.FolderCheck.summary"
+    },
+    "check.part.missing": {
+      "kind": "reason",
+      "params": {
+        "count": "int"
+      },
+      "today": "ArchiveVerifier.FolderCheck.summary"
+    },
+    "check.sumsUnreadable": {
+      "kind": "reason",
+      "today": "ArchiveVerifier.verify"
+    },
+    "check.sumsEmpty": {
+      "kind": "reason",
+      "today": "ArchiveVerifier.verify"
+    },
+    "check.alreadyRunning": {
+      "kind": "error",
+      "http": 409,
+      "today": "AppModel.webAction verify"
+    },
+    "check.verifying": {
+      "kind": "progress",
+      "params": {
+        "name": "string"
+      },
+      "today": "AppModel verify progress"
+    },
+    "check.damagedFound": {
+      "kind": "problem",
+      "params": {
+        "count": "int"
+      },
+      "today": "AppModel (a damaged folder is shown in the app)"
+    },
+    "check.notify.allOk": {
+      "kind": "notification",
+      "params": {
+        "total": "int"
+      },
+      "today": "AppModel.archiveCheckReport"
+    },
+    "check.notify.damaged": {
+      "kind": "notification",
+      "params": {
+        "damaged": "int",
+        "total": "int"
+      },
+      "today": "AppModel.archiveCheckReport"
+    },
+    "check.notify.everyFileMatches": {
+      "kind": "notification",
+      "today": "AppModel.archiveCheckReport"
+    },
+    "check.notify.more": {
+      "kind": "notification",
+      "params": {
+        "count": "int"
+      },
+      "today": "AppModel.archiveCheckReport"
+    },
+    "post.running": {
+      "kind": "progress",
+      "today": "JobRunner.run phase"
+    },
+    "post.handbrakeMissing": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "step": "string"
+      },
+      "today": "PostProcessor.run"
+    },
+    "post.noMkv": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "step": "string"
+      },
+      "today": "PostProcessor.run"
+    },
+    "post.cannotCreateFolder": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "step": "string",
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "PostProcessor.run"
+    },
+    "post.started": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "label": "string",
+        "command": "string"
+      },
+      "today": "PostProcessor.invoke"
+    },
+    "post.output": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "step": "string",
+        "line": "string"
+      },
+      "today": "PostProcessor.invoke"
+    },
+    "post.couldNotStart": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "label": "string",
+        "reason": "string"
+      },
+      "today": "PostProcessor.invoke"
+    },
+    "post.failed": {
+      "kind": "error",
+      "params": {
+        "name": "string"
+      },
+      "today": "JobRunner.run (failJobOnError)"
+    },
+    "post.queued": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int"
+      },
+      "today": "JobRunner.run"
+    },
+    "post.test": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "step": "string",
+        "unit": "string"
+      },
+      "today": "the editor's test run"
+    },
+    "step.notFound": {
+      "kind": "error",
+      "data": {
+        "stepId": "string"
+      },
+      "http": 404
+    },
+    "notify.badUrl": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "target": "string"
+      },
+      "today": "NotificationSender.send"
+    },
+    "notify.httpFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "host": "string",
+        "status": "int"
+      },
+      "today": "NotificationSender.send"
+    },
+    "notify.failed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "host": "string",
+        "reason": "string"
+      },
+      "today": "NotificationSender.send"
+    },
+    "notify.needsApprise": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "target": "string"
+      },
+      "today": "NotificationSender.send"
+    },
+    "notify.appriseFailed": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "status": "int"
+      },
+      "today": "NotificationSender.send"
+    },
+    "notify.title.job": {
+      "kind": "notification",
+      "params": {
+        "mode": "string",
+        "outcome": "string",
+        "what": "string"
+      },
+      "today": "JobRunner.notificationText"
+    },
+    "notify.body.saved": {
+      "kind": "notification",
+      "params": {
+        "count": "int",
+        "path": "path"
+      },
+      "today": "JobRunner.notificationText"
+    },
+    "notify.body.readErrors": {
+      "kind": "notification",
+      "params": {
+        "path": "path"
+      },
+      "today": "JobRunner.notificationText"
+    },
+    "notify.body.error": {
+      "kind": "notification",
+      "params": {
+        "error": "message"
+      },
+      "today": "JobRunner.notificationText (the job's error)"
+    },
+    "notify.test.title": {
+      "kind": "notification"
+    },
+    "notify.test.body": {
+      "kind": "notification",
+      "params": {
+        "target": "string"
+      }
+    },
+    "notify.notFound": {
+      "kind": "error",
+      "data": {
+        "targetId": "string"
+      },
+      "http": 404
+    },
+    "other.needsDrive": {
+      "kind": "error",
+      "params": {
+        "mode": "string"
+      },
+      "http": 400,
+      "today": "JobRunner.executeOtherDisc"
+    },
+    "other.audioNeedsRipper": {
+      "kind": "error",
+      "params": {
+        "platform": "string"
+      },
+      "today": "JobRunner.executeOtherDisc (and the Windows text)"
+    },
+    "other.rippingAudio": {
+      "kind": "progress",
+      "today": "JobRunner.executeOtherDisc phase"
+    },
+    "other.copyingData": {
+      "kind": "progress",
+      "today": "JobRunner.executeOtherDisc phase"
+    },
+    "other.imageCheckFailed": {
+      "kind": "error",
+      "params": {
+        "problem": "message"
+      },
+      "today": "JobRunner.executeOtherDisc"
+    },
+    "other.readError": {
+      "kind": "error",
+      "params": {
+        "offset": "int",
+        "reason": "string"
+      },
+      "today": "data-disc copy (OtherDiscTools; 'A read error fails the job')"
+    },
+    "session.opening": {
+      "kind": "progress",
+      "today": "AppModel.open phase"
+    },
+    "session.noTitlesHere": {
+      "kind": "error",
+      "today": "AppModel.open"
+    },
+    "session.noTitles": {
+      "kind": "error",
+      "params": {
+        "status": "int"
+      },
+      "today": "AppModel.open"
+    },
+    "session.openingContainer": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string",
+        "source": "string"
+      },
+      "today": "AppModel.openFile"
+    },
+    "session.notOpen": {
+      "kind": "error",
+      "http": 409,
+      "today": "AppModel.webAction rip"
+    },
+    "session.noTitlesChosen": {
+      "kind": "error",
+      "http": 400,
+      "today": "AppModel.webAction rip"
+    },
+    "session.nothingToRip": {
+      "kind": "error",
+      "http": 409,
+      "today": "AppModel.webAction rip"
+    },
+    "session.notFound": {
+      "kind": "error",
+      "data": {
+        "sessionId": "string"
+      },
+      "http": 404
+    },
+    "session.stale": {
+      "kind": "error",
+      "params": {
+        "current": "int"
+      },
+      "http": 409,
+      "today": "new: SessionService.patch (plan §15.3)"
+    },
+    "session.cancelled": {
+      "kind": "error",
+      "today": "AppModel.open"
+    },
+    "decision.archivedBefore": {
+      "kind": "decision",
+      "params": {
+        "folder": "path",
+        "day": "day"
+      },
+      "today": "disc page: \"archived before\" prompt; automation.alreadyArchived = ask"
+    },
+    "decision.continueInterrupted": {
+      "kind": "decision",
+      "params": {
+        "title": "string",
+        "step": "string"
+      },
+      "today": "new: RecoveryService (plan §15.8)"
+    },
+    "decision.ambiguousLookup": {
+      "kind": "decision",
+      "params": {
+        "count": "int",
+        "query": "string"
+      },
+      "today": "new: DecideStep (plan §20.1)"
+    },
+    "decision.answer.ripAgain": {
+      "kind": "label"
+    },
+    "decision.answer.skip": {
+      "kind": "label"
+    },
+    "decision.answer.eject": {
+      "kind": "label"
+    },
+    "decision.answer.continue": {
+      "kind": "label"
+    },
+    "decision.answer.startOver": {
+      "kind": "label"
+    },
+    "recovery.interrupted": {
+      "kind": "error",
+      "params": {
+        "step": "string"
+      },
+      "today": "UnfinishedJobs: \"Interrupted: Bromelia stopped while this job was running; …\""
+    },
+    "recovery.requeued": {
+      "kind": "log",
+      "severity": "info",
+      "today": "new: RecoveryService (plan §20.4)"
+    },
+    "recovery.resumed": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "step": "string"
+      },
+      "today": "new: RecoveryService"
+    },
+    "recovery.resumedFromBackup": {
+      "kind": "log",
+      "severity": "info",
+      "today": "new: plan §15.8"
+    },
+    "recovery.summary": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "count": "int"
+      },
+      "today": "AppModel: \"Bromelia stopped last time with N unfinished job(s); …\""
+    },
+    "config.invalid": {
+      "kind": "problem",
+      "params": {
+        "count": "int"
+      },
+      "http": 422,
+      "today": "new: ConfigService.load (plan §15.1)"
+    },
+    "config.unknownKey": {
+      "kind": "issue",
+      "today": "decoders ignore unknown keys today, silently"
+    },
+    "config.required": {
+      "kind": "issue"
+    },
+    "config.invalidValue": {
+      "kind": "issue",
+      "params": {
+        "value": "string"
+      }
+    },
+    "config.invalidRegex": {
+      "kind": "issue",
+      "today": "PluginMatcher.validate / TitleSelector"
+    },
+    "config.invalidIndexPattern": {
+      "kind": "issue",
+      "today": "TitleSelector"
+    },
+    "config.unknownReference": {
+      "kind": "issue",
+      "params": {
+        "kind": "string",
+        "id": "string"
+      }
+    },
+    "config.duplicateId": {
+      "kind": "issue",
+      "params": {
+        "id": "string"
+      }
+    },
+    "config.secretInline": {
+      "kind": "issue",
+      "http": 422
+    },
+    "config.secretMissing": {
+      "kind": "issue",
+      "params": {
+        "name": "string"
+      }
+    },
+    "config.networkNeedsToken": {
+      "kind": "issue",
+      "today": "WebAccess.startProblem"
+    },
+    "config.portInvalid": {
+      "kind": "issue",
+      "params": {
+        "port": "int"
+      },
+      "today": "WebAccess.startProblem / Headless.parse"
+    },
+    "config.tlsNeedsBoth": {
+      "kind": "issue",
+      "today": "WebAccess.startProblem"
+    },
+    "config.notVideoMode": {
+      "kind": "issue"
+    },
+    "config.versionConflict": {
+      "kind": "error",
+      "params": {
+        "current": "int"
+      },
+      "http": 409
+    },
+    "config.rejected": {
+      "kind": "error",
+      "params": {
+        "count": "int"
+      },
+      "http": 422
+    },
+    "config.unknownMode": {
+      "kind": "error",
+      "params": {
+        "mode": "string"
+      },
+      "http": 400,
+      "today": "AppModel.webAction settings"
+    },
+    "config.driveNotFound": {
+      "kind": "error",
+      "data": {
+        "id": "string"
+      },
+      "http": 404,
+      "today": "AppModel.webAction settings"
+    },
+    "config.saveFailed": {
+      "kind": "error",
+      "params": {
+        "reason": "string"
+      },
+      "today": "ConfigStore.save (NSLog today)"
+    },
+    "config.migrated": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "from": "int"
+      }
+    },
+    "config.migration.valueDropped": {
+      "kind": "issue",
+      "params": {
+        "value": "string"
+      }
+    },
+    "config.badBundle": {
+      "kind": "error",
+      "http": 400
+    },
+    "server.tokenRequired": {
+      "kind": "error",
+      "http": 401,
+      "today": "WebAccess.allowed"
+    },
+    "server.hostNotAllowed": {
+      "kind": "error",
+      "http": 403,
+      "today": "WebAccess.allowed"
+    },
+    "server.headerMissing": {
+      "kind": "error",
+      "http": 403,
+      "today": "WebAccess.allowed"
+    },
+    "server.originNotAllowed": {
+      "kind": "error",
+      "http": 403,
+      "today": "new (plan §25)"
+    },
+    "server.readOnlyToken": {
+      "kind": "error",
+      "http": 403,
+      "today": "new: scoped tokens (plan §25)"
+    },
+    "server.notFound": {
+      "kind": "error",
+      "http": 404,
+      "today": "WebServer.handle"
+    },
+    "server.methodNotAllowed": {
+      "kind": "error",
+      "http": 405,
+      "today": "WebServer.respond 405"
+    },
+    "server.badRequest": {
+      "kind": "error",
+      "params": {
+        "detail": "string"
+      },
+      "http": 400
+    },
+    "server.pageMissing": {
+      "kind": "error",
+      "http": 404,
+      "today": "WebServer.handle"
+    },
+    "server.startFailed": {
+      "kind": "problem",
+      "params": {
+        "reason": "message"
+      },
+      "today": "WebServer.apply lastError"
+    },
+    "server.listening": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "url": "string"
+      },
+      "today": "Headless: \"Web page: http://…\""
+    },
+    "server.stopping": {
+      "kind": "error",
+      "http": 503
+    },
+    "tls.cannotRead": {
+      "kind": "reason",
+      "params": {
+        "path": "path"
+      },
+      "today": "WebTLS"
+    },
+    "tls.opensslFailed": {
+      "kind": "reason",
+      "params": {
+        "detail": "string"
+      },
+      "today": "WebTLS"
+    },
+    "tls.importFailed": {
+      "kind": "reason",
+      "params": {
+        "detail": "string"
+      },
+      "today": "WebTLS"
+    },
+    "tls.keychainFailed": {
+      "kind": "reason",
+      "params": {
+        "status": "int"
+      },
+      "today": "WebTLS"
+    },
+    "tls.unusable": {
+      "kind": "reason",
+      "today": "WebTLS"
+    },
+    "host.alreadyRunning": {
+      "kind": "error",
+      "params": {
+        "pid": "int"
+      },
+      "today": "new: run/engine.lock (plan §7.1); replaces automation.lock"
+    },
+    "host.unknownOption": {
+      "kind": "error",
+      "params": {
+        "option": "string"
+      },
+      "today": "Headless.parse / Options.Parse"
+    },
+    "host.optionNeedsValue": {
+      "kind": "error",
+      "params": {
+        "option": "string"
+      },
+      "today": "Headless.parse / Options.Parse"
+    },
+    "host.started": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "version": "string",
+        "config": "path"
+      },
+      "today": "Headless.run"
+    },
+    "host.library": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "name": "string",
+        "path": "path",
+        "online": "bool"
+      },
+      "today": "Headless: \"Output folder: …\""
+    },
+    "host.stopping": {
+      "kind": "log",
+      "severity": "info",
+      "today": "Headless.stop"
+    },
+    "host.serviceInstalled": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "path": "path",
+        "log": "path"
+      },
+      "today": "Headless --install-agent"
+    },
+    "host.serviceRemoved": {
+      "kind": "log",
+      "severity": "info",
+      "today": "Headless --uninstall-agent"
+    },
+    "host.serviceFailed": {
+      "kind": "error",
+      "params": {
+        "reason": "string"
+      },
+      "today": "LaunchAgent.install"
+    },
+    "host.cannotFindProgram": {
+      "kind": "error",
+      "today": "LaunchAgent.install"
+    },
+    "host.stopRequested": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "who": "string"
+      },
+      "today": "new: EngineAPI.stop"
+    },
+    "power.unavailable": {
+      "kind": "problem",
+      "params": {
+        "reason": "string"
+      },
+      "today": "bro-sleep.c (systemd-logind)"
+    },
+    "tool.missing": {
+      "kind": "problem",
+      "params": {
+        "tool": "string"
+      },
+      "http": 503
+    },
+    "tool.version": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "tool": "string",
+        "version": "string",
+        "path": "path"
+      }
+    },
+    "replica.lagging": {
+      "kind": "problem",
+      "params": {
+        "count": "int",
+        "target": "string"
+      },
+      "today": "new (backlog 2)"
+    },
+    "replica.verifyFailed": {
+      "kind": "error",
+      "params": {
+        "target": "string",
+        "summary": "message"
+      },
+      "today": "new (backlog 2)"
+    },
+    "repair.repaired": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string",
+        "source": "string"
+      },
+      "today": "new (backlog 3)"
+    },
+    "repair.impossible": {
+      "kind": "error",
+      "params": {
+        "file": "string"
+      },
+      "today": "new (backlog 3)"
+    },
+    "internal.unexpected": {
+      "kind": "error",
+      "params": {
+        "detail": "string"
+      },
+      "http": 500,
+      "today": "new (plan §16)"
+    }
+  }
+}
