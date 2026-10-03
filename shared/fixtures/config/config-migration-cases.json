@@ -2,6 +2,7 @@
   "comment": "ConfigMigration.upgrade: each input (a v1 or v2 document) must give exactly this v3 document, these secrets (to be stored with setSecret) and these issues. Compare documents after expanding defaults (ConfigCodec.decode → encode), so omitted defaults don't matter. The rules are in shared/schema/config-migration-2-3.json.",
   "cases": [
     {
+      "id": "v2-everything",
       "what": "every v2 key",
       "input": "config2-everything.json",
       "expect": "config2-everything.expected-v3.json",
@@ -15,6 +16,7 @@
       "issues": []
     },
     {
+      "id": "v1-naming",
       "what": "version 1: untouched templates get the v2 defaults, changed ones are kept (macOS NamingTests.upgradesVersion1Naming)",
       "inputJson": {
         "version": 1,
@@ -102,6 +104,7 @@
       "issues": []
     },
     {
+      "id": "v2-empty-template",
       "what": "version 2 keeps an explicitly empty file name template (MakeMKV's names)",
       "inputJson": {
         "version": 2,
@@ -134,6 +137,7 @@
       "issues": []
     },
     {
+      "id": "v2-partial",
       "what": "a partial v2 document written by another platform: defaults fill the rest, unknown keys are dropped (Windows ReadsConfigWrittenByMacVersion, Linux /config/json, macOS decodesPartialJSON)",
       "inputJson": {
         "outputRoot": "/rips",

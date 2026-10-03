@@ -10,7 +10,7 @@
       "from": [
         "shared/fixtures/rip-outcomes.json",
         "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
-        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "windows RecordedRunTests.EveryRecordedRunEndsAsExpected",
         "linux /reliability/recorded-runs"
       ],
       "given": {
@@ -30,7 +30,7 @@
       "from": [
         "shared/fixtures/rip-outcomes.json",
         "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
-        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "windows RecordedRunTests.EveryRecordedRunEndsAsExpected",
         "linux /reliability/recorded-runs"
       ],
       "given": {
@@ -50,7 +50,7 @@
       "from": [
         "shared/fixtures/rip-outcomes.json",
         "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
-        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "windows RecordedRunTests.EveryRecordedRunEndsAsExpected",
         "linux /reliability/recorded-runs"
       ],
       "given": {
@@ -70,7 +70,7 @@
       "from": [
         "shared/fixtures/rip-outcomes.json",
         "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
-        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "windows RecordedRunTests.EveryRecordedRunEndsAsExpected",
         "linux /reliability/recorded-runs"
       ],
       "given": {
@@ -90,7 +90,7 @@
       "from": [
         "shared/fixtures/rip-outcomes.json",
         "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
-        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "windows RecordedRunTests.EveryRecordedRunEndsAsExpected",
         "linux /reliability/recorded-runs"
       ],
       "given": {
@@ -110,7 +110,7 @@
       "from": [
         "shared/fixtures/rip-outcomes.json",
         "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
-        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "windows RecordedRunTests.EveryRecordedRunEndsAsExpected",
         "linux /reliability/recorded-runs"
       ],
       "given": {
@@ -130,7 +130,7 @@
       "from": [
         "shared/fixtures/rip-outcomes.json",
         "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
-        "windows SafetyTests.EveryRecordedRunEndsAsExpected",
+        "windows RecordedRunTests.EveryRecordedRunEndsAsExpected",
         "linux /reliability/recorded-runs"
       ],
       "given": {

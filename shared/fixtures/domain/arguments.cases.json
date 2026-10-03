@@ -226,7 +226,7 @@
       "id": "run-condition-6",
       "from": [
         "macos RipCheckTests.stepsForJobsWithReadErrors",
-        "windows SafetyTests.StepsForJobsWithReadErrors",
+        "windows RipCheckTests.StepsForJobsWithReadErrors",
         "linux /safety/errors-state"
       ],
       "given": {
@@ -243,7 +243,7 @@
       "id": "run-condition-7",
       "from": [
         "macos RipCheckTests.stepsForJobsWithReadErrors",
-        "windows SafetyTests.StepsForJobsWithReadErrors",
+        "windows RipCheckTests.StepsForJobsWithReadErrors",
         "linux /safety/errors-state"
       ],
       "given": {

@@ -18,7 +18,7 @@
       "id": "settings-parse",
       "from": [
         "macos MakeMKVFileTests.settingsRoundTrip",
-        "windows MakeMKVFileTests.SettingsRoundTrip",
+        "windows FileFormatTests.SettingsRoundTrip",
         "linux /makemkv/settings-conf"
       ],
       "given": {
@@ -37,7 +37,7 @@
       "id": "profile-xml",
       "from": [
         "macos MakeMKVFileTests.profileIsWellFormedXML",
-        "windows MakeMKVFileTests.ProfileIsWellFormed",
+        "windows FileFormatTests.ProfileIsWellFormed",
         "linux /makemkv/profile"
       ],
       "given": {
@@ -70,7 +70,7 @@
       "id": "settings-layers",
       "from": [
         "macos MakeMKVFileTests.environmentIsolatesSettings",
-        "windows MakeMKVFileTests.EnvironmentBuildsArguments",
+        "windows FileFormatTests.EnvironmentBuildsArguments",
         "linux /makemkv/environment",
         "macos ConfigurationTests.effectiveSettingsOverlay",
         "windows ConfigurationTests.EffectiveSettingsOverlay"
@@ -129,7 +129,7 @@
       "id": "args-info",
       "from": [
         "macos MakeMKVFileTests.environmentIsolatesSettings",
-        "windows MakeMKVFileTests.EnvironmentBuildsArguments",
+        "windows FileFormatTests.EnvironmentBuildsArguments",
         "linux /makemkv/environment"
       ],
       "given": {

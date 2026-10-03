@@ -86,7 +86,6 @@
       "id": "path-sanitised",
       "from": [
         "macos TemplateTests.rendersTokens",
-        "windows TemplateTests",
         "linux /logic/templates"
       ],
       "given": {
@@ -322,7 +321,7 @@
       "id": "track-label-dvd",
       "from": [
         "macos IdentityTests.trackLabels",
-        "windows ArchiveTests.TrackLabels",
+        "windows IdentityTests.TrackLabels",
         "linux /identity/naming"
       ],
       "given": {

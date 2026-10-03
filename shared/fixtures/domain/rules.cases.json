@@ -14,7 +14,7 @@
       "id": "match-1",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -33,7 +33,7 @@
       "id": "match-2",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -54,7 +54,7 @@
       "id": "match-3",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -75,7 +75,7 @@
       "id": "match-4",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -96,7 +96,7 @@
       "id": "match-5",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -120,7 +120,7 @@
       "id": "match-6",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -144,7 +144,7 @@
       "id": "match-7",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -168,7 +168,7 @@
       "id": "match-8",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {
@@ -192,7 +192,7 @@
       "id": "match-9",
       "from": [
         "macos NamingTests.pluginMatching",
-        "windows ArchiveTests.PluginMatching",
+        "windows NamingTests.PluginMatching",
         "linux /identity/plugins"
       ],
       "given": {

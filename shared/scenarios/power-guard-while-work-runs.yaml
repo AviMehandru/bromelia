@@ -1,7 +1,7 @@
 title: The computer is kept awake while a rip or a background step runs; turning preventSleep off releases it at once
 from:
   - macos ReliabilityTests.backgroundStepsKeepTheMacAwake
-  - windows SafetyTests.BackgroundStepsKeepTheComputerAwake
+  - windows ReliabilityTests.BackgroundStepsKeepTheComputerAwake
   - linux /reliability/keep-awake
   - docs/architecture.md#sleep
 given:

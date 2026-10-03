@@ -18,7 +18,7 @@
       "id": "probe-parse",
       "from": [
         "macos RipCheckTests.parsesMkvmergeJSON",
-        "windows SafetyTests.ParsesMkvmergeJson",
+        "windows RipCheckTests.ParsesMkvmergeJson",
         "linux /safety/rip-checks"
       ],
       "given": {
@@ -52,7 +52,7 @@
       "id": "check-matches",
       "from": [
         "macos RipCheckTests.acceptsMatchingFiles",
-        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes"
+        "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes"
       ],
       "given": {
         "probe": {
@@ -81,7 +81,7 @@
       "id": "check-1",
       "from": [
         "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
-        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes",
         "linux /safety/rip-checks"
       ],
       "given": {
@@ -112,7 +112,7 @@
       "id": "check-2",
       "from": [
         "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
-        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes",
         "linux /safety/rip-checks"
       ],
       "given": {
@@ -142,7 +142,7 @@
       "id": "check-3",
       "from": [
         "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
-        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes",
         "linux /safety/rip-checks"
       ],
       "given": {
@@ -170,7 +170,7 @@
       "id": "check-4",
       "from": [
         "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
-        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes",
         "linux /safety/rip-checks"
       ],
       "given": {
@@ -200,7 +200,7 @@
       "id": "check-5",
       "from": [
         "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
-        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes",
         "linux /safety/rip-checks"
       ],
       "given": {
@@ -228,7 +228,7 @@
       "id": "check-6",
       "from": [
         "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
-        "windows SafetyTests.AcceptsMatchingFilesAndRejectsWrongOnes",
+        "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes",
         "linux /safety/rip-checks"
       ],
       "given": {
@@ -466,7 +466,7 @@
       "id": "simple-chapters",
       "from": [
         "macos DVDNavigationTests.mapsChaptersToMKV",
-        "windows ArchiveTests.PicksFirstEpisodeAndMapsChapters"
+        "windows DvdNavigationTests.PicksFirstEpisodeAndMapsChapters"
       ],
       "given": {
         "text": "CHAPTER01=00:00:00.000\nCHAPTER01NAME=x\nCHAPTER02=00:23:36.815\n"
@@ -607,7 +607,7 @@
       "id": "backup-structure-1",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {
@@ -625,7 +625,7 @@
       "id": "backup-structure-2",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {
@@ -641,7 +641,7 @@
       "id": "backup-structure-3",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {
@@ -657,7 +657,7 @@
       "id": "backup-structure-4",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {
@@ -673,7 +673,7 @@
       "id": "backup-structure-5",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {
@@ -692,7 +692,7 @@
       "id": "backup-structure-6",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {
@@ -708,7 +708,7 @@
       "id": "backup-structure-7",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {
@@ -724,7 +724,7 @@
       "id": "backup-structure-8",
       "from": [
         "macos RipCheckTests.checksBackupStructure",
-        "windows SafetyTests.ChecksBackupStructure",
+        "windows RipCheckTests.ChecksBackupStructure",
         "linux /safety/backup-checks"
       ],
       "given": {

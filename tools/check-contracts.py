@@ -887,6 +887,162 @@ def _check_expect(ex, names, codes, what):
         code(c, "decision")
 
 
+# ---- coverage of today's tests and docs -----------------------------------------------
+
+def current_tests():
+    """Every test of today's three suites: 'macos Suite.test', 'windows Class.Test', 'linux /path'."""
+    tests = []
+    for p in sorted((ROOT / "macos" / "BromeliaTests").glob("*.swift")):
+        cur, pending = None, False
+        for line in p.read_text(encoding="utf-8").split("\n"):
+            m = re.match(r"\s*(?:struct|final class|class)\s+(\w+)", line)
+            if m:
+                cur = m.group(1)
+            st = line.strip()
+            if st.startswith("@Test") and "func " not in st:
+                pending = True
+                continue
+            m = re.match(r"\s*(?:@Test(?:\([^)]*\))?\s+)?func\s+(\w+)\s*\(", line)
+            if m and (st.startswith("@Test") or pending):
+                tests.append(f"macos {cur}.{m.group(1)}")
+                pending = False
+            elif pending and not (st[:1] in ("(", '"', "]", "@", "/") or st == "" or st.endswith(",")):
+                pending = False
+    for p in sorted((ROOT / "windows" / "tests").rglob("*.cs")):
+        if "/obj/" in str(p) or "/bin/" in str(p):
+            continue
+        cur, pending = None, False
+        for line in p.read_text(encoding="utf-8").split("\n"):
+            m = re.match(r"\s*public\s+(?:sealed\s+)?class\s+(\w+)", line)
+            if m:
+                cur = m.group(1)
+            st = line.strip()
+            if re.match(r"\[(Fact|Theory)", st):
+                pending = True
+                continue
+            if pending and (st.startswith("[") or st.startswith("///") or st == ""):
+                continue
+            m = re.match(r"\s*public\s+(?:async\s+)?(?:void|Task)\s+(\w+)\s*\(", line)
+            if m and pending:
+                tests.append(f"windows {cur}.{m.group(1)}")
+            pending = False
+    for p in sorted((ROOT / "linux" / "tests").glob("*.c")):
+        tests += [f"linux {m.group(1)}" for m in re.finditer(r'g_test_add_func \("([^"]+)"', p.read_text(encoding="utf-8"))]
+    return tests
+
+
+def _from_refs():
+    """Test name → items, from the 'from' fields of fixtures and scenarios."""
+    refs = {}
+    def add(test, item):
+        refs.setdefault(test, set()).add(item)
+    def walk(node, item_of):
+        if isinstance(node, dict):
+            frm = node.get("from")
+            if frm is not None:
+                for f in frm if isinstance(frm, list) else [frm]:
+                    m = re.match(r"^(macos|windows|linux) (\S+?)(?=[\s(;]|$)", str(f))
+                    if m:
+                        add(f"{m.group(1)} {m.group(2)}", item_of(node))
+            for k, v in node.items():
+                if k != "from":
+                    walk(v, item_of)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, item_of)
+    for p in sorted(FIXTURES.rglob("*.json")):
+        relp = p.relative_to(FIXTURES).as_posix()
+        try:
+            doc = load_json(p)
+        except json.JSONDecodeError:
+            continue
+        walk(doc, lambda n, relp=relp: f"fixture:{relp}#{n['id']}" if "id" in n and "given" in n else f"fixture:{relp}")
+    for p in scenario_files():
+        sc = load_yaml(p)
+        walk(sc, lambda n, sid=p.stem: f"scenario:{sid}")
+    return refs
+
+
+def _item_exists(item):
+    kind, _, rest = item.partition(":")
+    path, _, key = rest.partition("#")
+    if kind == "scenario":
+        return (SCEN / f"{path}.yaml").exists()
+    if kind == "fixture":
+        f = FIXTURES / path
+        if not f.exists():
+            return False
+        if not key:
+            return True
+        doc = load_json(f)
+        return any(c.get("id") == key for c in doc.get("cases", []))
+    if kind == "schema":
+        f = SCHEMA / path
+        return f.exists() and (not key or key in f.read_text(encoding="utf-8"))
+    if kind == "ci":
+        return path in load_json(SCEN / "coverage.json").get("ci", {})
+    return False
+
+
+def check_coverage():
+    cov = load_json(SCEN / "coverage.json")
+    tests = current_tests()
+    R.check(len(tests) == len(set(tests)), "two tests have the same name: " + ", ".join(sorted({t for t in tests if tests.count(t) > 1})))
+    known = set(tests)
+    refs = _from_refs()
+    for t in sorted(set(refs) - known):
+        if t.split(" ", 1)[1].split(".")[0].endswith("Tests") or t.startswith("linux "):
+            R.error(f"a fixture or scenario names {t}, which isn't a test (renamed?)")
+    covered = {t: set(refs.get(t, set())) | set(cov["covers"].get(t, [])) for t in tests}
+    for t, items in cov["covers"].items():
+        R.check(t in known, f"coverage.json covers: {t} isn't a test")
+        for i in items:
+            R.check(_item_exists(i), f"coverage.json covers {t}: {i} doesn't exist")
+    for t, others in cov["same"].items():
+        R.check(t in known, f"coverage.json same: {t} isn't a test")
+        for o in others:
+            if R.check(o in known, f"coverage.json same {t}: {o} isn't a test"):
+                covered[t] |= covered.get(o, set())
+    for t in tests:
+        for i in covered[t]:
+            R.check(_item_exists(i), f"{t}: {i} doesn't exist")
+        R.check(bool(covered[t]), f"{t} isn't covered by any fixture or scenario (add it to a 'from', or to coverage.json)")
+    for d in cov["docs"]:
+        R.check((ROOT / d["doc"]).exists(), f"coverage.json docs: no {d['doc']}")
+        R.check(bool(d["covered"]), f"coverage.json docs: {d['behaviour'][:60]} has nothing")
+        for i in d["covered"]:
+            R.check(_item_exists(i), f"coverage.json docs '{d['behaviour'][:50]}': {i} doesn't exist")
+    for ch in cov["changes"]:
+        for t in ch["tests"]:
+            R.check(t in known, f"coverage.json changes: {t} isn't a test")
+        R.check(_item_exists(ch["now"]), f"coverage.json changes: {ch['now']} doesn't exist")
+    # COVERAGE.md
+    out = ["# Coverage of today's tests and docs", "",
+           "Generated by `tools/check-contracts.py --write` from `coverage.json`, the fixtures' and scenarios' `from` fields, and",
+           "the test suites themselves. Every test of macOS (`macos/BromeliaTests`), Windows (`windows/tests`) and Linux",
+           "(`linux/tests`), and every behaviour the docs describe, has a fixture or a scenario in the rebuild.", "",
+           f"{len(tests)} tests: {sum(t.startswith('macos') for t in tests)} macOS, {sum(t.startswith('windows') for t in tests)} Windows, "
+           f"{sum(t.startswith('linux') for t in tests)} Linux; {len(cov['docs'])} documented behaviours; {len(cov['changes'])} deliberate changes.", "",
+           "Items: `scenario:<id>` is `shared/scenarios/<id>.yaml`; `fixture:<path>#<case>` a case in `shared/fixtures/<path>`;",
+           "`schema:` a contract in `shared/schema`; `ci:` a CI check.", ""]
+    for platform, title in (("macos", "macOS"), ("windows", "Windows"), ("linux", "Linux")):
+        out += [f"## {title} tests", "", "| Test | Same as | Covered by |", "| --- | --- | --- |"]
+        for t in tests:
+            if t.startswith(platform):
+                same = ", ".join(o.split(" ", 1)[1] for o in cov["same"].get(t, []))
+                items = "<br>".join(f"`{i}`" for i in sorted(covered[t]))
+                out.append(f"| `{t.split(' ', 1)[1]}` | {same} | {items} |")
+        out.append("")
+    out += ["## Documented behaviours", "", "| Doc | Section | Behaviour | Covered by |", "| --- | --- | --- | --- |"]
+    for d in cov["docs"]:
+        out.append(f"| {d['doc']} | {d['section']} | {d['behaviour']} | {'<br>'.join(f'`{i}`' for i in d['covered'])} |")
+    out += ["", "## Deliberate changes", "", "What the rebuild does differently from today, on purpose (rearchitecture plan sections given).", "",
+            "| Change | Tests of today's behaviour | Covered now by | Plan |", "| --- | --- | --- | --- |"]
+    for ch in cov["changes"]:
+        out.append(f"| {ch['what']} | {'<br>'.join(f'`{t}`' for t in ch['tests'])} | `{ch['now']}` | {ch['plan']} |")
+    generated(SCEN / "COVERAGE.md", "\n".join(out) + "\n")
+
+
 SECTIONS = {
     "schemas": check_schemas,
     "config": check_config,
@@ -895,6 +1051,7 @@ SECTIONS = {
     "api": check_api,
     "db": check_db,
     "scenarios": check_scenarios,
+    "coverage": check_coverage,
     "fixtures": check_fixtures,
 }
 

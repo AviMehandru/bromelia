@@ -8,7 +8,6 @@
       "id": "all-skips-duplicates",
       "from": [
         "macos TitleSelectorTests.allWithDuplicateSkipping",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -38,7 +37,6 @@
       "id": "all-keeps-duplicates",
       "from": [
         "macos TitleSelectorTests.allWithDuplicateSkipping",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -62,7 +60,6 @@
       "id": "longest-one",
       "from": [
         "macos TitleSelectorTests.mainFeature",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -81,7 +78,6 @@
       "id": "longest-three",
       "from": [
         "macos TitleSelectorTests.mainFeature",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -103,7 +99,6 @@
       "id": "episodes-by-duration",
       "from": [
         "macos TitleSelectorTests.episodesByDuration",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -124,7 +119,6 @@
       "id": "index-pattern",
       "from": [
         "macos TitleSelectorTests.indexPatterns",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -147,7 +141,6 @@
       "id": "index-last",
       "from": [
         "macos TitleSelectorTests.indexPatterns",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -168,7 +161,6 @@
       "id": "index-source",
       "from": [
         "macos TitleSelectorTests.indexPatterns",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -192,7 +184,6 @@
       "id": "index-invalid",
       "from": [
         "macos TitleSelectorTests.indexPatterns",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -214,7 +205,6 @@
       "id": "include-pattern",
       "from": [
         "macos TitleSelectorTests.regexFilters",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -235,7 +225,6 @@
       "id": "exclude-name",
       "from": [
         "macos TitleSelectorTests.regexFilters",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -258,7 +247,6 @@
       "id": "exclude-source-id",
       "from": [
         "macos TitleSelectorTests.regexFilters",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -281,7 +269,6 @@
       "id": "max-titles",
       "from": [
         "macos TitleSelectorTests.limitsAndManual",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {
@@ -301,7 +288,6 @@
       "id": "manual",
       "from": [
         "macos TitleSelectorTests.limitsAndManual",
-        "windows TitleSelectorTests",
         "linux /logic/selection"
       ],
       "given": {

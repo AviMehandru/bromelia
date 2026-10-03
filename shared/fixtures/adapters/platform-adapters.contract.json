@@ -17,7 +17,7 @@
       "id": "stall-stops",
       "from": [
         "macos ReliabilityTests.stuckProcessIsStopped",
-        "windows SafetyTests.StuckProcessIsStopped",
+        "windows ReliabilityTests.StuckProcessIsStopped",
         "linux /reliability/stuck-process"
       ],
       "given": {
@@ -42,7 +42,7 @@
       "id": "busy-not-stopped",
       "from": [
         "macos ReliabilityTests.busyProcessIsNotStopped",
-        "windows SafetyTests.BusyProcessIsNotStopped",
+        "windows ReliabilityTests.BusyProcessIsNotStopped",
         "linux /reliability/stuck-process"
       ],
       "given": {
@@ -213,7 +213,7 @@
       "id": "settings-isolation-home",
       "from": [
         "macos MakeMKVFileTests.environmentIsolatesSettings",
-        "windows MakeMKVFileTests.EnvironmentBuildsArguments",
+        "windows FileFormatTests.EnvironmentBuildsArguments",
         "linux /makemkv/environment"
       ],
       "given": {
@@ -253,7 +253,7 @@
       "id": "power-guard",
       "from": [
         "macos ReliabilityTests.backgroundStepsKeepTheMacAwake",
-        "windows SafetyTests.BackgroundStepsKeepTheComputerAwake",
+        "windows ReliabilityTests.BackgroundStepsKeepTheComputerAwake",
         "linux /reliability/keep-awake"
       ],
       "given": {

@@ -401,7 +401,7 @@
       "id": "space-margin-small",
       "from": [
         "macos ReliabilityTests.requiredSpaceHasAMargin",
-        "windows SafetyTests.RequiredSpaceHasAMargin",
+        "windows ReliabilityTests.RequiredSpaceHasAMargin",
         "linux /reliability/free-space"
       ],
       "given": {
@@ -415,7 +415,7 @@
       "id": "space-margin-large",
       "from": [
         "macos ReliabilityTests.requiredSpaceHasAMargin",
-        "windows SafetyTests.RequiredSpaceHasAMargin",
+        "windows ReliabilityTests.RequiredSpaceHasAMargin",
         "linux /reliability/free-space"
       ],
       "given": {

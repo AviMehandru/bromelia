@@ -1,0 +1,239 @@
+{
+  "functions": [
+    "ConfigCodec.decode",
+    "ConfigCodec.encode",
+    "ConfigValidator.validate",
+    "ConfigTemplates.archiveEverything"
+  ],
+  "description": "Configuration v3 documents: decoding fills defaults outside profiles (config3-defaults.json is decode('{\"version\": 3}') encoded), encoding writes every top-level key in schema order with two-space indentation, a decode → encode round trip changes nothing, unknown keys are reported, not kept.",
+  "cases": [
+    {
+      "id": "empty-gives-defaults",
+      "from": [
+        "macos ReliabilityTests.settingsHaveSafeDefaults",
+        "windows ReliabilityTests.SettingsHaveSafeDefaults"
+      ],
+      "given": {
+        "json": {
+          "version": 3
+        }
+      },
+      "expect": {
+        "equals": "config3-defaults.json"
+      }
+    },
+    {
+      "id": "safe-defaults",
+      "from": [
+        "macos ReliabilityTests.settingsHaveSafeDefaults",
+        "windows ReliabilityTests.SettingsHaveSafeDefaults",
+        "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys"
+      ],
+      "given": {
+        "json": {
+          "version": 3
+        }
+      },
+      "expect": {
+        "paths": {
+          "limits.stallTimeoutMinutes": 30,
+          "power.preventSleep": true,
+          "limits.processing": 1,
+          "automation.pollIntervalSeconds": 10,
+          "automation.defaults.ejectWhenDone": true
+        }
+      }
+    },
+    {
+      "id": "round-trip",
+      "from": [
+        "macos ConfigurationTests.roundTrips",
+        "linux /config/json"
+      ],
+      "given": {
+        "file": "config2-everything.expected-v3.json"
+      },
+      "expect": {
+        "roundTrips": true
+      }
+    },
+    {
+      "id": "encode-shape",
+      "from": [
+        "windows ConfigurationTests.WritesSameShapeAsMacVersion",
+        "linux /config/json"
+      ],
+      "given": {
+        "json": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "mode": {
+                "default": "backupDecrypted"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "contains": [
+          "\"mode\": {\n        \"default\": \"backupDecrypted\"",
+          "\"makemkv\": {"
+        ],
+        "profileStaysSparse": true,
+        "rule": "Top-level sections are written in full (with defaults); profiles only with the keys they set (an unset minLengthSeconds isn't written)."
+      }
+    },
+    {
+      "id": "unknown-key",
+      "from": [
+        "macos ConfigurationTests.decodesPartialJSON",
+        "windows ConfigurationTests.ReadsConfigWrittenByMacVersion",
+        "linux /config/json"
+      ],
+      "given": {
+        "json": {
+          "version": 3,
+          "futureField": 1,
+          "limits": {
+            "stallTimeoutMinutes": 5,
+            "later": true
+          }
+        }
+      },
+      "expect": {
+        "paths": {
+          "limits.stallTimeoutMinutes": 5
+        },
+        "issues": [
+          {
+            "path": "futureField",
+            "code": "config.unknownKey",
+            "severity": "warning"
+          },
+          {
+            "path": "limits.later",
+            "code": "config.unknownKey",
+            "severity": "warning"
+          }
+        ],
+        "encodedWithout": [
+          "futureField",
+          "later"
+        ]
+      }
+    },
+    {
+      "id": "profile-mode-not-video",
+      "from": [
+        "macos WebTests.titlesSettingsAndLogs (Unknown mode “audioCD”)",
+        "windows WebApiTests.TitlesSettingsAndLogs",
+        "linux /web/api"
+      ],
+      "given": {
+        "json": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "mode": {
+                "default": "audioCD"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "issues": [
+          {
+            "path": "profiles[0].mode.default",
+            "code": "config.invalidValue",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "id": "secret-inline",
+      "from": "rearchitecture-plan §15.7 (secrets in the doc? rejected)",
+      "given": {
+        "json": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": "0123456789abcdef"
+          }
+        }
+      },
+      "expect": {
+        "issues": [
+          {
+            "path": "metadata.apiKey",
+            "code": "config.secretInline",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "id": "archive-everything-template",
+      "from": [
+        "macos ReliabilityTests.archiveEverythingPreset",
+        "windows ReliabilityTests.ArchiveEverythingPreset",
+        "linux /reliability/archive-everything",
+        "docs/configuration.md (Archive everything)"
+      ],
+      "given": {
+        "template": "archiveEverything"
+      },
+      "expect": {
+        "profile": {
+          "name": "Archive everything",
+          "mode": {
+            "default": "backupThenMkv"
+          },
+          "backup": {
+            "format": "folder",
+            "keepAfterMkv": true
+          },
+          "titles": {
+            "strategy": "all"
+          },
+          "makemkv": {
+            "profile": {
+              "mode": "generated",
+              "generated": {
+                "selectionRule": "+sel:all"
+              }
+            }
+          },
+          "archive": {
+            "checksums": true,
+            "archiveRecord": true,
+            "verifyRips": true,
+            "writeDiscInfo": true
+          },
+          "episodes": {
+            "keepPlayAll": true
+          }
+        },
+        "rule": "Was a preset applied to a drive (keeping its name); now a profile any drive can use."
+      }
+    },
+    {
+      "id": "catalog-loads",
+      "from": [
+        "windows ConfigurationTests.CatalogLoads"
+      ],
+      "given": {
+        "catalog": "shared/catalog/settings-catalog.json"
+      },
+      "expect": {
+        "hasKey": "dvd_MinimumTitleLength",
+        "selectionPresetsNotEmpty": true
+      }
+    }
+  ]
+}

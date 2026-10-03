@@ -9,7 +9,7 @@
       "id": "jump-vts-ptt",
       "from": [
         "macos DVDNavigationTests.decodesJumps",
-        "windows ArchiveTests.DecodesJumps",
+        "windows DvdNavigationTests.DecodesJumps",
         "linux /dvd/jumps-and-numbers"
       ],
       "given": {
@@ -109,7 +109,7 @@
       "id": "mkv-chapters-shifted",
       "from": [
         "macos DVDNavigationTests.mapsChaptersToMKV",
-        "windows ArchiveTests.PicksFirstEpisodeAndMapsChapters"
+        "windows DvdNavigationTests.PicksFirstEpisodeAndMapsChapters"
       ],
       "given": {
         "plan": "dvd-play-all.navigation.expected.json",

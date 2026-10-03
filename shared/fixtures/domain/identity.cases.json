@@ -221,7 +221,7 @@
       "id": "resolve-dvd-fixture",
       "from": [
         "macos IdentityTests.resolvesDVDFixture",
-        "windows ArchiveTests.ResolvesDvdFixture",
+        "windows IdentityTests.ResolvesDvdFixture",
         "linux /identity/resolve"
       ],
       "given": {
@@ -272,7 +272,7 @@
       "id": "resolve-bluray-metadata-title",
       "from": [
         "macos IdentityTests.prefersBlurayMetadataTitle",
-        "windows ArchiveTests.PrefersBlurayMetadataTitleAndDetectsUhd"
+        "windows IdentityTests.PrefersBlurayMetadataTitleAndDetectsUhd"
       ],
       "given": {
         "listing": {
@@ -298,7 +298,7 @@
       "id": "format-uhd-by-video",
       "from": [
         "macos IdentityTests.detectsFormats",
-        "windows ArchiveTests.PrefersBlurayMetadataTitleAndDetectsUhd"
+        "windows IdentityTests.PrefersBlurayMetadataTitleAndDetectsUhd"
       ],
       "given": {
         "listing": {
@@ -382,7 +382,7 @@
       "id": "format-backup-index-uhd",
       "from": [
         "macos IdentityTests.detectsUHDBackupFolder",
-        "windows ArchiveTests.DetectsUhdBackupFolder"
+        "windows IdentityTests.DetectsUhdBackupFolder"
       ],
       "given": {
         "indexBdmv": "INDX0300xxxxxxxx"
@@ -419,7 +419,7 @@
       "id": "kind-episode-length-titles",
       "from": [
         "macos IdentityTests.tvShowFromEpisodeLengthTitles",
-        "windows ArchiveTests.TvShowFromEpisodeLengthTitles",
+        "windows IdentityTests.TvShowFromEpisodeLengthTitles",
         "linux /identity/resolve"
       ],
       "given": {
@@ -488,7 +488,7 @@
       "id": "menu-numbers-first",
       "from": [
         "macos DVDNavigationTests.picksFirstEpisode",
-        "windows ArchiveTests.PicksFirstEpisodeAndMapsChapters",
+        "windows DvdNavigationTests.PicksFirstEpisodeAndMapsChapters",
         "linux /dvd/jumps-and-numbers"
       ],
       "given": {

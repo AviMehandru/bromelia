@@ -14,7 +14,7 @@
       "id": "sha256-abc",
       "from": [
         "macos ChecksumTests.hashesFilesAndFolders",
-        "windows ArchiveTests.HashesFilesAndFolders",
+        "windows ChecksumTests.HashesFilesAndFolders",
         "linux /archive/checksums"
       ],
       "given": {

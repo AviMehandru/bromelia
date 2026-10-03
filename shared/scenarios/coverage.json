@@ -1,0 +1,1662 @@
+{
+  "comment": "Where every test of today's three suites, and every behaviour docs/*.md and README.md describe, is covered in the rebuild. tools/check-contracts.py extracts the tests from macos/BromeliaTests, windows/tests and linux/tests, and checks that each one is here, that everything it points to exists, and writes COVERAGE.md from this file. A test is covered by the fixtures and scenarios whose `from` names it, by `covers` below, and through `same` by the tests it does the same as. Items: scenario:<id>, fixture:<path in shared/fixtures>[#<case id>], schema:<path in shared/schema>[#<key>], ci:<check>.",
+  "same": {
+    "windows IdentityTests.ParsesLabels": [
+      "macos IdentityTests.parsesLabels"
+    ],
+    "windows IdentityTests.ResolvesDvdFixture": [
+      "macos IdentityTests.resolvesDVDFixture"
+    ],
+    "windows IdentityTests.PrefersBlurayMetadataTitleAndDetectsUhd": [
+      "macos IdentityTests.prefersBlurayMetadataTitle",
+      "macos IdentityTests.detectsFormats"
+    ],
+    "windows IdentityTests.DetectsUhdBackupFolder": [
+      "macos IdentityTests.detectsUHDBackupFolder"
+    ],
+    "windows IdentityTests.TvShowFromEpisodeLengthTitles": [
+      "macos IdentityTests.tvShowFromEpisodeLengthTitles"
+    ],
+    "windows IdentityTests.TrackLabels": [
+      "macos IdentityTests.trackLabels"
+    ],
+    "windows NamingTests.DefaultTemplate": [
+      "macos NamingTests.defaultTemplate"
+    ],
+    "windows NamingTests.PluginMatching": [
+      "macos NamingTests.pluginMatching"
+    ],
+    "windows NamingTests.UpgradesVersion1Naming": [
+      "macos NamingTests.upgradesVersion1Naming"
+    ],
+    "windows ChecksumTests.HashesFilesAndFolders": [
+      "macos ChecksumTests.hashesFilesAndFolders"
+    ],
+    "windows DvdNavigationTests.FindsPlayAllEpisodes": [
+      "macos DVDNavigationTests.findsPlayAllEpisodes"
+    ],
+    "windows DvdNavigationTests.DecodesJumps": [
+      "macos DVDNavigationTests.decodesJumps"
+    ],
+    "windows DvdNavigationTests.PicksFirstEpisodeAndMapsChapters": [
+      "macos DVDNavigationTests.picksFirstEpisode",
+      "macos DVDNavigationTests.mapsChaptersToMKV"
+    ],
+    "windows DvdNavigationTests.ReadsIso": [
+      "macos DVDNavigationTests.readsISO"
+    ],
+    "windows DvdNavigationTests.SplitsPlayAllTitleIntoEpisodes": [
+      "macos IntegrationTests.splitsPlayAllTitleIntoEpisodes"
+    ],
+    "windows RobotParserTests.SplitsQuotedFields": [
+      "macos RobotParserTests.splitsQuotedFields"
+    ],
+    "windows RobotParserTests.ParsesMessagesAndProgress": [
+      "macos RobotParserTests.parsesMessage",
+      "macos RobotParserTests.parsesProgress"
+    ],
+    "windows RobotParserTests.ClassifiesSeverity": [
+      "macos RobotParserTests.classifiesSeverity"
+    ],
+    "windows RobotParserTests.ParsesDriveScanFixture": [
+      "macos RobotParserTests.parsesDriveScanFixture"
+    ],
+    "windows RobotParserTests.BuildsDiscInfoFromRealDvd": [
+      "macos RobotParserTests.buildsDiscInfoFromRealDVD"
+    ],
+    "windows RobotParserTests.FailureFixtureReportsErrors": [
+      "macos RobotParserTests.failureFixtureReportsErrors",
+      "macos RobotParserTests.ripFixtureReportsSuccess"
+    ],
+    "windows TitleSelectorTests.AllWithDuplicates": [
+      "macos TitleSelectorTests.allWithDuplicateSkipping"
+    ],
+    "windows TitleSelectorTests.Longest": [
+      "macos TitleSelectorTests.mainFeature",
+      "macos TitleSelectorTests.worksOnRealDisc"
+    ],
+    "windows TitleSelectorTests.Filters": [
+      "macos TitleSelectorTests.episodesByDuration",
+      "macos TitleSelectorTests.regexFilters"
+    ],
+    "windows TitleSelectorTests.IndexPatterns": [
+      "macos TitleSelectorTests.indexPatterns"
+    ],
+    "windows TitleSelectorTests.Manual": [
+      "macos TitleSelectorTests.limitsAndManual"
+    ],
+    "windows TemplateTests.Renders": [
+      "macos TemplateTests.rendersTokens"
+    ],
+    "windows TemplateTests.Sanitizes": [
+      "macos TemplateTests.sanitizes"
+    ],
+    "windows TemplateTests.SplitsArguments": [
+      "macos TemplateTests.splitsArguments"
+    ],
+    "windows TemplateTests.PostProcessInvocation": [
+      "macos TemplateTests.postProcessInvocation"
+    ],
+    "windows TemplateTests.RunConditions": [
+      "macos TemplateTests.runConditions"
+    ],
+    "windows FileFormatTests.SettingsRoundTrip": [
+      "macos MakeMKVFileTests.settingsRoundTrip"
+    ],
+    "windows FileFormatTests.ProfileIsWellFormed": [
+      "macos MakeMKVFileTests.profileIsWellFormedXML"
+    ],
+    "windows FileFormatTests.EnvironmentBuildsArguments": [
+      "macos MakeMKVFileTests.environmentIsolatesSettings"
+    ],
+    "windows ConfigurationTests.ReadsConfigWrittenByMacVersion": [
+      "macos ConfigurationTests.decodesPartialJSON"
+    ],
+    "windows ConfigurationTests.MatchesDrives": [
+      "macos ConfigurationTests.matchesDrives"
+    ],
+    "windows ConfigurationTests.EffectiveSettingsOverlay": [
+      "macos ConfigurationTests.effectiveSettingsOverlay"
+    ],
+    "windows RemuxTests.BuildsTrackArguments": [
+      "macos RemuxTests.buildsTrackArguments"
+    ],
+    "windows IntegrationTests.RipsTitleWithCustomTracksRenameAndScript": [
+      "macos IntegrationTests.ripsTitleWithCustomTracksRenameAndScript"
+    ],
+    "windows DriveDetectionTests.AutoRipQueuesOnInsertOnly": [
+      "macos DriveDetectionTests.autoRipQueuesOnInsertOnly"
+    ],
+    "windows AutomationLockTests.OneHolderAtATime": [
+      "macos HeadlessTests.automationLock"
+    ],
+    "windows DaemonTests.Options": [
+      "macos HeadlessTests.options"
+    ],
+    "windows HandBrakeTests.Arguments": [
+      "macos HandBrakeTests.arguments"
+    ],
+    "windows HandBrakeTests.EncodesEveryMkvWithoutReplacingAnything": [
+      "macos HandBrakeTests.encodesEveryMKVWithoutReplacingAnything"
+    ],
+    "windows LookupTests.RankedSearchResults": [
+      "macos LookupTests.rankedSearchResults"
+    ],
+    "windows LookupTests.DetailsAndSeasons": [
+      "macos LookupTests.detailsAndSeasons"
+    ],
+    "windows LookupTests.IdsAndYears": [
+      "macos LookupTests.idsAndYears"
+    ],
+    "windows LookupTests.Requests": [
+      "macos LookupTests.requests"
+    ],
+    "windows LookupTests.EpisodeTitlesInNames": [
+      "macos LookupTests.episodeTitlesInNames"
+    ],
+    "windows LookupTests.EpisodeNumberingAcrossDiscs": [
+      "macos EpisodeContinuationTests.sharedCases"
+    ],
+    "windows LookupTests.NfoFiles": [
+      "macos MediaServerMetadataTests.nfoFiles"
+    ],
+    "windows LookupTests.NotificationDeliveries": [
+      "macos NotificationFixtureTests.sharedCases"
+    ],
+    "windows SafetyTests.SuccessfulRipIsMovedIntoTheOutputFolder": [
+      "macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder"
+    ],
+    "windows SafetyTests.ReadErrorsKeepTheFilesApart": [
+      "macos SafetyTests.readErrorsKeepTheFilesApart"
+    ],
+    "windows SafetyTests.ListingErrorsAreNotReadErrors": [
+      "macos SafetyTests.listingErrorsAreNotReadErrors"
+    ],
+    "windows SafetyTests.FailedTitleIsKeptUnderMakeMkvsNameInAnIncompleteFolder": [
+      "macos SafetyTests.failedTitleIsKeptUnderMakeMKVsNameInAnIncompleteFolder"
+    ],
+    "windows SafetyTests.FailureWithoutFilesLeavesNoFolder": [
+      "macos SafetyTests.failureWithoutFilesLeavesNoFolder"
+    ],
+    "windows SafetyTests.FailureInASharedFolderUsesASubfolder": [
+      "macos SafetyTests.failureInASharedFolderUsesASubfolder"
+    ],
+    "windows SafetyTests.LogsFollowFilesOnlyWithTheArchiveRecord": [
+      "macos SafetyTests.logsFollowFilesOnlyWithTheArchiveRecord"
+    ],
+    "windows SafetyTests.MakeMkvsDebugLogIsKeptAfterEachRun": [
+      "macos SafetyTests.makeMKVsDebugLogIsKeptAfterEachRun"
+    ],
+    "windows SafetyTests.ADifferentDiscIsNotRipped": [
+      "macos SafetyTests.aDifferentDiscIsNotRipped"
+    ],
+    "windows SafetyTests.ChosenTitlesFollowChangedTitleNumbers": [
+      "macos SafetyTests.chosenTitlesFollowChangedTitleNumbers"
+    ],
+    "windows SafetyTests.AChosenTitleMissingFromTheListingFailsTheJob": [
+      "macos SafetyTests.aChosenTitleMissingFromTheListingFailsTheJob"
+    ],
+    "windows SafetyTests.RipsAreCheckedAgainstTheListing": [
+      "macos SafetyTests.ripsAreCheckedAgainstTheListing"
+    ],
+    "windows RipCheckTests.ParsesMkvmergeJson": [
+      "macos RipCheckTests.parsesMkvmergeJSON"
+    ],
+    "windows RipCheckTests.AcceptsMatchingFilesAndRejectsWrongOnes": [
+      "macos RipCheckTests.acceptsMatchingFiles",
+      "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+      "macos RipCheckTests.notesChapterDifferences"
+    ],
+    "windows RipCheckTests.MatchesTitlesAcrossListings": [
+      "macos RipCheckTests.matchesTitlesAcrossListings"
+    ],
+    "windows RipCheckTests.ChecksBackupStructure": [
+      "macos RipCheckTests.checksBackupStructure"
+    ],
+    "windows RipCheckTests.StepsForJobsWithReadErrors": [
+      "macos RipCheckTests.stepsForJobsWithReadErrors"
+    ],
+    "windows RecordedRunTests.EveryRecordedRunEndsAsExpected": [
+      "macos RecordedRunTests.everyRecordedRunEndsAsExpected"
+    ],
+    "windows ReliabilityTests.StuckProcessIsStopped": [
+      "macos ReliabilityTests.stuckProcessIsStopped"
+    ],
+    "windows ReliabilityTests.BusyProcessIsNotStopped": [
+      "macos ReliabilityTests.busyProcessIsNotStopped"
+    ],
+    "windows ReliabilityTests.NotEnoughFreeSpaceStopsBeforeRipping": [
+      "macos ReliabilityTests.notEnoughFreeSpaceStopsBeforeRipping"
+    ],
+    "windows ReliabilityTests.RequiredSpaceHasAMargin": [
+      "macos ReliabilityTests.requiredSpaceHasAMargin"
+    ],
+    "windows ReliabilityTests.IsoBackupIsKept": [
+      "macos ReliabilityTests.isoBackupIsKept"
+    ],
+    "windows ReliabilityTests.FolderWrittenInsteadOfAnIsoIsKeptAsAFolder": [
+      "macos ReliabilityTests.folderWrittenInsteadOfAnISOIsKeptAsAFolder"
+    ],
+    "windows ReliabilityTests.FolderWithoutADiscIsNotAcceptedAsAnIso": [
+      "macos ReliabilityTests.folderWithoutADiscIsNotAcceptedAsAnISO"
+    ],
+    "windows ReliabilityTests.ArchiveEverythingPreset": [
+      "macos ReliabilityTests.archiveEverythingPreset"
+    ],
+    "windows ReliabilityTests.SettingsHaveSafeDefaults": [
+      "macos ReliabilityTests.settingsHaveSafeDefaults"
+    ],
+    "windows ReliabilityTests.BackgroundStepsKeepTheComputerAwake": [
+      "macos ReliabilityTests.backgroundStepsKeepTheMacAwake"
+    ],
+    "windows ReliabilityTests.UnfinishedJobsAreRecordedAfterAStop": [
+      "macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop"
+    ],
+    "windows ReliabilityTests.FailuresNameTheirCause": [
+      "macos RecordedRunTests.failuresNameTheirCause"
+    ],
+    "windows ParityTests.RecognisesNotices": [
+      "macos ParityTests.recognisesNotices"
+    ],
+    "windows ParityTests.ReadsTheBetaKeyFromTheForumPage": [
+      "macos ParityTests.readsTheBetaKeyFromTheForumPage"
+    ],
+    "windows ParityTests.OpensTheDiscAFileBelongsTo": [
+      "macos ParityTests.opensTheDiscAFileBelongsTo"
+    ],
+    "windows ParityTests.OnePassNeedsTheLongestTitlesAndEnoughOfThem": [
+      "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem"
+    ],
+    "windows OnePassJobTests.LongestTitlesAreRippedInOnePass": [
+      "macos OnePassJobTests.longestTitlesAreRippedInOnePass"
+    ],
+    "windows OnePassJobTests.OtherSelectionsAreRippedTitleByTitle": [
+      "macos OnePassJobTests.otherSelectionsAreRippedTitleByTitle"
+    ],
+    "windows OnePassJobTests.ExpiredKeyExplainsTheFailure": [
+      "macos OnePassJobTests.expiredKeyExplainsTheFailure"
+    ],
+    "windows OnePassJobTests.RealDiscImageIsRippedInOnePass": [
+      "macos IntegrationTests.ripsTheLongestTitlesInOnePass"
+    ],
+    "windows OnePassJobTests.LibreDriveIsRecorded": [
+      "macos OnePassJobTests.libreDriveIsRecorded"
+    ],
+    "windows IntegrationFeatureTests.NotificationDeliveries": [
+      "macos IntegrationFeatureTests.notificationDeliveries"
+    ],
+    "windows IntegrationFeatureTests.MetadataResults": [
+      "macos IntegrationFeatureTests.metadataResults"
+    ],
+    "windows IntegrationFeatureTests.OtherDiscModesAndBetaKeys": [
+      "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys"
+    ],
+    "windows IntegrationFeatureTests.WebAccessRules": [
+      "macos IntegrationFeatureTests.webRequestsAndAccess"
+    ],
+    "windows IntegrationFeatureTests.WebServerAnswersStatusAndActions": [
+      "macos IntegrationJobTests.webServerServesStatusAndActions"
+    ],
+    "windows IntegrationJobTests.MoviesAndEpisodesAreNamedForMediaServers": [
+      "macos IntegrationJobTests.moviesAreNamedForMediaServers",
+      "macos IntegrationJobTests.episodesAreNamedForMediaServers",
+      "macos IntegrationJobTests.missingAudioRipperFailsClearly"
+    ],
+    "windows IntegrationJobTests.BackgroundStepsRunAfterTheJob": [
+      "macos IntegrationJobTests.backgroundStepsRunAfterTheJob"
+    ],
+    "windows IntegrationJobTests.FormatModesReplaceTheConfiguredMode": [
+      "macos IntegrationJobTests.formatModesReplaceTheConfiguredMode"
+    ],
+    "windows IntegrationJobTests.AudioCDsUseTheAudioCommand": [
+      "macos IntegrationJobTests.audioCDsUseTheAudioCommand"
+    ],
+    "windows IntegrationJobTests.DataDiscsAreCopiedExactly": [
+      "macos IntegrationJobTests.dataDiscsAreImagedExactly"
+    ],
+    "windows ArchiveCheckTests.FingerprintsMatchEveryPlatform": [
+      "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform"
+    ],
+    "windows ArchiveCheckTests.FindsEarlierArchives": [
+      "macos ArchiveCheckTests.findsEarlierArchives"
+    ],
+    "windows ArchiveCheckTests.VerifiesArchives": [
+      "macos ArchiveCheckTests.verifiesArchives"
+    ],
+    "windows ArchiveCheckTests.VerifiesFromTheApp": [
+      "macos ArchiveCheckTests.verifiesFromTheApp"
+    ],
+    "windows ArchiveCheckTests.DiscsArchivedBefore": [
+      "macos ArchiveCheckTests.discsArchivedBefore"
+    ],
+    "windows WebApiTests.ParsesRequests": [
+      "macos IntegrationFeatureTests.webRequestsAndAccess"
+    ],
+    "windows WebApiTests.LogTail": [
+      "macos WebTests.logTail"
+    ],
+    "windows WebApiTests.TitlesSettingsAndLogs": [
+      "macos WebTests.titlesSettingsAndLogs",
+      "macos WebTests.routes"
+    ],
+    "windows WebApiTests.ServesHttps": [
+      "macos WebTests.tlsIdentity"
+    ],
+    "linux /robot/split-fields": [
+      "macos RobotParserTests.splitsQuotedFields"
+    ],
+    "linux /lookup/fixtures": [
+      "macos LookupTests.rankedSearchResults",
+      "macos LookupTests.detailsAndSeasons",
+      "macos LookupTests.idsAndYears"
+    ],
+    "linux /lookup/requests": [
+      "macos LookupTests.requests"
+    ],
+    "linux /lookup/episode-titles-in-names": [
+      "macos LookupTests.episodeTitlesInNames"
+    ],
+    "linux /lookup/episode-continuation": [
+      "macos EpisodeContinuationTests.sharedCases"
+    ],
+    "linux /lookup/nfo-files": [
+      "macos MediaServerMetadataTests.nfoFiles"
+    ],
+    "linux /post/handbrake-arguments": [
+      "macos HandBrakeTests.arguments"
+    ],
+    "linux /post/handbrake-encodes": [
+      "macos HandBrakeTests.encodesEveryMKVWithoutReplacingAnything"
+    ],
+    "linux /web/api": [
+      "macos WebTests.titlesSettingsAndLogs"
+    ],
+    "linux /state/automation-lock": [
+      "macos HeadlessTests.automationLock"
+    ],
+    "linux /web/log-tail": [
+      "macos WebTests.logTail"
+    ],
+    "linux /web/tls": [
+      "macos WebTests.tlsIdentity"
+    ],
+    "linux /notifications/fixtures": [
+      "macos NotificationFixtureTests.sharedCases"
+    ],
+    "linux /robot/parse-events": [
+      "macos RobotParserTests.parsesMessage",
+      "macos RobotParserTests.parsesProgress",
+      "macos RobotParserTests.classifiesSeverity"
+    ],
+    "linux /robot/drive-scan-fixture": [
+      "macos RobotParserTests.parsesDriveScanFixture"
+    ],
+    "linux /robot/disc-info-fixture": [
+      "macos RobotParserTests.buildsDiscInfoFromRealDVD"
+    ],
+    "linux /robot/failure-fixture": [
+      "macos RobotParserTests.failureFixtureReportsErrors",
+      "macos RobotParserTests.ripFixtureReportsSuccess"
+    ],
+    "linux /logic/selection": [
+      "macos TitleSelectorTests.allWithDuplicateSkipping",
+      "macos TitleSelectorTests.mainFeature",
+      "macos TitleSelectorTests.episodesByDuration",
+      "macos TitleSelectorTests.indexPatterns",
+      "macos TitleSelectorTests.regexFilters",
+      "macos TitleSelectorTests.limitsAndManual",
+      "macos TitleSelectorTests.worksOnRealDisc"
+    ],
+    "linux /logic/templates": [
+      "macos TemplateTests.rendersTokens",
+      "macos TemplateTests.sanitizes"
+    ],
+    "linux /logic/arguments": [
+      "macos TemplateTests.splitsArguments",
+      "macos TemplateTests.postProcessInvocation",
+      "macos TemplateTests.runConditions"
+    ],
+    "linux /makemkv/settings-conf": [
+      "macos MakeMKVFileTests.settingsRoundTrip"
+    ],
+    "linux /makemkv/profile": [
+      "macos MakeMKVFileTests.profileIsWellFormedXML"
+    ],
+    "linux /makemkv/environment": [
+      "macos MakeMKVFileTests.environmentIsolatesSettings"
+    ],
+    "linux /config/json": [
+      "macos ConfigurationTests.decodesPartialJSON",
+      "macos ConfigurationTests.roundTrips",
+      "macos ConfigurationTests.matchesDrives"
+    ],
+    "linux /runner/remux-args": [
+      "macos RemuxTests.buildsTrackArguments"
+    ],
+    "linux /state/auto-rip": [
+      "macos DriveDetectionTests.autoRipQueuesOnInsertOnly"
+    ],
+    "linux /runner/integration": [
+      "macos IntegrationTests.ripsTitleWithCustomTracksRenameAndScript",
+      "macos IntegrationTests.failsCleanlyWhenNoTitleMatches"
+    ],
+    "linux /identity/labels": [
+      "macos IdentityTests.parsesLabels",
+      "macos IdentityTests.describesSet"
+    ],
+    "linux /identity/resolve": [
+      "macos IdentityTests.resolvesDVDFixture",
+      "macos IdentityTests.prefersBlurayMetadataTitle",
+      "macos IdentityTests.detectsFormats",
+      "macos IdentityTests.detectsUHDBackupFolder",
+      "macos IdentityTests.tvShowFromEpisodeLengthTitles"
+    ],
+    "linux /identity/naming": [
+      "macos NamingTests.defaultTemplate",
+      "macos IdentityTests.trackLabels"
+    ],
+    "linux /identity/plugins": [
+      "macos NamingTests.pluginMatching"
+    ],
+    "linux /config/upgrade": [
+      "macos NamingTests.upgradesVersion1Naming"
+    ],
+    "linux /archive/checksums": [
+      "macos ChecksumTests.hashesFilesAndFolders"
+    ],
+    "linux /dvd/navigation": [
+      "macos DVDNavigationTests.findsPlayAllEpisodes",
+      "macos DVDNavigationTests.mapsChaptersToMKV"
+    ],
+    "linux /dvd/jumps-and-numbers": [
+      "macos DVDNavigationTests.decodesJumps",
+      "macos DVDNavigationTests.picksFirstEpisode"
+    ],
+    "linux /dvd/iso": [
+      "macos DVDNavigationTests.readsISO"
+    ],
+    "linux /runner/split-integration": [
+      "macos IntegrationTests.splitsPlayAllTitleIntoEpisodes"
+    ],
+    "linux /safety/success": [
+      "macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder"
+    ],
+    "linux /safety/read-errors": [
+      "macos SafetyTests.readErrorsKeepTheFilesApart"
+    ],
+    "linux /safety/listing-errors": [
+      "macos SafetyTests.listingErrorsAreNotReadErrors"
+    ],
+    "linux /safety/failed-title": [
+      "macos SafetyTests.failedTitleIsKeptUnderMakeMKVsNameInAnIncompleteFolder"
+    ],
+    "linux /safety/failure-without-files": [
+      "macos SafetyTests.failureWithoutFilesLeavesNoFolder"
+    ],
+    "linux /safety/shared-folder": [
+      "macos SafetyTests.failureInASharedFolderUsesASubfolder",
+      "macos SafetyTests.logsFollowFilesOnlyWithTheArchiveRecord"
+    ],
+    "linux /safety/debug-log": [
+      "macos SafetyTests.makeMKVsDebugLogIsKeptAfterEachRun"
+    ],
+    "linux /safety/different-disc": [
+      "macos SafetyTests.aDifferentDiscIsNotRipped"
+    ],
+    "linux /safety/title-numbers": [
+      "macos SafetyTests.chosenTitlesFollowChangedTitleNumbers",
+      "macos SafetyTests.aChosenTitleMissingFromTheListingFailsTheJob"
+    ],
+    "linux /safety/checks-rips": [
+      "macos SafetyTests.ripsAreCheckedAgainstTheListing"
+    ],
+    "linux /safety/rip-checks": [
+      "macos RipCheckTests.parsesMkvmergeJSON",
+      "macos RipCheckTests.acceptsMatchingFiles",
+      "macos RipCheckTests.rejectsTruncatedOrWrongTitles",
+      "macos RipCheckTests.notesChapterDifferences"
+    ],
+    "linux /safety/listing-matcher": [
+      "macos RipCheckTests.matchesTitlesAcrossListings"
+    ],
+    "linux /safety/backup-checks": [
+      "macos RipCheckTests.checksBackupStructure"
+    ],
+    "linux /safety/errors-state": [
+      "macos RipCheckTests.stepsForJobsWithReadErrors"
+    ],
+    "linux /reliability/recorded-runs": [
+      "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+      "macos RecordedRunTests.failuresNameTheirCause"
+    ],
+    "linux /reliability/stuck-process": [
+      "macos ReliabilityTests.stuckProcessIsStopped",
+      "macos ReliabilityTests.busyProcessIsNotStopped"
+    ],
+    "linux /reliability/free-space": [
+      "macos ReliabilityTests.notEnoughFreeSpaceStopsBeforeRipping",
+      "macos ReliabilityTests.requiredSpaceHasAMargin"
+    ],
+    "linux /reliability/iso-backups": [
+      "macos ReliabilityTests.isoBackupIsKept",
+      "macos ReliabilityTests.folderWrittenInsteadOfAnISOIsKeptAsAFolder",
+      "macos ReliabilityTests.folderWithoutADiscIsNotAcceptedAsAnISO"
+    ],
+    "linux /reliability/archive-everything": [
+      "macos ReliabilityTests.archiveEverythingPreset"
+    ],
+    "linux /parity/notices": [
+      "macos ParityTests.recognisesNotices"
+    ],
+    "linux /parity/beta-key": [
+      "macos ParityTests.readsTheBetaKeyFromTheForumPage"
+    ],
+    "linux /parity/source-resolve": [
+      "macos ParityTests.opensTheDiscAFileBelongsTo"
+    ],
+    "linux /parity/one-pass-rule": [
+      "macos ParityTests.onePassNeedsTheLongestTitlesAndEnoughOfThem"
+    ],
+    "linux /parity/one-pass-jobs": [
+      "macos OnePassJobTests.longestTitlesAreRippedInOnePass",
+      "macos OnePassJobTests.otherSelectionsAreRippedTitleByTitle"
+    ],
+    "linux /parity/notices-in-jobs": [
+      "macos OnePassJobTests.expiredKeyExplainsTheFailure",
+      "macos OnePassJobTests.libreDriveIsRecorded"
+    ],
+    "linux /parity/one-pass-integration": [
+      "macos IntegrationTests.ripsTheLongestTitlesInOnePass"
+    ],
+    "linux /integrations/notifications": [
+      "macos IntegrationFeatureTests.notificationDeliveries"
+    ],
+    "linux /integrations/metadata": [
+      "macos IntegrationFeatureTests.metadataResults"
+    ],
+    "linux /integrations/modes-and-keys": [
+      "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys"
+    ],
+    "linux /integrations/web-access": [
+      "macos IntegrationFeatureTests.webRequestsAndAccess"
+    ],
+    "linux /integrations/web-server": [
+      "macos IntegrationJobTests.webServerServesStatusAndActions"
+    ],
+    "linux /integrations/media-server-names": [
+      "macos IntegrationJobTests.moviesAreNamedForMediaServers",
+      "macos IntegrationJobTests.episodesAreNamedForMediaServers"
+    ],
+    "linux /integrations/background-steps": [
+      "macos IntegrationJobTests.backgroundStepsRunAfterTheJob"
+    ],
+    "linux /integrations/format-modes": [
+      "macos IntegrationJobTests.formatModesReplaceTheConfiguredMode"
+    ],
+    "linux /integrations/audio-cds": [
+      "macos IntegrationJobTests.audioCDsUseTheAudioCommand",
+      "macos IntegrationJobTests.missingAudioRipperFailsClearly"
+    ],
+    "linux /integrations/data-discs": [
+      "macos IntegrationJobTests.dataDiscsAreImagedExactly"
+    ],
+    "linux /reliability/keep-awake": [
+      "macos ReliabilityTests.backgroundStepsKeepTheMacAwake"
+    ],
+    "linux /reliability/unfinished-jobs": [
+      "macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop"
+    ],
+    "linux /archive/fingerprints": [
+      "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform"
+    ],
+    "linux /archive/find-archived": [
+      "macos ArchiveCheckTests.findsEarlierArchives"
+    ],
+    "linux /archive/verify": [
+      "macos ArchiveCheckTests.verifiesArchives"
+    ],
+    "linux /archive/verify-in-state": [
+      "macos ArchiveCheckTests.verifiesFromTheApp"
+    ],
+    "linux /archive/already-archived-jobs": [
+      "macos ArchiveCheckTests.discsArchivedBefore"
+    ]
+  },
+  "covers": {
+    "macos NamingTests.upgradesVersion1Naming": [
+      "fixture:config/config-migration-cases.json#v1-naming",
+      "fixture:config/config-migration-cases.json#v2-empty-template"
+    ],
+    "macos ConfigurationTests.decodesPartialJSON": [
+      "fixture:config/config-migration-cases.json#v2-partial",
+      "fixture:config/config-codec.cases.json#unknown-key"
+    ],
+    "macos ConfigurationTests.roundTrips": [
+      "fixture:config/config-codec.cases.json#round-trip",
+      "fixture:config/config-migration-cases.json#v2-everything"
+    ],
+    "macos EpisodeContinuationTests.sharedCases": [
+      "fixture:episode-continuation.json",
+      "scenario:episodes-continue-from-previous-disc"
+    ],
+    "macos ReliabilityTests.archiveEverythingPreset": [
+      "fixture:config/config-codec.cases.json#archive-everything-template"
+    ],
+    "macos ReliabilityTests.settingsHaveSafeDefaults": [
+      "fixture:config/config-codec.cases.json#safe-defaults",
+      "fixture:config/config3-defaults.json"
+    ],
+    "windows ConfigurationTests.WritesSameShapeAsMacVersion": [
+      "fixture:config/config-codec.cases.json#encode-shape"
+    ],
+    "windows ConfigurationTests.CatalogLoads": [
+      "fixture:config/config-codec.cases.json#catalog-loads"
+    ],
+    "windows DaemonTests.LogonTaskArguments": [
+      "fixture:host/service-installer.cases.json#logon-task"
+    ],
+    "windows IntegrationFeatureTests.OnlyDriveLettersAreReadAsDevices": [
+      "fixture:adapters/platform-adapters.contract.json#windows-drive-letters"
+    ],
+    "macos HeadlessTests.launchAgent": [
+      "fixture:host/service-installer.cases.json#launch-agent"
+    ],
+    "macos HeadlessTests.options": [
+      "fixture:host/host-options.cases.json#all-options",
+      "fixture:host/host-options.cases.json#port-zero",
+      "fixture:host/host-options.cases.json#unknown",
+      "fixture:host/host-options.cases.json#missing-value",
+      "fixture:host/host-options.cases.json#ignores-cocoa-arguments"
+    ],
+    "macos HeadlessTests.automationLock": [
+      "fixture:adapters/platform-adapters.contract.json#engine-lock"
+    ],
+    "macos WebTests.logTail": [
+      "fixture:api/log-tail.cases.json"
+    ],
+    "macos WebTests.tlsIdentity": [
+      "fixture:adapters/platform-adapters.contract.json#tls-identity",
+      "fixture:api/auth.cases.json#tls-needs-both",
+      "scenario:api-network-needs-token"
+    ],
+    "macos WebTests.routes": [
+      "scenario:api-status-page-and-actions"
+    ],
+    "macos IntegrationFeatureTests.drutilListIsMatchedByModel": [
+      "fixture:adapters/platform-adapters.contract.json#drutil-match"
+    ],
+    "macos IntegrationFeatureTests.notificationReachesAWebhook": [
+      "scenario:notify-on-finish"
+    ],
+    "macos LookupTests.rankedSearchResults": [
+      "fixture:lookup/expected.json",
+      "fixture:domain/metadata.cases.json#recorded-answers"
+    ],
+    "macos LookupTests.detailsAndSeasons": [
+      "fixture:lookup/expected.json",
+      "fixture:domain/metadata.cases.json#recorded-answers"
+    ],
+    "macos LookupTests.idsAndYears": [
+      "fixture:lookup/expected.json",
+      "fixture:domain/metadata.cases.json#recorded-answers"
+    ],
+    "macos MediaServerMetadataTests.nfoFiles": [
+      "fixture:nfo/nfo-cases.json",
+      "scenario:publish-nfo-and-poster"
+    ],
+    "macos NotificationFixtureTests.sharedCases": [
+      "fixture:notifications.json",
+      "fixture:domain/notify.cases.json#recorded-cases"
+    ],
+    "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform": [
+      "fixture:fingerprints.json"
+    ]
+  },
+  "ci": {
+    "playwright": "shared/web/test/check-web-page.mjs in the Linux job (moves to the /v1 API in phase 4)",
+    "docker-smoke-test": "docker/smoke-test.sh in the docker job",
+    "windows-screenshots": "Snapshots.cs in the Windows job (phase 4: UI tests against bromeliad with fakes)"
+  },
+  "changes": [
+    {
+      "what": "Only one engine runs per user; automation.lock and its one-minute takeover are gone.",
+      "tests": [
+        "macos HeadlessTests.automationLock",
+        "windows AutomationLockTests.OneHolderAtATime",
+        "linux /state/automation-lock"
+      ],
+      "now": "fixture:adapters/platform-adapters.contract.json#engine-lock",
+      "plan": "§7.1"
+    },
+    {
+      "what": "Unfinished jobs aren't written to unfinished-<pid>.json and turned into history records: jobs are in the database from creation, and RecoveryService requeues, resumes or interrupts them after a restart. An interrupted rip's staging is kept (hidden, listed with the job) instead of being renamed to a visible 'INCOMPLETE - <id>' folder.",
+      "tests": [
+        "macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop",
+        "windows ReliabilityTests.UnfinishedJobsAreRecordedAfterAStop",
+        "linux /reliability/unfinished-jobs"
+      ],
+      "now": "scenario:recovery-interrupted-during-acquire",
+      "plan": "§20.4, §15.8"
+    },
+    {
+      "what": "Files that aren't a finished archive go to <library>/_Quarantine/<name> [READ ERRORS] or [INCOMPLETE] instead of a sibling '<folder> [INCOMPLETE]' or an 'INCOMPLETE - <job8>' subfolder of a shared folder.",
+      "tests": [
+        "macos SafetyTests.readErrorsKeepTheFilesApart",
+        "macos SafetyTests.failedTitleIsKeptUnderMakeMKVsNameInAnIncompleteFolder",
+        "macos SafetyTests.failureInASharedFolderUsesASubfolder"
+      ],
+      "now": "scenario:safety-read-errors-quarantine",
+      "plan": "§22.1 I1, §22.2"
+    },
+    {
+      "what": "Staging is <library>/.bromelia/staging/<job>/ (same filesystem, so the commit is a rename) instead of <output folder>/.bromelia-incomplete-<job8>.",
+      "tests": [
+        "macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder"
+      ],
+      "now": "scenario:rip-success-moves-into-library",
+      "plan": "§22.2"
+    },
+    {
+      "what": "The archive record is bromelia-<unit8>.json (version 3) and the logs bromelia-<unit8>-log.txt, makemkv-<unit8>-log.txt, makemkv-<unit8>-debug-log.txt, instead of bromelia.json, bromelia (2).json, bromelia-log.txt …; version 2 records are still read.",
+      "tests": [
+        "macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder"
+      ],
+      "now": "fixture:domain/archive-format.cases.json#own-bromelia-1a2b3c4d-json",
+      "plan": "§16, §22.3"
+    },
+    {
+      "what": "A failed post-processing step marked affectsOutcome (was failJobOnError) makes the outcome succeededStepsFailed instead of failed: the archive stays committed.",
+      "tests": [],
+      "now": "scenario:post-step-failure-marks-outcome",
+      "plan": "§20.3"
+    },
+    {
+      "what": "A disc archived before, in an automatic rip, ends as skipped (was cancelled); with alreadyArchived ask the job waits for an answer instead of stopping.",
+      "tests": [
+        "macos ArchiveCheckTests.discsArchivedBefore"
+      ],
+      "now": "scenario:archived-automatic-ask",
+      "plan": "§20.1, §20.2"
+    },
+    {
+      "what": "No library root is ever created; a library needs its .bromelia-library marker, and jobs wait (blocked) while it is missing. Today the output root is created on demand.",
+      "tests": [],
+      "now": "scenario:library-offline-blocks-jobs",
+      "plan": "§22.1 I2 (backlog 1)"
+    },
+    {
+      "what": "The API is /v1/… with codes in error bodies; tokens are accepted as Bearer or a login cookie, never in the URL (?token= is gone); scoped read tokens; an Origin check. The web page's /api/status, /api/drives/<lane>/… and /api/settings/<id>/set are replaced by EngineAPI routes and updateConfig.",
+      "tests": [
+        "macos WebTests.titlesSettingsAndLogs",
+        "macos IntegrationFeatureTests.webRequestsAndAccess",
+        "macos IntegrationJobTests.webServerServesStatusAndActions"
+      ],
+      "now": "scenario:api-auth-rules",
+      "plan": "§13, §25"
+    },
+    {
+      "what": "Engine messages are codes with parameters (shared/messages); clients render them. Today's English sentences become en.json texts.",
+      "tests": [],
+      "now": "fixture:domain/outcome.cases.json",
+      "plan": "§16"
+    },
+    {
+      "what": "An automatic rip's countdown happens before the job exists; cancelling it creates no job (today a waiting job is created and then cancelled into the history).",
+      "tests": [
+        "macos DriveDetectionTests.autoRipQueuesOnInsertOnly"
+      ],
+      "now": "scenario:automation-countdown-cancelled",
+      "plan": "§15.2"
+    },
+    {
+      "what": "Setting up an unconfigured drive no longer copies the default drive configuration: a drive entry points at a profile (the default one unless chosen).",
+      "tests": [
+        "macos DriveDetectionTests.disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults"
+      ],
+      "now": "scenario:drives-list-and-states",
+      "plan": "§24"
+    },
+    {
+      "what": "Presets and the Archive everything preset are profiles; plugins are steps plus rules; conflictPolicy overwrite is called merge (it never overwrote a file).",
+      "tests": [
+        "macos ReliabilityTests.archiveEverythingPreset",
+        "macos NamingTests.pluginMatching"
+      ],
+      "now": "fixture:config/config-migration-cases.json#v2-everything",
+      "plan": "§24, §29"
+    },
+    {
+      "what": "Secrets (registration key, API keys, web tokens, notification URLs) are no longer stored in config.json but in the keystore; config.json is written 0600.",
+      "tests": [],
+      "now": "fixture:config/config-codec.cases.json#secret-inline",
+      "plan": "§24 (backlog 16)"
+    },
+    {
+      "what": "The engine host is its own executable (bromeliad) on every platform; macOS's launch agent runs it (Label app.bromelia.engine) instead of 'Bromelia --headless'.",
+      "tests": [
+        "macos HeadlessTests.launchAgent",
+        "macos HeadlessTests.options"
+      ],
+      "now": "fixture:host/service-installer.cases.json#launch-agent",
+      "plan": "§7.1"
+    }
+  ],
+  "docs": [
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "Unknown keys are ignored and missing keys take their defaults; files move between versions and platforms",
+      "covered": [
+        "fixture:config/config-codec.cases.json#unknown-key",
+        "fixture:config/config-migration-cases.json#v2-partial"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "Every v2 key (makemkvconPath … webUI)",
+      "covered": [
+        "fixture:config/config-migration-cases.json#v2-everything"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "Upgrading from version 1: untouched templates get the v2 defaults",
+      "covered": [
+        "fixture:config/config-migration-cases.json#v1-naming"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "pollIntervalSeconds 0 = only rescan on OS media events; pollWhileRipping",
+      "covered": [
+        "scenario:automation-rescans-dont-duplicate",
+        "fixture:config/config3-defaults.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "maxConcurrentJobs: a global limit, always one job per drive",
+      "covered": [
+        "scenario:queue-one-job-per-drive-and-limits"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "stallTimeoutMinutes stops a stuck rip",
+      "covered": [
+        "scenario:process-stalled-rip-is-stopped"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "preventSleep keeps the computer awake while jobs or background steps run",
+      "covered": [
+        "scenario:power-guard-while-work-runs"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "autoUpdateBetaKey registers MakeMKV's current beta key at startup and when it expires; never replaces a purchased key",
+      "covered": [
+        "scenario:makemkv-beta-key-installed-when-expired",
+        "fixture:domain/makemkv-files.cases.json#beta-key-may-replace-4"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Top level",
+      "behaviour": "backgroundJobs: background steps at the same time",
+      "covered": [
+        "scenario:post-background-step-after-job",
+        "fixture:config/config-codec.cases.json#safe-defaults"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "Drives are matched by MakeMKV's name, case/space-insensitively, else by device path",
+      "covered": [
+        "fixture:domain/rules.cases.json#drive-match-name",
+        "fixture:domain/rules.cases.json#drive-match-device"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "settings override globalSettings",
+      "covered": [
+        "fixture:domain/makemkv-files.cases.json#settings-overlay"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "profile: makemkvDefault, generated (selection rule, default tracks, ISO 639-2/T, chapter 0, LPCM) or a custom file",
+      "covered": [
+        "fixture:domain/makemkv-files.cases.json#profile-xml",
+        "fixture:domain/makemkv-files.cases.json#profile-xml-default-rule"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "rip.mode mkv, backup, backupDecrypted, backupThenMkv, infoOnly",
+      "covered": [
+        "scenario:rip-success-moves-into-library",
+        "scenario:backup-iso-kept",
+        "scenario:backup-folder-instead-of-iso",
+        "scenario:mode-by-format"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "backupFormat folder / iso; keepBackupAfterMKV",
+      "covered": [
+        "scenario:backup-iso-kept",
+        "scenario:backup-then-mkv-without-keeping"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "minLengthSeconds, cacheMB, directIO, extraArguments",
+      "covered": [
+        "fixture:domain/makemkv-files.cases.json#args-info"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "writeDiscInfoJSON",
+      "covered": [
+        "scenario:mode-by-format"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "formatModes by disc format for automatic rips and Rip, not for titles chosen by hand",
+      "covered": [
+        "scenario:mode-by-format",
+        "scenario:mode-titles-chosen-by-hand-keep-mode",
+        "fixture:domain/rules.cases.json#mode-by-format-bluray"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "folderTemplate, fileNameTemplate (empty = MakeMKV's names), backupSubfolder",
+      "covered": [
+        "fixture:domain/naming.cases.json#default-episode",
+        "scenario:backup-folder-instead-of-iso"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "conflictPolicy uniqueSuffix | overwrite | skip",
+      "covered": [
+        "scenario:naming-folder-conflicts"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "automation: autoRipOnInsert, autoRipDelaySeconds, ejectWhenDone, ejectOnFailure, notify, playSound, waitForMountSeconds, alreadyArchived",
+      "covered": [
+        "scenario:automation-rip-on-insert",
+        "scenario:automation-eject-policy",
+        "scenario:automation-waits-for-mount",
+        "scenario:archived-automatic-skip"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "archive.checksums, archiveRecord, verifyRips",
+      "covered": [
+        "scenario:rip-success-moves-into-library",
+        "scenario:safety-logs-follow-files-only-with-record",
+        "scenario:verify-rips-wrong-length-fails"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "episodes.splitPlayAll, keepPlayAll, readMenuNumbers",
+      "covered": [
+        "scenario:episodes-play-all-split",
+        "scenario:episodes-continue-from-previous-disc"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "DriveConfig",
+      "behaviour": "other.ripAudioCDs, imageDataDiscs, audioCommand",
+      "covered": [
+        "scenario:other-audio-cd-ripped",
+        "scenario:other-data-disc-imaged-exactly",
+        "scenario:other-discs-left-alone-when-off"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "A job writes into hidden staging and moves files out only when it succeeded",
+      "covered": [
+        "scenario:rip-success-moves-into-library"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "Read errors: the files are kept apart with checksums, a record with status errors, the logs and a note",
+      "covered": [
+        "scenario:safety-read-errors-quarantine"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "Failed or cancelled: kept apart with the logs and a note; unfinished titles keep MakeMKV's names",
+      "covered": [
+        "scenario:safety-failed-title-keeps-makemkv-name",
+        "scenario:process-cancel-stops-makemkv"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "A shared folder is never renamed; a job that saved nothing leaves no folder",
+      "covered": [
+        "scenario:safety-failure-in-shared-folder",
+        "scenario:safety-failure-without-files-leaves-nothing"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "Errors while reading the listing aren't read errors",
+      "covered": [
+        "scenario:safety-listing-errors-are-not-read-errors"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "verifyRips: length within 5 s or 0.5 %, tracks and video; chapter and track differences are warnings; backups need a disc structure; ISOs a volume descriptor; without mkvmerge the log says so",
+      "covered": [
+        "scenario:verify-rips-wrong-length-fails",
+        "scenario:verify-rips-without-mkvmerge",
+        "scenario:verify-rips-track-count-note",
+        "fixture:domain/media-args.cases.json#check-tolerance",
+        "fixture:domain/media-args.cases.json#backup-structure-6"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "Every job reads the listing again: same disc, chosen titles found again by source, length and segment map, hand-picked tracks unchanged",
+      "covered": [
+        "scenario:reconcile-different-disc-not-ripped",
+        "scenario:reconcile-titles-follow-new-numbers",
+        "scenario:reconcile-chosen-title-gone",
+        "scenario:reconcile-hand-picked-tracks-changed"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "Free space is checked before ripping (sizes, plus copies, plus 2 % or 256 MB); MakeMKV's 5038 warning stops before writing",
+      "covered": [
+        "scenario:space-insufficient-stops-before-ripping",
+        "scenario:space-makemkv-warning-stops-before-writing",
+        "fixture:domain/one-pass-and-space.cases.json#space-plan"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "A process that can't be stopped even with SIGKILL is left behind after 30 s",
+      "covered": [
+        "scenario:process-unkillable-rip-is-abandoned",
+        "fixture:adapters/platform-adapters.contract.json#abandon"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "MakeMKV writes a folder instead of an ISO: kept as a folder",
+      "covered": [
+        "scenario:backup-folder-instead-of-iso"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "LibreDrive shown on the disc page and recorded; expired key, evaluation not started and too old show a banner and name the cause of a failure",
+      "covered": [
+        "scenario:makemkv-libredrive-recorded",
+        "scenario:makemkv-key-expired-explains-failure",
+        "fixture:domain/robot.cases.json#notice-evaluation-not-started"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "Archive everything preset",
+      "covered": [
+        "fixture:config/config-codec.cases.json#archive-everything-template"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Output folder, read errors and checks",
+      "behaviour": "Title rules order: filters, duplicates, strategy, maxTitles; the include/exclude text",
+      "covered": [
+        "fixture:domain/titles.cases.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "PostProcessStep",
+      "behaviour": "Steps run on success / failure (also cancelled, read errors) / always, per file or once, with a timeout and environment",
+      "covered": [
+        "fixture:domain/arguments.cases.json",
+        "scenario:post-steps-run-on-failure",
+        "scenario:post-step-environment-and-manifest"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "PostProcessStep",
+      "behaviour": "HandBrake steps: one encode per MKV, never replacing a file, progress every 10 %",
+      "covered": [
+        "scenario:post-handbrake-encodes-without-replacing",
+        "fixture:domain/media-args.cases.json#handbrake-progress-filter"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "PostProcessStep",
+      "behaviour": "Background steps run after the job in their own queue and can't change its result",
+      "covered": [
+        "scenario:post-background-step-after-job"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "PostProcessStep",
+      "behaviour": "matchName against the name and the label, matchFormats with a trailing *; drive steps first, then plugins",
+      "covered": [
+        "fixture:domain/rules.cases.json",
+        "scenario:post-steps-from-rules"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "PostProcessStep",
+      "behaviour": "Arguments are split like a POSIX shell before tokens are filled in; a lone {files} expands",
+      "covered": [
+        "fixture:domain/arguments.cases.json#invocation"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "PostProcessStep",
+      "behaviour": "BROMELIA_* environment variables and the manifest",
+      "covered": [
+        "scenario:post-step-environment-and-manifest",
+        "fixture:archive/manifest2-tv-play-all.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Templates",
+      "behaviour": "Every token, {n:3}, {token?text}, unknown tokens, '/' and safe names",
+      "covered": [
+        "fixture:domain/naming.cases.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Templates",
+      "behaviour": "The file name template also names backups",
+      "covered": [
+        "fixture:domain/naming.cases.json#default-backup",
+        "scenario:backup-iso-kept"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Naming, formats and episodes",
+      "behaviour": "Names from labels (set markers, noise words, title case, Roman numerals)",
+      "covered": [
+        "fixture:domain/identity.cases.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Naming, formats and episodes",
+      "behaviour": "Movie or TV: label markers, play-all menus, episode-length titles",
+      "covered": [
+        "fixture:domain/identity.cases.json#kind-episode-length-titles",
+        "fixture:domain/identity.cases.json#kind-play-all"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Naming, formats and episodes",
+      "behaviour": "Format from the listing (2160p / HEVC = 4K), the drive's flags, index.bdmv INDX0300",
+      "covered": [
+        "fixture:domain/identity.cases.json#format-uhd-by-video",
+        "fixture:domain/identity.cases.json#format-backup-index-uhd",
+        "scenario:backup-uhd-detected-from-index"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Naming, formats and episodes",
+      "behaviour": "Episodes from DVD navigation: play-all titles, plausibility, the split, the closing clip, numbering sources",
+      "covered": [
+        "fixture:domain/dvd-play-all.navigation.expected.json",
+        "fixture:domain/dvdnav.cases.json",
+        "scenario:episodes-play-all-split"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Naming, formats and episodes",
+      "behaviour": "Numbering across discs and the gap warning",
+      "covered": [
+        "fixture:episode-continuation.json",
+        "scenario:episodes-continue-from-previous-disc",
+        "scenario:episodes-gap-with-previous-disc-warned"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Archive files",
+      "behaviour": "SHA256SUMS (kept entries of earlier jobs), bromelia.json, the job log, makemkv's log and debug log, whatever the outcome",
+      "covered": [
+        "fixture:domain/archive-format.cases.json#sums-merge",
+        "scenario:rip-success-moves-into-library",
+        "scenario:safety-incomplete-note-names-the-logs",
+        "scenario:makemkv-debug-log-kept-after-each-run"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Archive check",
+      "behaviour": "Verifying: changed, unreadable, missing, not listed; Bromelia's own files and metadata not reported; hidden folders skipped; last check kept; scheduled checks with notifications",
+      "covered": [
+        "scenario:check-verify-reports-damage",
+        "scenario:check-verify-any-folder",
+        "scenario:check-scheduled-verification",
+        "scenario:check-one-at-a-time",
+        "scenario:check-verify-stop-keeps-finished-folders"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Archive check",
+      "behaviour": "Discs archived before: the fingerprint, skip / ask / ripAgain, manual rips only warn, only successful archives whose folder exists count",
+      "covered": [
+        "fixture:domain/fingerprint.cases.json",
+        "scenario:archived-automatic-skip",
+        "scenario:archived-automatic-ask",
+        "scenario:archived-automatic-rip-again",
+        "scenario:archived-manual-rip-only-warns",
+        "scenario:archived-only-successful-units-count",
+        "scenario:archived-other-disc-same-label"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Export bundle",
+      "behaviour": "Export drives and presets ({format: bromelia-drives, version 1})",
+      "covered": [
+        "schema:api/routes.json#exportConfig",
+        "schema:config-migration-2-3.json#exportBundle"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Media server layout",
+      "behaviour": "Movies/Name (Year)/…, Other/, Backup/ with .plexignore / .ignore; TV Shows/…/Season NN/…SxxEyy; later discs added to the same folders; failures kept outside",
+      "covered": [
+        "scenario:naming-media-server-movie",
+        "scenario:naming-media-server-episodes-merge",
+        "scenario:naming-media-server-backup-ignored",
+        "scenario:naming-media-server-failure-outside-library"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Media server layout",
+      "behaviour": "Kodi / Jellyfin / Emby .nfo and poster, never replaced, not in SHA256SUMS",
+      "covered": [
+        "scenario:publish-nfo-and-poster",
+        "fixture:nfo/nfo-cases.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Other discs",
+      "behaviour": "Audio CDs with cyanrip / abcde; data discs byte for byte; a read error fails; how discs are recognised; off = left alone",
+      "covered": [
+        "scenario:other-audio-cd-ripped",
+        "scenario:other-audio-ripper-missing",
+        "scenario:other-data-disc-imaged-exactly",
+        "scenario:other-data-disc-read-error-fails",
+        "scenario:other-discs-left-alone-when-off",
+        "fixture:domain/rules.cases.json#mode-other-disc-1"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Online lookup",
+      "behaviour": "TMDb / OMDb, canonical names and ids, a failed lookup continues",
+      "covered": [
+        "scenario:metadata-lookup-names-the-rip",
+        "scenario:metadata-lookup-failure-continues",
+        "fixture:domain/metadata.cases.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Online lookup",
+      "behaviour": "Ranking, years, candidates on the disc page, typed ids, movie turned TV by the menus",
+      "covered": [
+        "fixture:lookup/expected.json",
+        "scenario:metadata-session-candidates-and-chosen-id"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Online lookup",
+      "behaviour": "Episode titles from the season; none when the season doesn't list every number",
+      "covered": [
+        "scenario:metadata-episode-titles",
+        "scenario:metadata-season-missing-numbers"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Notifications",
+      "behaviour": "Discord, Slack, ntfy, Telegram, Pushover, Gotify, webhooks, Apprise; onlyProblems; failures logged",
+      "covered": [
+        "fixture:notifications.json",
+        "fixture:domain/notify.cases.json",
+        "scenario:notify-on-finish",
+        "scenario:notify-failure-logged-and-retried"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Web page",
+      "behaviour": "The page, status, open / rip / eject / close tray / cancel / log / settings / verify",
+      "covered": [
+        "scenario:api-web-page-rip-flow",
+        "scenario:api-status-page-and-actions",
+        "scenario:api-settings-change-mode-and-automation",
+        "scenario:drives-tray-control",
+        "scenario:check-one-at-a-time",
+        "ci:playwright"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Web page",
+      "behaviour": "Access rules: token, Host check, X-Bromelia, address needs a token",
+      "covered": [
+        "scenario:api-auth-rules",
+        "fixture:api/auth.cases.json"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "Web page",
+      "behaviour": "HTTPS with PEM files, both or neither",
+      "covered": [
+        "scenario:api-network-needs-token",
+        "fixture:adapters/platform-adapters.contract.json#tls-identity"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "makemkvcon",
+      "behaviour": "Drive scan, open, rip with output files found by comparing the folder, one pass, listing again, backups with disc:N and DRV checks, devices by dev:",
+      "covered": [
+        "fixture:domain/makemkv-files.cases.json#args-drive-scan",
+        "scenario:onepass-longest-titles",
+        "scenario:backup-drive-renumbered-stops",
+        "scenario:backup-needs-a-drive"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Per-drive MakeMKV settings",
+      "behaviour": "A private HOME with settings.conf (macOS, Linux); registry values around each launch (Windows); the profile; makemkv.txt and the debug log copies",
+      "covered": [
+        "fixture:adapters/platform-adapters.contract.json#settings-isolation-home",
+        "fixture:adapters/platform-adapters.contract.json#settings-isolation-registry",
+        "fixture:adapters/platform-adapters.contract.json#transcript",
+        "scenario:makemkv-debug-log-kept-after-each-run"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Threads",
+      "behaviour": "Progress coalesced to 10 per second",
+      "covered": [
+        "schema:events.json#jobChanged"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Hand-picked tracks",
+      "behaviour": "+sel:all, then mkvmerge keeps the chosen tracks; a layout that doesn't match keeps the file",
+      "covered": [
+        "scenario:tracks-hand-picked-remux",
+        "scenario:tracks-need-mkvmerge",
+        "fixture:domain/media-args.cases.json#remux-layout-differs"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Identity, episodes and archiving",
+      "behaviour": "Identity after the listing; VIDEO_TS navigation; split; hashing; records before post-processing",
+      "covered": [
+        "scenario:episodes-play-all-split",
+        "scenario:post-step-environment-and-manifest"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Staging, read errors and checks",
+      "behaviour": "Staging, checks, read errors, moves, paths rewritten to the final location",
+      "covered": [
+        "scenario:rip-success-moves-into-library",
+        "scenario:naming-media-server-episodes-merge"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Unfinished jobs",
+      "behaviour": "Nothing lost on a crash",
+      "covered": [
+        "scenario:recovery-interrupted-during-acquire",
+        "scenario:recovery-requeued-before-acquire",
+        "scenario:recovery-jobs-durable-from-creation",
+        "scenario:recovery-automatic-job-disc-changed"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Stopping processes",
+      "behaviour": "SIGTERM for makemkvcon, SIGINT first for others, SIGKILL after 5 s, output drained 5 s, abandoned 30 s after SIGKILL, watchdog thread",
+      "covered": [
+        "fixture:adapters/platform-adapters.contract.json#terminate-first",
+        "fixture:adapters/platform-adapters.contract.json#cancel-escalates",
+        "fixture:adapters/platform-adapters.contract.json#output-drained"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Stopping processes",
+      "behaviour": "Recorded makemkvcon runs decide the outcome (5036, 5037, 5004; first error)",
+      "covered": [
+        "fixture:rip-outcomes.json",
+        "fixture:domain/outcome.cases.json",
+        "scenario:recorded-rip-killed"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Sleep",
+      "behaviour": "macOS activity, Windows ES_SYSTEM_REQUIRED, logind inhibitor; logged once when logind is missing",
+      "covered": [
+        "fixture:adapters/platform-adapters.contract.json#power-guard",
+        "fixture:adapters/platform-adapters.contract.json#power-no-logind",
+        "scenario:power-unavailable-reported-once"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Services",
+      "behaviour": "Notifications and lookup never fail a job; the key never on a command line",
+      "covered": [
+        "scenario:metadata-lookup-failure-continues",
+        "scenario:notify-failure-logged-and-retried"
+      ]
+    },
+    {
+      "doc": "docs/architecture.md",
+      "section": "Services",
+      "behaviour": "Headless: scans drives, starts automatic rips, runs the background queue, serves the web page",
+      "covered": [
+        "scenario:automation-rip-on-insert",
+        "ci:docker-smoke-test"
+      ]
+    },
+    {
+      "doc": "docs/docker.md",
+      "section": "Run",
+      "behaviour": "Drives, /run/udev, the system bus, /config, /output, the web token, registration, archive checks, archived discs, automatic rips",
+      "covered": [
+        "ci:docker-smoke-test",
+        "scenario:automation-rip-on-insert",
+        "scenario:check-scheduled-verification",
+        "fixture:host/host-options.cases.json#token-from-environment"
+      ]
+    },
+    {
+      "doc": "docs/docker.md",
+      "section": "Run",
+      "behaviour": "docker stop cancels running jobs and exits; a kill or power loss is recovered at the next start",
+      "covered": [
+        "scenario:process-cancel-stops-makemkv",
+        "scenario:recovery-interrupted-during-acquire",
+        "ci:docker-smoke-test"
+      ]
+    },
+    {
+      "doc": "docs/docker.md",
+      "section": "Without Docker",
+      "behaviour": "Options --config, --listen, --port, --token (not saved)",
+      "covered": [
+        "fixture:host/host-options.cases.json"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Features",
+      "behaviour": "Open a disc, an ISO, a folder or a file inside one; title tree; information panel",
+      "covered": [
+        "scenario:session-open-disc",
+        "scenario:session-open-file-inside-disc",
+        "scenario:session-no-titles-in-a-video-file",
+        "fixture:domain/makemkv-files.cases.json#source-1"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Features",
+      "behaviour": "Rename output files per title; command transparency",
+      "covered": [
+        "scenario:naming-renamed-titles",
+        "schema:api/dtos.json#JobDetail"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Features",
+      "behaviour": "Registration key and read-only firmware information",
+      "covered": [
+        "schema:api/routes.json#register",
+        "schema:api/routes.json#firmware"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Features",
+      "behaviour": "Parallel rips, a queue (reorder, cancel, retry, start now) and a persistent history",
+      "covered": [
+        "scenario:queue-one-job-per-drive-and-limits",
+        "scenario:queue-retry-failed-job",
+        "schema:db/0001_init.sql"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Features",
+      "behaviour": "Drive list, trays and the mount wait",
+      "covered": [
+        "scenario:drives-list-and-states",
+        "scenario:drives-tray-control",
+        "scenario:automation-waits-for-mount"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Features",
+      "behaviour": "Presets, export and import as JSON",
+      "covered": [
+        "schema:api/routes.json#exportConfig",
+        "schema:api/routes.json#importConfig"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Testing",
+      "behaviour": "Real disc images through the pipeline (BROMELIA_TEST_*ISO)",
+      "covered": [
+        "scenario:realdisc-custom-tracks-rename-script",
+        "scenario:realdisc-play-all-split",
+        "scenario:realdisc-dvd-navigation-from-iso",
+        "scenario:realdisc-one-pass",
+        "scenario:realdisc-data-disc-image",
+        "scenario:realdisc-no-title-matches"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Testing",
+      "behaviour": "CI: Windows screenshots, the web page in Chromium, the Docker image",
+      "covered": [
+        "ci:windows-screenshots",
+        "ci:playwright",
+        "ci:docker-smoke-test"
+      ]
+    }
+  ]
+}
