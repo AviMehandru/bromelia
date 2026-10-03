@@ -1,6 +1,8 @@
 /* test-domain.c: Domain against shared/fixtures (one test per module, as on the other platforms). */
 #include "bro-test-fixtures.h"
 
+#include <math.h>
+
 #include "bro-bro-message.h"
 #include "bro-job-kind.h"
 #include "bro-job-state.h"
@@ -42,6 +44,15 @@
 #include "bro-profile-resolver.h"
 #include "bro-rule-matcher.h"
 #include "bro-step-filter.h"
+#include "bro-apprise-args.h"
+#include "bro-backup-structure.h"
+#include "bro-cd-ripper-args.h"
+#include "bro-command-args.h"
+#include "bro-hand-brake-args.h"
+#include "bro-remux.h"
+#include "bro-rip-check.h"
+#include "bro-simple-chapters.h"
+#include "bro-split.h"
 #include "bro-fingerprint.h"
 #include "bro-listing-builder.h"
 #include "bro-drive-join.h"
@@ -1914,6 +1925,292 @@ test_rule_profile_switch_and_removed_keys (void)
   g_assert_null (e->steps[0]);
 }
 
+/* ---- media args -------------------------------------------------------------------------------------- */
+
+static void
+near (GPtrArray *failures, const char *id, const char *what, BroJsonValue *expected, double actual)
+{
+  if (fabs (bro_json_value_get_number (expected, NAN) - actual) > 1e-9)
+    bro_test_fail (failures, id, "%s: expected %g, got %g", what, bro_json_value_get_number (expected, NAN), actual);
+}
+
+static BroTrackKind
+track_kind (const char *s)
+{
+  g_autofree char *lower = g_ascii_strdown (s, -1);
+  BroTrackKind k = BRO_TRACK_KIND_UNKNOWN;
+  if (g_str_has_prefix (lower, "subtitle"))
+    return BRO_TRACK_KIND_SUBTITLE;
+  bro_track_kind_from_wire (lower, &k);
+  return k;
+}
+
+/* A title written in a fixture, with tracks of the kinds named. */
+static BroTitle *
+title_with_tracks (BroJsonValue *t, BroJsonValue *kinds)
+{
+  BroTitle *title = title_of (t);
+  for (guint i = 0; i < bro_json_value_length (kinds); i++) {
+    BroTrack *track = g_new0 (BroTrack, 1);
+    track->index = i;
+    track->kind = track_kind (bro_json_value_get_string (bro_json_value_at (kinds, i), ""));
+    track->codec = g_strdup ("");
+    track->language = g_strdup ("");
+    track->language_name = g_strdup ("");
+    track->name = g_strdup ("");
+    track->attributes = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+    g_ptr_array_add (title->tracks, track);
+  }
+  return title;
+}
+
+static BroStepDefinition *
+step_from (BroJsonValue *given, const char *kind)
+{
+  g_autoptr (BroJsonValue) json = bro_json_value_new_object ();
+  bro_json_value_set (json, "id", bro_json_value_new_string ("s"));
+  bro_json_value_set (json, "kind", bro_json_value_new_string (kind));
+  for (guint i = 0; i < given->keys->len; i++)
+    if (strcmp (given->keys->pdata[i], "kind") != 0)
+      bro_json_value_set (json, given->keys->pdata[i], bro_json_value_ref (given->items->pdata[i]));
+  return bro_step_definition_decode (json);
+}
+
+static void
+same_codes (GPtrArray *failures, const char *id, const char *what, BroJsonValue *expected, GPtrArray *messages, gboolean full)
+{
+  g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+  for (guint i = 0; i < messages->len; i++) {
+    BroBroMessage *m = messages->pdata[i];
+    bro_json_value_append (got, full ? bro_bro_message_to_json (m) : bro_json_value_new_string (bro_message_code_wire (m->code)));
+  }
+  bro_test_same_json (failures, id, what, expected, got);
+}
+
+static gboolean
+media_args_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (g_str_has_prefix (id, "probe-")) {
+    g_autoptr (BroMkvProbe) p = bro_mkv_probe_parse (JS (given, "json"));
+    BroJsonValue *want = J (expect, "probe");
+    if (want->kind == BRO_JSON_VALUE_NULL) {
+      if (p)
+        bro_test_fail (failures, id, "probe should be NULL");
+      return TRUE;
+    }
+    if (!p) {
+      bro_test_fail (failures, id, "no probe");
+      return TRUE;
+    }
+    near (failures, id, "durationSeconds", J (want, "durationSeconds"), p->duration_seconds);
+    g_autoptr (BroJsonValue) types = bro_json_value_new_array ();
+    for (guint i = 0; i < p->tracks->len; i++)
+      bro_json_value_append (types, bro_json_value_new_string (((BroMkvTrack *) p->tracks->pdata[i])->type));
+    bro_test_same_json (failures, id, "trackTypes", J (want, "trackTypes"), types);
+    if (bro_json_value_get_integer (J (want, "chapterCount"), -1) != p->chapter_count)
+      bro_test_fail (failures, id, "chapterCount: got %d", p->chapter_count);
+    return TRUE;
+  }
+  if (J (given, "expectedSeconds")) {
+    BroJsonValue *secs = J (given, "expectedSeconds"), *want = J (expect, "tolerance");
+    for (guint i = 0; i < bro_json_value_length (want); i++)
+      near (failures, id, "tolerance", bro_json_value_at (want, i),
+            bro_rip_check_tolerance (bro_json_value_get_number (bro_json_value_at (secs, i), 0)).seconds);
+    return TRUE;
+  }
+  if (g_str_has_prefix (id, "check-")) {
+    BroJsonValue *p = J (given, "probe"), *t = J (given, "title");
+    g_autoptr (BroMkvProbe) probe = bro_mkv_probe_new ();
+    BroJsonValue *d = J (p, "durationSeconds");
+    probe->has_duration = d && d->kind != BRO_JSON_VALUE_NULL;
+    probe->duration_seconds = bro_json_value_get_number (d, 0);
+    for (guint i = 0; i < bro_json_value_length (J (p, "trackTypes")); i++)
+      g_ptr_array_add (probe->tracks, bro_mkv_track_new (i, bro_json_value_get_string (bro_json_value_at (J (p, "trackTypes"), i), "")));
+    probe->chapter_count = bro_json_value_get_integer (J (p, "chapterCount"), 0);
+    g_autoptr (BroTitle) title = title_with_tracks (t, J (t, "tracks"));
+    g_autoptr (BroRipCheckResult) r = bro_rip_check_check (probe, title);
+    if (J (expect, "problems"))
+      same_codes (failures, id, "problems", J (expect, "problems"), r->problems, TRUE);
+    if (J (expect, "notes"))
+      same_codes (failures, id, "notes", J (expect, "notes"), r->notes, TRUE);
+    if (J (expect, "problemCodes"))
+      same_codes (failures, id, "problemCodes", J (expect, "problemCodes"), r->problems, FALSE);
+    if (J (expect, "noteCodes"))
+      same_codes (failures, id, "noteCodes", J (expect, "noteCodes"), r->notes, FALSE);
+    return TRUE;
+  }
+  if (g_str_has_prefix (id, "remux-")) {
+    g_autoptr (GPtrArray) layout = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_mkv_track_free);
+    BroJsonValue *l = J (given, "layout");
+    for (guint i = 0; i < bro_json_value_length (l); i++)
+      g_ptr_array_add (layout, bro_mkv_track_new (bro_json_value_get_integer (J (bro_json_value_at (l, i), "id"), 0),
+                                                  JS (bro_json_value_at (l, i), "type")));
+    g_autoptr (BroListing) listing = NULL;
+    g_autoptr (BroTitle) own = NULL;
+    const BroTitle *title = NULL;
+    if (JS (given, "listing")) {
+      g_autofree char *text = bro_test_fixture_text (JS (given, "listing"), NULL);
+      listing = listing_of (text);
+      for (guint i = 0; i < listing->titles->len && !title; i++)
+        if (((BroTitle *) listing->titles->pdata[i])->index == bro_json_value_get_integer (J (given, "title"), -1))
+          title = listing->titles->pdata[i];
+    } else {
+      g_autoptr (BroJsonValue) empty = bro_json_value_new_object ();
+      title = own = title_with_tracks (empty, J (given, "tracks"));
+    }
+    g_autoptr (GArray) keep = ints_of (J (given, "keep"));
+    g_auto (GStrv) args = bro_remux_arguments (layout, title, keep, JS (given, "input"), JS (given, "output"));
+    g_autoptr (BroJsonValue) got = args ? strv_json (args) : bro_json_value_new_null ();
+    bro_test_same_json (failures, id, "arguments", J (expect, "arguments"), got);
+    return TRUE;
+  }
+  if (strcmp (id, "split-arguments") == 0) {
+    g_autoptr (GArray) chapters = ints_of (J (given, "chapters"));
+    g_auto (GStrv) args = bro_split_arguments (chapters, JS (given, "input"), JS (given, "output"));
+    g_autoptr (BroJsonValue) got = strv_json (args);
+    bro_test_same_json (failures, id, "arguments", J (expect, "arguments"), got);
+    return TRUE;
+  }
+  if (strcmp (id, "simple-chapters") == 0) {
+    g_autoptr (GArray) starts = bro_simple_chapters_parse (JS (given, "text"));
+    BroJsonValue *want = J (expect, "starts");
+    if (starts->len != bro_json_value_length (want))
+      bro_test_fail (failures, id, "%u starts", starts->len);
+    for (guint i = 0; i < starts->len && i < bro_json_value_length (want); i++)
+      near (failures, id, "start", bro_json_value_at (want, i), g_array_index (starts, BroDuration, i).seconds);
+    return TRUE;
+  }
+  if (g_str_has_prefix (id, "handbrake-")) {
+    if (J (given, "files")) {
+      g_auto (GStrv) files = strv_of (J (given, "files"));
+      g_autoptr (GPtrArray) kept = g_ptr_array_new ();
+      for (int i = 0; files[i]; i++)
+        if (bro_hand_brake_args_is_source (files[i]))
+          g_ptr_array_add (kept, files[i]);
+      g_ptr_array_add (kept, NULL);
+      g_autoptr (BroJsonValue) got = strv_json ((GStrv) kept->pdata);
+      bro_test_same_json (failures, id, "sources", J (expect, "sources"), got);
+      return TRUE;
+    }
+    if (J (given, "lines")) {
+      g_auto (GStrv) lines = strv_of (J (given, "lines"));
+      BroProgressFilter filter = { 0 };
+      g_autoptr (GPtrArray) kept = g_ptr_array_new ();
+      for (int i = 0; lines[i]; i++)
+        if (bro_hand_brake_args_keep_line (&filter, lines[i]))
+          g_ptr_array_add (kept, lines[i]);
+      g_ptr_array_add (kept, NULL);
+      g_autoptr (BroJsonValue) got = strv_json ((GStrv) kept->pdata);
+      bro_test_same_json (failures, id, "kept", J (expect, "kept"), got);
+      return TRUE;
+    }
+    g_autoptr (BroStepDefinition) step = step_from (J (given, "step"), "handbrake");
+    if (J (expect, "preset")) {
+      if (!step->background != !bro_json_value_get_bool (J (expect, "background"), FALSE))
+        bro_test_fail (failures, id, "background");
+      bro_test_same_string (failures, id, "preset", JS (expect, "preset"), step->handbrake.preset);
+      BroJsonValue *runs = J (expect, "runsOn");
+      for (guint i = 0; i < runs->keys->len; i++) {
+        BroOutcome o = BRO_OUTCOME_FAILED;
+        bro_outcome_from_wire (runs->keys->pdata[i], &o);
+        if (!bro_step_filter_applies (step, o) != !bro_json_value_get_bool (runs->items->pdata[i], FALSE))
+          bro_test_fail (failures, id, "runsOn %s", (char *) runs->keys->pdata[i]);
+      }
+    }
+    if (J (expect, "output")) {
+      g_autoptr (GHashTable) values = values_of (J (given, "values"));
+      g_autofree char *out = bro_hand_brake_args_output (step, values, NULL);
+      bro_test_same_string (failures, id, "output", JS (expect, "output"), out);
+    }
+    if (J (expect, "arguments")) {
+      g_auto (GStrv) args = bro_hand_brake_args_build (step, JS (given, "input"), JS (given, "output"), NULL);
+      g_autoptr (BroJsonValue) got = strv_json (args);
+      bro_test_same_json (failures, id, "arguments", J (expect, "arguments"), got);
+    }
+    return TRUE;
+  }
+  if (g_str_has_prefix (id, "backup-structure")) {
+    g_auto (GStrv) entries = J (given, "folder") ? strv_of (J (given, "folder")) : NULL;
+    g_autoptr (GBytes) header = NULL;
+    if (J (given, "bytes")) {
+      /* The file's bytes from 32769: the descriptor, else zeros. */
+      const char *descriptor = JS (given, "descriptorAt32769") ? JS (given, "descriptorAt32769") : "";
+      int n = CLAMP ((int) bro_json_value_get_integer (J (given, "bytes"), 0) - 32769, 0, 5);
+      guint8 bytes[5] = { 0 };
+      for (int i = 0; i < n && descriptor[i]; i++)
+        bytes[i] = descriptor[i];
+      header = g_bytes_new (bytes, n);
+    }
+    g_autoptr (BroBroMessage) problem = bro_backup_structure_problem ("disc", bro_json_value_get_bool (J (given, "iso"), FALSE),
+                                                                      (const char *const *) entries, header);
+    BroJsonValue *want = J (expect, "problem");
+    bro_test_same_string (failures, id, "problem", want->kind == BRO_JSON_VALUE_NULL ? NULL : JS (want, "code"),
+                          problem ? bro_message_code_wire (problem->code) : NULL);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void
+test_media_args_cases (void)
+{
+  bro_test_run_cases ("domain/media-args.cases.json", media_args_case);
+}
+
+static gboolean
+only_invocation (const char *id)
+{
+  return g_str_has_prefix (id, "invocation");
+}
+
+static gboolean
+command_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  g_autoptr (BroStepDefinition) step = step_from (J (given, "step"), "command");
+  g_autoptr (GHashTable) values = values_of (J (given, "values"));
+  g_auto (GStrv) files = strv_of (J (given, "files"));
+  g_autoptr (BroCommandLine) line = bro_command_args_build (step, values, (const char *const *) files, JS (given, "home"));
+  bro_test_same_string (failures, id, "executable", JS (expect, "executable"), line->executable);
+  g_autoptr (BroJsonValue) got = strv_json (line->arguments);
+  bro_test_same_json (failures, id, "arguments", J (expect, "arguments"), got);
+  return TRUE;
+}
+
+static void
+test_command_cases (void)
+{
+  bro_test_run_cases_only ("domain/arguments.cases.json", only_invocation, command_case);
+}
+
+static void
+test_other_tool_arguments (void)
+{
+  g_auto (GStrv) apprise = bro_apprise_args_build ("tgram://bot/chat", "T", "B");
+  const char *want_apprise[] = { "-t", "T", "-b", "B", "tgram://bot/chat", NULL };
+  g_assert_true (g_strv_equal ((const char *const *) apprise, want_apprise));
+  g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
+  const char *both[] = { "abcde", "cyanrip", NULL }, *abcde[] = { "abcde", NULL }, *nothing[] = { NULL };
+  g_autoptr (BroCommandLine) cyanrip = bro_cd_ripper_args_build (none, "/dev/sr0", both);
+  const char *want_cyanrip[] = { "-d", "/dev/sr0", "-o", "flac", NULL };
+  g_assert_cmpstr (cyanrip->executable, ==, "cyanrip");
+  g_assert_true (g_strv_equal ((const char *const *) cyanrip->arguments, want_cyanrip));
+  g_autoptr (BroCommandLine) a = bro_cd_ripper_args_build (none, "/dev/sr0", abcde);
+  g_assert_cmpstr (a->executable, ==, "abcde");
+  g_assert_null (bro_cd_ripper_args_build (none, "/dev/sr0", nothing));
+  g_autoptr (BroJsonValue) other = bro_json_value_parse ("{\"audioCommand\": \"whipper cd -d {device} rip\"}", -1);
+  g_autoptr (BroCommandLine) custom = bro_cd_ripper_args_build (other, "/dev/sr1", nothing);
+  const char *want_custom[] = { "cd", "-d", "/dev/sr1", "rip", NULL };
+  g_assert_cmpstr (custom->executable, ==, "whipper");
+  g_assert_true (g_strv_equal ((const char *const *) custom->arguments, want_custom));
+  /* A leading ~ is the home folder in a preset file too. */
+  g_autoptr (BroJsonValue) json = bro_json_value_parse (
+    "{\"id\": \"h\", \"kind\": \"handbrake\", \"handbrake\": {\"presetFile\": \"~/p.json\", \"preset\": \"\"}}", -1);
+  g_autoptr (BroStepDefinition) step = bro_step_definition_decode (json);
+  g_auto (GStrv) hb = bro_hand_brake_args_build (step, "/i", "/o", "/home/me/");
+  const char *want_hb[] = { "--preset-import-file", "/home/me/p.json", "-i", "/i", "-o", "/o", NULL };
+  g_assert_true (g_strv_equal ((const char *const *) hb, want_hb));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1948,5 +2245,8 @@ main (int argc, char **argv)
   g_test_add_func ("/rules/cases", test_rule_cases);
   g_test_add_func ("/rules/step-filter", test_step_filter_cases);
   g_test_add_func ("/rules/profile-switch", test_rule_profile_switch_and_removed_keys);
+  g_test_add_func ("/media-args/cases", test_media_args_cases);
+  g_test_add_func ("/media-args/command", test_command_cases);
+  g_test_add_func ("/media-args/other-tools", test_other_tool_arguments);
   return g_test_run ();
 }

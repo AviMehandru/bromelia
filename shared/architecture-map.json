@@ -4317,6 +4317,32 @@
           "c": {
             "name": "BroMkvProbe",
             "file": "linux/src/domain/media-args/bro-mkv-probe.h"
+          },
+          "fields": [
+            "durationSeconds",
+            "tracks",
+            "chapterCount"
+          ]
+        },
+        {
+          "name": "MkvTrack",
+          "kind": "struct",
+          "doc": "A track of an MKV as mkvmerge -J lists it: its id and type (video, audio, subtitles).",
+          "fields": [
+            "id",
+            "type"
+          ],
+          "swift": {
+            "name": "MkvTrack",
+            "file": "macos/BromeliaKit/Sources/BroDomain/MediaArgs/MkvTrack.swift"
+          },
+          "cs": {
+            "name": "MkvTrack",
+            "file": "windows/src/Bromelia.Domain/MediaArgs/MkvTrack.cs"
+          },
+          "c": {
+            "name": "BroMkvTrack",
+            "file": "linux/src/domain/media-args/bro-mkv-track.h"
           }
         },
         {
@@ -4333,6 +4359,27 @@
           "c": {
             "name": "BroRipCheck",
             "file": "linux/src/domain/media-args/bro-rip-check.h"
+          }
+        },
+        {
+          "name": "RipCheckResult",
+          "kind": "struct",
+          "doc": "Problems (the file must not be trusted) and notes (worth logging) of RipCheck.check.",
+          "fields": [
+            "problems",
+            "notes"
+          ],
+          "swift": {
+            "name": "RipCheckResult",
+            "file": "macos/BromeliaKit/Sources/BroDomain/MediaArgs/RipCheckResult.swift"
+          },
+          "cs": {
+            "name": "RipCheckResult",
+            "file": "windows/src/Bromelia.Domain/MediaArgs/RipCheckResult.cs"
+          },
+          "c": {
+            "name": "BroRipCheckResult",
+            "file": "linux/src/domain/media-args/bro-rip-check-result.h"
           }
         },
         {
@@ -4400,6 +4447,27 @@
           }
         },
         {
+          "name": "ProgressFilter",
+          "kind": "struct",
+          "doc": "HandBrakeArgs.keepLine's state: the task and the next 10 % step to keep.",
+          "fields": [
+            "task",
+            "next"
+          ],
+          "swift": {
+            "name": "ProgressFilter",
+            "file": "macos/BromeliaKit/Sources/BroDomain/MediaArgs/ProgressFilter.swift"
+          },
+          "cs": {
+            "name": "ProgressFilter",
+            "file": "windows/src/Bromelia.Domain/MediaArgs/ProgressFilter.cs"
+          },
+          "c": {
+            "name": "BroProgressFilter",
+            "file": "linux/src/domain/media-args/bro-progress-filter.h"
+          }
+        },
+        {
           "name": "Par2Args",
           "kind": "namespace",
           "swift": {
@@ -4413,7 +4481,8 @@
           "c": {
             "name": "BroPar2Args",
             "file": "linux/src/domain/media-args/bro-par2-args.h"
-          }
+          },
+          "phase": 7
         },
         {
           "name": "CdRipperArgs",
@@ -4461,6 +4530,27 @@
           "c": {
             "name": "BroCommandArgs",
             "file": "linux/src/domain/media-args/bro-command-args.h"
+          }
+        },
+        {
+          "name": "CommandLine",
+          "kind": "struct",
+          "doc": "A program and its arguments (the adapter resolves a bare program name with ToolLocator).",
+          "fields": [
+            "executable",
+            "arguments"
+          ],
+          "swift": {
+            "name": "CommandLine",
+            "file": "macos/BromeliaKit/Sources/BroDomain/MediaArgs/CommandLine.swift"
+          },
+          "cs": {
+            "name": "CommandLine",
+            "file": "windows/src/Bromelia.Domain/MediaArgs/CommandLine.cs"
+          },
+          "c": {
+            "name": "BroCommandLine",
+            "file": "linux/src/domain/media-args/bro-command-line.h"
           }
         },
         {
@@ -4553,10 +4643,11 @@
           "params": [
             "step",
             "input",
-            "output"
+            "output",
+            "home"
           ],
           "returns": "[String]",
-          "swift": "HandBrakeArgs.build(_:input:output:)",
+          "swift": "HandBrakeArgs.build(_:input:output:home:)",
           "cs": "HandBrakeArgs.Build",
           "c": "bro_hand_brake_args_build"
         },
@@ -4564,10 +4655,11 @@
           "name": "HandBrakeArgs.output",
           "params": [
             "step",
-            "values"
+            "values",
+            "home"
           ],
           "returns": "String",
-          "swift": "HandBrakeArgs.output(_:values:)",
+          "swift": "HandBrakeArgs.output(_:values:home:)",
           "cs": "HandBrakeArgs.Output",
           "c": "bro_hand_brake_args_output"
         },
@@ -4601,7 +4693,8 @@
           "returns": "[String]",
           "swift": "Par2Args.create(_:percent:)",
           "cs": "Par2Args.Create",
-          "c": "bro_par2_args_create"
+          "c": "bro_par2_args_create",
+          "phase": 7
         },
         {
           "name": "CdRipperArgs.build",
@@ -4632,21 +4725,24 @@
           "params": [
             "step",
             "values",
-            "files"
+            "files",
+            "home"
           ],
           "returns": "CommandLine",
-          "swift": "CommandArgs.build(_:values:files:)",
+          "swift": "CommandArgs.build(_:values:files:home:)",
           "cs": "CommandArgs.Build",
           "c": "bro_command_args_build"
         },
         {
           "name": "BackupStructure.problem",
           "params": [
+            "name",
+            "iso",
             "entries",
             "isoHeader"
           ],
           "returns": "BroMessage?",
-          "swift": "BackupStructure.problem(_:isoHeader:)",
+          "swift": "BackupStructure.problem(_:iso:entries:isoHeader:)",
           "cs": "BackupStructure.Problem",
           "c": "bro_backup_structure_problem"
         }
