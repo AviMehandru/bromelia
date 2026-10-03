@@ -4997,6 +4997,28 @@
               "BRO_ONLINE_ID_TMDB",
               "BRO_ONLINE_ID_IMDB"
             ]
+          },
+          "doc": "A movie or show chosen by its id: tmdb(id, kind or none) or imdb(id)."
+        },
+        {
+          "name": "NameAndYear",
+          "kind": "struct",
+          "doc": "A name and the year typed after it: \"Inception (2010)\".",
+          "fields": [
+            "name",
+            "year"
+          ],
+          "swift": {
+            "name": "NameAndYear",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Metadata/NameAndYear.swift"
+          },
+          "cs": {
+            "name": "NameAndYear",
+            "file": "windows/src/Bromelia.Domain/Metadata/NameAndYear.cs"
+          },
+          "c": {
+            "name": "BroNameAndYear",
+            "file": "linux/src/domain/metadata/bro-name-and-year.h"
           }
         },
         {
@@ -5013,7 +5035,18 @@
           "c": {
             "name": "BroCandidate",
             "file": "linux/src/domain/metadata/bro-candidate.h"
-          }
+          },
+          "fields": [
+            "title",
+            "year",
+            "tmdbId",
+            "imdbId",
+            "provider",
+            "kind",
+            "overview",
+            "poster"
+          ],
+          "doc": "A movie or show found online: title, year, TMDb and IMDb ids, the provider, movie or TV as listed, plot and poster URL."
         },
         {
           "name": "EpisodeDetails",
@@ -5044,10 +5077,11 @@
             "name",
             "kind",
             "year",
-            "key"
+            "key",
+            "language"
           ],
           "returns": "HttpRequestSpec",
-          "swift": "TmdbRequests.search(_:kind:year:key:)",
+          "swift": "TmdbRequests.search(_:kind:year:key:language:)",
           "cs": "TmdbRequests.Search",
           "c": "bro_tmdb_requests_search"
         },
@@ -5056,10 +5090,11 @@
           "params": [
             "id",
             "kind",
-            "key"
+            "key",
+            "language"
           ],
           "returns": "HttpRequestSpec",
-          "swift": "TmdbRequests.details(_:kind:key:)",
+          "swift": "TmdbRequests.details(_:kind:key:language:)",
           "cs": "TmdbRequests.Details",
           "c": "bro_tmdb_requests_details"
         },
@@ -5067,10 +5102,11 @@
           "name": "TmdbRequests.find",
           "params": [
             "imdbId",
-            "key"
+            "key",
+            "language"
           ],
           "returns": "HttpRequestSpec",
-          "swift": "TmdbRequests.find(_:key:)",
+          "swift": "TmdbRequests.find(_:key:language:)",
           "cs": "TmdbRequests.Find",
           "c": "bro_tmdb_requests_find"
         },
@@ -5079,10 +5115,11 @@
           "params": [
             "match",
             "season",
-            "key"
+            "key",
+            "language"
           ],
-          "returns": "HttpRequestSpec",
-          "swift": "TmdbRequests.season(_:season:key:)",
+          "returns": "HttpRequestSpec?",
+          "swift": "TmdbRequests.season(_:season:key:language:)",
           "cs": "TmdbRequests.Season",
           "c": "bro_tmdb_requests_season"
         },
@@ -5090,10 +5127,11 @@
           "name": "TmdbRequests.episodeGroups",
           "params": [
             "tmdbId",
-            "key"
+            "key",
+            "language"
           ],
           "returns": "HttpRequestSpec",
-          "swift": "TmdbRequests.episodeGroups(_:key:)",
+          "swift": "TmdbRequests.episodeGroups(_:key:language:)",
           "cs": "TmdbRequests.EpisodeGroups",
           "c": "bro_tmdb_requests_episode_groups"
         },
@@ -5101,10 +5139,11 @@
           "name": "TmdbRequests.episodeGroup",
           "params": [
             "groupId",
-            "key"
+            "key",
+            "language"
           ],
           "returns": "HttpRequestSpec",
-          "swift": "TmdbRequests.episodeGroup(_:key:)",
+          "swift": "TmdbRequests.episodeGroup(_:key:language:)",
           "cs": "TmdbRequests.EpisodeGroup",
           "c": "bro_tmdb_requests_episode_group"
         },
@@ -5193,7 +5232,7 @@
             "season",
             "key"
           ],
-          "returns": "HttpRequestSpec",
+          "returns": "HttpRequestSpec?",
           "swift": "OmdbRequests.season(_:season:key:)",
           "cs": "OmdbRequests.Season",
           "c": "bro_omdb_requests_season"
@@ -5201,20 +5240,22 @@
         {
           "name": "OmdbParse.candidates",
           "params": [
-            "bytes"
+            "bytes",
+            "kind"
           ],
           "returns": "[Candidate]",
-          "swift": "OmdbParse.candidates(_:)",
+          "swift": "OmdbParse.candidates(_:kind:)",
           "cs": "OmdbParse.Candidates",
           "c": "bro_omdb_parse_candidates"
         },
         {
           "name": "OmdbParse.details",
           "params": [
-            "bytes"
+            "bytes",
+            "kind"
           ],
           "returns": "Candidate?",
-          "swift": "OmdbParse.details(_:)",
+          "swift": "OmdbParse.details(_:kind:)",
           "cs": "OmdbParse.Details",
           "c": "bro_omdb_parse_details"
         },
@@ -5259,6 +5300,17 @@
           "swift": "OnlineId.splitYear(_:)",
           "cs": "OnlineId.SplitYear",
           "c": "bro_online_id_split_year"
+        },
+        {
+          "name": "Candidate.choice",
+          "params": [
+            "candidate"
+          ],
+          "returns": "String",
+          "doc": "What to type or pick to choose this candidate: movie/603, tv/1668 or tt0133093.",
+          "swift": "Candidate.choice(_:)",
+          "cs": "Candidate.Choice",
+          "c": "bro_candidate_choice"
         }
       ]
     },

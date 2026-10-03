@@ -44,6 +44,11 @@
 #include "bro-profile-resolver.h"
 #include "bro-rule-matcher.h"
 #include "bro-step-filter.h"
+#include "bro-omdb-parse.h"
+#include "bro-omdb-requests.h"
+#include "bro-ranking.h"
+#include "bro-tmdb-parse.h"
+#include "bro-tmdb-requests.h"
 #include "bro-dvd-nav.h"
 #include "bro-apprise-args.h"
 #include "bro-backup-structure.h"
@@ -2468,6 +2473,269 @@ test_menu_stills_and_buttons (void)
   g_assert_null (bro_dvd_nav_analyse (&none.parent));
 }
 
+/* ---- metadata ---------------------------------------------------------------------------------------- */
+
+static BroMediaKind
+media_kind (BroJsonValue *v)
+{
+  return g_strcmp0 (bro_json_value_get_string (v, NULL), "tv") == 0 ? BRO_MEDIA_KIND_TV : BRO_MEDIA_KIND_MOVIE;
+}
+
+static int
+int_or_none (BroJsonValue *v)
+{
+  return v && v->kind == BRO_JSON_VALUE_INTEGER ? (int) v->integer : -1;
+}
+
+/* The request a fixture case describes; NULL when the provider can't make it. */
+static BroHttpRequestSpec *
+request_of (BroJsonValue *given)
+{
+  gboolean tmdb = g_strcmp0 (JS (given, "provider"), "tmdb") == 0;
+  const char *key = JS (given, "key"), *language = "en-US";
+  BroJsonValue *s;
+  if ((s = J (given, "search")))
+    return tmdb ? bro_tmdb_requests_search (JS (s, "name"), media_kind (J (s, "kind")), int_or_none (J (s, "year")), key, language)
+                : bro_omdb_requests_search (JS (s, "name"), media_kind (J (s, "kind")), int_or_none (J (s, "year")), key);
+  if ((s = J (given, "id"))) {
+    BroOnlineId id = { 0 };
+    if (JS (s, "imdb")) {
+      id.kind = BRO_ONLINE_ID_IMDB;
+      id.imdb_id = (char *) JS (s, "imdb");
+    } else {
+      id.kind = BRO_ONLINE_ID_TMDB;
+      id.tmdb_id = int_or_none (J (s, "tmdb"));
+      id.has_media_kind = J (s, "kind") != NULL;
+      id.media_kind = media_kind (J (s, "kind"));
+    }
+    if (!tmdb)
+      return bro_omdb_requests_details (&id, key);
+    if (id.kind == BRO_ONLINE_ID_IMDB)
+      return bro_tmdb_requests_find (id.imdb_id, key, language);
+    return bro_tmdb_requests_details (id.tmdb_id, id.has_media_kind ? id.media_kind : media_kind (J (given, "kind")), key, language);
+  }
+  if ((s = J (given, "season"))) {
+    g_autoptr (BroCandidate) match = bro_candidate_new ("", "");
+    match->tmdb_id = int_or_none (J (s, "tmdbId"));
+    match->imdb_id = g_strdup (JS (s, "imdbId"));
+    int n = int_or_none (J (s, "season"));
+    return tmdb ? bro_tmdb_requests_season (match, n, key, language) : bro_omdb_requests_season (match, n, key);
+  }
+  if ((s = J (given, "episodeGroups")))
+    return bro_tmdb_requests_episode_groups (int_or_none (J (s, "tmdbId")), key, language);
+  if ((s = J (given, "episodeGroup")))
+    return bro_tmdb_requests_episode_group (JS (s, "id"), key, language);
+  return NULL;
+}
+
+/* A candidate as the fixtures write one: only the fields the expected value names. */
+static void
+same_candidate (GPtrArray *failures, const char *id, const char *what, BroJsonValue *want, const BroCandidate *got)
+{
+  if (!want || want->kind == BRO_JSON_VALUE_NULL) {
+    if (got)
+      bro_test_fail (failures, id, "%s: expected none", what);
+    return;
+  }
+  if (!got) {
+    bro_test_fail (failures, id, "%s: none", what);
+    return;
+  }
+  for (guint i = 0; i < want->keys->len; i++) {
+    const char *k = want->keys->pdata[i];
+    g_autoptr (BroJsonValue) actual = NULL;
+    if (strcmp (k, "title") == 0)
+      actual = bro_json_value_new_string (got->title);
+    else if (strcmp (k, "year") == 0)
+      actual = got->year >= 0 ? bro_json_value_new_integer (got->year) : bro_json_value_new_null ();
+    else if (strcmp (k, "tmdbId") == 0)
+      actual = got->tmdb_id >= 0 ? bro_json_value_new_integer (got->tmdb_id) : bro_json_value_new_null ();
+    else if (strcmp (k, "imdbId") == 0)
+      actual = got->imdb_id ? bro_json_value_new_string (got->imdb_id) : bro_json_value_new_null ();
+    else if (strcmp (k, "kind") == 0)
+      actual = got->has_kind ? bro_json_value_new_string (bro_media_kind_to_wire (got->kind)) : bro_json_value_new_null ();
+    else if (strcmp (k, "choice") == 0) {
+      g_autofree char *choice = bro_candidate_choice (got);
+      actual = bro_json_value_new_string (choice);
+    } else if (strcmp (k, "poster") == 0)
+      actual = bro_json_value_new_string (got->poster);
+    else if (strcmp (k, "overview") == 0)
+      actual = bro_json_value_new_string (got->overview);
+    else {
+      bro_test_fail (failures, id, "unknown field %s", k);
+      continue;
+    }
+    g_autofree char *field = g_strdup_printf ("%s.%s", what, k);
+    bro_test_same_json (failures, id, field, want->items->pdata[i], actual);
+  }
+}
+
+static GPtrArray *
+search_in (BroJsonValue *c, GBytes *body)
+{
+  g_autoptr (GPtrArray) list = g_strcmp0 (JS (c, "provider"), "tmdb") == 0
+                                 ? bro_tmdb_parse_candidates (body, media_kind (J (c, "kind")))
+                                 : bro_omdb_parse_candidates (body, J (c, "kind") != NULL, media_kind (J (c, "kind")));
+  return bro_ranking_rank (list, JS (c, "name"), int_or_none (J (c, "year")));
+}
+
+static GBytes *
+fixture_bytes (const char *relative)
+{
+  gsize n;
+  char *text = bro_test_fixture_text (relative, &n);
+  return g_bytes_new_take (text, n);
+}
+
+static void
+recorded_answers (GPtrArray *failures, const char *id, BroJsonValue *f)
+{
+  BroJsonValue *list = J (f, "search");
+  for (guint i = 0; i < bro_json_value_length (list); i++) {
+    BroJsonValue *c = bro_json_value_at (list, i);
+    g_autofree char *rel = g_strconcat ("lookup/", JS (c, "file"), NULL);
+    g_autoptr (GBytes) body = fixture_bytes (rel);
+    g_autoptr (GPtrArray) got = search_in (c, body);
+    BroJsonValue *want = J (c, "expect");
+    if (got->len != bro_json_value_length (want))
+      bro_test_fail (failures, id, "%s: %u results", rel, got->len);
+    for (guint k = 0; k < got->len && k < bro_json_value_length (want); k++) {
+      g_autofree char *what = g_strdup_printf ("%s[%u]", rel, k);
+      same_candidate (failures, id, what, bro_json_value_at (want, k), got->pdata[k]);
+    }
+  }
+  list = J (f, "details");
+  for (guint i = 0; i < bro_json_value_length (list); i++) {
+    BroJsonValue *c = bro_json_value_at (list, i);
+    g_autofree char *rel = g_strconcat ("lookup/", JS (c, "file"), NULL);
+    g_autoptr (GBytes) body = fixture_bytes (rel);
+    g_autoptr (BroCandidate) got = g_strcmp0 (JS (c, "provider"), "tmdb") == 0 ? bro_tmdb_parse_details (body, media_kind (J (c, "kind")))
+                                                                                 : bro_omdb_parse_details (body, TRUE, media_kind (J (c, "kind")));
+    same_candidate (failures, id, rel, J (c, "expect"), got);
+  }
+  list = J (f, "season");
+  for (guint i = 0; i < bro_json_value_length (list); i++) {
+    BroJsonValue *c = bro_json_value_at (list, i);
+    g_autofree char *rel = g_strconcat ("lookup/", JS (c, "file"), NULL);
+    g_autoptr (GBytes) body = fixture_bytes (rel);
+    g_autoptr (GHashTable) got = g_strcmp0 (JS (c, "provider"), "tmdb") == 0 ? bro_tmdb_parse_season (body) : bro_omdb_parse_season (body);
+    BroJsonValue *want = J (c, "expect"), *aired = J (c, "aired");
+    if (g_hash_table_size (got) != want->keys->len)
+      bro_test_fail (failures, id, "%s: %u episodes", rel, g_hash_table_size (got));
+    for (guint k = 0; k < want->keys->len; k++) {
+      BroEpisodeDetails *e = g_hash_table_lookup (got, GINT_TO_POINTER (atoi (want->keys->pdata[k])));
+      bro_test_same_string (failures, id, "episode", bro_json_value_get_string (want->items->pdata[k], ""), e ? e->title : NULL);
+    }
+    for (guint k = 0; k < aired->keys->len; k++) {
+      BroEpisodeDetails *e = g_hash_table_lookup (got, GINT_TO_POINTER (atoi (aired->keys->pdata[k])));
+      bro_test_same_string (failures, id, "aired", bro_json_value_get_string (aired->items->pdata[k], ""), e ? e->aired : NULL);
+    }
+  }
+  list = J (f, "ids");
+  for (guint i = 0; i < bro_json_value_length (list); i++) {
+    BroJsonValue *c = bro_json_value_at (list, i);
+    g_autoptr (BroOnlineId) got = bro_online_id_parse (JS (c, "text"));
+    gboolean ok;
+    if (bro_json_value_get_bool (J (c, "invalid"), FALSE))
+      ok = got == NULL;
+    else if (JS (c, "imdb"))
+      ok = got && got->kind == BRO_ONLINE_ID_IMDB && g_strcmp0 (got->imdb_id, JS (c, "imdb")) == 0;
+    else
+      ok = got && got->kind == BRO_ONLINE_ID_TMDB && got->tmdb_id == int_or_none (J (c, "tmdb")) && !got->has_media_kind == !J (c, "kind")
+           && (!J (c, "kind") || got->media_kind == media_kind (J (c, "kind")));
+    if (!ok)
+      bro_test_fail (failures, id, "id %s", JS (c, "text"));
+  }
+  list = J (f, "splitYear");
+  for (guint i = 0; i < bro_json_value_length (list); i++) {
+    BroJsonValue *c = bro_json_value_at (list, i);
+    g_autoptr (BroNameAndYear) got = bro_online_id_split_year (JS (c, "text"));
+    if (g_strcmp0 (got->name, JS (c, "name")) != 0 || got->year != int_or_none (J (c, "year")))
+      bro_test_fail (failures, id, "splitYear %s: %s, %d", JS (c, "text"), got->name, got->year);
+  }
+}
+
+static gboolean
+metadata_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (JS (given, "fixture")) {
+    g_autoptr (BroJsonValue) f = bro_test_fixture_json (JS (given, "fixture"));
+    recorded_answers (failures, id, f);
+    return TRUE;
+  }
+  if (JS (given, "body")) {
+    g_autoptr (GBytes) body = g_bytes_new (JS (given, "body"), strlen (JS (given, "body")));
+    g_autoptr (GPtrArray) got = search_in (given, body);
+    same_candidate (failures, id, "best", J (expect, "best"), got->len ? got->pdata[0] : NULL);
+    return TRUE;
+  }
+  if (JS (given, "file")) {
+    g_autoptr (GBytes) bytes = fixture_bytes (JS (given, "file"));
+    if (J (expect, "groupId")) {
+      g_autofree char *group = bro_tmdb_parse_absolute_group (bytes);
+      bro_test_same_string (failures, id, "groupId", JS (expect, "groupId"), group);
+    }
+    BroJsonValue *titles = J (expect, "titles");
+    if (titles) {
+      g_autoptr (GHashTable) episodes = bro_tmdb_parse_absolute_episodes (bytes);
+      for (guint i = 0; i < titles->keys->len; i++) {
+        BroEpisodeDetails *e = g_hash_table_lookup (episodes, GINT_TO_POINTER (atoi (titles->keys->pdata[i])));
+        bro_test_same_string (failures, id, "title", bro_json_value_get_string (titles->items->pdata[i], ""), e ? e->title : NULL);
+      }
+    }
+    return TRUE;
+  }
+  g_autoptr (BroHttpRequestSpec) request = request_of (given);
+  BroJsonValue *want_request = J (expect, "request");
+  if (want_request && want_request->kind == BRO_JSON_VALUE_NULL) {
+    if (request)
+      bro_test_fail (failures, id, "expected no request");
+    return TRUE;
+  }
+  if (!request) {
+    bro_test_fail (failures, id, "no request");
+    return TRUE;
+  }
+  /* https://host/path?query */
+  const char *after_scheme = strstr (request->url, "://");
+  const char *path = after_scheme ? strchr (after_scheme + 3, '/') : NULL;
+  const char *q = strchr (request->url, '?');
+  g_autofree char *path_only = path ? g_strndup (path, q ? (gsize) (q - path) : strlen (path)) : g_strdup ("");
+  const char *query = q ? q + 1 : "";
+  if (JS (expect, "method"))
+    bro_test_same_string (failures, id, "method", JS (expect, "method"), request->method);
+  if (JS (expect, "path"))
+    bro_test_same_string (failures, id, "path", JS (expect, "path"), path_only);
+  BroJsonValue *list = J (expect, "queryContains");
+  for (guint i = 0; i < bro_json_value_length (list); i++)
+    if (!strstr (query, bro_json_value_get_string (bro_json_value_at (list, i), "")))
+      bro_test_fail (failures, id, "query lacks %s", bro_json_value_get_string (bro_json_value_at (list, i), ""));
+  list = J (expect, "queryExcludes");
+  for (guint i = 0; i < bro_json_value_length (list); i++)
+    if (strstr (query, bro_json_value_get_string (bro_json_value_at (list, i), "")))
+      bro_test_fail (failures, id, "query has %s", bro_json_value_get_string (bro_json_value_at (list, i), ""));
+  if (JS (expect, "noHeader"))
+    for (guint i = 0; i < request->headers->len; i += 2)
+      if (strcmp (request->headers->pdata[i], JS (expect, "noHeader")) == 0)
+        bro_test_fail (failures, id, "header %s", JS (expect, "noHeader"));
+  BroJsonValue *headers = J (expect, "header");
+  for (guint k = 0; headers && k < headers->keys->len; k++) {
+    gboolean found = FALSE;
+    for (guint i = 0; i + 1 < request->headers->len && !found; i += 2)
+      found = strcmp (request->headers->pdata[i], headers->keys->pdata[k]) == 0
+              && strcmp (request->headers->pdata[i + 1], bro_json_value_get_string (headers->items->pdata[k], "")) == 0;
+    if (!found)
+      bro_test_fail (failures, id, "no header %s", (char *) headers->keys->pdata[k]);
+  }
+  return TRUE;
+}
+
+static void
+test_metadata_cases (void)
+{
+  bro_test_run_cases ("domain/metadata.cases.json", metadata_case);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -2508,5 +2776,6 @@ main (int argc, char **argv)
   g_test_add_func ("/dvdnav/play-all", test_finds_play_all_episodes);
   g_test_add_func ("/dvdnav/cases", test_navigation_cases);
   g_test_add_func ("/dvdnav/menu-stills", test_menu_stills_and_buttons);
+  g_test_add_func ("/metadata/cases", test_metadata_cases);
   return g_test_run ();
 }
