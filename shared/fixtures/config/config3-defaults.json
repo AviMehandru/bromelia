@@ -1,0 +1,94 @@
+{
+  "version": 3,
+  "libraries": [],
+  "defaultLibrary": null,
+  "targets": [],
+  "defaultProfile": "default",
+  "profiles": [
+    {
+      "id": "default",
+      "name": "Default"
+    }
+  ],
+  "drives": [],
+  "steps": [],
+  "rules": [],
+  "automation": {
+    "pollIntervalSeconds": 10,
+    "pollWhileRipping": false,
+    "defaults": {
+      "ripOnInsert": false,
+      "delaySeconds": 10,
+      "ejectWhenDone": true,
+      "ejectOnFailure": false,
+      "waitForMountSeconds": 30,
+      "alreadyArchived": "skip",
+      "desktopNotification": true,
+      "playSound": true
+    }
+  },
+  "limits": {
+    "acquisitions": 0,
+    "processing": 1,
+    "cpu": 0,
+    "ioPerVolume": 2,
+    "stallTimeoutMinutes": 30
+  },
+  "power": {
+    "preventSleep": true,
+    "keepAwakeForMaintenance": true
+  },
+  "maintenance": {
+    "verify": {
+      "intervalDays": 0,
+      "window": null,
+      "gbPerHour": 0
+    },
+    "retention": {
+      "jobLogsDays": 0
+    }
+  },
+  "makemkv": {
+    "path": "",
+    "registrationKey": null,
+    "autoUpdateBetaKey": false,
+    "settings": {}
+  },
+  "tools": {
+    "mkvmerge": "",
+    "mkvextract": "",
+    "ffmpeg": "",
+    "tesseract": "",
+    "handbrake": "",
+    "cyanrip": "",
+    "abcde": "",
+    "par2": "",
+    "apprise": ""
+  },
+  "metadata": {
+    "provider": "none",
+    "apiKey": null,
+    "language": "en-US",
+    "episodeTitles": true,
+    "nfo": true
+  },
+  "notifications": {
+    "targets": []
+  },
+  "server": {
+    "tcp": {
+      "enabled": false,
+      "address": "127.0.0.1",
+      "port": 51280
+    },
+    "tls": {
+      "certificate": "",
+      "key": ""
+    },
+    "tokens": [],
+    "allowedHosts": []
+  },
+  "updates": {
+    "check": false
+  }
+}

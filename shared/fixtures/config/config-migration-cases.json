@@ -1,0 +1,257 @@
+{
+  "comment": "ConfigMigration.upgrade: each input (a v1 or v2 document) must give exactly this v3 document, these secrets (to be stored with setSecret) and these issues. Compare documents after expanding defaults (ConfigCodec.decode → encode), so omitted defaults don't matter. The rules are in shared/schema/config-migration-2-3.json.",
+  "cases": [
+    {
+      "what": "every v2 key",
+      "input": "config2-everything.json",
+      "expect": "config2-everything.expected-v3.json",
+      "secrets": {
+        "makemkv.registrationKey": "T-EXAMPLEKEY-NOT-REAL",
+        "metadata.apiKey": "0123456789abcdef0123456789abcdef",
+        "notifications.8b000000-0000-4000-8000-000000000040": "https://discord.com/api/webhooks/1/abc",
+        "notifications.8b000000-0000-4000-8000-000000000041": "ntfy://rips",
+        "server.token.web": "s3cret-web-token"
+      },
+      "issues": []
+    },
+    {
+      "what": "version 1: untouched templates get the v2 defaults, changed ones are kept (macOS NamingTests.upgradesVersion1Naming)",
+      "inputJson": {
+        "version": 1,
+        "defaultDrive": {
+          "output": {
+            "folderTemplate": "{disc}",
+            "fileNameTemplate": ""
+          }
+        },
+        "drives": [
+          {
+            "name": "A",
+            "output": {
+              "folderTemplate": "{type}/{disc}",
+              "fileNameTemplate": "{disc} {n}"
+            }
+          }
+        ],
+        "plugins": [
+          {
+            "name": "P",
+            "matchName": "piece",
+            "matchFormats": [
+              "DVD"
+            ]
+          }
+        ]
+      },
+      "expectJson": {
+        "version": 3,
+        "libraries": [
+          {
+            "id": "library",
+            "name": "Bromelia",
+            "path": "~/Movies/Bromelia"
+          }
+        ],
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Default"
+          },
+          {
+            "id": "profile-drive-1",
+            "name": "A",
+            "naming": {
+              "folderTemplate": "{type}/{disc}",
+              "fileNameTemplate": "{disc} {n}"
+            }
+          }
+        ],
+        "drives": [
+          {
+            "id": "drive-1",
+            "name": "A",
+            "profile": "profile-drive-1"
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "name": "P",
+            "kind": "command"
+          }
+        ],
+        "rules": [
+          {
+            "id": "rule-step-1",
+            "name": "P",
+            "when": {
+              "nameOrLabel": "piece",
+              "formats": [
+                "DVD"
+              ]
+            },
+            "then": {
+              "steps": [
+                "step-1"
+              ]
+            }
+          }
+        ]
+      },
+      "secrets": {},
+      "issues": []
+    },
+    {
+      "what": "version 2 keeps an explicitly empty file name template (MakeMKV's names)",
+      "inputJson": {
+        "version": 2,
+        "defaultDrive": {
+          "output": {
+            "fileNameTemplate": ""
+          }
+        }
+      },
+      "expectJson": {
+        "version": 3,
+        "libraries": [
+          {
+            "id": "library",
+            "name": "Bromelia",
+            "path": "~/Movies/Bromelia"
+          }
+        ],
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Default",
+            "naming": {
+              "fileNameTemplate": ""
+            }
+          }
+        ]
+      },
+      "secrets": {},
+      "issues": []
+    },
+    {
+      "what": "a partial v2 document written by another platform: defaults fill the rest, unknown keys are dropped (Windows ReadsConfigWrittenByMacVersion, Linux /config/json, macOS decodesPartialJSON)",
+      "inputJson": {
+        "outputRoot": "/rips",
+        "version": 2,
+        "drives": [
+          {
+            "id": "45C805B7-47BE-4674-A759-A6EAEA53521A",
+            "name": "Left",
+            "match": {
+              "driveName": "BD-RE  HL-DT-ST"
+            },
+            "rip": {
+              "mode": "backupThenMkv",
+              "keepBackupAfterMKV": false,
+              "directIO": true,
+              "titleSelection": {
+                "strategy": "longest",
+                "indexBase": "source"
+              }
+            },
+            "profile": {
+              "mode": "generated",
+              "generated": {
+                "lpcmMultichannel": "flac-fast",
+                "useISO639Type2T": true
+              }
+            },
+            "output": {
+              "conflictPolicy": "uniqueSuffix"
+            },
+            "postProcess": [
+              {
+                "executable": "/bin/true",
+                "runOn": "always",
+                "environment": {
+                  "A": "{disc}"
+                }
+              }
+            ],
+            "futureField": 1
+          }
+        ]
+      },
+      "expectJson": {
+        "version": 3,
+        "libraries": [
+          {
+            "id": "library",
+            "name": "rips",
+            "path": "/rips"
+          }
+        ],
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Default"
+          },
+          {
+            "id": "profile-45c805b7-47be-4674-a759-a6eaea53521a",
+            "name": "Left",
+            "mode": {
+              "default": "backupThenMkv"
+            },
+            "titles": {
+              "strategy": "longest",
+              "indexBase": "source"
+            },
+            "makemkv": {
+              "directIO": true,
+              "profile": {
+                "mode": "generated",
+                "generated": {
+                  "lpcmMultichannel": "flac-fast",
+                  "useISO639Type2T": true
+                }
+              }
+            },
+            "backup": {
+              "keepAfterMkv": false
+            },
+            "steps": [
+              "step-1"
+            ]
+          }
+        ],
+        "drives": [
+          {
+            "id": "45c805b7-47be-4674-a759-a6eaea53521a",
+            "name": "Left",
+            "match": {
+              "driveName": "BD-RE  HL-DT-ST"
+            },
+            "profile": "profile-45c805b7-47be-4674-a759-a6eaea53521a"
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "command",
+            "runOn": "always",
+            "command": {
+              "executable": "/bin/true",
+              "environment": {
+                "A": "{disc}"
+              }
+            },
+            "name": "Post-processing script"
+          }
+        ]
+      },
+      "secrets": {},
+      "issues": [
+        {
+          "severity": "warning",
+          "code": "config.unknownKey",
+          "path": "drives[0].futureField"
+        }
+      ]
+    }
+  ]
+}

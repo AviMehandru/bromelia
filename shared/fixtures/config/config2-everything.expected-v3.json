@@ -1,0 +1,153 @@
+{
+  "version": 3,
+  "libraries": [
+    { "id": "library", "name": "Rips", "path": "/Volumes/Archive/Rips" },
+    { "id": "library-2", "name": "Rips", "path": "/Volumes/Second/Rips" }
+  ],
+  "profiles": [
+    {
+      "id": "default",
+      "name": "Default",
+      "titles": { "strategy": "longest" },
+      "otherDiscs": { "imageDataDiscs": false }
+    },
+    {
+      "id": "profile-45c805b7-47be-4674-a759-a6eaea53521a",
+      "name": "Left drive",
+      "library": "library-2",
+      "mode": { "default": "backupThenMkv", "byFormat": { "dvd": "backupThenMkv", "bluray": "mkv", "uhd": "backupDecrypted" } },
+      "titles": {
+        "strategy": "indices", "longestCount": 2, "indexPattern": "0,2-4,7-", "indexBase": "source",
+        "minDurationSeconds": 60, "maxDurationSeconds": 7200, "minChapters": 1, "maxChapters": 99, "minSizeMB": 10, "maxSizeMB": 50000,
+        "includePattern": "0080[01]\\.mpls", "excludePattern": "trailer", "skipDuplicates": false, "skipAlternateAngles": true, "maxTitles": 5
+      },
+      "makemkv": {
+        "settings": { "io_ErrorRetryCount": "10" },
+        "profile": {
+          "mode": "generated",
+          "generated": {
+            "name": "Archive", "selectionRule": "+sel:all", "setFirstSubtitleTrackAsDefault": false, "useISO639Type2T": true,
+            "insertFirstChapter00IfMissing": false, "lpcmStereo": "flac-fast"
+          }
+        },
+        "minLengthSeconds": 45,
+        "cacheMB": 256,
+        "directIO": false,
+        "extraArguments": "--noscan"
+      },
+      "backup": { "format": "iso", "keepAfterMkv": false },
+      "naming": {
+        "layout": "mediaServer", "folderTemplate": "{type}/{disc}", "fileNameTemplate": "{disc} - {n:2}",
+        "backupSubfolder": "Backups", "conflictPolicy": "merge"
+      },
+      "archive": { "checksums": false, "archiveRecord": false, "verifyRips": false, "writeDiscInfo": true },
+      "episodes": { "splitPlayAll": false, "keepPlayAll": false, "readMenuNumbers": false },
+      "otherDiscs": { "ripAudioCDs": false, "imageDataDiscs": true, "audioCommand": "abcde -d {device} -o flac -N" },
+      "steps": ["6b1c1c55-5f2e-4c2b-9c7e-000000000010"]
+    },
+    {
+      "id": "5d3f0000-0000-4000-8000-000000000020",
+      "name": "Archive everything",
+      "mode": { "default": "backupThenMkv" },
+      "titles": { "strategy": "all" },
+      "makemkv": { "profile": { "mode": "generated", "generated": { "selectionRule": "+sel:all" } } },
+      "archive": { "writeDiscInfo": true },
+      "otherDiscs": { "imageDataDiscs": true }
+    }
+  ],
+  "drives": [
+    {
+      "id": "45c805b7-47be-4674-a759-a6eaea53521a",
+      "name": "Left drive",
+      "match": { "driveName": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325", "devicePath": "/dev/rdisk4" },
+      "profile": "profile-45c805b7-47be-4674-a759-a6eaea53521a",
+      "automation": {
+        "ripOnInsert": false, "delaySeconds": 5, "ejectWhenDone": false, "ejectOnFailure": true,
+        "waitForMountSeconds": 0, "alreadyArchived": "ripAgain", "desktopNotification": false, "playSound": true
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "6b1c1c55-5f2e-4c2b-9c7e-000000000010",
+      "name": "Encode",
+      "kind": "command",
+      "affectsOutcome": true,
+      "timeoutSeconds": 600,
+      "command": {
+        "executable": "/usr/bin/HandBrakeCLI",
+        "arguments": "-i {file} -o \"{outputDir}/{stem}.mp4\"",
+        "perFile": true,
+        "environment": { "PRESET": "{disc}" }
+      }
+    },
+    {
+      "id": "6b1c1c55-5f2e-4c2b-9c7e-000000000011",
+      "name": "Blu-ray only",
+      "kind": "command",
+      "runOn": "always",
+      "command": { "executable": "/usr/local/bin/bd-only.sh", "interpreter": "/bin/sh", "workingDirectory": "/tmp" }
+    },
+    {
+      "id": "7a000000-0000-4000-8000-000000000030",
+      "name": "One Piece DVDs",
+      "kind": "command",
+      "command": { "executable": "/bin/sh", "arguments": "-c 'echo \"$BROMELIA_NAME\" > plugin.txt'" }
+    },
+    {
+      "id": "7a000000-0000-4000-8000-000000000031",
+      "name": "Transcode with HandBrake",
+      "kind": "handbrake",
+      "handbrake": { "preset": "H.265 MKV 2160p60 4K", "presetFile": "/Users/me/archive.json", "extraArguments": "--all-subtitles" }
+    }
+  ],
+  "rules": [
+    {
+      "id": "rule-6b1c1c55-5f2e-4c2b-9c7e-000000000011",
+      "name": "Blu-ray only",
+      "when": { "formats": ["BR*"], "profiles": ["profile-45c805b7-47be-4674-a759-a6eaea53521a"] },
+      "then": { "steps": ["6b1c1c55-5f2e-4c2b-9c7e-000000000011"] }
+    },
+    {
+      "id": "rule-7a000000-0000-4000-8000-000000000030",
+      "name": "One Piece DVDs",
+      "when": { "nameOrLabel": "^one piece$", "formats": ["DVD"] },
+      "then": { "steps": ["7a000000-0000-4000-8000-000000000030"] }
+    },
+    {
+      "id": "rule-7a000000-0000-4000-8000-000000000031",
+      "name": "Transcode with HandBrake",
+      "then": { "steps": ["7a000000-0000-4000-8000-000000000031"] }
+    }
+  ],
+  "automation": {
+    "pollIntervalSeconds": 15,
+    "pollWhileRipping": true,
+    "defaults": {
+      "ripOnInsert": true, "delaySeconds": 20, "ejectWhenDone": true, "ejectOnFailure": false,
+      "waitForMountSeconds": 30, "alreadyArchived": "ask", "desktopNotification": true, "playSound": false
+    }
+  },
+  "limits": { "acquisitions": 2, "processing": 2, "stallTimeoutMinutes": 45 },
+  "power": { "preventSleep": false },
+  "maintenance": { "verify": { "intervalDays": 30 } },
+  "makemkv": {
+    "path": "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+    "registrationKey": { "secret": "makemkv.registrationKey" },
+    "autoUpdateBetaKey": true,
+    "settings": { "dvd_MinimumTitleLength": "120", "app_ShowDebug": "1" }
+  },
+  "tools": { "mkvmerge": "/opt/homebrew/bin/mkvmerge" },
+  "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.apiKey" }, "language": "de-DE", "episodeTitles": false, "nfo": false },
+  "notifications": {
+    "targets": [
+      { "id": "8b000000-0000-4000-8000-000000000040", "name": "Discord", "url": { "secret": "notifications.8b000000-0000-4000-8000-000000000040" } },
+      { "id": "8b000000-0000-4000-8000-000000000041", "name": "ntfy", "url": { "secret": "notifications.8b000000-0000-4000-8000-000000000041" }, "enabled": false, "onlyProblems": true }
+    ]
+  },
+  "server": {
+    "tcp": { "enabled": true, "address": "0.0.0.0", "port": 8443 },
+    "tls": { "certificate": "/etc/bromelia/cert.pem", "key": "/etc/bromelia/key.pem" },
+    "tokens": [{ "id": "web", "name": "Web page", "scope": "control", "token": { "secret": "server.token.web" } }]
+  }
+}

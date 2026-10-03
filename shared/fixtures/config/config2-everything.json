@@ -1,0 +1,237 @@
+{
+  "version": 2,
+  "makemkvconPath": "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+  "mkvmergePath": "/opt/homebrew/bin/mkvmerge",
+  "outputRoot": "/Volumes/Archive/Rips",
+  "pollIntervalSeconds": 15,
+  "pollWhileRipping": true,
+  "maxConcurrentJobs": 2,
+  "registrationKey": "T-EXAMPLEKEY-NOT-REAL",
+  "globalSettings": { "dvd_MinimumTitleLength": "120", "app_ShowDebug": "1" },
+  "defaultDrive": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "name": "Default",
+    "enabled": true,
+    "match": { "driveName": "", "devicePath": "" },
+    "settings": {},
+    "profile": {
+      "mode": "makemkvDefault",
+      "customPath": "",
+      "generated": {
+        "name": "Bromelia", "selectionRule": "", "setFirstAudioTrackAsDefault": true, "setFirstSubtitleTrackAsDefault": true,
+        "setFirstForcedSubtitleTrackAsDefault": true, "ignoreForcedSubtitlesFlag": true, "useISO639Type2T": false,
+        "insertFirstChapter00IfMissing": true, "lpcmStereo": "lpcm", "lpcmMultichannel": "flac-best"
+      }
+    },
+    "rip": {
+      "mode": "mkv",
+      "backupFormat": "folder",
+      "keepBackupAfterMKV": true,
+      "titleSelection": {
+        "strategy": "longest", "longestCount": 1, "indexPattern": "", "indexBase": "makemkv",
+        "minDurationSeconds": 0, "maxDurationSeconds": 0, "minChapters": 0, "maxChapters": 0, "minSizeMB": 0, "maxSizeMB": 0,
+        "includePattern": "", "excludePattern": "", "skipDuplicates": true, "skipAlternateAngles": false, "maxTitles": 0
+      },
+      "extraArguments": "",
+      "writeDiscInfoJSON": false,
+      "formatModes": {}
+    },
+    "output": {
+      "rootOverride": "",
+      "folderTemplate": "{name}{discLabel? - {discLabel}}",
+      "fileNameTemplate": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
+      "backupSubfolder": "backup",
+      "conflictPolicy": "uniqueSuffix",
+      "layout": "templates"
+    },
+    "automation": {
+      "autoRipOnInsert": true, "autoRipDelaySeconds": 20, "ejectWhenDone": true, "ejectOnFailure": false,
+      "notify": true, "playSound": false, "waitForMountSeconds": 30, "alreadyArchived": "ask"
+    },
+    "archive": { "checksums": true, "archiveRecord": true, "verifyRips": true },
+    "episodes": { "splitPlayAll": true, "keepPlayAll": true, "readMenuNumbers": true },
+    "other": { "ripAudioCDs": true, "imageDataDiscs": false, "audioCommand": "" },
+    "postProcess": []
+  },
+  "drives": [
+    {
+      "id": "45C805B7-47BE-4674-A759-A6EAEA53521A",
+      "name": "Left drive",
+      "enabled": true,
+      "match": { "driveName": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325", "devicePath": "/dev/rdisk4" },
+      "settings": { "io_ErrorRetryCount": "10" },
+      "profile": {
+        "mode": "generated",
+        "customPath": "",
+        "generated": {
+          "name": "Archive", "selectionRule": "+sel:all", "setFirstAudioTrackAsDefault": true, "setFirstSubtitleTrackAsDefault": false,
+          "setFirstForcedSubtitleTrackAsDefault": true, "ignoreForcedSubtitlesFlag": true, "useISO639Type2T": true,
+          "insertFirstChapter00IfMissing": false, "lpcmStereo": "flac-fast", "lpcmMultichannel": "flac-best"
+        }
+      },
+      "rip": {
+        "mode": "backupThenMkv",
+        "backupFormat": "iso",
+        "keepBackupAfterMKV": false,
+        "titleSelection": {
+          "strategy": "indices", "longestCount": 2, "indexPattern": "0,2-4,7-", "indexBase": "source",
+          "minDurationSeconds": 60, "maxDurationSeconds": 7200, "minChapters": 1, "maxChapters": 99, "minSizeMB": 10, "maxSizeMB": 50000,
+          "includePattern": "0080[01]\\.mpls", "excludePattern": "trailer", "skipDuplicates": false, "skipAlternateAngles": true, "maxTitles": 5
+        },
+        "minLengthSeconds": 45,
+        "cacheMB": 256,
+        "directIO": false,
+        "extraArguments": "--noscan",
+        "writeDiscInfoJSON": true,
+        "formatModes": { "dvd": "backupThenMkv", "bluray": "mkv", "uhd": "backupDecrypted" }
+      },
+      "output": {
+        "rootOverride": "/Volumes/Second/Rips",
+        "folderTemplate": "{type}/{disc}",
+        "fileNameTemplate": "{disc} - {n:2}",
+        "backupSubfolder": "Backups",
+        "conflictPolicy": "overwrite",
+        "layout": "mediaServer"
+      },
+      "automation": {
+        "autoRipOnInsert": false, "autoRipDelaySeconds": 5, "ejectWhenDone": false, "ejectOnFailure": true,
+        "notify": false, "playSound": true, "waitForMountSeconds": 0, "alreadyArchived": "ripAgain"
+      },
+      "archive": { "checksums": false, "archiveRecord": false, "verifyRips": false },
+      "episodes": { "splitPlayAll": false, "keepPlayAll": false, "readMenuNumbers": false },
+      "other": { "ripAudioCDs": false, "imageDataDiscs": true, "audioCommand": "abcde -d {device} -o flac -N" },
+      "postProcess": [
+        {
+          "id": "6B1C1C55-5F2E-4C2B-9C7E-000000000010",
+          "name": "Encode",
+          "enabled": true,
+          "executable": "/usr/bin/HandBrakeCLI",
+          "interpreter": "",
+          "arguments": "-i {file} -o \"{outputDir}/{stem}.mp4\"",
+          "workingDirectory": "",
+          "runOn": "success",
+          "perFile": true,
+          "timeoutSeconds": 600,
+          "environment": { "PRESET": "{disc}" },
+          "failJobOnError": true,
+          "matchName": "",
+          "matchFormats": [],
+          "background": false,
+          "kind": "command",
+          "preset": "H.265 MKV 1080p30",
+          "presetFile": "",
+          "outputPath": "{outputDir}/Encoded/{stem}.mkv",
+          "extraArguments": ""
+        },
+        {
+          "id": "6B1C1C55-5F2E-4C2B-9C7E-000000000011",
+          "name": "Blu-ray only",
+          "enabled": true,
+          "executable": "/usr/local/bin/bd-only.sh",
+          "interpreter": "/bin/sh",
+          "arguments": "{outputDir}",
+          "workingDirectory": "/tmp",
+          "runOn": "always",
+          "perFile": false,
+          "timeoutSeconds": 0,
+          "environment": {},
+          "failJobOnError": false,
+          "matchName": "",
+          "matchFormats": ["BR*"],
+          "background": false,
+          "kind": "command",
+          "preset": "H.265 MKV 1080p30",
+          "presetFile": "",
+          "outputPath": "{outputDir}/Encoded/{stem}.mkv",
+          "extraArguments": ""
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "id": "5D3F0000-0000-4000-8000-000000000020",
+      "name": "Archive everything",
+      "config": {
+        "id": "5D3F0000-0000-4000-8000-000000000021",
+        "name": "Archive everything",
+        "enabled": true,
+        "match": { "driveName": "", "devicePath": "" },
+        "settings": {},
+        "profile": { "mode": "generated", "customPath": "", "generated": { "name": "Bromelia", "selectionRule": "+sel:all" } },
+        "rip": { "mode": "backupThenMkv", "backupFormat": "folder", "keepBackupAfterMKV": true, "titleSelection": { "strategy": "all" }, "writeDiscInfoJSON": true },
+        "output": {},
+        "automation": {},
+        "archive": { "checksums": true, "archiveRecord": true, "verifyRips": true },
+        "episodes": {},
+        "other": {},
+        "postProcess": []
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "id": "7A000000-0000-4000-8000-000000000030",
+      "name": "One Piece DVDs",
+      "enabled": true,
+      "executable": "/bin/sh",
+      "interpreter": "",
+      "arguments": "-c 'echo \"$BROMELIA_NAME\" > plugin.txt'",
+      "workingDirectory": "",
+      "runOn": "success",
+      "perFile": false,
+      "timeoutSeconds": 0,
+      "environment": {},
+      "failJobOnError": false,
+      "matchName": "^one piece$",
+      "matchFormats": ["DVD"],
+      "background": false,
+      "kind": "command",
+      "preset": "H.265 MKV 1080p30",
+      "presetFile": "",
+      "outputPath": "{outputDir}/Encoded/{stem}.mkv",
+      "extraArguments": ""
+    },
+    {
+      "id": "7A000000-0000-4000-8000-000000000031",
+      "name": "Transcode with HandBrake",
+      "enabled": true,
+      "executable": "",
+      "interpreter": "",
+      "arguments": "{outputDir}",
+      "workingDirectory": "",
+      "runOn": "success",
+      "perFile": false,
+      "timeoutSeconds": 0,
+      "environment": {},
+      "failJobOnError": false,
+      "matchName": "",
+      "matchFormats": [],
+      "background": true,
+      "kind": "handbrake",
+      "preset": "H.265 MKV 2160p60 4K",
+      "presetFile": "/Users/me/archive.json",
+      "outputPath": "{outputDir}/Encoded/{stem}.mkv",
+      "extraArguments": "--all-subtitles"
+    }
+  ],
+  "historyLimit": 500,
+  "stallTimeoutMinutes": 45,
+  "preventSleep": false,
+  "metadata": { "provider": "tmdb", "apiKey": "0123456789abcdef0123456789abcdef", "language": "de-DE", "episodeTitles": false, "nfo": false },
+  "notifications": [
+    { "id": "8B000000-0000-4000-8000-000000000040", "url": "https://discord.com/api/webhooks/1/abc", "enabled": true, "onlyProblems": false },
+    { "id": "8B000000-0000-4000-8000-000000000041", "url": "ntfy://rips", "enabled": false, "onlyProblems": true }
+  ],
+  "autoUpdateBetaKey": true,
+  "backgroundJobs": 2,
+  "archiveCheck": { "intervalDays": 30 },
+  "webUI": {
+    "enabled": true,
+    "address": "0.0.0.0",
+    "port": 8443,
+    "token": "s3cret-web-token",
+    "tlsCertificate": "/etc/bromelia/cert.pem",
+    "tlsKey": "/etc/bromelia/key.pem"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "id": "default",
+  "name": "Default",
+  "library": null,
+  "mode": {
+    "default": "mkv",
+    "byFormat": {}
+  },
+  "titles": {
+    "strategy": "all",
+    "longestCount": 1,
+    "indexPattern": "",
+    "indexBase": "makemkv",
+    "minDurationSeconds": 0,
+    "maxDurationSeconds": 0,
+    "minChapters": 0,
+    "maxChapters": 0,
+    "minSizeMB": 0,
+    "maxSizeMB": 0,
+    "includePattern": "",
+    "excludePattern": "",
+    "skipDuplicates": true,
+    "skipAlternateAngles": false,
+    "maxTitles": 0
+  },
+  "makemkv": {
+    "settings": {},
+    "profile": {
+      "mode": "makemkvDefault",
+      "customPath": "",
+      "generated": {
+        "name": "Bromelia",
+        "selectionRule": "",
+        "setFirstAudioTrackAsDefault": true,
+        "setFirstSubtitleTrackAsDefault": true,
+        "setFirstForcedSubtitleTrackAsDefault": true,
+        "ignoreForcedSubtitlesFlag": true,
+        "useISO639Type2T": false,
+        "insertFirstChapter00IfMissing": true,
+        "lpcmStereo": "lpcm",
+        "lpcmMultichannel": "flac-best"
+      }
+    },
+    "minLengthSeconds": null,
+    "cacheMB": null,
+    "directIO": null,
+    "extraArguments": ""
+  },
+  "backup": {
+    "format": "folder",
+    "keepAfterMkv": true
+  },
+  "naming": {
+    "layout": "templates",
+    "folderTemplate": "{name}{discLabel? - {discLabel}}",
+    "fileNameTemplate": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
+    "backupSubfolder": "backup",
+    "conflictPolicy": "newFolder"
+  },
+  "archive": {
+    "checksums": true,
+    "archiveRecord": true,
+    "verifyRips": true,
+    "writeDiscInfo": false,
+    "hashFromDisk": true,
+    "parityPercent": 0,
+    "replicateTo": []
+  },
+  "episodes": {
+    "splitPlayAll": true,
+    "keepPlayAll": true,
+    "readMenuNumbers": true
+  },
+  "otherDiscs": {
+    "ripAudioCDs": true,
+    "imageDataDiscs": true,
+    "audioCommand": ""
+  },
+  "readErrors": {
+    "retry": "manual",
+    "maxAttempts": 3
+  },
+  "steps": []
+}

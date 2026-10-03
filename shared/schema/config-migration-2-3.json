@@ -1,0 +1,540 @@
+{
+  "title": "Configuration version 2 → version 3",
+  "description": "Where every key of a version 2 configuration (docs/configuration.md) goes in version 3, for ConfigMigration.upgrade (Domain/Config) and the importer (plan §29, phase 5). Version 1 files are first upgraded to version 2 as today (templates still at the v1 defaults get the v2 defaults). 'from' paths are relative to the v2 type named before the colon; 'to' paths to the v3 schema definition named before the colon (Config = the document root). tools/check-contracts.py checks that every key of shared/fixtures/config/config2-everything.json has an entry and that every 'to' path exists in config-3.json. The golden results are in shared/fixtures/config/config-migration-cases.json.",
+  "rules": [
+    "Every v2 drive configuration (defaultDrive, drives[], presets[].config) becomes a profile. Profiles whose contents are identical (ignoring id and name) are merged into one; the first one's id is kept.",
+    "defaultDrive becomes the profile with id 'default' (name kept) and its automation becomes automation.defaults. It gets no drives[] entry.",
+    "drives[i] becomes a drives[] entry with the same id (lower-cased), name, enabled and match, the automation, the settings as makemkvSettings, and profile = its profile's id. Its profile is named after the drive and has id 'profile-<drive id>' unless it was merged into another.",
+    "presets[i] becomes a profile with the preset's id and name; the preset's automation and match are dropped (a profile has neither).",
+    "A profile keeps only the values that differ from what it inherits: the v3 defaults overlaid with the default profile (for the default profile, the v3 defaults alone). A drive's automation is omitted (null) when it equals automation.defaults; otherwise it is written in full.",
+    "A step of a drive's postProcess with no matchName and no matchFormats goes into its profile's steps. One with either becomes a rule {when: {nameOrLabel, formats, profiles: [that profile]}, then: {steps: [id]}}.",
+    "Every plugin becomes a step and a rule {when: {nameOrLabel, formats}, then: {steps: [id]}} in plugin order; an empty when matches every disc. Profile steps run before rule steps, as drive steps ran before plugins.",
+    "outputRoot becomes the library 'library' (name = the folder's name); each distinct non-empty rootOverride another library 'library-2', 'library-3', … and the profile's library. The importer writes the markers only after the owner confirms (I2).",
+    "Secrets leave the document: their values are returned next to the configuration and stored with ConfigService.setSecret. The fields get SecretRefs.",
+    "Ids are lower-cased. Values a v3 field doesn't accept (an audioCD mode in rip.mode, say) become the default and produce the issue config.migration.valueDropped.",
+    "Entries without an id get one from their place: 'drive-1', 'drive-2', … for drives, 'step-1', … for steps (drive steps, then plugins, in order), so the result is the same on every platform. Rules get 'rule-<step id>'.",
+    "Unknown keys are dropped with the warning config.unknownKey (its path in the v2 document)."
+  ],
+  "keys": [
+    {
+      "from": "Config:version",
+      "to": "Config:version",
+      "transform": "3"
+    },
+    {
+      "from": "Config:makemkvconPath",
+      "to": "Config:makemkv.path"
+    },
+    {
+      "from": "Config:mkvmergePath",
+      "to": "Config:tools.mkvmerge"
+    },
+    {
+      "from": "Config:outputRoot",
+      "to": "Config:libraries[].path",
+      "transform": "library 'library'; defaultLibrary = null (the first)"
+    },
+    {
+      "from": "Config:pollIntervalSeconds",
+      "to": "Config:automation.pollIntervalSeconds"
+    },
+    {
+      "from": "Config:pollWhileRipping",
+      "to": "Config:automation.pollWhileRipping"
+    },
+    {
+      "from": "Config:maxConcurrentJobs",
+      "to": "Config:limits.acquisitions"
+    },
+    {
+      "from": "Config:registrationKey",
+      "to": "Config:makemkv.registrationKey",
+      "transform": "secret makemkv.registrationKey; empty = null"
+    },
+    {
+      "from": "Config:globalSettings.*",
+      "to": "Config:makemkv.settings.*"
+    },
+    {
+      "from": "Config:defaultDrive",
+      "to": "Config:profiles[]",
+      "transform": "profile 'default', see rules"
+    },
+    {
+      "from": "Config:drives[]",
+      "to": "Config:drives[]",
+      "transform": "see rules"
+    },
+    {
+      "from": "Config:presets[].id",
+      "to": "Profile:id"
+    },
+    {
+      "from": "Config:presets[].name",
+      "to": "Profile:name"
+    },
+    {
+      "from": "Config:presets[].config",
+      "to": "Config:profiles[]",
+      "transform": "see rules"
+    },
+    {
+      "from": "Config:plugins[]",
+      "to": "Config:steps[]",
+      "transform": "and a rule, see rules"
+    },
+    {
+      "from": "Config:historyLimit",
+      "to": null,
+      "note": "Jobs and units are never dropped; only job folders are pruned (maintenance.retention.jobLogsDays)."
+    },
+    {
+      "from": "Config:stallTimeoutMinutes",
+      "to": "Config:limits.stallTimeoutMinutes"
+    },
+    {
+      "from": "Config:preventSleep",
+      "to": "Config:power.preventSleep"
+    },
+    {
+      "from": "Config:metadata.provider",
+      "to": "Config:metadata.provider"
+    },
+    {
+      "from": "Config:metadata.apiKey",
+      "to": "Config:metadata.apiKey",
+      "transform": "secret metadata.apiKey; empty = null"
+    },
+    {
+      "from": "Config:metadata.language",
+      "to": "Config:metadata.language"
+    },
+    {
+      "from": "Config:metadata.episodeTitles",
+      "to": "Config:metadata.episodeTitles"
+    },
+    {
+      "from": "Config:metadata.nfo",
+      "to": "Config:metadata.nfo"
+    },
+    {
+      "from": "Config:notifications[].id",
+      "to": "Config:notifications.targets[].id"
+    },
+    {
+      "from": "Config:notifications[].url",
+      "to": "Config:notifications.targets[].url",
+      "transform": "secret notifications.<id>; name = the service (Discord, ntfy, …)"
+    },
+    {
+      "from": "Config:notifications[].enabled",
+      "to": "Config:notifications.targets[].enabled"
+    },
+    {
+      "from": "Config:notifications[].onlyProblems",
+      "to": "Config:notifications.targets[].onlyProblems"
+    },
+    {
+      "from": "Config:autoUpdateBetaKey",
+      "to": "Config:makemkv.autoUpdateBetaKey"
+    },
+    {
+      "from": "Config:backgroundJobs",
+      "to": "Config:limits.processing"
+    },
+    {
+      "from": "Config:archiveCheck.intervalDays",
+      "to": "Config:maintenance.verify.intervalDays"
+    },
+    {
+      "from": "Config:webUI.enabled",
+      "to": "Config:server.tcp.enabled"
+    },
+    {
+      "from": "Config:webUI.address",
+      "to": "Config:server.tcp.address"
+    },
+    {
+      "from": "Config:webUI.port",
+      "to": "Config:server.tcp.port"
+    },
+    {
+      "from": "Config:webUI.token",
+      "to": "Config:server.tokens[]",
+      "transform": "{id: 'web', name: 'Web page', scope: control, token: secret server.token.web}; empty = no token"
+    },
+    {
+      "from": "Config:webUI.tlsCertificate",
+      "to": "Config:server.tls.certificate"
+    },
+    {
+      "from": "Config:webUI.tlsKey",
+      "to": "Config:server.tls.key"
+    },
+    {
+      "from": "DriveConfig:id",
+      "to": "Drive:id",
+      "transform": "lower case; defaultDrive and presets: dropped (the profile gets its own id)"
+    },
+    {
+      "from": "DriveConfig:name",
+      "to": "Drive:name",
+      "transform": "and the profile's name"
+    },
+    {
+      "from": "DriveConfig:enabled",
+      "to": "Drive:enabled"
+    },
+    {
+      "from": "DriveConfig:match.driveName",
+      "to": "Drive:match.driveName"
+    },
+    {
+      "from": "DriveConfig:match.devicePath",
+      "to": "Drive:match.devicePath"
+    },
+    {
+      "from": "DriveConfig:settings.*",
+      "to": "Profile:makemkv.settings.*"
+    },
+    {
+      "from": "DriveConfig:profile.mode",
+      "to": "Profile:makemkv.profile.mode"
+    },
+    {
+      "from": "DriveConfig:profile.customPath",
+      "to": "Profile:makemkv.profile.customPath"
+    },
+    {
+      "from": "DriveConfig:profile.generated.name",
+      "to": "Profile:makemkv.profile.generated.name"
+    },
+    {
+      "from": "DriveConfig:profile.generated.selectionRule",
+      "to": "Profile:makemkv.profile.generated.selectionRule"
+    },
+    {
+      "from": "DriveConfig:profile.generated.setFirstAudioTrackAsDefault",
+      "to": "Profile:makemkv.profile.generated.setFirstAudioTrackAsDefault"
+    },
+    {
+      "from": "DriveConfig:profile.generated.setFirstSubtitleTrackAsDefault",
+      "to": "Profile:makemkv.profile.generated.setFirstSubtitleTrackAsDefault"
+    },
+    {
+      "from": "DriveConfig:profile.generated.setFirstForcedSubtitleTrackAsDefault",
+      "to": "Profile:makemkv.profile.generated.setFirstForcedSubtitleTrackAsDefault"
+    },
+    {
+      "from": "DriveConfig:profile.generated.ignoreForcedSubtitlesFlag",
+      "to": "Profile:makemkv.profile.generated.ignoreForcedSubtitlesFlag"
+    },
+    {
+      "from": "DriveConfig:profile.generated.useISO639Type2T",
+      "to": "Profile:makemkv.profile.generated.useISO639Type2T"
+    },
+    {
+      "from": "DriveConfig:profile.generated.insertFirstChapter00IfMissing",
+      "to": "Profile:makemkv.profile.generated.insertFirstChapter00IfMissing"
+    },
+    {
+      "from": "DriveConfig:profile.generated.lpcmStereo",
+      "to": "Profile:makemkv.profile.generated.lpcmStereo"
+    },
+    {
+      "from": "DriveConfig:profile.generated.lpcmMultichannel",
+      "to": "Profile:makemkv.profile.generated.lpcmMultichannel"
+    },
+    {
+      "from": "DriveConfig:rip.mode",
+      "to": "Profile:mode.default",
+      "transform": "audioCD / dataImage → mkv with config.migration.valueDropped"
+    },
+    {
+      "from": "DriveConfig:rip.backupFormat",
+      "to": "Profile:backup.format"
+    },
+    {
+      "from": "DriveConfig:rip.keepBackupAfterMKV",
+      "to": "Profile:backup.keepAfterMkv"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.strategy",
+      "to": "Profile:titles.strategy"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.longestCount",
+      "to": "Profile:titles.longestCount"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.indexPattern",
+      "to": "Profile:titles.indexPattern"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.indexBase",
+      "to": "Profile:titles.indexBase"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.minDurationSeconds",
+      "to": "Profile:titles.minDurationSeconds"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.maxDurationSeconds",
+      "to": "Profile:titles.maxDurationSeconds"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.minChapters",
+      "to": "Profile:titles.minChapters"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.maxChapters",
+      "to": "Profile:titles.maxChapters"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.minSizeMB",
+      "to": "Profile:titles.minSizeMB"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.maxSizeMB",
+      "to": "Profile:titles.maxSizeMB"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.includePattern",
+      "to": "Profile:titles.includePattern"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.excludePattern",
+      "to": "Profile:titles.excludePattern"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.skipDuplicates",
+      "to": "Profile:titles.skipDuplicates"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.skipAlternateAngles",
+      "to": "Profile:titles.skipAlternateAngles"
+    },
+    {
+      "from": "DriveConfig:rip.titleSelection.maxTitles",
+      "to": "Profile:titles.maxTitles"
+    },
+    {
+      "from": "DriveConfig:rip.minLengthSeconds",
+      "to": "Profile:makemkv.minLengthSeconds"
+    },
+    {
+      "from": "DriveConfig:rip.cacheMB",
+      "to": "Profile:makemkv.cacheMB"
+    },
+    {
+      "from": "DriveConfig:rip.directIO",
+      "to": "Profile:makemkv.directIO"
+    },
+    {
+      "from": "DriveConfig:rip.extraArguments",
+      "to": "Profile:makemkv.extraArguments"
+    },
+    {
+      "from": "DriveConfig:rip.writeDiscInfoJSON",
+      "to": "Profile:archive.writeDiscInfo"
+    },
+    {
+      "from": "DriveConfig:rip.formatModes.*",
+      "to": "Profile:mode.byFormat.*"
+    },
+    {
+      "from": "DriveConfig:output.rootOverride",
+      "to": "Profile:library",
+      "transform": "non-empty: a library of its own, see rules"
+    },
+    {
+      "from": "DriveConfig:output.folderTemplate",
+      "to": "Profile:naming.folderTemplate"
+    },
+    {
+      "from": "DriveConfig:output.fileNameTemplate",
+      "to": "Profile:naming.fileNameTemplate"
+    },
+    {
+      "from": "DriveConfig:output.backupSubfolder",
+      "to": "Profile:naming.backupSubfolder"
+    },
+    {
+      "from": "DriveConfig:output.conflictPolicy",
+      "to": "Profile:naming.conflictPolicy",
+      "transform": "uniqueSuffix → newFolder, overwrite → merge, skip → skip"
+    },
+    {
+      "from": "DriveConfig:output.layout",
+      "to": "Profile:naming.layout"
+    },
+    {
+      "from": "DriveConfig:automation.autoRipOnInsert",
+      "to": "DriveAutomation:ripOnInsert"
+    },
+    {
+      "from": "DriveConfig:automation.autoRipDelaySeconds",
+      "to": "DriveAutomation:delaySeconds"
+    },
+    {
+      "from": "DriveConfig:automation.ejectWhenDone",
+      "to": "DriveAutomation:ejectWhenDone"
+    },
+    {
+      "from": "DriveConfig:automation.ejectOnFailure",
+      "to": "DriveAutomation:ejectOnFailure"
+    },
+    {
+      "from": "DriveConfig:automation.notify",
+      "to": "DriveAutomation:desktopNotification"
+    },
+    {
+      "from": "DriveConfig:automation.playSound",
+      "to": "DriveAutomation:playSound"
+    },
+    {
+      "from": "DriveConfig:automation.waitForMountSeconds",
+      "to": "DriveAutomation:waitForMountSeconds"
+    },
+    {
+      "from": "DriveConfig:automation.alreadyArchived",
+      "to": "DriveAutomation:alreadyArchived"
+    },
+    {
+      "from": "DriveConfig:archive.checksums",
+      "to": "Profile:archive.checksums"
+    },
+    {
+      "from": "DriveConfig:archive.archiveRecord",
+      "to": "Profile:archive.archiveRecord"
+    },
+    {
+      "from": "DriveConfig:archive.verifyRips",
+      "to": "Profile:archive.verifyRips"
+    },
+    {
+      "from": "DriveConfig:episodes.splitPlayAll",
+      "to": "Profile:episodes.splitPlayAll"
+    },
+    {
+      "from": "DriveConfig:episodes.keepPlayAll",
+      "to": "Profile:episodes.keepPlayAll"
+    },
+    {
+      "from": "DriveConfig:episodes.readMenuNumbers",
+      "to": "Profile:episodes.readMenuNumbers"
+    },
+    {
+      "from": "DriveConfig:other.ripAudioCDs",
+      "to": "Profile:otherDiscs.ripAudioCDs"
+    },
+    {
+      "from": "DriveConfig:other.imageDataDiscs",
+      "to": "Profile:otherDiscs.imageDataDiscs"
+    },
+    {
+      "from": "DriveConfig:other.audioCommand",
+      "to": "Profile:otherDiscs.audioCommand"
+    },
+    {
+      "from": "DriveConfig:postProcess[]",
+      "to": "Config:steps[]",
+      "transform": "and Profile:steps or a rule, see rules"
+    },
+    {
+      "from": "PostProcessStep:id",
+      "to": "Step:id",
+      "transform": "lower case"
+    },
+    {
+      "from": "PostProcessStep:name",
+      "to": "Step:name"
+    },
+    {
+      "from": "PostProcessStep:enabled",
+      "to": "Step:enabled"
+    },
+    {
+      "from": "PostProcessStep:kind",
+      "to": "Step:kind"
+    },
+    {
+      "from": "PostProcessStep:executable",
+      "to": "Step:command.executable",
+      "transform": "kind handbrake: Step:handbrake.executable"
+    },
+    {
+      "from": "PostProcessStep:interpreter",
+      "to": "Step:command.interpreter",
+      "transform": "kind command only"
+    },
+    {
+      "from": "PostProcessStep:arguments",
+      "to": "Step:command.arguments",
+      "transform": "kind command only"
+    },
+    {
+      "from": "PostProcessStep:workingDirectory",
+      "to": "Step:command.workingDirectory",
+      "transform": "kind command only"
+    },
+    {
+      "from": "PostProcessStep:perFile",
+      "to": "Step:command.perFile",
+      "transform": "kind command only"
+    },
+    {
+      "from": "PostProcessStep:environment.*",
+      "to": "Step:command.environment.*",
+      "transform": "kind command only"
+    },
+    {
+      "from": "PostProcessStep:runOn",
+      "to": "Step:runOn"
+    },
+    {
+      "from": "PostProcessStep:timeoutSeconds",
+      "to": "Step:timeoutSeconds"
+    },
+    {
+      "from": "PostProcessStep:failJobOnError",
+      "to": "Step:affectsOutcome",
+      "note": "A failed step now gives succeededStepsFailed instead of failed (plan §20.3)."
+    },
+    {
+      "from": "PostProcessStep:background",
+      "to": "Step:background"
+    },
+    {
+      "from": "PostProcessStep:matchName",
+      "to": "Rule:when.nameOrLabel"
+    },
+    {
+      "from": "PostProcessStep:matchFormats",
+      "to": "Rule:when.formats"
+    },
+    {
+      "from": "PostProcessStep:preset",
+      "to": "Step:handbrake.preset",
+      "transform": "kind handbrake only"
+    },
+    {
+      "from": "PostProcessStep:presetFile",
+      "to": "Step:handbrake.presetFile",
+      "transform": "kind handbrake only"
+    },
+    {
+      "from": "PostProcessStep:outputPath",
+      "to": "Step:handbrake.outputPath",
+      "transform": "kind handbrake only"
+    },
+    {
+      "from": "PostProcessStep:extraArguments",
+      "to": "Step:handbrake.extraArguments",
+      "transform": "kind handbrake only"
+    }
+  ],
+  "exportBundle": {
+    "description": "'Export drives and presets' wrote {format: 'bromelia-drives', version: 1, drives, presets}. ConfigService.importBundle accepts it (drives and presets as above) and the new {format: 'bromelia-config', version: 3, config} that exportConfig writes, which has no secrets: SecretRefs are kept, their values aren't."
+  }
+}
