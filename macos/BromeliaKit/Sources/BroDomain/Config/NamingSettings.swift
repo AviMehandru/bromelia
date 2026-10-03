@@ -1,3 +1,5 @@
+import BroFoundation
+
 /// A profile's naming (config-3.json's `naming` object), with its defaults.
 public struct NamingSettings: Sendable, Equatable {
     public static let defaultFolderTemplate = "{name}{discLabel? - {discLabel}}"
@@ -18,5 +20,14 @@ public struct NamingSettings: Sendable, Equatable {
         self.fileNameTemplate = fileNameTemplate
         self.backupSubfolder = backupSubfolder
         self.conflictPolicy = conflictPolicy
+    }
+
+    /// Naming from its JSON (a profile's naming object), with defaults for what it leaves out.
+    public static func decode(_ json: JsonValue) -> NamingSettings {
+        var issues: [Issue] = []
+        let j = SchemaWalker.normalize(json, SchemaWalker.def("ProfileFields")["properties"]!["naming"]!, "", fill: true, &issues)
+        return NamingSettings(layout: Layout(rawValue: j["layout"]?.string ?? "") ?? .templates, folderTemplate: j["folderTemplate"]?.string ?? "",
+                              fileNameTemplate: j["fileNameTemplate"]?.string ?? "", backupSubfolder: j["backupSubfolder"]?.string ?? "",
+                              conflictPolicy: ConflictPolicy(rawValue: j["conflictPolicy"]?.string ?? "") ?? .newFolder)
     }
 }

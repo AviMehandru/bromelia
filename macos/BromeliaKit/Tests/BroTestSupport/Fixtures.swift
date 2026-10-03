@@ -82,6 +82,22 @@ public enum Fixtures {
         return s
     }
 
+    /// The value with every object's keys sorted, to compare documents whose key order doesn't matter.
+    public static func sorted(_ v: JsonValue) -> JsonValue {
+        switch v {
+        case .object(let m): return .object(m.sorted { $0.key < $1.key }.map { ($0.key, sorted($0.value)) })
+        case .array(let a): return .array(a.map(sorted))
+        default: return v
+        }
+    }
+
+    /// The value at a dotted path (a.b.c), or nil.
+    public static func at(_ v: JsonValue, _ path: String) -> JsonValue? {
+        var cur: JsonValue? = v
+        for part in path.split(separator: ".") { cur = cur?[String(part)] }
+        return cur
+    }
+
     /// Throws unless `condition` holds.
     public static func check(_ condition: Bool, _ what: @autoclosure () -> String) throws {
         if !condition { throw FixtureError(what()) }

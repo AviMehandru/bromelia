@@ -91,6 +91,23 @@ public static class Fixtures
         return sb.ToString();
     }
 
+    /// <summary>The value with every object's keys sorted, to compare documents whose key order doesn't matter.</summary>
+    public static JsonValue Sorted(JsonValue v) => v switch
+    {
+        JsonValue.Object o => new JsonValue.Object(o.Members.OrderBy(m => m.Key, StringComparer.Ordinal)
+            .Select(m => new KeyValuePair<string, JsonValue>(m.Key, Sorted(m.Value))).ToList()),
+        JsonValue.Array a => new JsonValue.Array(a.Items.Select(Sorted).ToList()),
+        _ => v,
+    };
+
+    /// <summary>The value at a dotted path (a.b.c), or null.</summary>
+    public static JsonValue? At(JsonValue v, string path)
+    {
+        JsonValue? cur = v;
+        foreach (var part in path.Split('.')) cur = cur?[part];
+        return cur;
+    }
+
     /// <summary>Assert.Equal with a message that names the case's value.</summary>
     public static void Same<T>(T expected, T actual, string what)
     {

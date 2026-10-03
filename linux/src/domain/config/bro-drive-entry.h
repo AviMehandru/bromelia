@@ -21,6 +21,9 @@ typedef struct {
 BroDriveEntry *bro_drive_entry_new (const char *id, BroDriveMatch *match);
 void bro_drive_entry_free (BroDriveEntry *entry);
 
+/* A drive entry from its JSON, with the schema's defaults for what it leaves out. */
+BroDriveEntry *bro_drive_entry_decode (BroJsonValue *json);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroDriveEntry, bro_drive_entry_free)
 
 G_END_DECLS

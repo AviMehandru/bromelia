@@ -26,6 +26,9 @@ jobs:
       # The MessageCode enum of each platform is generated from shared/messages/codes.json.
       - name: Generated message codes
         run: python3 tools/gen-messages.py --check
+      # The configuration schema is compiled into each platform's Domain.
+      - name: Generated configuration schema
+        run: python3 tools/gen-config-schema.py --check
 
   macos:
     name: macOS (SwiftUI)

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "bro-conflict-policy.h"
+#include "bro-json-value.h"
 #include "bro-layout.h"
 
 G_BEGIN_DECLS
@@ -21,6 +22,9 @@ typedef struct {
 /* config-3.json's defaults. */
 BroNamingSettings *bro_naming_settings_new (void);
 void bro_naming_settings_free (BroNamingSettings *settings);
+
+/* Naming from its JSON (a profile's naming object), with defaults for what it leaves out. */
+BroNamingSettings *bro_naming_settings_decode (BroJsonValue *json);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroNamingSettings, bro_naming_settings_free)
 

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bro-index-base.h"
+#include "bro-json-value.h"
 #include "bro-title-strategy.h"
 
 G_BEGIN_DECLS
@@ -28,6 +29,9 @@ typedef struct {
 /* config-3.json's defaults. */
 BroTitleSettings *bro_title_settings_new (void);
 void bro_title_settings_free (BroTitleSettings *settings);
+
+/* Title rules from their JSON (config-3.json's TitleRules), with defaults for what it leaves out. */
+BroTitleSettings *bro_title_settings_decode (BroJsonValue *json);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroTitleSettings, bro_title_settings_free)
 

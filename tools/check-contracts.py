@@ -221,6 +221,8 @@ def expand_defaults(value, node, base, sparse=True):
         for key, prop in obj.get("properties", {}).items():
             pnode, pbase = resolve(prop, obase)
             if key not in out:
+                if _forbidden(obj, key, value):
+                    continue
                 default = prop.get("default", pnode.get("default") if isinstance(pnode, dict) else None)
                 if "default" in prop or (isinstance(pnode, dict) and "default" in pnode):
                     out[key] = copy.deepcopy(default)
@@ -237,6 +239,18 @@ def expand_defaults(value, node, base, sparse=True):
         if items is not None:
             return [expand_defaults(v, items, ibase, sparse) for v in value]
     return value
+
+
+def _forbidden(obj, key, value):
+    """Whether the schema forbids key in this object (allOf: if {properties: {k: {const}}} then not required),
+    so it isn't filled: a command step gets no handbrake object."""
+    for sub in obj.get("allOf", []):
+        cond, then = sub.get("if"), sub.get("then", {})
+        if not cond or key not in then.get("not", {}).get("required", []):
+            continue
+        if all(value.get(k) == p.get("const") for k, p in cond.get("properties", {}).items()):
+            return True
+    return False
 
 
 def _inherits(node, base):

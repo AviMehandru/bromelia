@@ -13,6 +13,9 @@
 #include "bro-conflict-namer.h"
 #include "bro-archive-files.h"
 #include "bro-archive-record-codec.h"
+#include "bro-config-codec.h"
+#include "bro-config-templates.h"
+#include "bro-config-validator.h"
 #include "bro-disc-flags.h"
 #include "bro-notes.h"
 #include "bro-sha256-sums.h"
@@ -1517,6 +1520,215 @@ test_notes (void)
   g_string_free (text, TRUE);
 }
 
+/* ---- config ------------------------------------------------------------------------------------------ */
+
+static int
+compare_names (gconstpointer a, gconstpointer b)
+{
+  return strcmp (*(const char **) a, *(const char **) b);
+}
+
+/* The value with every object's keys sorted, to compare documents whose key order doesn't matter. */
+static BroJsonValue *
+sorted_json (const BroJsonValue *v)
+{
+  if (v->kind == BRO_JSON_VALUE_ARRAY) {
+    BroJsonValue *a = bro_json_value_new_array ();
+    for (guint i = 0; i < v->items->len; i++)
+      bro_json_value_append (a, sorted_json (v->items->pdata[i]));
+    return a;
+  }
+  if (v->kind != BRO_JSON_VALUE_OBJECT)
+    return bro_json_value_ref ((BroJsonValue *) v);
+  g_autoptr (GPtrArray) keys = g_ptr_array_new ();
+  for (guint i = 0; i < v->keys->len; i++)
+    g_ptr_array_add (keys, v->keys->pdata[i]);
+  g_ptr_array_sort (keys, compare_names);
+  BroJsonValue *o = bro_json_value_new_object ();
+  for (guint i = 0; i < keys->len; i++)
+    bro_json_value_set (o, keys->pdata[i], sorted_json (bro_json_value_member (v, keys->pdata[i])));
+  return o;
+}
+
+static BroJsonValue *
+at_path (BroJsonValue *v, const char *path)
+{
+  g_auto (GStrv) parts = g_strsplit (path, ".", -1);
+  for (int i = 0; parts[i] && v; i++)
+    v = bro_json_value_member (v, parts[i]);
+  return v;
+}
+
+static BroConfig *
+decode_json (BroJsonValue *json)
+{
+  g_autofree char *text = bro_json_value_to_text (json);
+  return bro_config_codec_decode (text, -1, NULL);
+}
+
+static char *
+encoded (const BroConfig *c)
+{
+  g_autoptr (GBytes) b = bro_config_codec_encode (c);
+  return g_strndup (g_bytes_get_data (b, NULL), g_bytes_get_size (b));
+}
+
+/* Issues as the fixtures write them: params only when the expected issue has them. */
+static void
+same_issues (GPtrArray *failures, const char *id, BroJsonValue *expected, GPtrArray *issues)
+{
+  g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+  for (guint i = 0; i < issues->len; i++) {
+    g_autoptr (BroJsonValue) j = bro_issue_to_json (issues->pdata[i]);
+    gboolean with_params = i < bro_json_value_length (expected) && J (bro_json_value_at (expected, i), "params");
+    BroJsonValue *o = bro_json_value_new_object ();
+    for (guint k = 0; k < j->keys->len; k++)
+      if (with_params || strcmp (j->keys->pdata[k], "params") != 0)
+        bro_json_value_set (o, j->keys->pdata[k], bro_json_value_ref (j->items->pdata[k]));
+    bro_json_value_append (got, o);
+  }
+  bro_test_same_json (failures, id, "issues", expected, got);
+}
+
+static gboolean
+config_codec_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (J (given, "template")) {
+    g_autoptr (BroProfile) p = bro_config_templates_archive_everything ();
+    g_autoptr (BroJsonValue) want = sorted_json (J (expect, "profile"));
+    g_autoptr (BroJsonValue) got = sorted_json (p->json);
+    bro_test_same_json (failures, id, "profile", want, got);
+    return TRUE;
+  }
+  if (J (given, "catalog")) {
+    /* The settings catalog the forms are generated from (no Domain function reads it: it's the apps'). */
+    g_autofree char *rel = g_strconcat ("../", JS (given, "catalog") + strlen ("shared/"), NULL);
+    g_autoptr (BroJsonValue) doc = bro_test_fixture_json (rel);
+    g_autofree char *text = bro_json_value_to_text (doc);
+    g_autofree char *key = g_strdup_printf ("\"%s\"", JS (expect, "hasKey"));
+    if (!strstr (text, key) || bro_json_value_length (J (doc, "selectionPresets")) == 0)
+      bro_test_fail (failures, id, "the catalog lacks %s or its selection presets", key);
+    return TRUE;
+  }
+  g_autoptr (BroConfig) config = NULL;
+  if (J (given, "file")) {
+    g_autofree char *rel = g_strconcat ("config/", JS (given, "file"), NULL);
+    gsize length;
+    g_autofree char *bytes = bro_test_fixture_text (rel, &length);
+    config = bro_config_codec_decode (bytes, length, NULL);
+  } else {
+    config = decode_json (J (given, "json"));
+  }
+  g_autofree char *enc = encoded (config);
+  if (J (expect, "equals")) {
+    g_autofree char *rel = g_strconcat ("config/", JS (expect, "equals"), NULL);
+    g_autofree char *want = bro_test_fixture_text (rel, NULL);
+    bro_test_same_string (failures, id, "encoded", want, enc);
+  }
+  if (bro_json_value_get_bool (J (expect, "roundTrips"), FALSE)) {
+    /* Decoding what was encoded changes nothing (the file itself is formatted by hand). */
+    g_autoptr (BroConfig) again = bro_config_codec_decode (enc, -1, NULL);
+    g_autofree char *enc2 = encoded (again);
+    bro_test_same_string (failures, id, "round trip", enc, enc2);
+  }
+  BroJsonValue *paths = J (expect, "paths");
+  for (guint i = 0; paths && i < paths->keys->len; i++)
+    bro_test_same_json (failures, id, paths->keys->pdata[i], paths->items->pdata[i], at_path (config->document, paths->keys->pdata[i]));
+  BroJsonValue *contains = J (expect, "contains");
+  for (guint i = 0; i < bro_json_value_length (contains); i++)
+    if (!strstr (enc, bro_json_value_get_string (bro_json_value_at (contains, i), "")))
+      bro_test_fail (failures, id, "encoded doesn't contain %s", bro_json_value_get_string (bro_json_value_at (contains, i), ""));
+  BroJsonValue *without = J (expect, "encodedWithout");
+  for (guint i = 0; i < bro_json_value_length (without); i++) {
+    g_autofree char *key = g_strdup_printf ("\"%s\"", bro_json_value_get_string (bro_json_value_at (without, i), ""));
+    if (strstr (enc, key))
+      bro_test_fail (failures, id, "encoded contains %s", key);
+  }
+  if (bro_json_value_get_bool (J (expect, "profileStaysSparse"), FALSE)) {
+    g_autoptr (BroJsonValue) want = sorted_json (bro_json_value_at (J (J (given, "json"), "profiles"), 0));
+    g_autoptr (BroJsonValue) got = sorted_json (bro_json_value_at (J (config->document, "profiles"), 0));
+    bro_test_same_json (failures, id, "sparse profile", want, got);
+  }
+  if (J (expect, "issues")) {
+    g_autoptr (GPtrArray) issues = bro_config_validator_validate (config);
+    same_issues (failures, id, J (expect, "issues"), issues);
+  }
+  return TRUE;
+}
+
+static void
+test_config_codec_cases (void)
+{
+  bro_test_run_cases ("config/config-codec.cases.json", config_codec_case);
+}
+
+static gboolean
+only_invalid_regex (const char *id)
+{
+  return strcmp (id, "invalid-regex-issue") == 0;
+}
+
+static gboolean
+rule_regex_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  /* A fragment of a version 3 document. */
+  g_autoptr (BroJsonValue) full = bro_json_value_new_object ();
+  bro_json_value_set (full, "version", bro_json_value_new_integer (3));
+  BroJsonValue *frag = J (given, "config");
+  for (guint i = 0; i < frag->keys->len; i++)
+    bro_json_value_set (full, frag->keys->pdata[i], bro_json_value_ref (frag->items->pdata[i]));
+  g_autoptr (BroConfig) config = decode_json (full);
+  g_autoptr (GPtrArray) issues = bro_config_validator_validate (config);
+  same_issues (failures, id, J (expect, "issues"), issues);
+  return TRUE;
+}
+
+static void
+test_rule_regex_issues (void)
+{
+  bro_test_run_cases_only ("domain/rules.cases.json", only_invalid_regex, rule_regex_case);
+}
+
+static void
+test_typed_views_fill_defaults (void)
+{
+  g_autoptr (BroConfig) config = bro_config_codec_decode (
+    "{\"version\": 3,"
+    " \"profiles\": [{\"id\": \"default\", \"titles\": {\"strategy\": \"longest\"}, \"naming\": {\"layout\": \"mediaServer\"}}],"
+    " \"drives\": [{\"id\": \"left\", \"match\": {\"devicePath\": \"/dev/sr0\"}, \"profile\": \"default\"}],"
+    " \"steps\": [{\"id\": \"enc\", \"kind\": \"handbrake\"}, {\"id\": \"cmd\", \"kind\": \"command\", \"command\": {\"executable\": \"/bin/echo\"}}],"
+    " \"rules\": [{\"id\": \"bd\", \"when\": {\"formats\": [\"BR*\"]}, \"then\": {\"steps\": [\"enc\"]}}]}",
+    -1, NULL);
+  g_autoptr (GPtrArray) issues = bro_config_validator_validate (config);
+  g_assert_cmpuint (issues->len, ==, 0);
+  g_autoptr (GPtrArray) steps = bro_config_steps (config);
+  BroStepDefinition *enc = steps->pdata[0], *cmd = steps->pdata[1];
+  g_assert_true (enc->background);
+  g_assert_cmpstr (enc->handbrake.preset, ==, "H.265 MKV 1080p30");
+  g_assert_false (cmd->background);
+  g_assert_cmpstr (cmd->command.arguments, ==, "{outputDir}");
+  g_autoptr (GPtrArray) drives = bro_config_drives (config);
+  g_assert_cmpstr (((BroDriveEntry *) drives->pdata[0])->id, ==, "left");
+  g_autoptr (GPtrArray) rules = bro_config_rules (config);
+  g_assert_cmpstr (((BroRule *) rules->pdata[0])->when.formats[0], ==, "BR*");
+  g_autoptr (GPtrArray) profiles = bro_config_profiles (config);
+  BroProfile *p = profiles->pdata[0];
+  g_autoptr (BroTitleSettings) t = bro_title_settings_decode (J (p->json, "titles"));
+  g_assert_cmpint (t->strategy, ==, BRO_TITLE_STRATEGY_LONGEST);
+  g_autoptr (BroNamingSettings) n = bro_naming_settings_decode (J (p->json, "naming"));
+  g_assert_cmpint (n->layout, ==, BRO_LAYOUT_MEDIA_SERVER);
+  g_autoptr (BroConfig) bad = bro_config_codec_decode (
+    "{\"version\": 3, \"drives\": [{\"id\": \"d\", \"profile\": \"nope\"}],"
+    " \"steps\": [{\"id\": \"s\", \"kind\": \"command\"}, {\"id\": \"s\", \"kind\": \"command\"}],"
+    " \"server\": {\"tls\": {\"certificate\": \"/c.pem\"}}}",
+    -1, NULL);
+  g_autoptr (GPtrArray) bad_issues = bro_config_validator_validate (bad);
+  g_assert_cmpuint (bad_issues->len, ==, 3);
+  g_assert_cmpint (((BroIssue *) bad_issues->pdata[0])->code, ==, BRO_MSG_CONFIG_DUPLICATE_ID);
+  g_assert_cmpint (((BroIssue *) bad_issues->pdata[1])->code, ==, BRO_MSG_CONFIG_UNKNOWN_REFERENCE);
+  g_assert_cmpint (((BroIssue *) bad_issues->pdata[2])->code, ==, BRO_MSG_CONFIG_TLS_NEEDS_BOTH);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1545,5 +1757,8 @@ main (int argc, char **argv)
   g_test_add_func ("/archive-format/records-v3", test_version_3_records_round_trip);
   g_test_add_func ("/archive-format/records-v2", test_version_2_records_are_read);
   g_test_add_func ("/archive-format/notes", test_notes);
+  g_test_add_func ("/config/codec", test_config_codec_cases);
+  g_test_add_func ("/config/rule-regex", test_rule_regex_issues);
+  g_test_add_func ("/config/typed-views", test_typed_views_fill_defaults);
   return g_test_run ();
 }

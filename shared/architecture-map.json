@@ -2869,7 +2869,8 @@
           "c": {
             "name": "BroConfigMigration",
             "file": "linux/src/domain/config/bro-config-migration.h"
-          }
+          },
+          "phase": 5
         },
         {
           "name": "ConfigValidator",
@@ -2944,7 +2945,8 @@
           "c": {
             "name": "BroMigrationResult",
             "file": "linux/src/domain/config/bro-migration-result.h"
-          }
+          },
+          "phase": 5
         },
         {
           "name": "DriveMatch",
@@ -3194,6 +3196,247 @@
               "BRO_CONFLICT_POLICY_SKIP"
             ]
           }
+        },
+        {
+          "name": "Profile",
+          "kind": "struct",
+          "doc": "A profile as written in the configuration: sparse (a missing field is inherited), so a JSON object.",
+          "fields": [
+            "json"
+          ],
+          "swift": {
+            "name": "Profile",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/Profile.swift"
+          },
+          "cs": {
+            "name": "Profile",
+            "file": "windows/src/Bromelia.Domain/Config/Profile.cs"
+          },
+          "c": {
+            "name": "BroProfile",
+            "file": "linux/src/domain/config/bro-profile.h"
+          }
+        },
+        {
+          "name": "StepType",
+          "kind": "enum",
+          "doc": "What a post-processing step runs.",
+          "cases": [
+            "command",
+            "handbrake"
+          ],
+          "swift": {
+            "name": "StepType",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/StepType.swift",
+            "cases": [
+              ".command",
+              ".handbrake"
+            ]
+          },
+          "cs": {
+            "name": "StepType",
+            "file": "windows/src/Bromelia.Domain/Config/StepType.cs",
+            "cases": [
+              "Command",
+              "Handbrake"
+            ]
+          },
+          "c": {
+            "name": "BroStepType",
+            "file": "linux/src/domain/config/bro-step-type.h",
+            "cases": [
+              "BRO_STEP_TYPE_COMMAND",
+              "BRO_STEP_TYPE_HANDBRAKE"
+            ]
+          }
+        },
+        {
+          "name": "RunOn",
+          "kind": "enum",
+          "doc": "When a step runs.",
+          "cases": [
+            "success",
+            "failure",
+            "always"
+          ],
+          "swift": {
+            "name": "RunOn",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/RunOn.swift",
+            "cases": [
+              ".success",
+              ".failure",
+              ".always"
+            ]
+          },
+          "cs": {
+            "name": "RunOn",
+            "file": "windows/src/Bromelia.Domain/Config/RunOn.cs",
+            "cases": [
+              "Success",
+              "Failure",
+              "Always"
+            ]
+          },
+          "c": {
+            "name": "BroRunOn",
+            "file": "linux/src/domain/config/bro-run-on.h",
+            "cases": [
+              "BRO_RUN_ON_SUCCESS",
+              "BRO_RUN_ON_FAILURE",
+              "BRO_RUN_ON_ALWAYS"
+            ]
+          }
+        },
+        {
+          "name": "CommandSettings",
+          "kind": "struct",
+          "doc": "A command step's program, interpreter, arguments, working directory, per-file flag and environment.",
+          "fields": [
+            "executable",
+            "interpreter",
+            "arguments",
+            "workingDirectory",
+            "perFile",
+            "environment"
+          ],
+          "swift": {
+            "name": "CommandSettings",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/CommandSettings.swift"
+          },
+          "cs": {
+            "name": "CommandSettings",
+            "file": "windows/src/Bromelia.Domain/Config/CommandSettings.cs"
+          },
+          "c": {
+            "name": "BroCommandSettings",
+            "file": "linux/src/domain/config/bro-command-settings.h"
+          }
+        },
+        {
+          "name": "HandBrakeSettings",
+          "kind": "struct",
+          "doc": "A HandBrake step's executable, preset, preset file, output path and extra arguments.",
+          "fields": [
+            "executable",
+            "preset",
+            "presetFile",
+            "outputPath",
+            "extraArguments"
+          ],
+          "swift": {
+            "name": "HandBrakeSettings",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/HandBrakeSettings.swift"
+          },
+          "cs": {
+            "name": "HandBrakeSettings",
+            "file": "windows/src/Bromelia.Domain/Config/HandBrakeSettings.cs"
+          },
+          "c": {
+            "name": "BroHandBrakeSettings",
+            "file": "linux/src/domain/config/bro-hand-brake-settings.h"
+          }
+        },
+        {
+          "name": "StepDefinition",
+          "kind": "struct",
+          "doc": "A post-processing step of the configuration (config-3.json's Step).",
+          "fields": [
+            "id",
+            "kind",
+            "name",
+            "enabled",
+            "runOn",
+            "background",
+            "affectsOutcome",
+            "timeoutSeconds",
+            "command",
+            "handbrake"
+          ],
+          "swift": {
+            "name": "StepDefinition",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/StepDefinition.swift"
+          },
+          "cs": {
+            "name": "StepDefinition",
+            "file": "windows/src/Bromelia.Domain/Config/StepDefinition.cs"
+          },
+          "c": {
+            "name": "BroStepDefinition",
+            "file": "linux/src/domain/config/bro-step-definition.h"
+          }
+        },
+        {
+          "name": "RuleWhen",
+          "kind": "struct",
+          "doc": "A rule's conditions.",
+          "fields": [
+            "nameOrLabel",
+            "name",
+            "label",
+            "formats",
+            "kinds",
+            "drives",
+            "profiles",
+            "automatic"
+          ],
+          "swift": {
+            "name": "RuleWhen",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/RuleWhen.swift"
+          },
+          "cs": {
+            "name": "RuleWhen",
+            "file": "windows/src/Bromelia.Domain/Config/RuleWhen.cs"
+          },
+          "c": {
+            "name": "BroRuleWhen",
+            "file": "linux/src/domain/config/bro-rule-when.h"
+          }
+        },
+        {
+          "name": "RuleThen",
+          "kind": "struct",
+          "doc": "What a matching rule does: a profile, a profile patch, steps.",
+          "fields": [
+            "profile",
+            "set",
+            "steps"
+          ],
+          "swift": {
+            "name": "RuleThen",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/RuleThen.swift"
+          },
+          "cs": {
+            "name": "RuleThen",
+            "file": "windows/src/Bromelia.Domain/Config/RuleThen.cs"
+          },
+          "c": {
+            "name": "BroRuleThen",
+            "file": "linux/src/domain/config/bro-rule-then.h"
+          }
+        },
+        {
+          "name": "Rule",
+          "kind": "struct",
+          "doc": "A rule of the configuration (config-3.json's Rule).",
+          "fields": [
+            "id",
+            "name",
+            "enabled",
+            "when",
+            "then"
+          ],
+          "swift": {
+            "name": "Rule",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/Rule.swift"
+          },
+          "cs": {
+            "name": "Rule",
+            "file": "windows/src/Bromelia.Domain/Config/Rule.cs"
+          },
+          "c": {
+            "name": "BroRule",
+            "file": "linux/src/domain/config/bro-rule.h"
+          }
         }
       ],
       "functions": [
@@ -3226,7 +3469,8 @@
           "returns": "MigrationResult",
           "swift": "ConfigMigration.upgrade(_:)",
           "cs": "ConfigMigration.Upgrade",
-          "c": "bro_config_migration_upgrade"
+          "c": "bro_config_migration_upgrade",
+          "phase": 5
         },
         {
           "name": "ConfigValidator.validate",
@@ -3265,7 +3509,118 @@
           "throws": true,
           "swift": "ConfigCodec.importBundle(_:)",
           "cs": "ConfigCodec.ImportBundle",
-          "c": "bro_config_codec_import_bundle"
+          "c": "bro_config_codec_import_bundle",
+          "phase": 5
+        },
+        {
+          "name": "Config.profiles",
+          "params": [
+            "config"
+          ],
+          "returns": "[profiles]",
+          "doc": "The configuration's profiles.",
+          "swift": "Config.profiles(_:)",
+          "cs": "Config.Profiles",
+          "c": "bro_config_profiles"
+        },
+        {
+          "name": "Config.drives",
+          "params": [
+            "config"
+          ],
+          "returns": "[drives]",
+          "doc": "The configuration's drives.",
+          "swift": "Config.drives(_:)",
+          "cs": "Config.Drives",
+          "c": "bro_config_drives"
+        },
+        {
+          "name": "Config.steps",
+          "params": [
+            "config"
+          ],
+          "returns": "[steps]",
+          "doc": "The configuration's steps.",
+          "swift": "Config.steps(_:)",
+          "cs": "Config.Steps",
+          "c": "bro_config_steps"
+        },
+        {
+          "name": "Config.rules",
+          "params": [
+            "config"
+          ],
+          "returns": "[rules]",
+          "doc": "The configuration's rules.",
+          "swift": "Config.rules(_:)",
+          "cs": "Config.Rules",
+          "c": "bro_config_rules"
+        },
+        {
+          "name": "StepDefinition.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "StepDefinition",
+          "doc": "From its JSON, with the schema's defaults for what it leaves out.",
+          "swift": "StepDefinition.decode(_:)",
+          "cs": "StepDefinition.Decode",
+          "c": "bro_step_definition_decode"
+        },
+        {
+          "name": "Rule.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "Rule",
+          "doc": "From its JSON, with the schema's defaults for what it leaves out.",
+          "swift": "Rule.decode(_:)",
+          "cs": "Rule.Decode",
+          "c": "bro_rule_decode"
+        },
+        {
+          "name": "DriveEntry.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "DriveEntry",
+          "doc": "From its JSON, with the schema's defaults for what it leaves out.",
+          "swift": "DriveEntry.decode(_:)",
+          "cs": "DriveEntry.Decode",
+          "c": "bro_drive_entry_decode"
+        },
+        {
+          "name": "TitleSettings.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "TitleSettings",
+          "doc": "From its JSON, with the schema's defaults for what it leaves out.",
+          "swift": "TitleSettings.decode(_:)",
+          "cs": "TitleSettings.Decode",
+          "c": "bro_title_settings_decode"
+        },
+        {
+          "name": "NamingSettings.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "NamingSettings",
+          "doc": "From its JSON, with the schema's defaults for what it leaves out.",
+          "swift": "NamingSettings.decode(_:)",
+          "cs": "NamingSettings.Decode",
+          "c": "bro_naming_settings_decode"
+        },
+        {
+          "name": "Issue.toJson",
+          "params": [
+            "issue"
+          ],
+          "returns": "JsonValue",
+          "doc": "{path, code, params?, severity}.",
+          "swift": "Issue.toJson(_:)",
+          "cs": "Issue.ToJson",
+          "c": "bro_issue_to_json"
         }
       ]
     },
