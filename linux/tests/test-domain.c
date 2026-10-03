@@ -10,6 +10,11 @@
 #include "bro-step-state.h"
 
 #include "bro-disc-flags.h"
+#include "bro-duration.h"
+#include "bro-listing-match.h"
+#include "bro-one-pass.h"
+#include "bro-space-estimate.h"
+#include "bro-title-rules.h"
 #include "bro-fingerprint.h"
 #include "bro-listing-builder.h"
 #include "bro-drive-join.h"
@@ -17,6 +22,7 @@
 #include "bro-robot.h"
 #include "bro-run-accumulator.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define J(v, k) bro_json_value_member ((v), (k))
@@ -553,6 +559,232 @@ test_fingerprint_cases (void)
   bro_test_run_cases ("domain/fingerprint.cases.json", fingerprint_case);
 }
 
+/* ---- titles ------------------------------------------------------------------------------------------ */
+
+/* A title written in a fixture: any of the Title fields, the rest empty. */
+static BroTitle *
+title_of (BroJsonValue *t)
+{
+  BroTitle *x = g_new0 (BroTitle, 1);
+  x->index = bro_json_value_get_integer (J (t, "index"), 0);
+  x->has_source_title_id = J (t, "sourceTitleId") != NULL;
+  x->source_title_id = bro_json_value_get_integer (J (t, "sourceTitleId"), 0);
+  x->source_file = g_strdup (bro_json_value_get_string (J (t, "sourceFile"), ""));
+  x->name = g_strdup (bro_json_value_get_string (J (t, "name"), ""));
+  x->comment = g_strdup (bro_json_value_get_string (J (t, "comment"), ""));
+  x->duration = g_strdup (bro_json_value_get_string (J (t, "duration"), ""));
+  BroDuration d;
+  x->duration_seconds = J (t, "durationSeconds") ? bro_json_value_get_integer (J (t, "durationSeconds"), 0)
+                        : bro_duration_parse_clock (x->duration, &d) ? (int) d.seconds : 0;
+  x->chapters = bro_json_value_get_integer (J (t, "chapters"), 0);
+  x->size_bytes = bro_json_value_get_integer (J (t, "sizeBytes"), 0);
+  x->segment_map = g_strdup (bro_json_value_get_string (J (t, "segmentMap"), ""));
+  x->output_file_name = g_strdup (bro_json_value_get_string (J (t, "outputFileName"), ""));
+  x->has_angle = J (t, "angle") != NULL;
+  x->angle = bro_json_value_get_integer (J (t, "angle"), 0);
+  x->tracks = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_track_free);
+  x->attributes = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  return x;
+}
+
+static BroListing *
+listing_of_titles (BroJsonValue *titles)
+{
+  BroListing *l = g_atomic_rc_box_new0 (BroListing);
+  l->name = g_strdup ("");
+  l->volume_name = g_strdup ("");
+  l->type_text = g_strdup ("");
+  l->type = BRO_DISC_TYPE_DISC;
+  l->titles = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_title_free);
+  for (guint i = 0; i < bro_json_value_length (titles); i++)
+    g_ptr_array_add (l->titles, title_of (bro_json_value_at (titles, i)));
+  l->attributes = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  return l;
+}
+
+static BroTitleSettings *
+settings_of (BroJsonValue *r)
+{
+  BroTitleSettings *s = bro_title_settings_new ();
+  BroJsonValue *v;
+  if ((v = J (r, "strategy")))
+    bro_title_strategy_from_wire (bro_json_value_get_string (v, ""), &s->strategy);
+  s->longest_count = bro_json_value_get_integer (J (r, "longestCount"), 1);
+  if ((v = J (r, "indexPattern"))) {
+    g_free (s->index_pattern);
+    s->index_pattern = g_strdup (bro_json_value_get_string (v, ""));
+  }
+  if ((v = J (r, "indexBase")))
+    bro_index_base_from_wire (bro_json_value_get_string (v, ""), &s->index_base);
+  s->min_duration_seconds = bro_json_value_get_integer (J (r, "minDurationSeconds"), 0);
+  s->max_duration_seconds = bro_json_value_get_integer (J (r, "maxDurationSeconds"), 0);
+  s->min_chapters = bro_json_value_get_integer (J (r, "minChapters"), 0);
+  s->max_chapters = bro_json_value_get_integer (J (r, "maxChapters"), 0);
+  s->min_size_mb = bro_json_value_get_integer (J (r, "minSizeMB"), 0);
+  s->max_size_mb = bro_json_value_get_integer (J (r, "maxSizeMB"), 0);
+  if ((v = J (r, "includePattern"))) {
+    g_free (s->include_pattern);
+    s->include_pattern = g_strdup (bro_json_value_get_string (v, ""));
+  }
+  if ((v = J (r, "excludePattern"))) {
+    g_free (s->exclude_pattern);
+    s->exclude_pattern = g_strdup (bro_json_value_get_string (v, ""));
+  }
+  s->skip_duplicates = bro_json_value_get_bool (J (r, "skipDuplicates"), TRUE);
+  s->skip_alternate_angles = bro_json_value_get_bool (J (r, "skipAlternateAngles"), FALSE);
+  s->max_titles = bro_json_value_get_integer (J (r, "maxTitles"), 0);
+  return s;
+}
+
+static GArray *
+ints_of (BroJsonValue *v)
+{
+  GArray *a = g_array_new (FALSE, FALSE, sizeof (int));
+  for (guint i = 0; i < bro_json_value_length (v); i++) {
+    int n = bro_json_value_get_integer (bro_json_value_at (v, i), 0);
+    g_array_append_val (a, n);
+  }
+  return a;
+}
+
+static BroJsonValue *titles_inputs;
+
+static gboolean
+title_rules_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  g_autoptr (BroListing) listing = NULL;
+  if (J (given, "titles")) {
+    listing = listing_of_titles (J (titles_inputs, JS (given, "titles")));
+  } else {
+    g_autofree char *text = bro_test_fixture_text (JS (given, "listing"), NULL);
+    listing = listing_of (text);
+  }
+  g_autoptr (BroTitleSettings) rules = settings_of (J (given, "rules"));
+  g_autoptr (BroSelection) s = bro_title_rules_select (listing, rules);
+  g_autoptr (BroJsonValue) selected = bro_json_value_new_array ();
+  for (guint i = 0; i < s->indices->len; i++)
+    bro_json_value_append (selected, bro_json_value_new_integer (g_array_index (s->indices, int, i)));
+  bro_test_same_json (failures, id, "selected", J (expect, "selected"), selected);
+  g_autoptr (BroJsonValue) manual = bro_json_value_new_bool (s->requires_manual_choice);
+  g_autoptr (BroJsonValue) no = bro_json_value_new_bool (FALSE);
+  bro_test_same_json (failures, id, "requires manual choice", J (expect, "requiresManualChoice") ? J (expect, "requiresManualChoice") : no, manual);
+  bro_test_same_string (failures, id, "error", JS (J (expect, "error"), "code"), s->error ? bro_message_code_wire (s->error->code) : NULL);
+  BroJsonValue *reasons = J (expect, "reasons");
+  for (guint i = 0; reasons && i < reasons->keys->len; i++) {
+    int index = atoi (reasons->keys->pdata[i]);
+    for (guint k = 0; k < s->trace->len; k++) {
+      BroSelectionTrace *t = s->trace->pdata[k];
+      if (t->index != index)
+        continue;
+      g_autoptr (BroJsonValue) r = bro_bro_message_to_json (t->reason);
+      bro_test_same_json (failures, id, "reason", reasons->items->pdata[i], r);
+    }
+  }
+  if (s->trace->len != listing->titles->len)
+    bro_test_fail (failures, id, "trace has %u entries for %u titles", s->trace->len, listing->titles->len);
+  return TRUE;
+}
+
+static void
+test_title_rules_cases (void)
+{
+  g_autoptr (BroJsonValue) doc = bro_test_fixture_json ("domain/titles.cases.json");
+  titles_inputs = J (doc, "inputs");
+  bro_test_run_cases ("domain/titles.cases.json", title_rules_case);
+  titles_inputs = NULL;
+}
+
+static gboolean
+one_pass_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (J (given, "titles") && J (given, "chosen")) {
+    g_autoptr (BroListing) listing = listing_of_titles (J (given, "titles"));
+    g_autoptr (GArray) chosen = ints_of (J (given, "chosen"));
+    BroOnePassPlan plan;
+    BroJsonValue *current = J (given, "current");
+    int cur = current && current->kind != BRO_JSON_VALUE_NULL ? bro_json_value_get_integer (current, 0) : -1;
+    g_autoptr (BroJsonValue) actual = bro_one_pass_plan (chosen, listing, cur, &plan) ? bro_json_value_new_integer (plan.min_length)
+                                                                                         : bro_json_value_new_null ();
+    bro_test_same_json (failures, id, "min length", J (expect, "minLength"), actual);
+  } else if (J (given, "listing")) {
+    g_autoptr (BroListing) listing = listing_of_titles (J (given, "listing"));
+    g_autoptr (BroListing) original = listing_of_titles (J (given, "of"));
+    g_autoptr (GArray) chosen = ints_of (J (given, "chosen"));
+    g_autoptr (BroJsonValue) actual = bro_json_value_new_bool (bro_one_pass_matches (listing, chosen, original));
+    bro_test_same_json (failures, id, "matches", J (expect, "matches"), actual);
+  } else if (J (given, "bytes")) {
+    BroBytes b = { bro_json_value_get_integer (J (given, "bytes"), 0) };
+    g_autoptr (BroJsonValue) actual = bro_json_value_new_integer (bro_space_estimate_required (b).count);
+    bro_test_same_json (failures, id, "required", J (expect, "required"), actual);
+  } else if (J (given, "titles")) {
+    g_autoptr (BroListing) listing = listing_of_titles (J (given, "titles"));
+    g_autoptr (GArray) hand = ints_of (J (given, "handPicked"));
+    BroJsonValue *split = J (given, "splitTitle");
+    BroBytes need = bro_space_estimate_for_plan (listing->titles, hand, split ? bro_json_value_get_integer (split, -1) : -1);
+    g_autoptr (BroJsonValue) bytes = bro_json_value_new_integer (need.count);
+    g_autoptr (BroJsonValue) required = bro_json_value_new_integer (bro_space_estimate_required (need).count);
+    bro_test_same_json (failures, id, "bytes", J (expect, "bytes"), bytes);
+    bro_test_same_json (failures, id, "required", J (expect, "required"), required);
+  } else {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static void
+test_one_pass_and_space_cases (void)
+{
+  bro_test_run_cases ("domain/one-pass-and-space.cases.json", one_pass_case);
+}
+
+static BroListing *
+small_listing (const char *volume, int n, const int (*titles)[3])
+{
+  g_autoptr (BroJsonValue) array = bro_json_value_new_array ();
+  for (int i = 0; i < n; i++) {
+    BroJsonValue *t = bro_json_value_new_object ();
+    put (t, "index", bro_json_value_new_integer (i));
+    put (t, "sourceTitleId", bro_json_value_new_integer (titles[i][0]));
+    put (t, "durationSeconds", bro_json_value_new_integer (titles[i][1]));
+    g_autofree char *map = g_strdup_printf ("%d", titles[i][2]);
+    put (t, "segmentMap", bro_json_value_new_string (map));
+    bro_json_value_append (array, t);
+  }
+  BroListing *l = listing_of_titles (array);
+  g_free (l->volume_name);
+  l->volume_name = g_strdup (volume);
+  return l;
+}
+
+static void
+test_listing_match (void)
+{
+  const int opened_titles[][3] = { { 1, 1300, 1 }, { 2, 1310, 2 }, { 3, 1320, 3 } };
+  const int renumbered_titles[][3] = { { 2, 1310, 2 }, { 3, 1320, 3 } };
+  const int other_titles[][3] = { { 9, 99, 9 } };
+  g_autoptr (BroListing) opened = small_listing ("SHOW", 3, opened_titles);
+  g_autoptr (BroListing) renumbered = small_listing ("SHOW", 2, renumbered_titles);
+  g_autoptr (BroListing) other_volume = small_listing ("OTHER", 1, opened_titles);
+  g_autoptr (BroListing) other_titles_listing = small_listing ("SHOW", 1, other_titles);
+  g_assert_null (bro_listing_match_different_disc (opened, renumbered));
+  g_autoptr (GArray) two = g_array_new (FALSE, FALSE, sizeof (int));
+  int one_two[] = { 1, 2 };
+  g_array_append_vals (two, one_two, 2);
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (GHashTable) map = bro_listing_match_map_titles (two, opened, renumbered, NULL, &error);
+  g_assert_nonnull (map);
+  g_assert_cmpint (GPOINTER_TO_INT (g_hash_table_lookup (map, GINT_TO_POINTER (1))), ==, 0);
+  g_assert_cmpint (GPOINTER_TO_INT (g_hash_table_lookup (map, GINT_TO_POINTER (2))), ==, 1);
+  g_autoptr (GArray) zero = g_array_new (FALSE, TRUE, sizeof (int));
+  g_array_set_size (zero, 1);
+  g_assert_null (bro_listing_match_map_titles (zero, opened, renumbered, NULL, &error));
+  g_assert_cmpstr (error->code, ==, "disc.titleGone");
+  g_autoptr (BroBroMessage) v = bro_listing_match_different_disc (opened, other_volume);
+  g_assert_cmpint (v->code, ==, BRO_MSG_DISC_CHANGED_VOLUME);
+  g_autoptr (BroBroMessage) t = bro_listing_match_different_disc (opened, other_titles_listing);
+  g_assert_cmpint (t->code, ==, BRO_MSG_DISC_CHANGED_TITLES);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -567,5 +799,8 @@ main (int argc, char **argv)
   g_test_add_func ("/robot/accumulator", test_accumulator_stops);
   g_test_add_func ("/listing/real-dvd", test_listing_of_a_real_dvd);
   g_test_add_func ("/fingerprint/cases", test_fingerprint_cases);
+  g_test_add_func ("/titles/rules", test_title_rules_cases);
+  g_test_add_func ("/titles/one-pass-and-space", test_one_pass_and_space_cases);
+  g_test_add_func ("/titles/listing-match", test_listing_match);
   return g_test_run ();
 }

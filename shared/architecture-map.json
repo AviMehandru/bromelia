@@ -2636,6 +2636,114 @@
             "name": "BroDriveEntry",
             "file": "linux/src/domain/config/bro-drive-entry.h"
           }
+        },
+        {
+          "name": "TitleSettings",
+          "kind": "struct",
+          "doc": "A profile's title rules (config-3.json's TitleRules object; TitleRules is the Domain namespace that applies them).",
+          "fields": [
+            "strategy",
+            "longestCount",
+            "indexPattern",
+            "indexBase",
+            "minDurationSeconds",
+            "maxDurationSeconds",
+            "minChapters",
+            "maxChapters",
+            "minSizeMB",
+            "maxSizeMB",
+            "includePattern",
+            "excludePattern",
+            "skipDuplicates",
+            "skipAlternateAngles",
+            "maxTitles"
+          ],
+          "swift": {
+            "name": "TitleSettings",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/TitleSettings.swift"
+          },
+          "cs": {
+            "name": "TitleSettings",
+            "file": "windows/src/Bromelia.Domain/Config/TitleSettings.cs"
+          },
+          "c": {
+            "name": "BroTitleSettings",
+            "file": "linux/src/domain/config/bro-title-settings.h"
+          }
+        },
+        {
+          "name": "TitleStrategy",
+          "kind": "enum",
+          "doc": "How titles are chosen after the filters.",
+          "cases": [
+            "all",
+            "longest",
+            "indices",
+            "manual"
+          ],
+          "swift": {
+            "name": "TitleStrategy",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/TitleStrategy.swift",
+            "cases": [
+              ".all",
+              ".longest",
+              ".indices",
+              ".manual"
+            ]
+          },
+          "cs": {
+            "name": "TitleStrategy",
+            "file": "windows/src/Bromelia.Domain/Config/TitleStrategy.cs",
+            "cases": [
+              "All",
+              "Longest",
+              "Indices",
+              "Manual"
+            ]
+          },
+          "c": {
+            "name": "BroTitleStrategy",
+            "file": "linux/src/domain/config/bro-title-strategy.h",
+            "cases": [
+              "BRO_TITLE_STRATEGY_ALL",
+              "BRO_TITLE_STRATEGY_LONGEST",
+              "BRO_TITLE_STRATEGY_INDICES",
+              "BRO_TITLE_STRATEGY_MANUAL"
+            ]
+          }
+        },
+        {
+          "name": "IndexBase",
+          "kind": "enum",
+          "doc": "What an index pattern counts: MakeMKV's title numbers or the source (playlist / VTS) ids.",
+          "cases": [
+            "makemkv",
+            "source"
+          ],
+          "swift": {
+            "name": "IndexBase",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/IndexBase.swift",
+            "cases": [
+              ".makemkv",
+              ".source"
+            ]
+          },
+          "cs": {
+            "name": "IndexBase",
+            "file": "windows/src/Bromelia.Domain/Config/IndexBase.cs",
+            "cases": [
+              "Makemkv",
+              "Source"
+            ]
+          },
+          "c": {
+            "name": "BroIndexBase",
+            "file": "linux/src/domain/config/bro-index-base.h",
+            "cases": [
+              "BRO_INDEX_BASE_MAKEMKV",
+              "BRO_INDEX_BASE_SOURCE"
+            ]
+          }
         }
       ],
       "functions": [
