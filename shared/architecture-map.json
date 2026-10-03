@@ -2286,7 +2286,14 @@
           "c": {
             "name": "BroPlannedPath",
             "file": "linux/src/domain/naming/bro-planned-path.h"
-          }
+          },
+          "fields": [
+            "path",
+            "role",
+            "title",
+            "episode"
+          ],
+          "doc": "A path relative to the library, with its role and the title or episode it holds (the API's PlannedPath)."
         },
         {
           "name": "Sanitizer",
@@ -2334,6 +2341,160 @@
           "c": {
             "name": "BroArgumentSplitter",
             "file": "linux/src/domain/naming/bro-argument-splitter.h"
+          }
+        },
+        {
+          "name": "PathRole",
+          "kind": "enum",
+          "doc": "What a planned path holds (the API's PlannedPath role).",
+          "cases": [
+            "title",
+            "episode",
+            "closingClip",
+            "playAll",
+            "backup",
+            "image",
+            "audio",
+            "discInfo",
+            "record",
+            "sums",
+            "log",
+            "nfo",
+            "poster"
+          ],
+          "swift": {
+            "name": "PathRole",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Naming/PathRole.swift",
+            "cases": [
+              ".title",
+              ".episode",
+              ".closingClip",
+              ".playAll",
+              ".backup",
+              ".image",
+              ".audio",
+              ".discInfo",
+              ".record",
+              ".sums",
+              ".log",
+              ".nfo",
+              ".poster"
+            ]
+          },
+          "cs": {
+            "name": "PathRole",
+            "file": "windows/src/Bromelia.Domain/Naming/PathRole.cs",
+            "cases": [
+              "Title",
+              "Episode",
+              "ClosingClip",
+              "PlayAll",
+              "Backup",
+              "Image",
+              "Audio",
+              "DiscInfo",
+              "Record",
+              "Sums",
+              "Log",
+              "Nfo",
+              "Poster"
+            ]
+          },
+          "c": {
+            "name": "BroPathRole",
+            "file": "linux/src/domain/naming/bro-path-role.h",
+            "cases": [
+              "BRO_PATH_ROLE_TITLE",
+              "BRO_PATH_ROLE_EPISODE",
+              "BRO_PATH_ROLE_CLOSING_CLIP",
+              "BRO_PATH_ROLE_PLAY_ALL",
+              "BRO_PATH_ROLE_BACKUP",
+              "BRO_PATH_ROLE_IMAGE",
+              "BRO_PATH_ROLE_AUDIO",
+              "BRO_PATH_ROLE_DISC_INFO",
+              "BRO_PATH_ROLE_RECORD",
+              "BRO_PATH_ROLE_SUMS",
+              "BRO_PATH_ROLE_LOG",
+              "BRO_PATH_ROLE_NFO",
+              "BRO_PATH_ROLE_POSTER"
+            ]
+          }
+        },
+        {
+          "name": "PlannedOutput",
+          "kind": "struct",
+          "doc": "One file a job will write, for Layouts.paths: its role, title or episode, the tokens of that file (track, episode, …), whether it's a movie's main feature, and its extension.",
+          "fields": [
+            "role",
+            "title",
+            "episode",
+            "values",
+            "mainFeature",
+            "extension"
+          ],
+          "swift": {
+            "name": "PlannedOutput",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Naming/PlannedOutput.swift"
+          },
+          "cs": {
+            "name": "PlannedOutput",
+            "file": "windows/src/Bromelia.Domain/Naming/PlannedOutput.cs"
+          },
+          "c": {
+            "name": "BroPlannedOutput",
+            "file": "linux/src/domain/naming/bro-planned-output.h"
+          }
+        },
+        {
+          "name": "TokenContext",
+          "kind": "struct",
+          "doc": "What TokenRegistry.values needs besides the identity: the rip word, the drive's name, the disc and volume names, the disc type, the job's short id, the release year and the local time.",
+          "fields": [
+            "rip",
+            "drive",
+            "disc",
+            "volume",
+            "type",
+            "job",
+            "releaseYear",
+            "localTime"
+          ],
+          "swift": {
+            "name": "TokenContext",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Naming/TokenContext.swift"
+          },
+          "cs": {
+            "name": "TokenContext",
+            "file": "windows/src/Bromelia.Domain/Naming/TokenContext.cs"
+          },
+          "c": {
+            "name": "BroTokenContext",
+            "file": "linux/src/domain/naming/bro-token-context.h"
+          }
+        },
+        {
+          "name": "LocalTime",
+          "kind": "struct",
+          "doc": "A wall-clock time in the user's time zone, for the date tokens (the adapters make it from the clock).",
+          "fields": [
+            "year",
+            "month",
+            "day",
+            "hour",
+            "minute",
+            "second"
+          ],
+          "swift": {
+            "name": "LocalTime",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Naming/LocalTime.swift"
+          },
+          "cs": {
+            "name": "LocalTime",
+            "file": "windows/src/Bromelia.Domain/Naming/LocalTime.cs"
+          },
+          "c": {
+            "name": "BroLocalTime",
+            "file": "linux/src/domain/naming/bro-local-time.h"
           }
         }
       ],
@@ -2395,12 +2556,12 @@
         {
           "name": "Layouts.paths",
           "params": [
-            "layout",
-            "identity",
+            "naming",
+            "values",
             "outputs"
           ],
           "returns": "[PlannedPath]",
-          "swift": "Layouts.paths(_:identity:outputs:)",
+          "swift": "Layouts.paths(_:values:outputs:)",
           "cs": "Layouts.Paths",
           "c": "bro_layouts_paths"
         },
@@ -2418,10 +2579,11 @@
           "name": "ConflictNamer.next",
           "params": [
             "name",
-            "existing"
+            "existing",
+            "isFolder"
           ],
           "returns": "String",
-          "swift": "ConflictNamer.next(_:existing:)",
+          "swift": "ConflictNamer.next(_:existing:isFolder:)",
           "cs": "ConflictNamer.Next",
           "c": "bro_conflict_namer_next"
         },
@@ -2444,6 +2606,18 @@
           "swift": "ArgumentSplitter.quote(_:)",
           "cs": "ArgumentSplitter.Quote",
           "c": "bro_argument_splitter_quote"
+        },
+        {
+          "name": "Layouts.folder",
+          "params": [
+            "naming",
+            "values"
+          ],
+          "returns": "String",
+          "doc": "The unit's folder, relative to the library.",
+          "swift": "Layouts.folder(_:values:)",
+          "cs": "Layouts.Folder",
+          "c": "bro_layouts_folder"
         }
       ]
     },
@@ -2924,6 +3098,100 @@
             "cases": [
               "BRO_INDEX_BASE_MAKEMKV",
               "BRO_INDEX_BASE_SOURCE"
+            ]
+          }
+        },
+        {
+          "name": "NamingSettings",
+          "kind": "struct",
+          "doc": "A profile's naming (config-3.json's naming object).",
+          "fields": [
+            "layout",
+            "folderTemplate",
+            "fileNameTemplate",
+            "backupSubfolder",
+            "conflictPolicy"
+          ],
+          "swift": {
+            "name": "NamingSettings",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/NamingSettings.swift"
+          },
+          "cs": {
+            "name": "NamingSettings",
+            "file": "windows/src/Bromelia.Domain/Config/NamingSettings.cs"
+          },
+          "c": {
+            "name": "BroNamingSettings",
+            "file": "linux/src/domain/config/bro-naming-settings.h"
+          }
+        },
+        {
+          "name": "Layout",
+          "kind": "enum",
+          "doc": "templates: the profile's folder and file templates; mediaServer: the Plex / Jellyfin / Emby names.",
+          "cases": [
+            "templates",
+            "mediaServer"
+          ],
+          "swift": {
+            "name": "Layout",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/Layout.swift",
+            "cases": [
+              ".templates",
+              ".mediaServer"
+            ]
+          },
+          "cs": {
+            "name": "Layout",
+            "file": "windows/src/Bromelia.Domain/Config/Layout.cs",
+            "cases": [
+              "Templates",
+              "MediaServer"
+            ]
+          },
+          "c": {
+            "name": "BroLayout",
+            "file": "linux/src/domain/config/bro-layout.h",
+            "cases": [
+              "BRO_LAYOUT_TEMPLATES",
+              "BRO_LAYOUT_MEDIA_SERVER"
+            ]
+          }
+        },
+        {
+          "name": "ConflictPolicy",
+          "kind": "enum",
+          "doc": "When the unit's folder exists: a new folder 'Name (2)', merge item by item (never replacing), or fail.",
+          "cases": [
+            "newFolder",
+            "merge",
+            "skip"
+          ],
+          "swift": {
+            "name": "ConflictPolicy",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/ConflictPolicy.swift",
+            "cases": [
+              ".newFolder",
+              ".merge",
+              ".skip"
+            ]
+          },
+          "cs": {
+            "name": "ConflictPolicy",
+            "file": "windows/src/Bromelia.Domain/Config/ConflictPolicy.cs",
+            "cases": [
+              "NewFolder",
+              "Merge",
+              "Skip"
+            ]
+          },
+          "c": {
+            "name": "BroConflictPolicy",
+            "file": "linux/src/domain/config/bro-conflict-policy.h",
+            "cases": [
+              "BRO_CONFLICT_POLICY_NEW_FOLDER",
+              "BRO_CONFLICT_POLICY_MERGE",
+              "BRO_CONFLICT_POLICY_SKIP"
             ]
           }
         }

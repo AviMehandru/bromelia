@@ -307,7 +307,8 @@
         "values": {
           "name": "Inception",
           "releaseYear": "2010",
-          "track": "Playlist 00800"
+          "track": "Playlist 00800",
+          "format": "BR"
         }
       },
       "expect": {

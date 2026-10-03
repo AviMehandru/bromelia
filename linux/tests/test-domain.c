@@ -9,7 +9,13 @@
 #include "bro-step-kind.h"
 #include "bro-step-state.h"
 
+#include "bro-argument-splitter.h"
+#include "bro-conflict-namer.h"
 #include "bro-disc-flags.h"
+#include "bro-layouts.h"
+#include "bro-sanitizer.h"
+#include "bro-template-engine.h"
+#include "bro-token-registry.h"
 #include "bro-episode-continuation.h"
 #include "bro-format-detector.h"
 #include "bro-identity.h"
@@ -1176,6 +1182,149 @@ test_episode_continuation_cases (void)
   }
 }
 
+/* ---- naming ------------------------------------------------------------------------------------------ */
+
+static GHashTable *
+values_of (BroJsonValue *v)
+{
+  GHashTable *t = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  for (guint i = 0; v && v->keys && i < v->keys->len; i++)
+    g_hash_table_insert (t, g_strdup (v->keys->pdata[i]), g_strdup (bro_json_value_get_string (v->items->pdata[i], "")));
+  return t;
+}
+
+static gboolean
+naming_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  BroJsonValue *v;
+  if ((v = J (given, "template"))) {
+    g_autoptr (GHashTable) values = values_of (J (given, "values"));
+    if (J (expect, "render")) {
+      g_autofree char *r = bro_template_engine_render (v->string, values);
+      bro_test_same_string (failures, id, "render", JS (expect, "render"), r);
+    } else {
+      g_autofree char *r = bro_template_engine_render_path (v->string, values);
+      bro_test_same_string (failures, id, "renderPath", JS (expect, "renderPath"), r);
+    }
+    return TRUE;
+  }
+  if ((v = J (given, "component"))) {
+    g_autofree char *r = bro_sanitizer_component (v->string);
+    bro_test_same_string (failures, id, "sanitize", JS (expect, "sanitize"), r);
+    return TRUE;
+  }
+  if ((v = J (given, "layout"))) {
+    g_autoptr (BroNamingSettings) naming = bro_naming_settings_new ();
+    bro_layout_from_wire (v->string, &naming->layout);
+    g_autoptr (GHashTable) values = values_of (J (given, "values"));
+    g_hash_table_insert (values, g_strdup ("kind"), g_strdup (JS (given, "kind")));
+    g_autofree char *folder = bro_layouts_folder (naming, values);
+    const char *keys[] = { "episodePath", "mainFeature", "extra", "backup" };
+    BroPathRole roles[] = { BRO_PATH_ROLE_EPISODE, BRO_PATH_ROLE_TITLE, BRO_PATH_ROLE_TITLE, BRO_PATH_ROLE_BACKUP };
+    g_autoptr (GPtrArray) outputs = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_planned_output_free);
+    for (int i = 0; i < 4; i++) {
+      BroPlannedOutput *o = bro_planned_output_new (roles[i]);
+      o->main_feature = i == 1;
+      g_ptr_array_add (outputs, o);
+    }
+    g_autoptr (GPtrArray) paths = bro_layouts_paths (naming, values, outputs);
+    if (J (expect, "folder"))
+      bro_test_same_string (failures, id, "folder", JS (expect, "folder"), folder);
+    for (int i = 0; i < 4; i++)
+      if (J (expect, keys[i])) {
+        g_autofree char *want = g_strconcat (folder, "/", JS (expect, keys[i]), NULL);
+        bro_test_same_string (failures, id, keys[i], want, ((BroPlannedPath *) paths->pdata[i])->path);
+      }
+    return TRUE;
+  }
+  if ((v = J (given, "title"))) {
+    g_autoptr (BroTitle) t = title_of (v);
+    g_autofree char *label = bro_token_registry_track_label (t);
+    bro_test_same_string (failures, id, "track label", JS (expect, "trackLabel"), label);
+    return TRUE;
+  }
+  if ((v = J (given, "episode"))) {
+    g_autofree char *label = bro_token_registry_episode_label (bro_json_value_get_integer (v, 0), bro_json_value_get_integer (J (given, "width"), 0));
+    bro_test_same_string (failures, id, "episode label", JS (expect, "episodeLabel"), label);
+    return TRUE;
+  }
+  if ((v = J (given, "name"))) {
+    BroJsonValue *existing = J (given, "existing");
+    g_autoptr (GPtrArray) names = g_ptr_array_new ();
+    for (guint i = 0; i < bro_json_value_length (existing); i++)
+      g_ptr_array_add (names, (gpointer) bro_json_value_get_string (bro_json_value_at (existing, i), ""));
+    g_ptr_array_add (names, NULL);
+    g_autofree char *next = bro_conflict_namer_next (v->string, (const char *const *) names->pdata, strchr (v->string, '.') == NULL);
+    bro_test_same_string (failures, id, "next", JS (expect, "next"), next);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void
+test_naming_cases (void)
+{
+  bro_test_run_cases ("domain/naming.cases.json", naming_case);
+}
+
+static gboolean
+only_split_and_quote (const char *id)
+{
+  return g_str_has_prefix (id, "split") || g_str_has_prefix (id, "quote");
+}
+
+static gboolean
+argument_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (J (given, "text")) {
+    g_auto (GStrv) args = bro_argument_splitter_split (JS (given, "text"));
+    g_autoptr (BroJsonValue) actual = strv_json (args);
+    bro_test_same_json (failures, id, "split", J (expect, "split"), actual);
+  } else {
+    g_autofree char *q = bro_argument_splitter_quote (JS (given, "quote"));
+    bro_test_same_string (failures, id, "quoted", JS (expect, "quoted"), q);
+  }
+  return TRUE;
+}
+
+static void
+test_argument_cases (void)
+{
+  bro_test_run_cases_only ("domain/arguments.cases.json", only_split_and_quote, argument_case);
+}
+
+static void
+test_tokens_and_template_layout (void)
+{
+  g_autoptr (BroIdentityInputs) in = bro_identity_inputs_new (NULL, "ONE_PIECE_S2_P7_D2", FALSE);
+  in->has_format = TRUE;
+  in->format = BRO_DISC_FORMAT_DVD;
+  g_autoptr (BroIdentity) identity = bro_identity_resolve (in);
+  BroTokenContext ctx = { "Rip", "Left", "ONE_PIECE_S2_P7_D2", "ONE_PIECE_S2_P7_D2", BRO_DISC_TYPE_DVD, "3f2504e0", -1, TRUE, { 2026, 10, 3, 9, 5, 7 } };
+  g_autoptr (GHashTable) values = bro_token_registry_values (identity, &ctx);
+  g_assert_cmpstr (g_hash_table_lookup (values, "name"), ==, "One Piece");
+  g_assert_cmpstr (g_hash_table_lookup (values, "discLabel"), ==, "Season 2 Part 7 Disc 2");
+  g_assert_cmpstr (g_hash_table_lookup (values, "date"), ==, "2026-10-03");
+  g_assert_cmpstr (g_hash_table_lookup (values, "time"), ==, "09-05-07");
+  g_assert_cmpstr (g_hash_table_lookup (values, "libraryFolder"), ==, "TV Shows");
+  g_autoptr (BroNamingSettings) naming = bro_naming_settings_new ();
+  g_autoptr (GPtrArray) outputs = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_planned_output_free);
+  BroPlannedOutput *ep = bro_planned_output_new (BRO_PATH_ROLE_EPISODE);
+  g_hash_table_insert (ep->values, g_strdup ("episode"), g_strdup ("Episode 138"));
+  g_hash_table_insert (ep->values, g_strdup ("track"), g_strdup ("Title 11 Ch 1-7"));
+  ep->title = 0;
+  ep->episode = 138;
+  g_free (ep->extension);
+  ep->extension = g_strdup (".mkv");
+  g_ptr_array_add (outputs, ep);
+  g_ptr_array_add (outputs, bro_planned_output_new (BRO_PATH_ROLE_BACKUP));
+  g_autoptr (GPtrArray) paths = bro_layouts_paths (naming, values, outputs);
+  BroPlannedPath *p0 = paths->pdata[0], *p1 = paths->pdata[1];
+  g_assert_cmpstr (p0->path, ==, "One Piece - Season 2 Part 7 Disc 2/One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv");
+  g_assert_cmpint (p0->episode, ==, 138);
+  g_assert_cmpstr (p1->path, ==, "One Piece - Season 2 Part 7 Disc 2/backup");
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1197,5 +1346,8 @@ main (int argc, char **argv)
   g_test_add_func ("/outcome/stalled-and-cancelled", test_stalled_and_cancelled_runs);
   g_test_add_func ("/identity/cases", test_identity_cases);
   g_test_add_func ("/identity/episode-continuation", test_episode_continuation_cases);
+  g_test_add_func ("/naming/cases", test_naming_cases);
+  g_test_add_func ("/naming/arguments", test_argument_cases);
+  g_test_add_func ("/naming/tokens-and-layout", test_tokens_and_template_layout);
   return g_test_run ();
 }
