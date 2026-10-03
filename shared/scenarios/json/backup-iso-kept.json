@@ -1,0 +1,59 @@
+{
+  "title": "A decrypted ISO backup is kept as an image file",
+  "from": [
+    "macos ReliabilityTests.isoBackupIsKept",
+    "docs/configuration.md#drivecon"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ],
+    "profile": {
+      "backup": {
+        "format": "iso"
+      }
+    },
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-backup-iso.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "mode": "backupDecrypted",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "mode": "backupDecrypted",
+          "files": 1
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "Sample Movie/Sample Movie - Backup - BR.iso",
+            "Sample Movie/SHA256SUMS"
+          ]
+        },
+        "calls": {
+          "makemkvcon": {
+            "include": [
+              "backup --decrypt disc:0 "
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

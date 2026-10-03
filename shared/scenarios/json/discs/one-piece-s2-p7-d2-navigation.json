@@ -1,0 +1,12 @@
+{
+  "volume": "ONE_PIECE_S2_P7_D2",
+  "type": "dvd",
+  "titles": [
+    {
+      "duration": "2:21:51",
+      "source": 11,
+      "chapters": 43
+    }
+  ],
+  "videoTs": "dvd-play-all"
+}

@@ -1,0 +1,55 @@
+{
+  "title": "An MKV whose length doesn't match its title fails the job; titles that passed are logged as checked",
+  "from": [
+    "macos SafetyTests.ripsAreCheckedAgainstTheListing",
+    "docs/configuration.md#output-folder-read-errors-and-checks"
+  ],
+  "given": {
+    "disc": "sample-movie-three-titles",
+    "profile": {
+      "titles": {
+        "skipDuplicates": false
+      }
+    },
+    "tools": {
+      "mkvmerge": "tools/mkvmerge-title-1-short.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0,
+          1
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "rip.failed"
+          },
+          "errorText": "doesn't match the disc listing"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "ripcheck.checked"
+          ]
+        },
+        "files": {
+          "under": "library/_Quarantine/Sample Movie [INCOMPLETE]",
+          "include": [
+            "title_t01.mkv",
+            "INCOMPLETE.txt"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "tool": "mkvmerge",
+  "note": "Every file has its video track only, though the listing has video and audio.",
+  "rules": [
+    {
+      "when": {
+        "command": "-J"
+      },
+      "probe": {
+        "*": {
+          "durationSeconds": 10,
+          "tracks": [
+            "video"
+          ],
+          "chapters": 0
+        }
+      }
+    }
+  ]
+}

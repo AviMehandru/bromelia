@@ -1,0 +1,48 @@
+{
+  "title": "With ripAudioCDs off an audio CD is left alone, and Rip says why",
+  "from": [
+    "docs/configuration.md#other-discs",
+    "macos IntegrationFeatureTests.otherDiscModesAndBetaKeys"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "identification": "DVD+RW TEST 1.00",
+        "device": "/dev/fake9",
+        "disc": "audio-cd"
+      }
+    ],
+    "profile": {
+      "otherDiscs": {
+        "ripAudioCDs": false
+      }
+    }
+  },
+  "steps": [
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/drives/{driveId:drive}/rip",
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "response"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "response",
+          "status": 409,
+          "error": {
+            "code": "disc.notVideo"
+          }
+        },
+        "jobs": {
+          "count": 0
+        }
+      }
+    }
+  ]
+}

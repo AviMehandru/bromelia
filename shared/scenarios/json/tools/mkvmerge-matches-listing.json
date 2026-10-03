@@ -1,0 +1,23 @@
+{
+  "tool": "mkvmerge",
+  "note": "mkvmerge -J reports what the listing says about each title's file; remux and split write their output.",
+  "rules": [
+    {
+      "when": {
+        "command": "-J"
+      },
+      "matchListing": true
+    },
+    {
+      "when": {
+        "command": "-o"
+      },
+      "write": [
+        {
+          "path": "{output}",
+          "copyOf": "input"
+        }
+      ]
+    }
+  ]
+}

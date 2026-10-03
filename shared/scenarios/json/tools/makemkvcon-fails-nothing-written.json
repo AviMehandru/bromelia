@@ -1,0 +1,22 @@
+{
+  "tool": "makemkvcon",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "print": [
+        "failedSave",
+        "failedSummary"
+      ]
+    }
+  ]
+}

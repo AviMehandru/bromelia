@@ -1,0 +1,30 @@
+{
+  "title": "Without app_ShowDebug no debug log is copied into the unit",
+  "from": [
+    "macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "files": {
+          "under": "library/Sample Movie",
+          "exclude": [
+            "makemkv-{unit8}-debug-log.txt"
+          ]
+        }
+      }
+    }
+  ]
+}

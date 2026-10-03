@@ -1,0 +1,15 @@
+{
+  "tool": "script",
+  "note": "A post-processing command; writes BROMELIA_STATUS, BROMELIA_FILE_COUNT and its first argument to its file argument.",
+  "rules": [
+    {
+      "when": {},
+      "write": [
+        {
+          "path": "{arg0}",
+          "content": "{env:BROMELIA_STATUS}|{env:BROMELIA_FILE_COUNT}|{arg1}\n"
+        }
+      ]
+    }
+  ]
+}

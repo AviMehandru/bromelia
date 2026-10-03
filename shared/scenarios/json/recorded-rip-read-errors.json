@@ -1,0 +1,43 @@
+{
+  "title": "Recorded makemkvcon run rip-read-errors: exit 0, a file written → succeededWithReadErrors",
+  "from": [
+    "shared/fixtures/rip-outcomes.json",
+    "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+    "docs/architecture.md#stopping-processes"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-recorded-rip-read-errors.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeededWithReadErrors",
+          "errorText": "read error"
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "_Quarantine/Sample Movie [READ ERRORS]/*.mkv"
+          ],
+          "exclude": [
+            "Sample Movie"
+          ]
+        }
+      }
+    }
+  ]
+}

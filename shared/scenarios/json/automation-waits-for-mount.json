@@ -1,0 +1,99 @@
+{
+  "title": "An automatic rip waits for the OS to mount the disc, and goes on after waitForMountSeconds without it",
+  "from": [
+    "docs/configuration.md#driveconfig (waitForMountSeconds)",
+    "README.md (automatic rips wait for the system to mount the disc first)"
+  ],
+  "given": {
+    "configPatch": {
+      "automation": {
+        "defaults": {
+          "ripOnInsert": true,
+          "delaySeconds": 0,
+          "waitForMountSeconds": 30
+        }
+      }
+    },
+    "drives": [
+      {
+        "id": "drive",
+        "identification": "BD-RE TEST 1.00",
+        "device": "/dev/test0"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "insert": {
+        "drive": "drive",
+        "disc": "sample-movie-one-title"
+      }
+    },
+    {
+      "mounted": {
+        "drive": "drive",
+        "after": 5
+      }
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 1,
+          "outcomes": [
+            "succeeded"
+          ]
+        },
+        "events": {
+          "include": [
+            {
+              "type": "jobChanged",
+              "data": {
+                "job": {
+                  "progress": {
+                    "operation": {
+                      "code": "disc.waitingForMount"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "remove": {
+        "drive": "drive"
+      }
+    },
+    {
+      "insert": {
+        "drive": "drive",
+        "disc": {
+          "volume": "OTHER",
+          "type": "bluray",
+          "titles": [
+            {
+              "duration": "0:00:10",
+              "source": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "advance": 31
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 2,
+          "outcomes": [
+            "succeeded",
+            "succeeded"
+          ]
+        }
+      }
+    }
+  ]
+}

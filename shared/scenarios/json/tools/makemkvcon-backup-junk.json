@@ -1,0 +1,25 @@
+{
+  "tool": "makemkvcon",
+  "note": "The backup has no disc structure.",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "backup"
+      },
+      "writeFolder": {
+        "junk/file": "x"
+      },
+      "print": [
+        "saved"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "title": "A rip started by hand is never stopped because the disc was archived before; the session says so and the job warns",
+  "from": [
+    "macos ArchiveCheckTests.discsArchivedBefore",
+    "docs/configuration.md#archive-check"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "first"
+      }
+    },
+    {
+      "open": {
+        "drive": "drive",
+        "as": "disc"
+      }
+    },
+    {
+      "expect": {
+        "session": {
+          "name": "disc",
+          "archivedBefore": [
+            {
+              "folder": "{root}/library/Sample Movie"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "again"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "again",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "again",
+          "include": [
+            "disc.archivedBefore"
+          ]
+        }
+      }
+    }
+  ]
+}

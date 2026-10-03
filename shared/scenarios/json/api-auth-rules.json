@@ -1,0 +1,261 @@
+{
+  "title": "Over TCP: Host allowlist without a token, X-Bromelia on writes, Bearer and cookie tokens, read-only tokens, no tokens in URLs",
+  "from": [
+    "macos IntegrationFeatureTests.webRequestsAndAccess",
+    "windows IntegrationFeatureTests.WebAccessRules",
+    "linux /integrations/web-access",
+    "docs/configuration.md#web-page (access rules)",
+    "docs/docker.md (401 without the token, 403 for an action without the X-Bromelia header)",
+    "rearchitecture-plan §25 (security)"
+  ],
+  "given": {
+    "configPatch": {
+      "server": {
+        "tcp": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/system",
+        "transport": "tcp",
+        "headers": {
+          "Host": "localhost:51280"
+        },
+        "as": "local"
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/system",
+        "transport": "tcp",
+        "headers": {
+          "Host": "attacker.example:51280"
+        },
+        "as": "rebinding"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/drives/close-trays",
+        "transport": "tcp",
+        "headers": {
+          "Host": "127.0.0.1:51280"
+        },
+        "as": "noHeader"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/drives/close-trays",
+        "transport": "tcp",
+        "headers": {
+          "Host": "127.0.0.1:51280",
+          "X-Bromelia": "1",
+          "Origin": "https://evil.example"
+        },
+        "as": "crossSite"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "local",
+          "status": 200
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "rebinding",
+          "status": 403,
+          "error": {
+            "code": "server.hostNotAllowed"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "noHeader",
+          "status": 403,
+          "error": {
+            "code": "server.headerMissing"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "crossSite",
+          "status": 403,
+          "error": {
+            "code": "server.originNotAllowed"
+          }
+        }
+      }
+    },
+    {
+      "config": {
+        "server": {
+          "tcp": {
+            "enabled": true,
+            "address": "0.0.0.0"
+          },
+          "tokens": [
+            {
+              "id": "web",
+              "scope": "control",
+              "token": {
+                "secret": "server.token.web"
+              }
+            },
+            {
+              "id": "viewer",
+              "scope": "read",
+              "token": {
+                "secret": "server.token.viewer"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/system",
+        "transport": "tcp",
+        "headers": {
+          "Host": "nas.local:51280"
+        },
+        "as": "noToken"
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/system?token=s3cret",
+        "transport": "tcp",
+        "headers": {
+          "Host": "nas.local:51280"
+        },
+        "as": "urlToken"
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/system",
+        "transport": "tcp",
+        "headers": {
+          "Host": "nas.local:51280",
+          "Authorization": "Bearer s3cret"
+        },
+        "as": "bearer"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/drives/close-trays",
+        "transport": "tcp",
+        "headers": {
+          "Host": "nas.local:51280",
+          "Authorization": "Bearer viewer-token",
+          "X-Bromelia": "1"
+        },
+        "as": "readOnly"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/login",
+        "transport": "tcp",
+        "body": {
+          "token": "s3cret"
+        },
+        "headers": {
+          "Host": "nas.local:51280"
+        },
+        "as": "login"
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/system",
+        "transport": "socket",
+        "as": "socket"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "noToken",
+          "status": 401,
+          "error": {
+            "code": "server.tokenRequired"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "urlToken",
+          "status": 401,
+          "error": {
+            "code": "server.tokenRequired"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "bearer",
+          "status": 200
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "readOnly",
+          "status": 403,
+          "error": {
+            "code": "server.readOnlyToken"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "login",
+          "status": 204
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "socket",
+          "status": 200
+        }
+      }
+    }
+  ]
+}

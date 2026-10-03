@@ -1,0 +1,14 @@
+{
+  "tool": "makemkvcon",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "keyExpired",
+        "failedToOpen"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "title": "Another disc of the set with the same label isn't taken for the archived one",
+  "from": [
+    "macos ArchiveCheckTests.discsArchivedBefore",
+    "macos ArchiveCheckTests.fingerprintsMatchEveryPlatform"
+  ],
+  "given": {
+    "disc": {
+      "volume": "SHOW_S1_D1",
+      "type": "bluray",
+      "titles": [
+        {
+          "duration": "0:31:00",
+          "source": 1
+        }
+      ]
+    },
+    "units": [
+      {
+        "folder": "library/Show",
+        "fingerprintOf": {
+          "volume": "SHOW_S1_D1",
+          "type": "bluray",
+          "titles": [
+            {
+              "duration": "0:30:00",
+              "source": 1
+            }
+          ]
+        },
+        "status": "success"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "automatic": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        }
+      }
+    }
+  ]
+}

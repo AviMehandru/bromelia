@@ -1,0 +1,76 @@
+{
+  "title": "Attaching a library with today's v2 records imports them, so their discs count as archived; the folders aren't changed",
+  "from": [
+    "rearchitecture-plan §29 (attaching the old output root runs a rescan of the v2 records)",
+    "docs/configuration.md#archive-check (bromelia*.json under the output root, four folders deep)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "libraries": [
+      {
+        "id": "old",
+        "path": "old-rips",
+        "marker": false
+      }
+    ],
+    "units": [
+      {
+        "folder": "old-rips/Movies/Sample Movie",
+        "fingerprintOf": "sample-movie-one-title",
+        "status": "success",
+        "record": 2,
+        "inCatalogue": false,
+        "library": "old"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "attachLibrary": {
+        "path": "{root}/old-rips",
+        "name": "Old rips",
+        "as": "attached"
+      }
+    },
+    {
+      "expect": {
+        "files": {
+          "under": "old-rips",
+          "include": [
+            ".bromelia-library",
+            "Movies/Sample Movie/bromelia.json"
+          ]
+        },
+        "db": {
+          "archive_units": {
+            "count": 1,
+            "rows": [
+              {
+                "record_version": 2,
+                "status": "success"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "rip": {
+        "iso": true,
+        "automatic": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "skipped",
+          "error": {
+            "code": "disc.alreadyArchived"
+          }
+        }
+      }
+    }
+  ]
+}

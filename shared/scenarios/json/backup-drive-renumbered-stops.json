@@ -1,0 +1,46 @@
+{
+  "title": "If MakeMKV's drive number now means another device, the backup stops instead of reading the wrong disc",
+  "from": [
+    "README.md (safety check when MakeMKV's drive numbering changes)",
+    "docs/architecture.md#makemkvcon"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ],
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-drive-renumbered.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "mode": "backup",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "drive.renumbered",
+            "params": {
+              "index": 0,
+              "now": "/dev/other0",
+              "expected": "/dev/test0"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

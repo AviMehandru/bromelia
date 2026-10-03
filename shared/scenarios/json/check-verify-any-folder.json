@@ -1,0 +1,41 @@
+{
+  "title": "Any folder can be verified; every folder with a SHA256SUMS below it is checked and hidden folders are skipped",
+  "from": [
+    "macos ArchiveCheckTests.verifiesArchives",
+    "docs/configuration.md#archive-check (Verify Archive… on a chosen folder)"
+  ],
+  "given": {
+    "files": {
+      "elsewhere/A/a.mkv": "contents of a, long enough to hash",
+      "elsewhere/A/SHA256SUMS": "da5cd1e3d1b2ae5d4af1846e2c0b4b1cbd2cb3ab8a8e42cd5c5ad5c3ca5fa7c0  a.mkv\n",
+      "elsewhere/.hidden/SHA256SUMS": "0000000000000000000000000000000000000000000000000000000000000000  x\n"
+    }
+  },
+  "steps": [
+    {
+      "verify": {
+        "path": "{root}/elsewhere",
+        "as": "check"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "check",
+          "outcome": "succeeded"
+        },
+        "db": {
+          "checks": {
+            "count": 1,
+            "rows": [
+              {
+                "folder": "{root}/elsewhere/A",
+                "result": "damaged"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

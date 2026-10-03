@@ -19,11 +19,13 @@ nothing is missing.
 | `discs/` | Disc definitions: what the fake drive or ISO contains. |
 | `tools/` | Scripts for scripted tools (`makemkvcon`, `mkvmerge`, `HandBrakeCLI`, the audio ripper, …). |
 | `tools/lines.yaml` | Named robot-mode lines that scripts print (`saved`, `readError`, …). |
+| `json/` | Generated JSON copies of all of the above, which the runners read. |
 | `../schema/scenario.json` | The format, as JSON Schema; the checker validates every file against it. |
 | `coverage.json` | Today's tests and documented behaviours → fixture or scenario. |
 
-Scenarios are YAML 1.2 and use only what JSON can express (no anchors, tags or merge keys), so a runner may
-convert them to JSON with any YAML library or with `tools/check-contracts.py --export-scenarios`.
+Scenarios are written in YAML 1.2, using only what JSON can express (no anchors, tags or merge keys). **Runners read
+the JSON copy in `json/`** (same paths, `.json` instead of `.yaml`), so no platform needs a YAML library.
+`tools/check-contracts.py --write` regenerates it, and CI fails when it is out of date. Edit the YAML, never the JSON.
 
 ## A scenario
 
@@ -87,10 +89,11 @@ so far has settled* (finished, blocked, or awaiting a decision), unless it names
 
 | Action | Meaning |
 | --- | --- |
-| `rip: {iso: true \| drive: <id> \| folder: <path> \| session: <name>, titles: [..], mode, automatic, as}` | Start a job: `iso: true` = an ISO image of `given.disc` (source `iso:<root>/test.iso`); `drive` = `EngineAPI.rip`; `session` = `ripSession`. `titles` are the manual choice (MakeMKV title numbers). `as` names the job for later steps. |
+| `rip: {iso: true \| drive: <id> \| folder: <path> \| session: <name>, titles: [..], mode, automatic, outputFolder, as}` | Start a job: `iso: true` = an ISO image of `given.disc` (source `iso:<root>/test.iso`); `drive` = `EngineAPI.rip`; `session` = `ripSession`. `titles` are the manual choice (MakeMKV title numbers). `outputFolder` is a one-off folder (it must be a library). `as` names the job for later steps. |
 | `open: {iso: true \| drive \| folder \| file, as}` | `openSession`; `as` names the session. |
 | `choose: {session, titles, tracks: {<title>: [stream, …]}, names: {<title>: name}, name, kind, year, onlineId, firstEpisode}` | `patchSession` with the session's current rev. |
 | `insert: {drive, disc}` / `remove: {drive}` / `openTray: {drive}` | The fake drive reports a medium arriving / leaving / the tray opening (DeviceMonitor events). |
+| `keepApart: <job>` | Don't continue an interrupted job: its staging moves to `_Quarantine/<name> [INCOMPLETE]`. |
 | `cancel: <job>` / `retry: {job, drive, fromStep}` / `decide: {job, answer}` / `move: {job, by}` / `startNow: <job>` | The job commands. |
 | `verify: {library \| path \| unit, as}` | `EngineAPI.verify`. |
 | `advance: <seconds>` | Move the fake clock; due timers fire in order. |

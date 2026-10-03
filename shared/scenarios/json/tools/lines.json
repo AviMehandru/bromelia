@@ -1,0 +1,14 @@
+{
+  "saved": "MSG:5036,260,1,\"Copy complete. 1 titles saved.\",\"Copy complete. %1 titles saved.\",\"1\"",
+  "failedSave": "MSG:5003,0,2,\"Failed to save title 1 to file title_t01.mkv\",\"Failed to save title %1 to file %2\",\"1\",\"title_t01.mkv\"",
+  "failedSummary": "MSG:5037,516,2,\"Copy complete. 0 titles saved, 1 failed.\",\"Copy complete. %1 titles saved, %2 failed.\",\"0\",\"1\"",
+  "readError": "MSG:2003,0,3,\"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\",\"Error '%1' occurred while reading '%2' at offset '%3'\",\"Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR\",\"/BDMV/STREAM/00001.m2ts\",\"1048576\"",
+  "libreDrive": "MSG:1011,0,1,\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\",\"%1\",\"Using LibreDrive mode (v06.3 id=4FBA32AEC678)\"",
+  "libreDriveRequired": "MSG:2024,0,0,\"LibreDrive compatible drive is required to open this disc - video can't be decrypted.\",\"x\"",
+  "keyExpired": "MSG:5055,0,0,\"Evaluation period has expired, shareware functionality unavailable.\",\"Evaluation period has expired, shareware functionality unavailable.\"",
+  "tooOld": "MSG:5021,260,1,\"This application version is too old.  Please download the latest version at http://www.makemkv.com/ or enter a registration key to continue using the current version.\",\"x\",\"http://www.makemkv.com/\"",
+  "failedToOpen": "MSG:5010,0,0,\"Failed to open disc\",\"Failed to open disc\"",
+  "debugLogAnnounce": "MSG:1004,131072,1,\"Debug logging enabled, log will be saved as file://{debugLog}\",\"Debug logging enabled, log will be saved as %1\",\"file://{debugLog}\"",
+  "spaceWarning": "MSG:5038,776,2,\"The total size of all output files may reach as much as 30000 megabytes while there are only 20000 megabytes free on the destination drive.\",\"x\",\"30000\",\"20000\"",
+  "driveRenumbered": "DRV:0,2,999,12,\"BD-RE OTHER DRIVE 1.00\",\"OTHER_DISC\",\"/dev/other0\""
+}

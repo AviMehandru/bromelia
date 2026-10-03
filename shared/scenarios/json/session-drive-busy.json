@@ -1,0 +1,64 @@
+{
+  "title": "A drive busy with a job can't be opened",
+  "from": [
+    "macos AppModel.open (The drive is busy with a job.)"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ],
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-stalls.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "when": {
+          "job": "job",
+          "step": "acquire"
+        },
+        "job": {
+          "name": "job",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/sessions",
+        "body": {
+          "drive": "{driveId:drive}"
+        },
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "open"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "open",
+          "status": 409,
+          "error": {
+            "code": "drive.busy"
+          }
+        }
+      }
+    }
+  ]
+}

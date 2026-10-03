@@ -1,0 +1,11 @@
+{
+  "volume": "BACKUP_2019",
+  "type": "dvd",
+  "content": "data",
+  "titles": [],
+  "image": {
+    "bytes": 3147776,
+    "seed": 7,
+    "iso9660": true
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "title": "A backup can only be made from a disc in a drive (MakeMKV accepts only disc:N for backups)",
+  "from": [
+    "docs/architecture.md#makemkvcon",
+    "CLAUDE.md pitfalls (backups only accept disc:N)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "mode": "backup",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "backup.needsDrive"
+          }
+        },
+        "calls": {
+          "makemkvcon": {
+            "exclude": [
+              " backup "
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

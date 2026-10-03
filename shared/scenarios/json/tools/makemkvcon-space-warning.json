@@ -1,0 +1,24 @@
+{
+  "tool": "makemkvcon",
+  "note": "MakeMKV warns that the output may not fit (5038) before it starts writing.",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "print": [
+        "spaceWarning"
+      ],
+      "silence": 60,
+      "exit": "never"
+    }
+  ]
+}

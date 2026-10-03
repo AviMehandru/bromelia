@@ -1,0 +1,69 @@
+{
+  "title": "Steps get the BROMELIA_* variables and the manifest, with paths where the files are after the commit",
+  "from": [
+    "macos IntegrationTests.ripsTitleWithCustomTracksRenameAndScript",
+    "docs/configuration.md#postprocessstep"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "profile": {
+      "titles": {
+        "skipDuplicates": false
+      },
+      "steps": [
+        "record"
+      ]
+    },
+    "configPatch": {
+      "steps": [
+        {
+          "id": "record",
+          "kind": "command",
+          "command": {
+            "executable": "script",
+            "arguments": "{root}/post.txt {outputDir}"
+          }
+        }
+      ]
+    },
+    "tools": {
+      "script": "tools/script-records-status.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          1
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "file": {
+          "path": "post.txt",
+          "text": "success|1|{root}/library/Sample Movie\n"
+        },
+        "manifest": {
+          "job": "job",
+          "json": {
+            "manifestVersion": 2,
+            "status": "success",
+            "outcome": "succeeded",
+            "files": [
+              "{root}/library/Sample Movie/Sample Movie - Rip - Playlist 00002 - BR.mkv"
+            ],
+            "name": "Sample Movie",
+            "formatCode": "BR"
+          }
+        }
+      }
+    }
+  ]
+}

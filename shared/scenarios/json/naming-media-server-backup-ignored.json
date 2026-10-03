@@ -1,0 +1,50 @@
+{
+  "title": "In the media server layout, backups go into Backup/ with .plexignore and .ignore so servers leave them alone",
+  "from": [
+    "docs/configuration.md#media-server-layout"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ],
+    "profile": {
+      "naming": {
+        "layout": "mediaServer"
+      },
+      "mode": {
+        "default": "backupThenMkv"
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "files": {
+          "under": "library/Movies/Sample Movie",
+          "include": [
+            "Backup/.plexignore",
+            "Backup/.ignore",
+            "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+            "Sample Movie.mkv"
+          ]
+        }
+      }
+    }
+  ]
+}

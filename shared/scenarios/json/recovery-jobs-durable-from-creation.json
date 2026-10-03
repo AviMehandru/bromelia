@@ -1,0 +1,63 @@
+{
+  "title": "Jobs are in the database from the moment they are created until they finish, so a crash can't lose one",
+  "from": [
+    "macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop (this process's own jobs are written down while they wait)",
+    "README.md (nothing lost on a crash)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-stalls.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "running"
+      }
+    },
+    {
+      "rip": {
+        "iso": true,
+        "as": "queued"
+      }
+    },
+    {
+      "expect": {
+        "when": {
+          "job": "running",
+          "step": "acquire"
+        },
+        "db": {
+          "jobs": {
+            "count": 2,
+            "rows": [
+              {
+                "state": "running"
+              },
+              {
+                "state": "queued"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cancel": "queued"
+    },
+    {
+      "expect": {
+        "when": {
+          "job": "queued",
+          "state": "finished"
+        },
+        "job": {
+          "name": "queued",
+          "outcome": "cancelled"
+        }
+      }
+    }
+  ]
+}

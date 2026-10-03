@@ -759,6 +759,7 @@ def scenario_files():
     return sorted(p for p in SCEN.glob("*.yaml"))
 
 
+
 def check_scenarios():
     lines = load_yaml(SCEN / "tools" / "lines.yaml")
     validate(lines, "scenario.json", "Lines", what="tools/lines.yaml")
@@ -822,6 +823,19 @@ def check_scenarios():
             m = re.match(r"^(docs/[\w.-]+\.md|README\.md|shared/fixtures/[\w./-]+)", f)
             if m:
                 R.check((ROOT / m.group(1)).exists(), f"{what}: from {f}: no such file")
+    # The JSON copy runners read (generated; owner decision 2026-10-03: runners read JSON, not YAML).
+    expected = set()
+    for p in sorted(SCEN.rglob("*.yaml")):
+        target = SCEN / "json" / p.relative_to(SCEN).with_suffix(".json")
+        expected.add(target)
+        generated(target, dump_json(load_yaml(p)))
+    for stale in sorted((SCEN / "json").rglob("*.json")) if (SCEN / "json").exists() else []:
+        if stale not in expected:
+            if R.write:
+                stale.unlink()
+                print(f"removed {rel(stale)}")
+            else:
+                R.error(f"{rel(stale)} has no YAML source; run tools/check-contracts.py --write")
     for t in sorted(set(tools) - used_tools - {"tools/makemkvcon-saves.yaml"}):
         R.error(f"{t} isn't used by any scenario")
     for d in sorted(set(discs) - used_discs):

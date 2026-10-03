@@ -1,0 +1,49 @@
+{
+  "title": "Titles chosen by hand are ripped as MKV files whatever the format's mode",
+  "from": [
+    "docs/configuration.md#driveconfig (formatModes are not for titles chosen by hand)",
+    "macos WebTests.titlesSettingsAndLogs (?titles= rips as MKV)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "profile": {
+      "mode": {
+        "default": "backup",
+        "byFormat": {
+          "bluray": "infoOnly"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "open": {
+        "iso": true,
+        "as": "disc"
+      }
+    },
+    {
+      "choose": {
+        "session": "disc",
+        "titles": [
+          0
+        ]
+      }
+    },
+    {
+      "rip": {
+        "session": "disc",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "mode": "mkv"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "title": "The disc page lists the lookup's candidates; a typed id replaces the search and decides movie or TV",
+  "from": [
+    "docs/configuration.md#online-lookup (choosing the match)",
+    "shared/fixtures/lookup/expected.json"
+  ],
+  "given": {
+    "disc": {
+      "volume": "FRIENDS_S2_D1",
+      "type": "dvd",
+      "titles": [
+        {
+          "duration": "0:22:00",
+          "source": 1
+        }
+      ]
+    },
+    "configPatch": {
+      "metadata": {
+        "provider": "tmdb",
+        "apiKey": {
+          "secret": "metadata.apiKey"
+        }
+      }
+    },
+    "http": [
+      {
+        "method": "GET",
+        "url": "https://api.themoviedb.org/3/search/tv?*",
+        "status": 200,
+        "file": "tmdb-search-tv.json"
+      },
+      {
+        "method": "GET",
+        "url": "https://api.themoviedb.org/3/find/tt0108778?*",
+        "status": 200,
+        "file": "tmdb-find.json"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "open": {
+        "iso": true,
+        "as": "disc"
+      }
+    },
+    {
+      "expect": {
+        "session": {
+          "name": "disc",
+          "candidates": [
+            {
+              "title": "Friends",
+              "year": 1994,
+              "tmdbId": 1668,
+              "choiceId": "tv/1668"
+            },
+            {
+              "title": "Friends: The Reunion"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "choose": {
+        "session": "disc",
+        "onlineId": "https://www.imdb.com/title/tt0108778/"
+      }
+    },
+    {
+      "expect": {
+        "session": {
+          "name": "disc",
+          "identity": {
+            "name": "Friends",
+            "kind": "tv"
+          }
+        }
+      }
+    }
+  ]
+}

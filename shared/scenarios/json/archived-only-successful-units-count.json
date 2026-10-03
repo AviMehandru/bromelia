@@ -1,0 +1,69 @@
+{
+  "title": "Only successful units whose folder still exists count as archived; read-error units, failures and vanished folders don't",
+  "from": [
+    "macos ArchiveCheckTests.findsEarlierArchives",
+    "macos ArchiveCheckTests.discsArchivedBefore (only while the folder is there)",
+    "docs/configuration.md#archive-check"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "units": [
+      {
+        "folder": "library/Movies/Movie (2001)",
+        "fingerprintOf": "sample-movie-one-title",
+        "status": "success",
+        "archivedAt": "2024-05-01",
+        "record": 2
+      },
+      {
+        "folder": "library/_Quarantine/Other [READ ERRORS]",
+        "fingerprintOf": "sample-movie-one-title",
+        "status": "errors"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "open": {
+        "iso": true,
+        "as": "disc"
+      }
+    },
+    {
+      "expect": {
+        "session": {
+          "name": "disc",
+          "archivedBefore": [
+            {
+              "folder": "{root}/library/Movies/Movie (2001)",
+              "archivedAt": "2024-05-01"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "delete": "library/Movies/Movie (2001)"
+    },
+    {
+      "rescan": {
+        "library": "lib",
+        "as": "scan"
+      }
+    },
+    {
+      "open": {
+        "iso": true,
+        "as": "again"
+      }
+    },
+    {
+      "expect": {
+        "session": {
+          "name": "again",
+          "archivedBefore": []
+        }
+      }
+    }
+  ]
+}

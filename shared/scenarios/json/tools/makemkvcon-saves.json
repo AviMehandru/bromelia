@@ -1,0 +1,36 @@
+{
+  "tool": "makemkvcon",
+  "note": "The default. info prints the disc's listing; mkv writes the title's file and reports it saved; backup writes a Blu-ray folder.",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "writeTitles": {
+        "content": "mkv data {title}"
+      },
+      "print": [
+        "saved"
+      ]
+    },
+    {
+      "when": {
+        "command": "backup"
+      },
+      "writeFolder": {
+        "BDMV/index.bdmv": "INDX0200"
+      },
+      "print": [
+        "saved"
+      ]
+    }
+  ]
+}

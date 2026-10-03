@@ -1,0 +1,26 @@
+{
+  "tool": "makemkvcon",
+  "note": "The rip itself reports a read error, then the title as saved.",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "writeTitles": {
+        "content": "mkv data {title}"
+      },
+      "print": [
+        "readError",
+        "saved"
+      ]
+    }
+  ]
+}

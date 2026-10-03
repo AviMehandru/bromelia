@@ -1,0 +1,43 @@
+{
+  "title": "Recorded makemkvcon run rip-killed: exit 143, a file written → failed",
+  "from": [
+    "shared/fixtures/rip-outcomes.json",
+    "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+    "docs/architecture.md#stopping-processes"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-recorded-rip-killed.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "errorText": "exit status 143"
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "_Quarantine/Sample Movie [INCOMPLETE]/*.mkv"
+          ],
+          "exclude": [
+            "Sample Movie"
+          ]
+        }
+      }
+    }
+  ]
+}

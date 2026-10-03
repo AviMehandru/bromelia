@@ -1,0 +1,13 @@
+{
+  "tool": "script",
+  "note": "A post-processing command that fails.",
+  "rules": [
+    {
+      "when": {},
+      "stderr": [
+        "something went wrong"
+      ],
+      "exit": 3
+    }
+  ]
+}

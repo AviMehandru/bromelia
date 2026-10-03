@@ -1,0 +1,58 @@
+{
+  "title": "The three longest titles of a real DVD image in one makemkvcon run",
+  "realDisc": {
+    "env": "BROMELIA_TEST_ONEPASS_ISO",
+    "note": "Runs only when BROMELIA_TEST_ONEPASS_ISO is set (TEST_RUNNER_BROMELIA_TEST_ONEPASS_ISO for xcodebuild); uses the real makemkvcon and mkvmerge, not the scripted tools."
+  },
+  "from": [
+    "macos IntegrationTests.ripsTheLongestTitlesInOnePass",
+    "README.md#testing"
+  ],
+  "given": {
+    "profile": {
+      "makemkv": {
+        "minLengthSeconds": 0
+      },
+      "titles": {
+        "strategy": "longest",
+        "longestCount": 3
+      },
+      "episodes": {
+        "splitPlayAll": false
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "files": 3
+        },
+        "calls": {
+          "makemkvcon": {
+            "counts": {
+              " mkv ": 1
+            },
+            "include": [
+              " all "
+            ]
+          }
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "rip.onePass"
+          ]
+        }
+      }
+    }
+  ]
+}

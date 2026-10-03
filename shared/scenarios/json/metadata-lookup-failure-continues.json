@@ -1,0 +1,54 @@
+{
+  "title": "A failed lookup is logged and the job continues with the disc's own name",
+  "from": [
+    "docs/configuration.md#online-lookup (a failed lookup is logged and the job continues)",
+    "docs/architecture.md#services (failures are logged and never fail a job)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "configPatch": {
+      "metadata": {
+        "provider": "tmdb",
+        "apiKey": {
+          "secret": "metadata.apiKey"
+        }
+      }
+    },
+    "http": [
+      {
+        "method": "GET",
+        "url": "https://api.themoviedb.org/3/search/movie?*",
+        "status": 500,
+        "body": "oops"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "metadata.failed"
+          ]
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "Sample Movie/SHA256SUMS"
+          ]
+        }
+      }
+    }
+  ]
+}

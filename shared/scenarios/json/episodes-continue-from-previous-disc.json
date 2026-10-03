@@ -1,0 +1,91 @@
+{
+  "title": "Disc 2 of a set continues after the last episode of disc 1's record",
+  "from": [
+    "docs/configuration.md#naming-formats-and-episodes (numbering across discs)",
+    "shared/fixtures/episode-continuation.json",
+    "macos IntegrationTests.splitsPlayAllTitleIntoEpisodes (episodes 138–143)"
+  ],
+  "given": {
+    "disc": "one-piece-s2-p7-d2-navigation",
+    "profile": {
+      "episodes": {
+        "keepPlayAll": false
+      }
+    },
+    "units": [
+      {
+        "folder": "library/One Piece - Season 2 Part 7 Disc 1",
+        "name": "One Piece",
+        "kind": "tv",
+        "label": "ONE_PIECE_S2_P7_D1",
+        "season": 2,
+        "part": 7,
+        "disc": 1,
+        "episodes": [
+          132,
+          133,
+          134,
+          135,
+          136,
+          137
+        ],
+        "record": 2
+      }
+    ],
+    "tools": {
+      "mkvmerge": "tools/mkvmerge-splits.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "files": 7
+        },
+        "files": {
+          "under": "library/One Piece - Season 2 Part 7 Disc 2",
+          "include": [
+            "One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv",
+            "One Piece - Episode 143 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 36-42 - DVD.mkv"
+          ],
+          "exclude": [
+            "One Piece - Season 2 Part 7 Disc 2 - Rip - Title 11 - DVD.mkv"
+          ]
+        },
+        "record": {
+          "folder": "library/One Piece - Season 2 Part 7 Disc 2",
+          "json": {
+            "episodes": [
+              {
+                "episode": 138
+              },
+              {
+                "episode": 139
+              },
+              {
+                "episode": 140
+              },
+              {
+                "episode": 141
+              },
+              {
+                "episode": 142
+              },
+              {
+                "episode": 143
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

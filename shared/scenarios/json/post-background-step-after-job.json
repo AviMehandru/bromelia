@@ -1,0 +1,70 @@
+{
+  "title": "A background step runs after the job, on the processing queue, with the job's status",
+  "from": [
+    "macos IntegrationJobTests.backgroundStepsRunAfterTheJob",
+    "docs/configuration.md#postprocessstep (background steps)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "configPatch": {
+      "steps": [
+        {
+          "id": "encode",
+          "name": "Encode",
+          "kind": "command",
+          "background": true,
+          "command": {
+            "executable": "script",
+            "arguments": "{root}/encoded.txt {outputDir}"
+          }
+        }
+      ]
+    },
+    "profile": {
+      "steps": [
+        "encode"
+      ]
+    },
+    "tools": {
+      "script": "tools/script-records-status.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "jobs": {
+          "count": 2,
+          "kinds": [
+            "videoDisc",
+            "runCommand"
+          ],
+          "outcomes": [
+            "succeeded",
+            "succeeded"
+          ]
+        },
+        "file": {
+          "path": "encoded.txt",
+          "text": "success|1|{root}/library/Sample Movie\n"
+        },
+        "events": {
+          "sequence": [
+            "jobFinished",
+            "jobChanged",
+            "jobFinished"
+          ]
+        }
+      }
+    }
+  ]
+}

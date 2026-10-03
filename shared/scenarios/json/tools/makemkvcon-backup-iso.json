@@ -1,0 +1,25 @@
+{
+  "tool": "makemkvcon",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "backup"
+      },
+      "writeIso": {
+        "bytes": 40000,
+        "descriptor": "BEA01"
+      },
+      "print": [
+        "saved"
+      ]
+    }
+  ]
+}

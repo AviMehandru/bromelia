@@ -1,0 +1,40 @@
+{
+  "title": "When MakeMKV warns the output may not fit (5038) the rip is stopped before it writes",
+  "from": [
+    "docs/configuration.md#output-folder-read-errors-and-checks",
+    "shared/fixtures/rip-disk-full.txt"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-space-warning.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "space.makemkvWarning"
+          },
+          "errorText": "megabytes free on the destination"
+        },
+        "files": {
+          "under": "library",
+          "exactly": []
+        }
+      }
+    }
+  ]
+}

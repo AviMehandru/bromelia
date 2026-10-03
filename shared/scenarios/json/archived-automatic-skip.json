@@ -1,0 +1,83 @@
+{
+  "title": "An automatic rip of a disc archived before is skipped (and the disc ejected when ejectWhenDone is on)",
+  "from": [
+    "macos ArchiveCheckTests.discsArchivedBefore",
+    "docs/configuration.md#archive-check (discs archived before)"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ],
+    "configPatch": {
+      "automation": {
+        "defaults": {
+          "ejectWhenDone": true
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "first"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "first",
+          "outcome": "succeeded"
+        },
+        "record": {
+          "folder": "library/Sample Movie",
+          "json": {
+            "disc": {
+              "fingerprint": "v1:*"
+            }
+          }
+        }
+      }
+    },
+    {
+      "rip": {
+        "drive": "drive",
+        "automatic": true,
+        "as": "again"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "again",
+          "outcome": "skipped",
+          "error": {
+            "code": "disc.alreadyArchived",
+            "params": {
+              "folder": "{root}/library/Sample Movie"
+            }
+          },
+          "unit": {}
+        },
+        "calls": {
+          "makemkvcon": {
+            "counts": {
+              " mkv ": 1
+            }
+          }
+        },
+        "db": {
+          "archive_units": {
+            "count": 1
+          }
+        }
+      }
+    }
+  ]
+}

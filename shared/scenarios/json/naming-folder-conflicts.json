@@ -1,0 +1,99 @@
+{
+  "title": "When the unit's folder exists, newFolder makes 'Name (2)', merge adds to it, skip fails the job",
+  "from": [
+    "docs/configuration.md#driveconfig (conflictPolicy)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "files": {
+      "library/Sample Movie/old.mkv": "old"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "first"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "first",
+          "outcome": "succeeded"
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "Sample Movie/old.mkv",
+            "Sample Movie (2)/Sample Movie - Rip - Playlist 00001 - BR.mkv"
+          ]
+        }
+      }
+    },
+    {
+      "config": {
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Test profile",
+            "naming": {
+              "conflictPolicy": "skip"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rip": {
+        "iso": true,
+        "as": "second"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "second",
+          "outcome": "failed",
+          "error": {
+            "code": "library.folderExists"
+          }
+        }
+      }
+    },
+    {
+      "config": {
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Test profile",
+            "naming": {
+              "conflictPolicy": "merge"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rip": {
+        "iso": true,
+        "as": "third"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "third",
+          "outcome": "succeeded"
+        },
+        "files": {
+          "under": "library/Sample Movie",
+          "include": [
+            "old.mkv",
+            "Sample Movie - Rip - Playlist 00001 - BR.mkv"
+          ]
+        }
+      }
+    }
+  ]
+}

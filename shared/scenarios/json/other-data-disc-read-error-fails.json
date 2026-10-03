@@ -1,0 +1,49 @@
+{
+  "title": "A read error fails a data-disc copy",
+  "from": [
+    "docs/configuration.md#other-discs (a read error fails the job)"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "identification": "DVD+RW TEST 1.00",
+        "device": "/dev/fake9",
+        "disc": {
+          "volume": "BACKUP_2019",
+          "type": "dvd",
+          "content": "data",
+          "titles": [],
+          "image": {
+            "bytes": 3147776,
+            "seed": 7,
+            "iso9660": true,
+            "badSectors": [
+              700
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "kind": "dataDisc",
+          "outcome": "failed",
+          "error": {
+            "code": "other.readError"
+          }
+        }
+      }
+    }
+  ]
+}

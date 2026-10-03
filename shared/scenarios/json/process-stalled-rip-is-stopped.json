@@ -1,0 +1,82 @@
+{
+  "title": "A rip that prints nothing for the stall timeout is stopped with SIGTERM and fails",
+  "from": [
+    "macos ReliabilityTests.stuckProcessIsStopped",
+    "docs/configuration.md#output-folder-read-errors-and-checks",
+    "docs/architecture.md#stopping-processes"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "configPatch": {
+      "limits": {
+        "stallTimeoutMinutes": 30
+      }
+    },
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-stalls.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "when": {
+          "job": "job",
+          "step": "acquire"
+        },
+        "job": {
+          "name": "job",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "advance": 1799
+    },
+    {
+      "expect": {
+        "when": {
+          "job": "job",
+          "state": "running"
+        },
+        "job": {
+          "name": "job",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "advance": 2
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "makemkv.stalled",
+            "params": {
+              "minutes": 30,
+              "abandoned": false
+            }
+          }
+        },
+        "calls": {
+          "makemkvcon": {
+            "counts": {
+              " mkv ": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

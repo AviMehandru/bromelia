@@ -1,0 +1,60 @@
+{
+  "title": "A job whose library is offline waits, blocked, and never writes to the boot disk; it continues when the library is back",
+  "from": [
+    "claudeDocs/bromelia-handoff.md backlog 1 (refuse to write when the archive drive is missing)",
+    "rearchitecture-plan §22.1 I2, §22.2"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "unmount": "lib"
+    },
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "state": "blocked",
+          "blockedBy": {
+            "code": "library.offline"
+          }
+        },
+        "problems": {
+          "active": [
+            "library.offline"
+          ]
+        },
+        "file": {
+          "path": "library",
+          "exists": false
+        }
+      }
+    },
+    {
+      "mount": "lib"
+    },
+    {
+      "advance": 30
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "problems": {
+          "cleared": [
+            "library.offline"
+          ]
+        }
+      }
+    }
+  ]
+}

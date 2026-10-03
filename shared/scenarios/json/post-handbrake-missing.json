@@ -1,0 +1,51 @@
+{
+  "title": "A HandBrake step without HandBrakeCLI fails with a clear message",
+  "from": [
+    "macos HandBrakeTests.encodesEveryMKVWithoutReplacingAnything"
+  ],
+  "given": {
+    "units": [
+      {
+        "folder": "library/Show",
+        "name": "Show",
+        "kind": "tv",
+        "status": "success",
+        "files": [
+          "A.mkv"
+        ]
+      }
+    ],
+    "configPatch": {
+      "steps": [
+        {
+          "id": "transcode",
+          "name": "Transcode",
+          "kind": "handbrake"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "testStep": {
+        "step": "transcode",
+        "unit": "library/Show",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "post.handbrakeMissing"
+          ]
+        }
+      }
+    }
+  ]
+}

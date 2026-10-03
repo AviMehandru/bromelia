@@ -1,0 +1,60 @@
+{
+  "title": "Stopping a check keeps the results of the folders it finished, and nothing for the rest",
+  "from": [
+    "macos ArchiveCheckTests.verifiesArchives (stopping keeps only folders that were finished)"
+  ],
+  "given": {
+    "units": [
+      {
+        "folder": "library/A",
+        "name": "A",
+        "files": [
+          "a.mkv"
+        ]
+      },
+      {
+        "folder": "library/B",
+        "name": "B",
+        "files": [
+          "b.mkv"
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "verify": {
+        "library": "lib",
+        "as": "check"
+      }
+    },
+    {
+      "expect": {
+        "when": {
+          "job": "check",
+          "step": "verifyUnit"
+        },
+        "job": {
+          "name": "check",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "cancel": "check"
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "check",
+          "outcome": "cancelled"
+        },
+        "db": {
+          "checks": {
+            "rows": []
+          }
+        }
+      }
+    }
+  ]
+}

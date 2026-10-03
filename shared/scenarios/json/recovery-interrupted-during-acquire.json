@@ -1,0 +1,57 @@
+{
+  "title": "A rip interrupted by an engine crash is marked interrupted after the restart; its staging is kept and nothing appears in the library",
+  "from": [
+    "macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop",
+    "linux /reliability/unfinished-jobs",
+    "docs/architecture.md#unfinished-jobs",
+    "rearchitecture-plan §20.4, §15.8"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "inStep:acquire"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "interrupted",
+          "error": {
+            "code": "recovery.interrupted",
+            "params": {
+              "step": "acquire"
+            }
+          }
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            ".bromelia/staging/{jobId}"
+          ],
+          "exclude": [
+            "Sample Movie"
+          ]
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.interrupted"
+          ]
+        }
+      }
+    }
+  ]
+}

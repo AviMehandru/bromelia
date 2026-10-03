@@ -1,0 +1,42 @@
+{
+  "title": "Recorded makemkvcon run mkv-rip: exit 0, a file written → succeeded",
+  "from": [
+    "shared/fixtures/rip-outcomes.json",
+    "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+    "docs/architecture.md#stopping-processes"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-recorded-mkv-rip.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "Sample Movie/SHA256SUMS"
+          ],
+          "exclude": [
+            "_Quarantine"
+          ]
+        }
+      }
+    }
+  ]
+}

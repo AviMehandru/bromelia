@@ -1,0 +1,29 @@
+{
+  "title": "A real disc image attached as a device (hdiutil / a loop device / a file on Windows) and imaged; the copy's hash is the image's",
+  "realDisc": {
+    "env": "BROMELIA_TEST_DVD_ISO",
+    "note": "Runs only when BROMELIA_TEST_DVD_ISO is set (TEST_RUNNER_BROMELIA_TEST_DVD_ISO for xcodebuild); uses the real makemkvcon and mkvmerge, not the scripted tools."
+  },
+  "from": [
+    "macos IntegrationJobTests.dataDiscsAreImagedExactly",
+    "README.md#testing"
+  ],
+  "steps": [
+    {
+      "rip": {
+        "drive": "realdisc",
+        "mode": "backup",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "kind": "dataDisc",
+          "outcome": "succeeded"
+        }
+      }
+    }
+  ]
+}

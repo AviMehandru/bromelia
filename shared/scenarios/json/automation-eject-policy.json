@@ -1,0 +1,90 @@
+{
+  "title": "A drive ejects the disc when done (ejectWhenDone) and after a failure only with ejectOnFailure",
+  "from": [
+    "docs/configuration.md#driveconfig (ejectWhenDone, ejectOnFailure)",
+    "README.md (automatic eject on success and/or failure)"
+  ],
+  "given": {
+    "configPatch": {
+      "automation": {
+        "defaults": {
+          "ejectWhenDone": true,
+          "ejectOnFailure": false
+        }
+      }
+    },
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "ok"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "ok",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "ok",
+          "include": [
+            "drive.ejected"
+          ]
+        },
+        "drives": [
+          {
+            "id": "drive",
+            "state": "trayOpen"
+          }
+        ]
+      }
+    },
+    {
+      "closeTray": {
+        "drive": "drive"
+      }
+    },
+    {
+      "insert": {
+        "drive": "drive",
+        "disc": "sample-movie-one-title"
+      }
+    },
+    {
+      "tools": {
+        "makemkvcon": "tools/makemkvcon-fails-nothing-written.yaml"
+      }
+    },
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "bad"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "bad",
+          "outcome": "failed"
+        },
+        "log": {
+          "job": "bad",
+          "exclude": [
+            "drive.ejected"
+          ]
+        }
+      }
+    }
+  ]
+}

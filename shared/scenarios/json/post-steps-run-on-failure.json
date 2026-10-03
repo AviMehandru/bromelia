@@ -1,0 +1,77 @@
+{
+  "title": "A failure step runs when no title matched; a success step doesn't",
+  "from": [
+    "macos IntegrationTests.failsCleanlyWhenNoTitleMatches",
+    "macos TemplateTests.runConditions"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "profile": {
+      "titles": {
+        "minDurationSeconds": 356400
+      },
+      "steps": [
+        "onFailure",
+        "onSuccess"
+      ]
+    },
+    "configPatch": {
+      "steps": [
+        {
+          "id": "onFailure",
+          "kind": "command",
+          "runOn": "failure",
+          "command": {
+            "executable": "script",
+            "arguments": "{root}/failed.txt"
+          }
+        },
+        {
+          "id": "onSuccess",
+          "kind": "command",
+          "runOn": "success",
+          "command": {
+            "executable": "script",
+            "arguments": "{root}/succeeded.txt"
+          }
+        }
+      ]
+    },
+    "tools": {
+      "script": "tools/script-records-status.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "titles.noneMatched"
+          }
+        },
+        "file": {
+          "path": "failed.txt",
+          "contains": [
+            "failed|0|"
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "file": {
+          "path": "succeeded.txt",
+          "exists": false
+        }
+      }
+    }
+  ]
+}

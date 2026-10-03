@@ -1,0 +1,61 @@
+{
+  "title": "The event stream starts with a snapshot, then deltas in sequence; Last-Event-ID resumes without a snapshot",
+  "from": [
+    "rearchitecture-plan §25 (events), §13.3"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/events",
+        "as": "stream"
+      }
+    },
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "response": {
+          "as": "stream",
+          "status": 200
+        },
+        "events": {
+          "sequence": [
+            "snapshot",
+            "jobChanged",
+            "jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/events",
+        "headers": {
+          "Last-Event-ID": "1"
+        },
+        "as": "resumed"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "resumed",
+          "status": 200
+        }
+      }
+    }
+  ]
+}

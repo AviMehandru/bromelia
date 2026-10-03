@@ -1,0 +1,26 @@
+{
+  "tool": "makemkvcon",
+  "note": "The mkv command prints the recorded run shared/fixtures/mkv-rip.txt and exits with 0 (shared/fixtures/rip-outcomes.json).",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "writeTitles": {
+        "content": "mkv data"
+      },
+      "print": [
+        "fixture:mkv-rip.txt"
+      ],
+      "exit": 0
+    }
+  ]
+}

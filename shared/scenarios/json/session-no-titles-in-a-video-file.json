@@ -1,0 +1,33 @@
+{
+  "title": "A single video file has no titles; the session says what MakeMKV can open",
+  "from": [
+    "macos AppModel.open (MakeMKV found no titles here)"
+  ],
+  "given": {
+    "files": {
+      "Videos/clip.mp4": "x"
+    },
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-no-titles.yaml"
+    }
+  },
+  "steps": [
+    {
+      "open": {
+        "file": "{root}/Videos/clip.mp4",
+        "as": "clip"
+      }
+    },
+    {
+      "expect": {
+        "session": {
+          "name": "clip",
+          "state": "failed",
+          "error": {
+            "code": "session.noTitlesHere"
+          }
+        }
+      }
+    }
+  ]
+}

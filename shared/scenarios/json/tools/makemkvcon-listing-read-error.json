@@ -1,0 +1,26 @@
+{
+  "tool": "makemkvcon",
+  "note": "A read error while reading the listing (before the rip), which doesn't mark the rip as damaged.",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "readError",
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "writeTitles": {
+        "content": "mkv data {title}"
+      },
+      "print": [
+        "saved"
+      ]
+    }
+  ]
+}

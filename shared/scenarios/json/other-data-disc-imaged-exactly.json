@@ -1,0 +1,44 @@
+{
+  "title": "A data disc is copied byte for byte to an ISO image whose checksum is the disc's",
+  "from": [
+    "macos IntegrationJobTests.dataDiscsAreImagedExactly",
+    "windows IntegrationJobTests.DataDiscsAreCopiedExactly",
+    "docs/configuration.md#other-discs"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "identification": "DVD+RW TEST 1.00",
+        "device": "/dev/fake9",
+        "disc": "data-disc"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "kind": "dataDisc",
+          "outcome": "succeeded",
+          "files": 1
+        },
+        "file": {
+          "path": "library/Backup 2019/Backup 2019 - Backup - DISC.iso",
+          "sameAsDisc": true
+        },
+        "sums": {
+          "folder": "library/Backup 2019",
+          "ok": true
+        }
+      }
+    }
+  ]
+}

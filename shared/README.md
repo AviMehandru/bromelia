@@ -29,7 +29,8 @@ Rules:
 - **Golden files are exact.** Every implementation must produce exactly the expected output of a case, not
   something similar.
 - **Generated files** (`config3-defaults.json`, `profile3-defaults.json`, `0001_init.expected.txt`,
-  `scenarios/COVERAGE.md`) are rewritten with `tools/check-contracts.py --write`; CI fails when they are stale.
+  `scenarios/COVERAGE.md`, `scenarios/json/`) are rewritten with `tools/check-contracts.py --write`; CI fails when
+  they are stale. Scenarios are edited as YAML; the platforms' runners read `scenarios/json/`.
 
 ```bash
 pip install "jsonschema>=4.18" pyyaml

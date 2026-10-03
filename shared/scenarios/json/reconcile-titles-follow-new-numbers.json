@@ -1,0 +1,84 @@
+{
+  "title": "Chosen titles are found again when MakeMKV numbers them differently",
+  "from": [
+    "macos SafetyTests.chosenTitlesFollowChangedTitleNumbers",
+    "docs/architecture.md#makemkvcon"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "profile": {
+      "titles": {
+        "skipDuplicates": false
+      }
+    }
+  },
+  "steps": [
+    {
+      "open": {
+        "iso": true,
+        "as": "disc"
+      }
+    },
+    {
+      "choose": {
+        "session": "disc",
+        "titles": [
+          1
+        ]
+      }
+    },
+    {
+      "swapDisc": {
+        "volume": "SAMPLE_MOVIE",
+        "type": "bluray",
+        "titles": [
+          {
+            "duration": "0:00:05",
+            "source": 9
+          },
+          {
+            "duration": "0:00:10",
+            "source": 1
+          },
+          {
+            "duration": "0:00:20",
+            "source": 2
+          }
+        ]
+      }
+    },
+    {
+      "rip": {
+        "session": "disc",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "titles": [
+            2
+          ]
+        },
+        "calls": {
+          "makemkvcon": {
+            "include": [
+              "mkv iso:{root}/test.iso 2 "
+            ],
+            "exclude": [
+              "mkv iso:{root}/test.iso 1 "
+            ]
+          }
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "disc.titleNumbersChanged"
+          ]
+        }
+      }
+    }
+  ]
+}

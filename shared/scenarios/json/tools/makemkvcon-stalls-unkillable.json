@@ -1,0 +1,26 @@
+{
+  "tool": "makemkvcon",
+  "note": "Stuck in the kernel on a hung drive; doesn't end even on SIGKILL.",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "silence": 86400,
+      "ignore": [
+        "SIGINT",
+        "SIGTERM",
+        "SIGKILL"
+      ],
+      "exit": "never"
+    }
+  ]
+}

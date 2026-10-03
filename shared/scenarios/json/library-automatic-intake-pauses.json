@@ -1,0 +1,70 @@
+{
+  "title": "While the library is offline, inserted discs don't start automatic rips, and a notification goes out",
+  "from": [
+    "claudeDocs/bromelia-handoff.md backlog 1 (pause automatic rips and send a notification while the root is missing)",
+    "rearchitecture-plan §15.2, §22.2"
+  ],
+  "given": {
+    "configPatch": {
+      "automation": {
+        "defaults": {
+          "ripOnInsert": true,
+          "delaySeconds": 0
+        }
+      },
+      "notifications": {
+        "targets": [
+          {
+            "id": "hook",
+            "url": {
+              "secret": "notifications.hook"
+            }
+          }
+        ]
+      }
+    },
+    "http": [
+      {
+        "method": "POST",
+        "url": "https://example.org/hook",
+        "status": 204
+      }
+    ],
+    "drives": [
+      {
+        "id": "drive",
+        "identification": "BD-RE TEST 1.00",
+        "device": "/dev/test0"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "unmount": "lib"
+    },
+    {
+      "insert": {
+        "drive": "drive",
+        "disc": "sample-movie-one-title"
+      }
+    },
+    {
+      "advance": 60
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 0
+        },
+        "problems": {
+          "active": [
+            "library.offline"
+          ]
+        },
+        "notifications": {
+          "count": 1
+        }
+      }
+    }
+  ]
+}

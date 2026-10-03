@@ -1,0 +1,147 @@
+{
+  "title": "Scheduled verification runs when a unit's last check is intervalDays old, only while no rip runs, and reports damage to notifications",
+  "from": [
+    "macos ArchiveCheckTests.verifiesFromTheApp",
+    "linux /archive/verify-in-state",
+    "docs/configuration.md#archive-check",
+    "docs/docker.md (archive checks)"
+  ],
+  "given": {
+    "units": [
+      {
+        "folder": "library/Good",
+        "name": "Good",
+        "files": [
+          "Good.mkv"
+        ]
+      }
+    ],
+    "configPatch": {
+      "notifications": {
+        "targets": [
+          {
+            "id": "hook",
+            "url": {
+              "secret": "notifications.hook"
+            },
+            "onlyProblems": true
+          }
+        ]
+      }
+    },
+    "http": [
+      {
+        "method": "POST",
+        "url": "https://example.org/hook",
+        "status": 204
+      }
+    ]
+  },
+  "steps": [
+    {
+      "advance": 86400
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 0
+        }
+      }
+    },
+    {
+      "config": {
+        "maintenance": {
+          "verify": {
+            "intervalDays": 30
+          }
+        }
+      }
+    },
+    {
+      "advance": 3600
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 1,
+          "kinds": [
+            "verify"
+          ],
+          "outcomes": [
+            "succeeded"
+          ]
+        },
+        "db": {
+          "checks": {
+            "count": 1,
+            "rows": [
+              {
+                "result": "ok"
+              }
+            ]
+          }
+        },
+        "notifications": {
+          "count": 0
+        }
+      }
+    },
+    {
+      "advance": 86400
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "flip": {
+        "path": "library/Good/Good.mkv",
+        "byte": 0
+      }
+    },
+    {
+      "advance": 2592000
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 2,
+          "kinds": [
+            "verify",
+            "verify"
+          ]
+        },
+        "db": {
+          "checks": {
+            "count": 2,
+            "rows": [
+              {
+                "result": "ok"
+              },
+              {
+                "result": "damaged"
+              }
+            ]
+          }
+        },
+        "notifications": {
+          "count": 1,
+          "sent": [
+            {
+              "target": "hook",
+              "status": "failed"
+            }
+          ]
+        },
+        "problems": {
+          "active": [
+            "check.damagedFound"
+          ]
+        }
+      }
+    }
+  ]
+}

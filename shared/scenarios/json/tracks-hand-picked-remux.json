@@ -1,0 +1,62 @@
+{
+  "title": "A title with hand-picked tracks is ripped with every track, then mkvmerge keeps the chosen ones",
+  "from": [
+    "docs/architecture.md#hand-picked-tracks",
+    "macos IntegrationTests.ripsTitleWithCustomTracksRenameAndScript",
+    "macos RemuxTests.buildsTrackArguments"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "mkvmerge": "tools/mkvmerge-matches-listing.yaml"
+    }
+  },
+  "steps": [
+    {
+      "open": {
+        "iso": true,
+        "as": "disc"
+      }
+    },
+    {
+      "choose": {
+        "session": "disc",
+        "titles": [
+          0
+        ],
+        "tracks": {
+          "0": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "rip": {
+        "session": "disc",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "remux.kept"
+          ]
+        },
+        "calls": {
+          "mkvmerge": {
+            "include": [
+              "--video-tracks 0 --no-audio"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "tool": "mkvmerge",
+  "note": "-J answers what the listing says; --split writes one part per range (the file names mkvmerge gives them, -001, -002, …).",
+  "rules": [
+    {
+      "when": {
+        "command": "-J"
+      },
+      "matchListing": true
+    },
+    {
+      "when": {
+        "command": "-o",
+        "argsInclude": [
+          "--split"
+        ]
+      },
+      "write": [
+        {
+          "path": "{output}-001",
+          "copyOf": "input"
+        },
+        {
+          "path": "{output}-002",
+          "copyOf": "input"
+        },
+        {
+          "path": "{output}-003",
+          "copyOf": "input"
+        },
+        {
+          "path": "{output}-004",
+          "copyOf": "input"
+        },
+        {
+          "path": "{output}-005",
+          "copyOf": "input"
+        },
+        {
+          "path": "{output}-006",
+          "copyOf": "input"
+        },
+        {
+          "path": "{output}-007",
+          "copyOf": "input"
+        }
+      ]
+    }
+  ]
+}

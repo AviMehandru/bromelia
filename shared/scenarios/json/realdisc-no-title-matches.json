@@ -1,0 +1,37 @@
+{
+  "title": "A real disc image with title rules no title passes: the job fails cleanly and failure steps run",
+  "realDisc": {
+    "env": "BROMELIA_TEST_ISO",
+    "note": "Runs only when BROMELIA_TEST_ISO is set (TEST_RUNNER_BROMELIA_TEST_ISO for xcodebuild); uses the real makemkvcon and mkvmerge, not the scripted tools."
+  },
+  "from": [
+    "macos IntegrationTests.failsCleanlyWhenNoTitleMatches",
+    "README.md#testing"
+  ],
+  "given": {
+    "profile": {
+      "titles": {
+        "minDurationSeconds": 356400
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "titles.noneMatched"
+          }
+        }
+      }
+    }
+  ]
+}

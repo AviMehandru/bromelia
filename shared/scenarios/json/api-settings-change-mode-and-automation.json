@@ -1,0 +1,135 @@
+{
+  "title": "Settings switch automatic rips and the mode of a drive's profile through the configuration; an invalid mode is refused with an issue",
+  "from": [
+    "macos WebTests.titlesSettingsAndLogs (settings)",
+    "docs/configuration.md#web-page (Settings)"
+  ],
+  "steps": [
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/config",
+        "as": "before"
+      }
+    },
+    {
+      "api": {
+        "method": "PUT",
+        "path": "/v1/config",
+        "body": {
+          "version": 1,
+          "doc": {
+            "version": 3,
+            "libraries": [
+              {
+                "id": "lib",
+                "path": "{root}/library"
+              }
+            ],
+            "automation": {
+              "defaults": {
+                "ripOnInsert": true
+              }
+            },
+            "profiles": [
+              {
+                "id": "default",
+                "name": "Test profile",
+                "mode": {
+                  "default": "backup"
+                }
+              }
+            ]
+          }
+        },
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "set"
+      }
+    },
+    {
+      "api": {
+        "method": "PUT",
+        "path": "/v1/config",
+        "body": {
+          "version": 2,
+          "doc": {
+            "version": 3,
+            "profiles": [
+              {
+                "id": "default",
+                "mode": {
+                  "default": "audioCD"
+                }
+              }
+            ]
+          }
+        },
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "bad"
+      }
+    },
+    {
+      "api": {
+        "method": "PUT",
+        "path": "/v1/config",
+        "body": {
+          "version": 1,
+          "doc": {
+            "version": 3
+          }
+        },
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "stale"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "set",
+          "status": 200,
+          "json": {
+            "version": 2
+          }
+        },
+        "events": {
+          "include": [
+            {
+              "type": "configChanged",
+              "data": {
+                "version": 2
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "bad",
+          "status": 422,
+          "error": {
+            "code": "config.rejected"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "stale",
+          "status": 409,
+          "error": {
+            "code": "config.versionConflict"
+          }
+        }
+      }
+    }
+  ]
+}

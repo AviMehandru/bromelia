@@ -1,0 +1,140 @@
+{
+  "title": "The web page's flow: Open, tick titles, Make MKV; the job's log; refusals when the disc isn't open or no title is chosen",
+  "from": [
+    "macos WebTests.titlesSettingsAndLogs",
+    "windows WebApiTests.TitlesSettingsAndLogs",
+    "linux /web/api",
+    "docs/configuration.md#web-page"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "identification": "BD-RE TEST DRIVE",
+        "device": "/dev/rdisk99",
+        "disc": "one-piece-s3-p1-d1"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/drives/{driveId:drive}/rip",
+        "body": {
+          "titles": [
+            1
+          ]
+        },
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "notOpen"
+      }
+    },
+    {
+      "open": {
+        "drive": "drive",
+        "as": "disc"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/sessions/{sessionId:disc}/rip",
+        "body": {
+          "titles": [
+            999
+          ]
+        },
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "noTitles"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/sessions/{sessionId:disc}/rip",
+        "body": {
+          "titles": [
+            1,
+            2
+          ]
+        },
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "rip"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "notOpen",
+          "status": 409,
+          "error": {
+            "code": "session.notOpen"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "noTitles",
+          "status": 400,
+          "error": {
+            "code": "session.noTitlesChosen"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "rip",
+          "status": 201,
+          "json": {
+            "kind": "videoDisc",
+            "mode": "mkv"
+          }
+        },
+        "session": {
+          "name": "disc",
+          "selection": [
+            {
+              "index": 0,
+              "selected": true
+            },
+            {
+              "index": 1,
+              "selected": true
+            },
+            {
+              "index": 2,
+              "selected": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/jobs/{jobId:rip}/log?format=text",
+        "as": "log"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "log",
+          "status": 200,
+          "text": "Bromelia job"
+        }
+      }
+    }
+  ]
+}

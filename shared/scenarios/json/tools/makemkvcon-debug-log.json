@@ -1,0 +1,29 @@
+{
+  "tool": "makemkvcon",
+  "note": "Debug logging on (message 1004); MakeMKV rewrites its debug log on every start.",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "writeDebugLog": "Debug log of the listing\n",
+      "print": [
+        "debugLogAnnounce",
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "writeDebugLog": "Debug log of the rip",
+      "writeTitles": {
+        "content": "mkv data {title}"
+      },
+      "print": [
+        "debugLogAnnounce",
+        "saved"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "tool": "slow",
+  "note": "A background step that takes 300 s of the fake clock.",
+  "rules": [
+    {
+      "when": {},
+      "silence": 300,
+      "exit": 0
+    }
+  ]
+}

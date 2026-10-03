@@ -1,0 +1,111 @@
+{
+  "title": "The server answers the system status, serves the web page, refuses writes without X-Bromelia and returns codes for unknown ids",
+  "from": [
+    "macos IntegrationJobTests.webServerServesStatusAndActions",
+    "windows IntegrationFeatureTests.WebServerAnswersStatusAndActions",
+    "linux /integrations/web-server",
+    "macos WebTests.routes"
+  ],
+  "steps": [
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/system",
+        "as": "system"
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/",
+        "as": "page"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/jobs/00000000-0000-4000-8000-000000000000/cancel",
+        "transport": "tcp",
+        "headers": {
+          "Host": "localhost"
+        },
+        "as": "noHeader"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/jobs/00000000-0000-4000-8000-000000000000/cancel",
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "noJob"
+      }
+    },
+    {
+      "api": {
+        "method": "GET",
+        "path": "/v1/jobs/00000000-0000-4000-8000-000000000000/log",
+        "as": "noLog"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "system",
+          "status": 200,
+          "json": {
+            "libraries": [
+              {
+                "id": "lib",
+                "online": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "page",
+          "status": 200,
+          "text": "<title>Bromelia</title>"
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "noHeader",
+          "status": 403,
+          "error": {
+            "code": "server.headerMissing"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "noJob",
+          "status": 404,
+          "error": {
+            "code": "job.notFound"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "noLog",
+          "status": 404,
+          "error": {
+            "code": "job.notFound"
+          }
+        }
+      }
+    }
+  ]
+}

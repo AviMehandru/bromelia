@@ -1,0 +1,38 @@
+{
+  "title": "Recorded makemkvcon run rip-missing-source: exit 11, no file written → failed",
+  "from": [
+    "shared/fixtures/rip-outcomes.json",
+    "macos RecordedRunTests.everyRecordedRunEndsAsExpected",
+    "docs/architecture.md#stopping-processes"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-recorded-rip-missing-source.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "errorText": "does not exist"
+        },
+        "files": {
+          "under": "library",
+          "exactly": []
+        }
+      }
+    }
+  ]
+}

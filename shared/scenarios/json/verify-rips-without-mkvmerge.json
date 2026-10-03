@@ -1,0 +1,42 @@
+{
+  "title": "Without mkvmerge the MKV files aren't checked, and the log says so once",
+  "from": [
+    "docs/configuration.md#output-folder-read-errors-and-checks"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "profile": {
+      "titles": {
+        "skipDuplicates": false
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "ripcheck.cannotCheck"
+          ],
+          "exclude": [
+            "ripcheck.checked"
+          ]
+        }
+      }
+    }
+  ]
+}

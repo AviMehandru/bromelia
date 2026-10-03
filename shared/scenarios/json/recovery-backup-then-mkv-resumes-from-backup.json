@@ -1,0 +1,68 @@
+{
+  "title": "A backup-then-MKV job stopped after its backup was complete makes the MKV files from the backup, without the disc",
+  "from": [
+    "rearchitecture-plan §15.8, §20.4",
+    "README.md (backup then MKV from the backup, safest for damaged discs)"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "name": "Test drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      }
+    ],
+    "profile": {
+      "mode": {
+        "default": "backupThenMkv"
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "inStep:acquire"
+      }
+    },
+    {
+      "remove": {
+        "drive": "drive"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.resumedFromBackup"
+          ]
+        },
+        "calls": {
+          "makemkvcon": {
+            "counts": {
+              " backup ": 1
+            },
+            "include": [
+              "mkv file:"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

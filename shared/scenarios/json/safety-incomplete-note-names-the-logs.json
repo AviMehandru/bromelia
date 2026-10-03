@@ -1,0 +1,42 @@
+{
+  "title": "The INCOMPLETE note names the logs next to it, and makemkv's log has everything it printed",
+  "from": [
+    "macos SafetyTests.failureInASharedFolderUsesASubfolder",
+    "docs/configuration.md#archive-files"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-fails-file-written.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "file": {
+          "path": "library/_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt",
+          "contains": [
+            "NOT a finished archive",
+            "bromelia-{unit8}-log.txt",
+            "makemkv-{unit8}-log.txt"
+          ]
+        },
+        "transcript": {
+          "job": "job",
+          "contains": [
+            "Failed to save title 1 to file title_t01.mkv"
+          ]
+        }
+      }
+    }
+  ]
+}

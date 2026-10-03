@@ -1,0 +1,55 @@
+{
+  "title": "Without a listing, a backup's index.bdmv (INDX0300) tells a 4K UHD disc from a Blu-ray, and the backup is renamed",
+  "from": [
+    "README.md (index.bdmv version 3 in a backup)",
+    "docs/configuration.md#naming-formats-and-episodes",
+    "macos IdentityTests.detectsUHDBackupFolder"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": {
+          "volume": "SOME_MOVIE",
+          "type": "uhd",
+          "titles": []
+        }
+      }
+    ],
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-backup-uhd.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "drive",
+        "mode": "backupDecrypted",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "disc.continuingWithoutListing",
+            "backup.renamed"
+          ]
+        },
+        "files": {
+          "under": "library/Some Movie",
+          "include": [
+            "Some Movie - Backup - 4K/BDMV/index.bdmv"
+          ]
+        }
+      }
+    }
+  ]
+}

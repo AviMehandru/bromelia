@@ -1,0 +1,37 @@
+{
+  "title": "LibreDrive mode is recorded in the archive record",
+  "from": [
+    "macos OnePassJobTests.libreDriveIsRecorded",
+    "docs/configuration.md (MakeMKV messages shown outside the log)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-libredrive.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "record": {
+          "folder": "library/Sample Movie",
+          "json": {
+            "disc": {
+              "libreDrive": "v06.3 id=4FBA32AEC678"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

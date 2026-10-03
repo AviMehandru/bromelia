@@ -1,0 +1,39 @@
+{
+  "title": "A file with fewer tracks than the disc lists is logged (the selection rule left them out); the title still passes",
+  "from": [
+    "docs/configuration.md#output-folder-read-errors-and-checks",
+    "docs/configuration.md (Archive everything)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "mkvmerge": "tools/mkvmerge-one-track.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "ripcheck.checked",
+            "ripcheck.trackSubset"
+          ]
+        }
+      }
+    }
+  ]
+}

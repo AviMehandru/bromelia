@@ -1,0 +1,54 @@
+{
+  "title": "Cancelling a running rip stops makemkvcon (SIGTERM, since it ignores SIGINT) and quarantines what it wrote",
+  "from": [
+    "docs/architecture.md#stopping-processes",
+    "linux /reliability/cancel-without-main-loop"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-stalls.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "when": {
+          "job": "job",
+          "step": "acquire"
+        },
+        "job": {
+          "name": "job",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "cancel": "job"
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "cancelled",
+          "error": {
+            "code": "job.cancelledByUser"
+          }
+        },
+        "files": {
+          "under": "library",
+          "exactly": []
+        }
+      }
+    }
+  ]
+}

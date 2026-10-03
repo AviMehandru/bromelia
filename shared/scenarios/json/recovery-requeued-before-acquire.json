@@ -1,0 +1,40 @@
+{
+  "title": "A job that hadn't reached its rip when the engine stopped is queued again and runs after the restart",
+  "from": [
+    "macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop (queued jobs)",
+    "rearchitecture-plan §20.4 (not started yet, or before Acquire: requeued)"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "beforeStep:acquire"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.requeued"
+          ]
+        }
+      }
+    }
+  ]
+}

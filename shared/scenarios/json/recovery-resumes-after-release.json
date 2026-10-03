@@ -1,0 +1,53 @@
+{
+  "title": "A job stopped after its files were sealed resumes at the commit after the restart",
+  "from": [
+    "rearchitecture-plan §20.4 (after Release: resumes automatically), §15.8"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "afterStep:seal"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "unit": {
+            "state": "committed"
+          }
+        },
+        "sums": {
+          "folder": "library/Sample Movie",
+          "ok": true
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.resumed"
+          ]
+        },
+        "calls": {
+          "makemkvcon": {
+            "counts": {
+              " mkv ": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

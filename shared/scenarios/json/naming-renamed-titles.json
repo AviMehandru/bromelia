@@ -1,0 +1,48 @@
+{
+  "title": "A title renamed on the disc page gets that file name instead of the template's",
+  "from": [
+    "README.md (rename output files per title)"
+  ],
+  "given": {
+    "disc": "sample-movie"
+  },
+  "steps": [
+    {
+      "open": {
+        "iso": true,
+        "as": "disc"
+      }
+    },
+    {
+      "choose": {
+        "session": "disc",
+        "titles": [
+          0
+        ],
+        "names": {
+          "0": "My Cut"
+        }
+      }
+    },
+    {
+      "rip": {
+        "session": "disc",
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded"
+        },
+        "files": {
+          "under": "library/Sample Movie",
+          "include": [
+            "My Cut.mkv"
+          ]
+        }
+      }
+    }
+  ]
+}
