@@ -5,6 +5,25 @@ on:
   pull_request:
 
 jobs:
+  contracts:
+    name: Shared contracts (rebuild phase 0)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install checker dependencies
+        run: pip install "jsonschema>=4.18" pyyaml
+      # Schemas, samples, messages, API, database, scenarios and the coverage of today's tests.
+      - name: Contracts
+        run: python3 tools/check-contracts.py
+      # Lints the architecture map; missing code is reported until a phase requires it.
+      - name: Architecture map
+        run: python3 tools/check-architecture.py --quiet
+      - name: Layer rules
+        run: python3 tools/check-layers.py --quiet
+
   macos:
     name: macOS (SwiftUI)
     runs-on: macos-15
