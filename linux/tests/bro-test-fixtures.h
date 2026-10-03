@@ -23,6 +23,10 @@ void bro_test_run_cases_only (const char *relative, gboolean (*only) (const char
 
 void bro_test_fail (GPtrArray *failures, const char *id, const char *format, ...) G_GNUC_PRINTF (3, 4);
 
+/* The robot-mode listing of a disc definition (shared/scenarios/README.md, "A generated listing"): {volume,
+ * type, titles}, each title {duration, source, size, chapters} or [duration, source]. Free with g_free. */
+char *bro_test_generated_listing (const BroJsonValue *disc);
+
 /* Compares and records a failure; return TRUE when equal. NULL is a value (JSON null). */
 gboolean bro_test_same_string (GPtrArray *failures, const char *id, const char *what, const char *expected, const char *actual);
 gboolean bro_test_same_json (GPtrArray *failures, const char *id, const char *what, const BroJsonValue *expected, const BroJsonValue *actual);

@@ -61,6 +61,36 @@ public static class Fixtures
         Assert.True(failures.Count == 0, $"{relative}: {failures.Count} of {count} case(s) failed:\n" + string.Join("\n", failures));
     }
 
+    /// <summary>The robot-mode listing of a disc definition (shared/scenarios/README.md, "A generated listing"):
+    /// <c>{volume, type, titles}</c>, each title <c>{duration, source, size, chapters}</c> or <c>[duration, source]</c>.</summary>
+    public static string GeneratedListing(JsonValue disc)
+    {
+        var volume = disc["volume"]?.AsString ?? "";
+        var type = disc["type"]?.AsString ?? "bluray";
+        var titles = disc["titles"]?.AsArray ?? new List<JsonValue>();
+        var sb = new StringBuilder();
+        sb.Append("MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\",\"%1 started\",\"MakeMKV v1.18.1 darwin(arm64-release)\"\n");
+        sb.Append($"TCOUNT:{titles.Count}\n");
+        sb.Append(type switch { "dvd" => "CINFO:1,6206,\"DVD disc\"\n", "hddvd" => "CINFO:1,6207,\"HD-DVD disc\"\n", _ => "CINFO:1,6209,\"Blu-ray disc\"\n" });
+        sb.Append($"CINFO:2,0,\"{volume}\"\nCINFO:32,0,\"{volume}\"\n");
+        for (int i = 0; i < titles.Count; i++)
+        {
+            var t = titles[i];
+            string duration = t.AsArray is { } pair ? pair[0].AsString! : t["duration"]!.AsString!;
+            long source = t.AsArray is { } p2 ? p2[1].AsInteger!.Value : t["source"]!.AsInteger!.Value;
+            long? size = t.AsArray is null ? t["size"]?.AsInteger : null;
+            long chapters = t.AsArray is null ? t["chapters"]?.AsInteger ?? 2 : 2;
+            sb.Append($"TINFO:{i},8,0,\"{chapters}\"\nTINFO:{i},9,0,\"{duration}\"\nTINFO:{i},16,0,\"0000{source}.mpls\"\n");
+            sb.Append($"TINFO:{i},24,0,\"{source}\"\nTINFO:{i},26,0,\"{source}\"\nTINFO:{i},27,0,\"title_t0{i}.mkv\"\n");
+            if (size is { } s) sb.Append($"TINFO:{i},11,0,\"{s}\"\n");
+            sb.Append($"SINFO:{i},0,1,6201,\"Video\"\n");
+            if (type == "uhd") sb.Append($"SINFO:{i},0,19,0,\"3840x2160\"\n");
+            sb.Append($"SINFO:{i},1,1,6202,\"Audio\"\n");
+        }
+        sb.Append("MSG:5011,0,0,\"Operation successfully completed\",\"Operation successfully completed\"\n");
+        return sb.ToString();
+    }
+
     /// <summary>Assert.Equal with a message that names the case's value.</summary>
     public static void Same<T>(T expected, T actual, string what)
     {

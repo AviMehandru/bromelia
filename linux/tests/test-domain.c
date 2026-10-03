@@ -10,6 +10,8 @@
 #include "bro-step-state.h"
 
 #include "bro-disc-flags.h"
+#include "bro-fingerprint.h"
+#include "bro-listing-builder.h"
 #include "bro-drive-join.h"
 #include "bro-message-catalog.h"
 #include "bro-robot.h"
@@ -399,6 +401,158 @@ test_accumulator_stops (void)
   g_assert_cmpstr (windows->debug_log, ==, "C:/Users/me/log.txt");
 }
 
+/* ---- listing and fingerprint ------------------------------------------------------------------------- */
+
+static BroListing *
+listing_of (const char *robot_text)
+{
+  g_autoptr (BroListingBuilder) b = bro_listing_builder_new ();
+  g_auto (GStrv) lines = g_strsplit (robot_text, "\n", -1);
+  for (int i = 0; lines[i]; i++) {
+    g_autoptr (BroRobotEvent) e = bro_robot_parse_line (lines[i]);
+    if (e)
+      bro_listing_builder_feed (b, e);
+  }
+  return bro_listing_builder_build (b);
+}
+
+static int
+compare_keys (gconstpointer a, gconstpointer b)
+{
+  int x = GPOINTER_TO_INT (*(gpointer *) a), y = GPOINTER_TO_INT (*(gpointer *) b);
+  return x < y ? -1 : x > y;
+}
+
+static BroJsonValue *
+attributes_json (GHashTable *a)
+{
+  g_autoptr (GPtrArray) keys = g_ptr_array_new ();
+  GHashTableIter it;
+  gpointer k;
+  g_hash_table_iter_init (&it, a);
+  while (g_hash_table_iter_next (&it, &k, NULL))
+    g_ptr_array_add (keys, k);
+  g_ptr_array_sort (keys, compare_keys);
+  BroJsonValue *o = bro_json_value_new_object ();
+  for (guint i = 0; i < keys->len; i++) {
+    g_autofree char *key = g_strdup_printf ("%d", GPOINTER_TO_INT (keys->pdata[i]));
+    put (o, key, bro_json_value_new_string (g_hash_table_lookup (a, keys->pdata[i])));
+  }
+  return o;
+}
+
+static BroJsonValue *
+int_or_null (gboolean has, int v)
+{
+  return has ? bro_json_value_new_integer (v) : bro_json_value_new_null ();
+}
+
+/* A listing as the golden writes it. */
+static BroJsonValue *
+listing_json (const BroListing *l)
+{
+  BroJsonValue *o = bro_json_value_new_object ();
+  put (o, "name", bro_json_value_new_string (l->name));
+  put (o, "volumeName", bro_json_value_new_string (l->volume_name));
+  put (o, "type", bro_json_value_new_string (bro_disc_type_to_wire (l->type)));
+  put (o, "typeText", bro_json_value_new_string (l->type_text));
+  put (o, "reportedTitleCount", bro_json_value_new_integer (l->reported_title_count));
+  BroJsonValue *titles = bro_json_value_new_array ();
+  for (guint i = 0; i < l->titles->len; i++) {
+    const BroTitle *t = l->titles->pdata[i];
+    BroJsonValue *j = bro_json_value_new_object ();
+    put (j, "index", bro_json_value_new_integer (t->index));
+    put (j, "sourceTitleId", int_or_null (t->has_source_title_id, t->source_title_id));
+    put (j, "sourceFile", bro_json_value_new_string (t->source_file));
+    put (j, "name", bro_json_value_new_string (t->name));
+    put (j, "comment", bro_json_value_new_string (t->comment));
+    put (j, "duration", bro_json_value_new_string (t->duration));
+    put (j, "durationSeconds", bro_json_value_new_integer (t->duration_seconds));
+    put (j, "chapters", bro_json_value_new_integer (t->chapters));
+    put (j, "sizeBytes", bro_json_value_new_integer (t->size_bytes));
+    put (j, "segmentMap", bro_json_value_new_string (t->segment_map));
+    put (j, "outputFileName", bro_json_value_new_string (t->output_file_name));
+    put (j, "angle", int_or_null (t->has_angle, t->angle));
+    BroJsonValue *tracks = bro_json_value_new_array ();
+    for (guint k = 0; k < t->tracks->len; k++) {
+      const BroTrack *x = t->tracks->pdata[k];
+      BroJsonValue *tj = bro_json_value_new_object ();
+      put (tj, "index", bro_json_value_new_integer (x->index));
+      put (tj, "kind", bro_json_value_new_string (bro_track_kind_to_wire (x->kind)));
+      put (tj, "codec", bro_json_value_new_string (x->codec));
+      put (tj, "language", bro_json_value_new_string (x->language));
+      put (tj, "languageName", bro_json_value_new_string (x->language_name));
+      put (tj, "name", bro_json_value_new_string (x->name));
+      put (tj, "isDefault", bro_json_value_new_bool (x->is_default));
+      put (tj, "attributes", attributes_json (x->attributes));
+      bro_json_value_append (tracks, tj);
+    }
+    put (j, "tracks", tracks);
+    put (j, "attributes", attributes_json (t->attributes));
+    bro_json_value_append (titles, j);
+  }
+  put (o, "titles", titles);
+  put (o, "attributes", attributes_json (l->attributes));
+  return o;
+}
+
+static void
+test_listing_of_a_real_dvd (void)
+{
+  g_autoptr (BroJsonValue) golden = bro_test_fixture_json ("domain/info-dvd.listing.expected.json");
+  g_autofree char *text = bro_test_fixture_text (JS (golden, "input"), NULL);
+  g_autoptr (BroListing) listing = listing_of (text);
+  g_autoptr (BroJsonValue) actual = listing_json (listing);
+  g_autoptr (GPtrArray) failures = g_ptr_array_new_with_free_func (g_free);
+  bro_test_same_json (failures, "info-dvd", "listing", J (golden, "expect"), actual);
+  for (guint i = 0; i < failures->len; i++)
+    g_printerr ("%s\n", (char *) failures->pdata[i]);
+  g_assert_cmpuint (failures->len, ==, 0);
+}
+
+static char *
+fingerprint_of_disc (const BroJsonValue *disc)
+{
+  g_autofree char *text = bro_test_generated_listing (disc);
+  g_autoptr (BroListing) listing = listing_of (text);
+  return bro_fingerprint_of (listing);
+}
+
+static gboolean
+fingerprint_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  BroJsonValue *v;
+  if ((v = J (given, "listingFile"))) {
+    g_autofree char *text = bro_test_fixture_text (bro_json_value_get_string (v, ""), NULL);
+    g_autoptr (BroListing) listing = listing_of (text);
+    g_autofree char *fp = bro_fingerprint_of (listing);
+    bro_test_same_string (failures, id, "fingerprint", JS (expect, "fingerprint"), fp);
+  } else if ((v = J (given, "listings"))) {
+    g_autoptr (BroJsonValue) prints = bro_json_value_new_array ();
+    g_autoptr (GHashTable) distinct = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    for (guint i = 0; i < bro_json_value_length (v); i++) {
+      char *fp = fingerprint_of_disc (bro_json_value_at (v, i));
+      bro_json_value_append (prints, fp ? bro_json_value_new_string (fp) : bro_json_value_new_null ());
+      g_hash_table_add (distinct, fp ? fp : g_strdup (""));
+    }
+    bro_test_same_json (failures, id, "fingerprints", J (expect, "fingerprints"), prints);
+    g_autoptr (BroJsonValue) equal = bro_json_value_new_bool (g_hash_table_size (distinct) == 1);
+    bro_test_same_json (failures, id, "equal", J (expect, "equal"), equal);
+  } else if ((v = J (given, "listing"))) {
+    g_autofree char *fp = fingerprint_of_disc (v);
+    bro_test_same_string (failures, id, "fingerprint", JS (expect, "fingerprint"), fp);
+  } else {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static void
+test_fingerprint_cases (void)
+{
+  bro_test_run_cases ("domain/fingerprint.cases.json", fingerprint_case);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -411,5 +565,7 @@ main (int argc, char **argv)
   g_test_add_func ("/robot/drive-join", test_drive_join_cases);
   g_test_add_func ("/robot/join", test_joins_makemkv_and_os_drives);
   g_test_add_func ("/robot/accumulator", test_accumulator_stops);
+  g_test_add_func ("/listing/real-dvd", test_listing_of_a_real_dvd);
+  g_test_add_func ("/fingerprint/cases", test_fingerprint_cases);
   return g_test_run ();
 }

@@ -108,3 +108,40 @@ bro_test_run_cases_only (const char *relative, gboolean (*only) (const char *id)
     g_test_fail ();
   }
 }
+
+char *
+bro_test_generated_listing (const BroJsonValue *disc)
+{
+  const char *volume = bro_json_value_get_string (bro_json_value_member (disc, "volume"), "");
+  const char *type = bro_json_value_get_string (bro_json_value_member (disc, "type"), "bluray");
+  BroJsonValue *titles = bro_json_value_member (disc, "titles");
+  GString *s = g_string_new ("MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\",\"%1 started\",\"MakeMKV v1.18.1 darwin(arm64-release)\"\n");
+  g_string_append_printf (s, "TCOUNT:%u\n", bro_json_value_length (titles));
+  if (strcmp (type, "dvd") == 0)
+    g_string_append (s, "CINFO:1,6206,\"DVD disc\"\n");
+  else if (strcmp (type, "hddvd") == 0)
+    g_string_append (s, "CINFO:1,6207,\"HD-DVD disc\"\n");
+  else
+    g_string_append (s, "CINFO:1,6209,\"Blu-ray disc\"\n");
+  g_string_append_printf (s, "CINFO:2,0,\"%s\"\nCINFO:32,0,\"%s\"\n", volume, volume);
+  for (guint i = 0; i < bro_json_value_length (titles); i++) {
+    BroJsonValue *t = bro_json_value_at (titles, i);
+    gboolean pair = t->kind == BRO_JSON_VALUE_ARRAY;
+    const char *duration = pair ? bro_json_value_get_string (bro_json_value_at (t, 0), "") : bro_json_value_get_string (bro_json_value_member (t, "duration"), "");
+    gint64 source = pair ? bro_json_value_get_integer (bro_json_value_at (t, 1), 0) : bro_json_value_get_integer (bro_json_value_member (t, "source"), 0);
+    BroJsonValue *size = pair ? NULL : bro_json_value_member (t, "size");
+    gint64 chapters = pair ? 2 : bro_json_value_get_integer (bro_json_value_member (t, "chapters"), 2);
+    g_string_append_printf (s, "TINFO:%u,8,0,\"%" G_GINT64_FORMAT "\"\nTINFO:%u,9,0,\"%s\"\nTINFO:%u,16,0,\"0000%" G_GINT64_FORMAT ".mpls\"\n",
+                            i, chapters, i, duration, i, source);
+    g_string_append_printf (s, "TINFO:%u,24,0,\"%" G_GINT64_FORMAT "\"\nTINFO:%u,26,0,\"%" G_GINT64_FORMAT "\"\nTINFO:%u,27,0,\"title_t0%u.mkv\"\n",
+                            i, source, i, source, i, i);
+    if (size)
+      g_string_append_printf (s, "TINFO:%u,11,0,\"%" G_GINT64_FORMAT "\"\n", i, bro_json_value_get_integer (size, 0));
+    g_string_append_printf (s, "SINFO:%u,0,1,6201,\"Video\"\n", i);
+    if (strcmp (type, "uhd") == 0)
+      g_string_append_printf (s, "SINFO:%u,0,19,0,\"3840x2160\"\n", i);
+    g_string_append_printf (s, "SINFO:%u,1,1,6202,\"Audio\"\n", i);
+  }
+  g_string_append (s, "MSG:5011,0,0,\"Operation successfully completed\",\"Operation successfully completed\"\n");
+  return g_string_free (s, FALSE);
+}

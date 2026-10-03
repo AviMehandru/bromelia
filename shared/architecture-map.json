@@ -1112,6 +1112,92 @@
             "name": "BroListingBuilder",
             "file": "linux/src/domain/listing/bro-listing-builder.h"
           }
+        },
+        {
+          "name": "TrackKind",
+          "kind": "enum",
+          "doc": "A track's kind (MakeMKV attribute 1).",
+          "cases": [
+            "video",
+            "audio",
+            "subtitle",
+            "attachment",
+            "unknown"
+          ],
+          "swift": {
+            "name": "TrackKind",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Listing/TrackKind.swift",
+            "cases": [
+              ".video",
+              ".audio",
+              ".subtitle",
+              ".attachment",
+              ".unknown"
+            ]
+          },
+          "cs": {
+            "name": "TrackKind",
+            "file": "windows/src/Bromelia.Domain/Listing/TrackKind.cs",
+            "cases": [
+              "Video",
+              "Audio",
+              "Subtitle",
+              "Attachment",
+              "Unknown"
+            ]
+          },
+          "c": {
+            "name": "BroTrackKind",
+            "file": "linux/src/domain/listing/bro-track-kind.h",
+            "cases": [
+              "BRO_TRACK_KIND_VIDEO",
+              "BRO_TRACK_KIND_AUDIO",
+              "BRO_TRACK_KIND_SUBTITLE",
+              "BRO_TRACK_KIND_ATTACHMENT",
+              "BRO_TRACK_KIND_UNKNOWN"
+            ]
+          }
+        },
+        {
+          "name": "DiscType",
+          "kind": "enum",
+          "doc": "The {type} token: from the listing's attribute 1 (or the drive's flags).",
+          "cases": [
+            "dvd",
+            "bd",
+            "hddvd",
+            "disc"
+          ],
+          "swift": {
+            "name": "DiscType",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Listing/DiscType.swift",
+            "cases": [
+              ".dvd",
+              ".bd",
+              ".hddvd",
+              ".disc"
+            ]
+          },
+          "cs": {
+            "name": "DiscType",
+            "file": "windows/src/Bromelia.Domain/Listing/DiscType.cs",
+            "cases": [
+              "Dvd",
+              "Bd",
+              "Hddvd",
+              "Disc"
+            ]
+          },
+          "c": {
+            "name": "BroDiscType",
+            "file": "linux/src/domain/listing/bro-disc-type.h",
+            "cases": [
+              "BRO_DISC_TYPE_DVD",
+              "BRO_DISC_TYPE_BD",
+              "BRO_DISC_TYPE_HDDVD",
+              "BRO_DISC_TYPE_DISC"
+            ]
+          }
         }
       ],
       "functions": [
