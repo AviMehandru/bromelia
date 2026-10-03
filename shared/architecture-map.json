@@ -92,7 +92,9 @@
         "foundation",
         "domain",
         "client"
-      ]
+      ],
+      "checkFromPhase": 4,
+      "note": "macos/Bromelia and windows/src/Bromelia.App hold today's apps until phase 4 replaces them."
     }
   },
   "modules": {
