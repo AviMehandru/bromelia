@@ -1,0 +1,7 @@
+tool: mkvmerge
+note: title_t01.mkv lasts 3 s instead of the listed 20 s; the others match.
+rules:
+  - when: {command: "-J", file: "*title_t01.mkv"}
+    probe: {"*": {durationSeconds: 3, tracks: [video, audio], chapters: 0}}
+  - when: {command: "-J"}
+    matchListing: true

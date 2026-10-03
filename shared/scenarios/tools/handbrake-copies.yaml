@@ -1,0 +1,6 @@
+tool: HandBrakeCLI
+note: Copies -i to -o and prints a progress line.
+rules:
+  - when: {}
+    print: ["Encoding: task 1 of 1, 50.00 %"]
+    write: [{path: "{output}", copyOf: input}]

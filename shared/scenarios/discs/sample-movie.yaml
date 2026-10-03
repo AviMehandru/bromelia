@@ -1,0 +1,5 @@
+volume: SAMPLE_MOVIE
+type: bluray
+titles:
+  - {duration: "0:00:10", source: 1}
+  - {duration: "0:00:20", source: 2}

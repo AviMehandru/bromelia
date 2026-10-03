@@ -1,0 +1,8 @@
+tool: makemkvcon
+note: The mkv command prints the recorded run shared/fixtures/rip-failure.txt and exits with 0 (shared/fixtures/rip-outcomes.json).
+rules:
+  - when: {command: info}
+    print: [listing]
+  - when: {command: mkv}
+    print: ["fixture:rip-failure.txt"]
+    exit: 0

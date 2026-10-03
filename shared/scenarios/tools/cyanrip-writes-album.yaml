@@ -1,0 +1,5 @@
+tool: cyanrip
+note: Writes one track into an album folder in its working directory; the file holds the device it was given.
+rules:
+  - when: {}
+    write: [{path: "Artist - Album/01 - Track.flac", content: "{device}"}]

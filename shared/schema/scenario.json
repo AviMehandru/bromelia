@@ -1,0 +1,1947 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.bromelia.invalid/scenario.json",
+  "title": "Shared scenario",
+  "description": "The format of shared/scenarios/*.yaml (README.md explains the semantics). $defs Disc and ToolScript are the formats of discs/*.yaml and tools/*.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "from": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "realDisc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "env"
+      ]
+    },
+    "platforms": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "macos",
+          "windows",
+          "linux"
+        ]
+      }
+    },
+    "replaces": {
+      "type": "string"
+    },
+    "given": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "type": "string"
+        },
+        "configPatch": {
+          "type": "object"
+        },
+        "profile": {
+          "type": "object"
+        },
+        "disc": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/Disc"
+            }
+          ]
+        },
+        "drives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "identification": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              },
+              "disc": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/Disc"
+                  }
+                ]
+              },
+              "configured": {
+                "type": "boolean"
+              },
+              "makemkvIndex": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "seed": {
+                    "type": "integer"
+                  },
+                  "descriptor": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "folder": {
+                "type": "string"
+              },
+              "fingerprint": {
+                "$ref": "common.json#/$defs/Fingerprint"
+              },
+              "status": {
+                "$ref": "common.json#/$defs/UnitStatus"
+              },
+              "record": {
+                "enum": [
+                  2,
+                  3
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "$ref": "common.json#/$defs/MediaKind"
+              },
+              "label": {
+                "type": "string"
+              },
+              "season": {
+                "type": "integer"
+              },
+              "part": {
+                "type": "integer"
+              },
+              "volume": {
+                "type": "integer"
+              },
+              "disc": {
+                "type": "integer"
+              },
+              "episodes": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "archivedAt": {
+                "$ref": "common.json#/$defs/Day"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "inCatalogue": {
+                "type": "boolean"
+              },
+              "library": {
+                "type": "string"
+              },
+              "fingerprintOf": {
+                "description": "The fingerprint of this disc (a name in discs/ or an inline disc).",
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/Disc"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "folder"
+            ]
+          }
+        },
+        "libraries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "marker": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "path"
+            ]
+          }
+        },
+        "http": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "status": {
+                "type": "integer"
+              },
+              "file": {
+                "type": "string"
+              },
+              "body": {},
+              "headers": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "url"
+            ]
+          }
+        },
+        "clock": {
+          "$ref": "common.json#/$defs/Instant"
+        },
+        "platform": {
+          "enum": [
+            "macos",
+            "windows",
+            "linux"
+          ]
+        },
+        "freeBytes": {
+          "type": "integer"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rip": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "iso": {
+                    "const": true
+                  },
+                  "drive": {
+                    "type": "string"
+                  },
+                  "folder": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string"
+                  },
+                  "session": {
+                    "type": "string"
+                  },
+                  "titles": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "mode": {
+                    "$ref": "common.json#/$defs/VideoMode"
+                  },
+                  "automatic": {
+                    "type": "boolean"
+                  },
+                  "profile": {
+                    "type": "string"
+                  },
+                  "tracks": {
+                    "type": "object"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "rip"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "open": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "iso": {
+                    "const": true
+                  },
+                  "drive": {
+                    "type": "string"
+                  },
+                  "folder": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "open"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "choose": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  },
+                  "titles": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "tracks": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "names": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "$ref": "common.json#/$defs/MediaKind"
+                  },
+                  "year": {
+                    "type": "integer"
+                  },
+                  "onlineId": {
+                    "type": "string"
+                  },
+                  "firstEpisode": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "session"
+                ]
+              }
+            },
+            "required": [
+              "choose"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "insert": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "drive": {
+                    "type": "string"
+                  },
+                  "disc": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/Disc"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "drive",
+                  "disc"
+                ]
+              }
+            },
+            "required": [
+              "insert"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "remove": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "drive": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "drive"
+                ]
+              }
+            },
+            "required": [
+              "remove"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "openTray": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "drive": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "drive"
+                ]
+              }
+            },
+            "required": [
+              "openTray"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "eject": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "drive": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "drive"
+                ]
+              }
+            },
+            "required": [
+              "eject"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "closeTray": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "drive": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "drive"
+                ]
+              }
+            },
+            "required": [
+              "closeTray"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cancel": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "cancel"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "retry": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "job": {
+                    "type": "string"
+                  },
+                  "drive": {
+                    "type": "string"
+                  },
+                  "fromStep": {
+                    "$ref": "common.json#/$defs/StepKind"
+                  },
+                  "titles": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "makemkvSettings": {
+                    "type": "object"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "job"
+                ]
+              }
+            },
+            "required": [
+              "retry"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "decide": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "job": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "job",
+                  "answer"
+                ]
+              }
+            },
+            "required": [
+              "decide"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "move": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "job": {
+                    "type": "string"
+                  },
+                  "by": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "job",
+                  "by"
+                ]
+              }
+            },
+            "required": [
+              "move"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "startNow": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "startNow"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "verify": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "library": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "all": {
+                    "type": "boolean"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "verify"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rescan": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "library": {
+                    "type": "string"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "library"
+                ]
+              }
+            },
+            "required": [
+              "rescan"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "repair": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "unit": {
+                    "type": "string"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "unit"
+                ]
+              }
+            },
+            "required": [
+              "repair"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "advance": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "advance"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kill": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "at": {
+                    "type": "string",
+                    "pattern": "^(beforeStep|afterStep|inStep):[a-zA-Z]+$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$"
+                  }
+                },
+                "required": [
+                  "at"
+                ]
+              }
+            },
+            "required": [
+              "kill"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "restart": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {}
+              }
+            },
+            "required": [
+              "restart"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "unmount": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "unmount"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "mount": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mount"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "write": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "bytes": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            },
+            "required": [
+              "write"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "flip": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "byte": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "path",
+                  "byte"
+                ]
+              }
+            },
+            "required": [
+              "flip"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "delete": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "delete"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "config": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "tools": {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "tools"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "api": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "PATCH",
+                      "DELETE"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "body": {},
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "transport": {
+                    "enum": [
+                      "socket",
+                      "tcp"
+                    ]
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "method",
+                  "path"
+                ]
+              }
+            },
+            "required": [
+              "api"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "wait": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "job": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "$ref": "common.json#/$defs/JobState"
+                  },
+                  "outcome": {
+                    "$ref": "common.json#/$defs/Outcome"
+                  },
+                  "step": {
+                    "$ref": "common.json#/$defs/StepKind"
+                  },
+                  "event": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "wait"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "attachLibrary": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            },
+            "required": [
+              "attachLibrary"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "swapDisc"
+            ],
+            "properties": {
+              "swapDisc": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/Disc"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "testStep"
+            ],
+            "properties": {
+              "testStep": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "step",
+                  "unit"
+                ],
+                "properties": {
+                  "step": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cancelCountdown"
+            ],
+            "properties": {
+              "cancelCountdown": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "drive"
+                ],
+                "properties": {
+                  "drive": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "testNotification"
+            ],
+            "properties": {
+              "testNotification": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mounted"
+            ],
+            "properties": {
+              "mounted": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "drive"
+                ],
+                "properties": {
+                  "drive": {
+                    "type": "string"
+                  },
+                  "after": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "expect": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "job": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "$ref": "common.json#/$defs/JobState"
+                      },
+                      "outcome": {
+                        "$ref": "common.json#/$defs/Outcome"
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "code": {
+                            "$ref": "common.json#/$defs/MessageCode"
+                          },
+                          "params": {
+                            "type": "object"
+                          },
+                          "cause": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "code"
+                        ]
+                      },
+                      "blockedBy": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "code": {
+                            "$ref": "common.json#/$defs/MessageCode"
+                          },
+                          "params": {
+                            "type": "object"
+                          },
+                          "cause": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "code"
+                        ]
+                      },
+                      "decision": {
+                        "type": "object"
+                      },
+                      "mode": {
+                        "$ref": "common.json#/$defs/RipMode"
+                      },
+                      "kind": {
+                        "$ref": "common.json#/$defs/JobKind"
+                      },
+                      "unit": {
+                        "type": "object"
+                      },
+                      "counts": {
+                        "type": "object"
+                      },
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "common.json#/$defs/StepKind"
+                        }
+                      },
+                      "titles": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        }
+                      },
+                      "parent": {
+                        "type": "string"
+                      },
+                      "queue": {
+                        "$ref": "common.json#/$defs/Queue"
+                      },
+                      "automatic": {
+                        "type": "boolean"
+                      },
+                      "noError": {
+                        "type": "boolean"
+                      },
+                      "errorText": {
+                        "description": "A substring of the job's error rendered in English.",
+                        "type": "string"
+                      },
+                      "files": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  "jobs": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "count": {
+                        "type": "integer"
+                      },
+                      "outcomes": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "common.json#/$defs/Outcome"
+                        }
+                      },
+                      "states": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "common.json#/$defs/JobState"
+                        }
+                      },
+                      "kinds": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "common.json#/$defs/JobKind"
+                        }
+                      }
+                    }
+                  },
+                  "files": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "exactly": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "include": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "exclude": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "under": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "file": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "contains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "excludes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "json": {},
+                      "sha256": {
+                        "type": "string"
+                      },
+                      "exists": {
+                        "type": "boolean"
+                      },
+                      "sameAsDisc": {
+                        "description": "The file's bytes are the disc image's (data discs).",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  },
+                  "sums": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "folder": {
+                        "type": "string"
+                      },
+                      "ok": {
+                        "type": "boolean"
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "folder"
+                    ]
+                  },
+                  "record": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "folder": {
+                        "type": "string"
+                      },
+                      "json": {
+                        "description": "A subset match: every key given must be equal (recursively; lists must match exactly unless the key is listed in the README).",
+                        "type": "object"
+                      },
+                      "job": {
+                        "type": "string"
+                      }
+                    },
+                    "required": []
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "job": {
+                        "type": "string"
+                      },
+                      "json": {
+                        "description": "A subset match: every key given must be equal (recursively; lists must match exactly unless the key is listed in the README).",
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "job"
+                    ]
+                  },
+                  "transcript": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "job": {
+                        "type": "string"
+                      },
+                      "runs": {
+                        "type": "integer"
+                      },
+                      "contains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "job"
+                    ]
+                  },
+                  "debugLog": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "job": {
+                        "type": "string"
+                      },
+                      "order": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "runs": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "job"
+                    ]
+                  },
+                  "calls": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        },
+                        "include": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "exclude": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "none": {
+                          "type": "boolean"
+                        },
+                        "counts": {
+                          "description": "Substring → how many command lines contain it.",
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "log": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "job": {
+                        "type": "string"
+                      },
+                      "include": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "exclude": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "job"
+                    ]
+                  },
+                  "events": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "include": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "type"
+                          ]
+                        }
+                      },
+                      "sequence": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "exclude": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "problems": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "active": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "none": {
+                        "type": "boolean"
+                      },
+                      "cleared": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "drives": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id"
+                      ]
+                    }
+                  },
+                  "session": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  "db": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "power": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "held": {
+                        "type": "boolean"
+                      },
+                      "changes": {
+                        "type": "array",
+                        "items": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  },
+                  "notifications": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "count": {
+                        "type": "integer"
+                      },
+                      "sent": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  },
+                  "response": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "as": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "integer"
+                      },
+                      "json": {},
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "code": {
+                            "$ref": "common.json#/$defs/MessageCode"
+                          },
+                          "params": {
+                            "type": "object"
+                          },
+                          "cause": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "code"
+                        ]
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "as"
+                    ]
+                  },
+                  "config": {
+                    "description": "A subset match: every key given must be equal (recursively; lists must match exactly unless the key is listed in the README).",
+                    "type": "object"
+                  },
+                  "when": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "job": {
+                        "type": "string"
+                      },
+                      "step": {
+                        "$ref": "common.json#/$defs/StepKind"
+                      },
+                      "state": {
+                        "$ref": "common.json#/$defs/JobState"
+                      },
+                      "event": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "note": {
+                    "type": "string",
+                    "description": "Why this expectation matters, for the reader."
+                  }
+                }
+              }
+            },
+            "required": [
+              "expect"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "title",
+    "steps"
+  ],
+  "$defs": {
+    "Disc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "volume": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "dvd",
+            "bluray",
+            "uhd",
+            "hddvd"
+          ]
+        },
+        "listing": {
+          "type": "string"
+        },
+        "titles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "duration": {
+                "type": "string"
+              },
+              "source": {
+                "type": "integer"
+              },
+              "size": {
+                "type": "integer"
+              },
+              "chapters": {
+                "type": "integer"
+              },
+              "segments": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "duration",
+              "source"
+            ]
+          }
+        },
+        "content": {
+          "$ref": "common.json#/$defs/DiscContent"
+        },
+        "videoTs": {
+          "type": "string"
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "type": "integer"
+            },
+            "seed": {
+              "type": "integer"
+            },
+            "iso9660": {
+              "type": "boolean"
+            },
+            "badSectors": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    },
+    "ToolScript": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "when": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "argsInclude": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "file": {
+                    "type": "string"
+                  }
+                }
+              },
+              "print": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "writeTitles": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "titles": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "write": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "copyOf": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                }
+              },
+              "writeIso": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "descriptor": {
+                    "enum": [
+                      "CD001",
+                      "BEA01",
+                      "none"
+                    ]
+                  }
+                }
+              },
+              "writeFolder": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "writeDebugLog": {
+                "type": "string"
+              },
+              "silence": {
+                "type": "number"
+              },
+              "ignore": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "exit": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "const": "never"
+                  }
+                ]
+              },
+              "probe": {
+                "type": "object"
+              },
+              "matchListing": {
+                "type": "boolean"
+              },
+              "chapters": {
+                "type": "object"
+              },
+              "stderr": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "rules"
+      ]
+    },
+    "Lines": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+tool: makemkvcon
+rules:
+  - when: {command: info}
+    print: [libreDrive, listing]
+  - when: {command: mkv}
+    writeTitles: {content: "mkv data"}
+    print: [saved]

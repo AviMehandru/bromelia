@@ -1,0 +1,9 @@
+tool: makemkvcon
+note: The rip prints its first line and then nothing (a stuck drive); it ignores SIGINT and ends on SIGTERM.
+rules:
+  - when: {command: info}
+    print: [listing]
+  - when: {command: mkv}
+    print: ["PRGT:5018,0,\"Saving to MKV file\""]
+    silence: 86400
+    exit: never

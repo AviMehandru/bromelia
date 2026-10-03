@@ -576,7 +576,11 @@ def check_messages():
     for p in sorted(list(SHARED.rglob("*.json")) + list(SHARED.rglob("*.yaml"))):
         if p.parent == SHARED / "messages" or "catalog" in p.parts or "web" in p.parts:
             continue
-        doc = load_yaml(p) if p.suffix == ".yaml" else load_json(p)
+        try:
+            doc = load_yaml(p) if p.suffix == ".yaml" else load_json(p)
+        except (yaml.YAMLError, json.JSONDecodeError) as e:
+            R.error(f"{rel(p)}: {str(e).splitlines()[0]}")
+            continue
         for code in _codes_in(doc):
             R.check(code in codes, f"{rel(p)}: unknown message code {code}")
 
@@ -743,6 +747,146 @@ def check_db():
             pass
 
 
+# ---- scenarios -------------------------------------------------------------------
+
+SCEN = SHARED / "scenarios"
+
+
+def scenario_files():
+    return sorted(p for p in SCEN.glob("*.yaml"))
+
+
+def check_scenarios():
+    lines = load_yaml(SCEN / "tools" / "lines.yaml")
+    validate(lines, "scenario.json", "Lines", what="tools/lines.yaml")
+    discs = {}
+    for p in sorted((SCEN / "discs").glob("*.yaml")):
+        d = load_yaml(p)
+        validate(d, "scenario.json", "Disc", what=rel(p))
+        _check_disc(d, rel(p))
+        discs[p.stem] = d
+    tools = {}
+    for p in sorted((SCEN / "tools").glob("*.yaml")):
+        if p.name == "lines.yaml":
+            continue
+        t = load_yaml(p)
+        validate(t, "scenario.json", "ToolScript", what=rel(p))
+        tools[f"tools/{p.name}"] = t
+        for rule in t.get("rules", []):
+            for line in rule.get("print", []):
+                _check_print(line, lines, rel(p))
+    codes = message_codes()
+    used_tools, used_discs = set(), set()
+    for p in scenario_files():
+        what = rel(p)
+        try:
+            sc = load_yaml(p)
+        except yaml.YAMLError as e:
+            R.error(f"{what}: {' '.join(str(e).split())[:200]}")
+            continue
+        if not validate(sc, "scenario.json", what=what):
+            continue
+        given = sc.get("given", {})
+        for disc in _discs_in(sc):
+            if isinstance(disc, str):
+                R.check(disc in discs, f"{what}: no disc {disc} in discs/")
+                used_discs.add(disc)
+            else:
+                _check_disc(disc, what)
+        for tool, script in list(given.get("tools", {}).items()) + [kv for st in sc["steps"] if "tools" in st for kv in st["tools"].items()]:
+            if script is not None:
+                R.check(script in tools, f"{what}: no tool script {script}")
+                used_tools.add(script)
+        if "config" in given:
+            R.check((FIXTURES / "config" / given["config"]).exists(), f"{what}: no config {given['config']}")
+        for f in given.get("http", []):
+            if "file" in f:
+                R.check((FIXTURES / "lookup" / f["file"]).exists() or (FIXTURES / f["file"]).exists(), f"{what}: no fixture {f['file']}")
+        names = {"job": set(), "session": set()}
+        for st in sc["steps"]:
+            (action, arg), = st.items()
+            if isinstance(arg, dict) and "as" in arg:
+                names["session" if action == "open" else "job"].add(arg["as"])
+            if action == "expect":
+                _check_expect(arg, names, codes, what)
+            elif action in ("cancel", "startNow"):
+                R.check(arg in names["job"], f"{what}: {action} names the unknown job {arg}")
+            elif action in ("retry", "decide", "move") or (action == "wait" and "job" in arg):
+                R.check(arg["job"] in names["job"], f"{what}: {action} names the unknown job {arg['job']}")
+            elif action == "choose" or (action == "rip" and "session" in arg):
+                R.check(arg["session"] in names["session"], f"{what}: {action} names the unknown session {arg['session']}")
+        for f in sc.get("from", []):
+            m = re.match(r"^(docs/[\w.-]+\.md|README\.md|shared/fixtures/[\w./-]+)", f)
+            if m:
+                R.check((ROOT / m.group(1)).exists(), f"{what}: from {f}: no such file")
+    for t in sorted(set(tools) - used_tools - {"tools/makemkvcon-saves.yaml"}):
+        R.error(f"{t} isn't used by any scenario")
+    for d in sorted(set(discs) - used_discs):
+        R.error(f"discs/{d}.yaml isn't used by any scenario")
+
+
+def _check_disc(d, what):
+    R.check(("listing" in d) != ("titles" in d) or d.get("content") in ("audio", "data", "blank"),
+            f"{what}: a disc has either a listing or titles")
+    if "listing" in d:
+        R.check((FIXTURES / d["listing"]).exists(), f"{what}: no fixture {d['listing']}")
+    if "videoTs" in d:
+        R.check((FIXTURES / d["videoTs"]).is_dir(), f"{what}: no fixture folder {d['videoTs']}")
+
+
+def _check_print(line, lines, what):
+    if line == "listing" or ":" in line and line.split(":")[0].isupper() or line.startswith("PRG") or line.startswith("Encoding") or " " in line:
+        return
+    if line.startswith("fixture:"):
+        R.check((FIXTURES / line[8:]).exists(), f"{what}: no fixture {line[8:]}")
+        return
+    R.check(line in lines, f"{what}: no line {line} in tools/lines.yaml")
+
+
+def _discs_in(sc):
+    g = sc.get("given", {})
+    if "disc" in g:
+        yield g["disc"]
+    for d in g.get("drives", []):
+        if "disc" in d:
+            yield d["disc"]
+    for st in sc["steps"]:
+        if "insert" in st:
+            yield st["insert"]["disc"]
+        if "swapDisc" in st:
+            yield st["swapDisc"]
+
+
+def _check_expect(ex, names, codes, what):
+    def code(c, where):
+        R.check(c in codes, f"{what}: {where}: unknown code {c}")
+    for key in ("job",):
+        if key in ex:
+            R.check(ex[key]["name"] in names["job"], f"{what}: expect names the unknown job {ex[key]['name']}")
+    if "job" in ex:
+        for k in ("error", "blockedBy"):
+            if k in ex["job"]:
+                for c in _codes_in({"code": ex["job"][k]["code"], "params": ex["job"][k].get("params", {})}):
+                    code(c, f"job.{k}")
+    if "log" in ex:
+        R.check(ex["log"]["job"] in names["job"], f"{what}: log names the unknown job {ex['log']['job']}")
+        for c in ex["log"].get("include", []) + ex["log"].get("exclude", []):
+            code(c, "log")
+    for c in ex.get("problems", {}).get("active", []) + ex.get("problems", {}).get("cleared", []):
+        code(c, "problems")
+    if "session" in ex:
+        R.check(ex["session"]["name"] in names["session"], f"{what}: expect names the unknown session {ex['session']['name']}")
+    for k in ("manifest", "transcript", "debugLog"):
+        if k in ex:
+            R.check(ex[k]["job"] in names["job"], f"{what}: {k} names the unknown job {ex[k]['job']}")
+    if "when" in ex and "job" in ex["when"]:
+        R.check(ex["when"]["job"] in names["job"], f"{what}: when names the unknown job {ex['when']['job']}")
+    for c in _codes_in(ex.get("response", {})):
+        code(c, "response")
+    for c in _codes_in(ex.get("job", {}).get("decision", {})):
+        code(c, "decision")
+
+
 SECTIONS = {
     "schemas": check_schemas,
     "config": check_config,
@@ -750,6 +894,7 @@ SECTIONS = {
     "documents": check_documents,
     "api": check_api,
     "db": check_db,
+    "scenarios": check_scenarios,
     "fixtures": check_fixtures,
 }
 

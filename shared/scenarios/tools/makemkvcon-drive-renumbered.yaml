@@ -1,0 +1,9 @@
+tool: makemkvcon
+note: During a backup, MakeMKV's drive 0 turns out to be another device.
+rules:
+  - when: {command: info}
+    print: [listing]
+  - when: {command: backup}
+    print: [driveRenumbered]
+    silence: 60
+    exit: never

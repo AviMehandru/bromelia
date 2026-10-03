@@ -1,0 +1,5 @@
+tool: makemkvcon
+note: A file MakeMKV can't open as a disc.
+rules:
+  - when: {command: info}
+    print: ['MSG:5010,0,0,"Failed to open disc","Failed to open disc"', "TCOUNT:0"]

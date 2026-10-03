@@ -1,0 +1,11 @@
+tool: makemkvcon
+note: Every title leaves a partial file; title 1 fails, the others are saved.
+rules:
+  - when: {command: info}
+    print: [listing]
+  - when: {command: mkv, title: "1"}
+    writeTitles: {content: partial}
+    print: [failedSave, failedSummary]
+  - when: {command: mkv}
+    writeTitles: {content: partial}
+    print: [saved]

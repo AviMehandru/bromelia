@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "libraries": [
+    {
+      "id": "lib",
+      "name": "Library",
+      "path": "{root}/library"
+    }
+  ],
+  "automation": {
+    "pollIntervalSeconds": 0,
+    "defaults": {
+      "ripOnInsert": false,
+      "delaySeconds": 10,
+      "ejectWhenDone": false,
+      "ejectOnFailure": false,
+      "waitForMountSeconds": 0,
+      "alreadyArchived": "skip",
+      "desktopNotification": false,
+      "playSound": false
+    }
+  },
+  "profiles": [
+    {
+      "id": "default",
+      "name": "Test profile"
+    }
+  ]
+}

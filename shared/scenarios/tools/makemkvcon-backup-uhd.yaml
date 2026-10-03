@@ -1,0 +1,8 @@
+tool: makemkvcon
+note: No listing (so the format is unknown before the backup); the backup's index.bdmv says UHD.
+rules:
+  - when: {command: info}
+    print: [failedToOpen, "TCOUNT:0"]
+  - when: {command: backup}
+    writeFolder: {"BDMV/index.bdmv": "INDX0300xxxxxxxx"}
+    print: [saved]

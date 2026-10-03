@@ -1,0 +1,8 @@
+tool: makemkvcon
+note: The mkv command prints the recorded run shared/fixtures/rip-missing-source.txt and exits with 11 (shared/fixtures/rip-outcomes.json).
+rules:
+  - when: {command: info}
+    print: [listing]
+  - when: {command: mkv}
+    print: ["fixture:rip-missing-source.txt"]
+    exit: 11
