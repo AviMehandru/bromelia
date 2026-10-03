@@ -1273,6 +1273,10 @@
             "type": "integer",
             "minimum": 0
           }
+        },
+        "outputFolder": {
+          "description": "A one-off output folder for this rip. It must be a library's folder; otherwise the answer is 409 library.notAttached, and the UI offers to attach it (POST /v1/libraries) and rips again.",
+          "$ref": "../common.json#/$defs/Path"
         }
       }
     },

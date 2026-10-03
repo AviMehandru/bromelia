@@ -3294,6 +3294,28 @@
           "c": "bro_tmdb_requests_season"
         },
         {
+          "name": "TmdbRequests.episodeGroups",
+          "params": [
+            "tmdbId",
+            "key"
+          ],
+          "returns": "HttpRequestSpec",
+          "swift": "TmdbRequests.episodeGroups(_:key:)",
+          "cs": "TmdbRequests.EpisodeGroups",
+          "c": "bro_tmdb_requests_episode_groups"
+        },
+        {
+          "name": "TmdbRequests.episodeGroup",
+          "params": [
+            "groupId",
+            "key"
+          ],
+          "returns": "HttpRequestSpec",
+          "swift": "TmdbRequests.episodeGroup(_:key:)",
+          "cs": "TmdbRequests.EpisodeGroup",
+          "c": "bro_tmdb_requests_episode_group"
+        },
+        {
           "name": "TmdbParse.candidates",
           "params": [
             "bytes",
@@ -3324,6 +3346,28 @@
           "swift": "TmdbParse.season(_:)",
           "cs": "TmdbParse.Season",
           "c": "bro_tmdb_parse_season"
+        },
+        {
+          "name": "TmdbParse.absoluteGroup",
+          "params": [
+            "bytes"
+          ],
+          "returns": "String?",
+          "doc": "The id of the show's absolute-order episode group (type 2).",
+          "swift": "TmdbParse.absoluteGroup(_:)",
+          "cs": "TmdbParse.AbsoluteGroup",
+          "c": "bro_tmdb_parse_absolute_group"
+        },
+        {
+          "name": "TmdbParse.absoluteEpisodes",
+          "params": [
+            "bytes"
+          ],
+          "returns": "[Int: EpisodeDetails]",
+          "doc": "metadata.absoluteEpisodes.",
+          "swift": "TmdbParse.absoluteEpisodes(_:)",
+          "cs": "TmdbParse.AbsoluteEpisodes",
+          "c": "bro_tmdb_parse_absolute_episodes"
         },
         {
           "name": "OmdbRequests.search",

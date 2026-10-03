@@ -351,6 +351,9 @@
                   },
                   "as": {
                     "type": "string"
+                  },
+                  "outputFolder": {
+                    "type": "string"
                   }
                 }
               }
@@ -1137,6 +1140,18 @@
                     "type": "number"
                   }
                 }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "keepApart"
+            ],
+            "properties": {
+              "keepApart": {
+                "type": "string"
               }
             }
           },

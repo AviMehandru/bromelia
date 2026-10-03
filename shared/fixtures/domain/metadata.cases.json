@@ -11,7 +11,11 @@
     "OmdbParse.candidates",
     "Ranking.rank",
     "OnlineId.parse",
-    "OnlineId.splitYear"
+    "OnlineId.splitYear",
+    "TmdbRequests.episodeGroups",
+    "TmdbRequests.episodeGroup",
+    "TmdbParse.absoluteGroup",
+    "TmdbParse.absoluteEpisodes"
   ],
   "description": "Online lookup requests (pure specs: method, URL, headers; the key never on a command line) and answers. shared/fixtures/lookup/expected.json holds the recorded answers' cases.",
   "cases": [
@@ -305,6 +309,63 @@
       },
       "expect": {
         "asInFixture": true
+      }
+    },
+    {
+      "id": "tmdb-episode-groups",
+      "from": "rearchitecture-plan §30 decision 5; owner decision 2026-10-03 (metadata.absoluteEpisodes)",
+      "given": {
+        "provider": "tmdb",
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "episodeGroups": {
+          "tmdbId": 37854
+        }
+      },
+      "expect": {
+        "path": "/3/tv/37854/episode_groups"
+      }
+    },
+    {
+      "id": "tmdb-episode-group",
+      "from": "rearchitecture-plan §30 decision 5; owner decision 2026-10-03 (metadata.absoluteEpisodes)",
+      "given": {
+        "provider": "tmdb",
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "episodeGroup": {
+          "id": "5b1e8e1f0e0a2631c9000002"
+        }
+      },
+      "expect": {
+        "path": "/3/tv/episode_group/5b1e8e1f0e0a2631c9000002"
+      }
+    },
+    {
+      "id": "absolute-group-chosen",
+      "from": "rearchitecture-plan §30 decision 5; owner decision 2026-10-03 (metadata.absoluteEpisodes)",
+      "given": {
+        "file": "scenario-http/tmdb-episode-groups-one-piece.json"
+      },
+      "expect": {
+        "groupId": "5b1e8e1f0e0a2631c9000002",
+        "rule": "The first group of type 2 (TMDb's 'absolute' order); none = no absolute order."
+      }
+    },
+    {
+      "id": "absolute-episodes",
+      "from": "rearchitecture-plan §30 decision 5; owner decision 2026-10-03 (metadata.absoluteEpisodes)",
+      "given": {
+        "file": "scenario-http/tmdb-episode-group-absolute.json",
+        "wanted": [
+          138,
+          139
+        ]
+      },
+      "expect": {
+        "titles": {
+          "138": "Absolute episode 138 (fixture)",
+          "139": "Absolute episode 139 (fixture)"
+        },
+        "rule": "The absolute number is the episode's place across the groups in order (groups by order, episodes by order), counting from 1."
       }
     }
   ]

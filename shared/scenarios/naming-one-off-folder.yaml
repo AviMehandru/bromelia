@@ -1,0 +1,23 @@
+title: Ripping into a one-off folder that isn't a library is refused until it is attached (with its marker); then the rip goes there
+from:
+  - README.md (pick a one-off output folder)
+  - owner decision 2026-10-03 (picking a folder offers to use it as a library)
+  - rearchitecture-plan §22.1 I2
+given:
+  disc: sample-movie-one-title
+  files: {"OneOff/readme.txt": "a folder on another disk"}
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [0]}
+  - api: {method: POST, path: "/v1/sessions/{sessionId:disc}/rip", body: {outputFolder: "{root}/OneOff"}, headers: {X-Bromelia: "1"}, as: refused}
+  - expect:
+      response: {as: refused, status: 409, error: {code: library.notAttached}}
+      jobs: {count: 0}
+      file: {path: OneOff/.bromelia-library, exists: false}
+  - attachLibrary: {path: "{root}/OneOff", name: One-off, as: attached}
+  - api: {method: POST, path: "/v1/sessions/{sessionId:disc}/rip", body: {outputFolder: "{root}/OneOff"}, headers: {X-Bromelia: "1"}, as: rip}
+  - expect:
+      response: {as: rip, status: 201}
+      files: {under: OneOff, include: [".bromelia-library", "readme.txt", "Sample Movie/SHA256SUMS"]}
+  - expect:
+      files: {under: library, exactly: []}

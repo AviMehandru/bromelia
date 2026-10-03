@@ -729,14 +729,14 @@
       "plan": "§7.1"
     },
     {
-      "what": "Unfinished jobs aren't written to unfinished-<pid>.json and turned into history records: jobs are in the database from creation, and RecoveryService requeues, resumes or interrupts them after a restart. An interrupted rip's staging is kept (hidden, listed with the job) instead of being renamed to a visible 'INCOMPLETE - <id>' folder.",
+      "what": "Unfinished jobs aren't written to unfinished-<pid>.json and turned into history records: jobs are in the database from creation, and RecoveryService requeues, resumes or interrupts them after a restart. An interrupted rip's files stay in hidden staging while it can be continued (retry); if you choose not to (keepApart), they move to _Quarantine/<name> [INCOMPLETE] with a note, visible like today's 'INCOMPLETE - <id>' folder.",
       "tests": [
         "macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop",
         "windows ReliabilityTests.UnfinishedJobsAreRecordedAfterAStop",
         "linux /reliability/unfinished-jobs"
       ],
-      "now": "scenario:recovery-interrupted-during-acquire",
-      "plan": "§20.4, §15.8"
+      "now": "scenario:recovery-interrupted-kept-apart",
+      "plan": "§20.4, §15.8; owner decision 2026-10-03"
     },
     {
       "what": "Files that aren't a finished archive go to <library>/_Quarantine/<name> [READ ERRORS] or [INCOMPLETE] instead of a sibling '<folder> [INCOMPLETE]' or an 'INCOMPLETE - <job8>' subfolder of a shared folder.",
@@ -839,6 +839,12 @@
       ],
       "now": "fixture:host/service-installer.cases.json#launch-agent",
       "plan": "§7.1"
+    },
+    {
+      "what": "A one-off output folder must be a library: picking one that isn't offers to attach it (writing its marker), then the rip goes there.",
+      "tests": [],
+      "now": "scenario:naming-one-off-folder",
+      "plan": "§22.1 I2; owner decision 2026-10-03"
     }
   ],
   "docs": [
@@ -1656,6 +1662,24 @@
         "ci:windows-screenshots",
         "ci:playwright",
         "ci:docker-smoke-test"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Features",
+      "behaviour": "Pick a one-off output folder",
+      "covered": [
+        "scenario:naming-one-off-folder"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "Limitations",
+      "behaviour": "A disc numbered across seasons gets episode titles only when the season lists those numbers (or, with metadata.absoluteEpisodes, from TMDb's absolute order)",
+      "covered": [
+        "scenario:metadata-season-missing-numbers",
+        "scenario:metadata-absolute-episode-titles",
+        "fixture:domain/metadata.cases.json#absolute-episodes"
       ]
     }
   ]

@@ -5,25 +5,40 @@
   "description": "config.json (0600), owned by ConfigService (plan §24). The same document on every platform. Decoders ignore unknown keys (ConfigValidator reports each as the warning config.unknownKey) and fill missing keys with the defaults given here; shared/fixtures/config/config3-defaults.json is the fully expanded default document. Secrets are never stored here: fields that hold one take a SecretRef. Version 1 and 2 files are upgraded by ConfigMigration (shared/schema/config-migration-2-3.json).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version"],
+  "required": [
+    "version"
+  ],
   "properties": {
-    "version": { "const": 3 },
+    "version": {
+      "const": 3
+    },
     "libraries": {
       "description": "Where archives are committed. A library is online only while its marker (.bromelia-library) is present; Bromelia never creates a library root (invariant I2).",
       "type": "array",
       "default": [],
-      "items": { "$ref": "#/$defs/Library" }
+      "items": {
+        "$ref": "#/$defs/Library"
+      }
     },
     "defaultLibrary": {
       "description": "The library of profiles that don't name one. null = the first library.",
-      "oneOf": [{ "$ref": "common.json#/$defs/EntryId" }, { "type": "null" }],
+      "oneOf": [
+        {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        {
+          "type": "null"
+        }
+      ],
       "default": null
     },
     "targets": {
       "description": "Replica destinations (backlog 2). First version: local and mounted paths only.",
       "type": "array",
       "default": [],
-      "items": { "$ref": "#/$defs/Target" }
+      "items": {
+        "$ref": "#/$defs/Target"
+      }
     },
     "defaultProfile": {
       "description": "The profile of drives without one, of ISO images and folders, and the base every other profile is resolved over.",
@@ -33,72 +48,154 @@
     "profiles": {
       "description": "Replace drive configurations and presets. A profile lists only what differs from the defaults; ProfileResolver.resolve layers defaults → default profile → the drive's profile → drive overrides → matching rules → session choices.",
       "type": "array",
-      "default": [{ "id": "default", "name": "Default" }],
-      "items": { "$ref": "#/$defs/Profile" }
+      "default": [
+        {
+          "id": "default",
+          "name": "Default"
+        }
+      ],
+      "items": {
+        "$ref": "#/$defs/Profile"
+      }
     },
     "drives": {
       "description": "Physical drives with settings of their own. Drives without an entry use the default profile and automation.defaults.",
       "type": "array",
       "default": [],
-      "items": { "$ref": "#/$defs/Drive" }
+      "items": {
+        "$ref": "#/$defs/Drive"
+      }
     },
     "steps": {
       "description": "Post-processing steps. Profiles and rules refer to them by id.",
       "type": "array",
       "default": [],
-      "items": { "$ref": "#/$defs/Step" }
+      "items": {
+        "$ref": "#/$defs/Step"
+      }
     },
     "rules": {
       "description": "when → then, applied in order after the disc is identified. Replace plugins and matchName / matchFormats.",
       "type": "array",
       "default": [],
-      "items": { "$ref": "#/$defs/Rule" }
+      "items": {
+        "$ref": "#/$defs/Rule"
+      }
     },
-    "automation": { "$ref": "#/$defs/Automation" },
-    "limits": { "$ref": "#/$defs/Limits" },
-    "power": { "$ref": "#/$defs/Power" },
-    "maintenance": { "$ref": "#/$defs/Maintenance" },
-    "makemkv": { "$ref": "#/$defs/Makemkv" },
-    "tools": { "$ref": "#/$defs/Tools" },
-    "metadata": { "$ref": "#/$defs/Metadata" },
-    "notifications": { "$ref": "#/$defs/Notifications" },
-    "server": { "$ref": "#/$defs/Server" },
-    "updates": { "$ref": "#/$defs/Updates" }
+    "automation": {
+      "$ref": "#/$defs/Automation"
+    },
+    "limits": {
+      "$ref": "#/$defs/Limits"
+    },
+    "power": {
+      "$ref": "#/$defs/Power"
+    },
+    "maintenance": {
+      "$ref": "#/$defs/Maintenance"
+    },
+    "makemkv": {
+      "$ref": "#/$defs/Makemkv"
+    },
+    "tools": {
+      "$ref": "#/$defs/Tools"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "notifications": {
+      "$ref": "#/$defs/Notifications"
+    },
+    "server": {
+      "$ref": "#/$defs/Server"
+    },
+    "updates": {
+      "$ref": "#/$defs/Updates"
+    }
   },
   "$defs": {
     "Library": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "path"],
+      "required": [
+        "id",
+        "path"
+      ],
       "properties": {
-        "id": { "$ref": "common.json#/$defs/EntryId" },
-        "name": { "type": "string", "default": "" },
-        "path": { "$ref": "common.json#/$defs/Path" }
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "name": {
+          "type": "string",
+          "default": ""
+        },
+        "path": {
+          "$ref": "common.json#/$defs/Path"
+        }
       }
     },
     "Target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "path"],
+      "required": [
+        "id",
+        "kind",
+        "path"
+      ],
       "properties": {
-        "id": { "$ref": "common.json#/$defs/EntryId" },
-        "name": { "type": "string", "default": "" },
-        "kind": { "const": "path" },
-        "path": { "$ref": "common.json#/$defs/Path" },
-        "enabled": { "type": "boolean", "default": true }
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "name": {
+          "type": "string",
+          "default": ""
+        },
+        "kind": {
+          "const": "path"
+        },
+        "path": {
+          "$ref": "common.json#/$defs/Path"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
       }
     },
     "Profile": {
       "allOf": [
-        { "$ref": "#/$defs/ProfileFields" },
-        { "required": ["id"] }
+        {
+          "$ref": "#/$defs/ProfileFields"
+        },
+        {
+          "required": [
+            "id"
+          ]
+        }
       ]
     },
     "ProfilePatch": {
       "description": "Part of a profile (rule then.set). Merged over the effective profile like an RFC 7386 merge patch; id and name are not allowed.",
       "allOf": [
-        { "$ref": "#/$defs/ProfileFields" },
-        { "not": { "anyOf": [{ "required": ["id"] }, { "required": ["name"] }] } }
+        {
+          "$ref": "#/$defs/ProfileFields"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "id"
+                ]
+              },
+              {
+                "required": [
+                  "name"
+                ]
+              }
+            ]
+          }
+        }
       ]
     },
     "ProfileFields": {
@@ -107,33 +204,58 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "common.json#/$defs/EntryId" },
-        "name": { "type": "string", "default": "" },
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "name": {
+          "type": "string",
+          "default": ""
+        },
         "library": {
           "description": "null = defaultLibrary.",
-          "oneOf": [{ "$ref": "common.json#/$defs/EntryId" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/EntryId"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null
         },
         "mode": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "default": { "$ref": "common.json#/$defs/VideoMode", "default": "mkv" },
+            "default": {
+              "$ref": "common.json#/$defs/VideoMode",
+              "default": "mkv"
+            },
             "byFormat": {
               "description": "Modes by disc format for automatic rips and Rip (not for titles chosen by hand); a missing format uses default. Was rip.formatModes.",
               "type": "object",
               "additionalProperties": false,
               "default": {},
               "properties": {
-                "dvd": { "$ref": "common.json#/$defs/VideoMode" },
-                "bluray": { "$ref": "common.json#/$defs/VideoMode" },
-                "uhd": { "$ref": "common.json#/$defs/VideoMode" },
-                "hddvd": { "$ref": "common.json#/$defs/VideoMode" }
+                "dvd": {
+                  "$ref": "common.json#/$defs/VideoMode"
+                },
+                "bluray": {
+                  "$ref": "common.json#/$defs/VideoMode"
+                },
+                "uhd": {
+                  "$ref": "common.json#/$defs/VideoMode"
+                },
+                "hddvd": {
+                  "$ref": "common.json#/$defs/VideoMode"
+                }
               }
             }
           }
         },
-        "titles": { "$ref": "#/$defs/TitleRules" },
+        "titles": {
+          "$ref": "#/$defs/TitleRules"
+        },
         "makemkv": {
           "type": "object",
           "additionalProperties": false,
@@ -143,36 +265,89 @@
               "$ref": "#/$defs/MakemkvSettings",
               "default": {}
             },
-            "profile": { "$ref": "#/$defs/MakemkvProfile" },
-            "minLengthSeconds": { "description": "--minlength; null = not passed.", "type": ["integer", "null"], "minimum": 0, "default": null },
-            "cacheMB": { "description": "--cache; null = not passed.", "type": ["integer", "null"], "minimum": 1, "default": null },
-            "directIO": { "description": "--directio; null = not passed.", "type": ["boolean", "null"], "default": null },
-            "extraArguments": { "description": "More makemkvcon arguments, split like a POSIX command line.", "type": "string", "default": "" }
+            "profile": {
+              "$ref": "#/$defs/MakemkvProfile"
+            },
+            "minLengthSeconds": {
+              "description": "--minlength; null = not passed.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": null
+            },
+            "cacheMB": {
+              "description": "--cache; null = not passed.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "default": null
+            },
+            "directIO": {
+              "description": "--directio; null = not passed.",
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "default": null
+            },
+            "extraArguments": {
+              "description": "More makemkvcon arguments, split like a POSIX command line.",
+              "type": "string",
+              "default": ""
+            }
           }
         },
         "backup": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "format": { "enum": ["folder", "iso"], "default": "folder" },
-            "keepAfterMkv": { "description": "backupThenMkv: keep the backup next to the MKV files.", "type": "boolean", "default": true }
+            "format": {
+              "enum": [
+                "folder",
+                "iso"
+              ],
+              "default": "folder"
+            },
+            "keepAfterMkv": {
+              "description": "backupThenMkv: keep the backup next to the MKV files.",
+              "type": "boolean",
+              "default": true
+            }
           }
         },
         "naming": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "layout": { "$ref": "common.json#/$defs/Layout", "default": "templates" },
-            "folderTemplate": { "type": "string", "default": "{name}{discLabel? - {discLabel}}" },
+            "layout": {
+              "$ref": "common.json#/$defs/Layout",
+              "default": "templates"
+            },
+            "folderTemplate": {
+              "type": "string",
+              "default": "{name}{discLabel? - {discLabel}}"
+            },
             "fileNameTemplate": {
               "description": "MKV files and backups; empty = keep MakeMKV's names.",
               "type": "string",
               "default": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}"
             },
-            "backupSubfolder": { "description": "backupThenMkv with layout templates: the backup's folder inside the unit.", "type": "string", "default": "backup" },
+            "backupSubfolder": {
+              "description": "backupThenMkv with layout templates: the backup's folder inside the unit.",
+              "type": "string",
+              "default": "backup"
+            },
             "conflictPolicy": {
               "description": "When the unit's folder exists: newFolder = 'Name (2)' (was uniqueSuffix); merge = add the files to it item by item, never replacing one (was overwrite); skip = the job fails with library.folderExists.",
-              "enum": ["newFolder", "merge", "skip"],
+              "enum": [
+                "newFolder",
+                "merge",
+                "skip"
+              ],
               "default": "newFolder"
             }
           }
@@ -181,31 +356,84 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "checksums": { "description": "SHA256SUMS in the unit's folder.", "type": "boolean", "default": true },
-            "archiveRecord": { "description": "bromelia-<unit8>.json and the logs in the unit's folder.", "type": "boolean", "default": true },
-            "verifyRips": { "description": "Check every MKV against the listing (mkvmerge -J) and every backup's structure.", "type": "boolean", "default": true },
-            "writeDiscInfo": { "description": "disc-info.json with the listing (was rip.writeDiscInfoJSON).", "type": "boolean", "default": false },
-            "hashFromDisk": { "description": "Hash each file read back from disk, bypassing the cache (plan §22.3).", "type": "boolean", "default": true },
-            "parityPercent": { "description": "PAR2 recovery data per unit, percent of its size; 0 = none (backlog 3).", "type": "integer", "minimum": 0, "maximum": 100, "default": 0 },
-            "replicateTo": { "description": "Target ids each new unit is copied to and verified on (backlog 2).", "type": "array", "items": { "$ref": "common.json#/$defs/EntryId" }, "default": [] }
+            "checksums": {
+              "description": "SHA256SUMS in the unit's folder.",
+              "type": "boolean",
+              "default": true
+            },
+            "archiveRecord": {
+              "description": "bromelia-<unit8>.json and the logs in the unit's folder.",
+              "type": "boolean",
+              "default": true
+            },
+            "verifyRips": {
+              "description": "Check every MKV against the listing (mkvmerge -J) and every backup's structure.",
+              "type": "boolean",
+              "default": true
+            },
+            "writeDiscInfo": {
+              "description": "disc-info.json with the listing (was rip.writeDiscInfoJSON).",
+              "type": "boolean",
+              "default": false
+            },
+            "hashFromDisk": {
+              "description": "Hash each file read back from disk, bypassing the cache (plan §22.3).",
+              "type": "boolean",
+              "default": true
+            },
+            "parityPercent": {
+              "description": "PAR2 recovery data per unit, percent of its size; 0 = none (backlog 3).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 0
+            },
+            "replicateTo": {
+              "description": "Target ids each new unit is copied to and verified on (backlog 2).",
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/EntryId"
+              },
+              "default": []
+            }
           }
         },
         "episodes": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "splitPlayAll": { "type": "boolean", "default": true },
-            "keepPlayAll": { "type": "boolean", "default": true },
-            "readMenuNumbers": { "description": "Read episode numbers from the menus (ffmpeg + tesseract).", "type": "boolean", "default": true }
+            "splitPlayAll": {
+              "type": "boolean",
+              "default": true
+            },
+            "keepPlayAll": {
+              "type": "boolean",
+              "default": true
+            },
+            "readMenuNumbers": {
+              "description": "Read episode numbers from the menus (ffmpeg + tesseract).",
+              "type": "boolean",
+              "default": true
+            }
           }
         },
         "otherDiscs": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "ripAudioCDs": { "type": "boolean", "default": true },
-            "imageDataDiscs": { "type": "boolean", "default": true },
-            "audioCommand": { "description": "Empty = cyanrip, else abcde (not on Windows). {device} is the drive.", "type": "string", "default": "" }
+            "ripAudioCDs": {
+              "type": "boolean",
+              "default": true
+            },
+            "imageDataDiscs": {
+              "type": "boolean",
+              "default": true
+            },
+            "audioCommand": {
+              "description": "Empty = cyanrip, else abcde (not on Windows). {device} is the drive.",
+              "type": "string",
+              "default": ""
+            }
           }
         },
         "readErrors": {
@@ -214,16 +442,26 @@
           "properties": {
             "retry": {
               "description": "manual: the unit is quarantined and the UI offers a retry (today's behaviour plus the offer). otherDrive: retry the damaged titles on another free drive automatically. Owner decision 7 in plan §30.",
-              "enum": ["manual", "otherDrive"],
+              "enum": [
+                "manual",
+                "otherDrive"
+              ],
               "default": "manual"
             },
-            "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3 }
+            "maxAttempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3
+            }
           }
         },
         "steps": {
           "description": "Step ids run for jobs of this profile, before the steps added by rules.",
           "type": "array",
-          "items": { "$ref": "common.json#/$defs/EntryId" },
+          "items": {
+            "$ref": "common.json#/$defs/EntryId"
+          },
           "default": []
         }
       }
@@ -233,73 +471,213 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "strategy": { "enum": ["all", "longest", "indices", "manual"], "default": "all" },
-        "longestCount": { "type": "integer", "minimum": 1, "default": 1 },
-        "indexPattern": { "description": "e.g. '0,2-4,7-', 'last', 'all'.", "type": "string", "default": "" },
-        "indexBase": { "description": "makemkv: 0-based title number; source: playlist / VTS id.", "enum": ["makemkv", "source"], "default": "makemkv" },
-        "minDurationSeconds": { "type": "integer", "minimum": 0, "default": 0 },
-        "maxDurationSeconds": { "type": "integer", "minimum": 0, "default": 0 },
-        "minChapters": { "type": "integer", "minimum": 0, "default": 0 },
-        "maxChapters": { "type": "integer", "minimum": 0, "default": 0 },
-        "minSizeMB": { "type": "integer", "minimum": 0, "default": 0 },
-        "maxSizeMB": { "type": "integer", "minimum": 0, "default": 0 },
-        "includePattern": { "description": "Case-insensitive regular expression over title name, comment, output file name, source file name, segment map, '#<source id>' and duration.", "type": "string", "default": "" },
-        "excludePattern": { "type": "string", "default": "" },
-        "skipDuplicates": { "type": "boolean", "default": true },
-        "skipAlternateAngles": { "type": "boolean", "default": false },
-        "maxTitles": { "type": "integer", "minimum": 0, "default": 0 }
+        "strategy": {
+          "enum": [
+            "all",
+            "longest",
+            "indices",
+            "manual"
+          ],
+          "default": "all"
+        },
+        "longestCount": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "indexPattern": {
+          "description": "e.g. '0,2-4,7-', 'last', 'all'.",
+          "type": "string",
+          "default": ""
+        },
+        "indexBase": {
+          "description": "makemkv: 0-based title number; source: playlist / VTS id.",
+          "enum": [
+            "makemkv",
+            "source"
+          ],
+          "default": "makemkv"
+        },
+        "minDurationSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "maxDurationSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "minChapters": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "maxChapters": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "minSizeMB": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "maxSizeMB": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "includePattern": {
+          "description": "Case-insensitive regular expression over title name, comment, output file name, source file name, segment map, '#<source id>' and duration.",
+          "type": "string",
+          "default": ""
+        },
+        "excludePattern": {
+          "type": "string",
+          "default": ""
+        },
+        "skipDuplicates": {
+          "type": "boolean",
+          "default": true
+        },
+        "skipAlternateAngles": {
+          "type": "boolean",
+          "default": false
+        },
+        "maxTitles": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        }
       }
     },
     "MakemkvSettings": {
       "type": "object",
-      "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_]*$" },
-      "additionalProperties": { "type": "string" }
+      "propertyNames": {
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "MakemkvProfile": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mode": { "enum": ["makemkvDefault", "generated", "customFile"], "default": "makemkvDefault" },
-        "customPath": { "type": "string", "default": "" },
+        "mode": {
+          "enum": [
+            "makemkvDefault",
+            "generated",
+            "customFile"
+          ],
+          "default": "makemkvDefault"
+        },
+        "customPath": {
+          "type": "string",
+          "default": ""
+        },
         "generated": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "name": { "type": "string", "default": "Bromelia" },
-            "selectionRule": { "description": "Empty = MakeMKV's default rule.", "type": "string", "default": "" },
-            "setFirstAudioTrackAsDefault": { "type": "boolean", "default": true },
-            "setFirstSubtitleTrackAsDefault": { "type": "boolean", "default": true },
-            "setFirstForcedSubtitleTrackAsDefault": { "type": "boolean", "default": true },
-            "ignoreForcedSubtitlesFlag": { "type": "boolean", "default": true },
-            "useISO639Type2T": { "type": "boolean", "default": false },
-            "insertFirstChapter00IfMissing": { "type": "boolean", "default": true },
-            "lpcmStereo": { "$ref": "#/$defs/LpcmOutput", "default": "lpcm" },
-            "lpcmMultichannel": { "$ref": "#/$defs/LpcmOutput", "default": "flac-best" }
+            "name": {
+              "type": "string",
+              "default": "Bromelia"
+            },
+            "selectionRule": {
+              "description": "Empty = MakeMKV's default rule.",
+              "type": "string",
+              "default": ""
+            },
+            "setFirstAudioTrackAsDefault": {
+              "type": "boolean",
+              "default": true
+            },
+            "setFirstSubtitleTrackAsDefault": {
+              "type": "boolean",
+              "default": true
+            },
+            "setFirstForcedSubtitleTrackAsDefault": {
+              "type": "boolean",
+              "default": true
+            },
+            "ignoreForcedSubtitlesFlag": {
+              "type": "boolean",
+              "default": true
+            },
+            "useISO639Type2T": {
+              "type": "boolean",
+              "default": false
+            },
+            "insertFirstChapter00IfMissing": {
+              "type": "boolean",
+              "default": true
+            },
+            "lpcmStereo": {
+              "$ref": "#/$defs/LpcmOutput",
+              "default": "lpcm"
+            },
+            "lpcmMultichannel": {
+              "$ref": "#/$defs/LpcmOutput",
+              "default": "flac-best"
+            }
           }
         }
       }
     },
-    "LpcmOutput": { "enum": ["copy", "lpcm", "wavex", "flac-best", "flac-fast"] },
+    "LpcmOutput": {
+      "enum": [
+        "copy",
+        "lpcm",
+        "wavex",
+        "flac-best",
+        "flac-fast"
+      ]
+    },
     "Drive": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
-        "id": { "$ref": "common.json#/$defs/EntryId" },
-        "name": { "type": "string", "default": "Drive" },
-        "enabled": { "type": "boolean", "default": true },
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "name": {
+          "type": "string",
+          "default": "Drive"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "match": {
           "description": "DriveJoin.matches: driveName compared case- and space-insensitively with MakeMKV's identification string; devicePath used when driveName is empty.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "driveName": { "type": "string", "default": "" },
-            "devicePath": { "type": "string", "default": "" }
+            "driveName": {
+              "type": "string",
+              "default": ""
+            },
+            "devicePath": {
+              "type": "string",
+              "default": ""
+            }
           }
         },
         "profile": {
           "description": "null = defaultProfile.",
-          "oneOf": [{ "$ref": "common.json#/$defs/EntryId" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/EntryId"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null
         },
         "makemkvSettings": {
@@ -309,7 +687,14 @@
         },
         "automation": {
           "description": "null = automation.defaults.",
-          "oneOf": [{ "$ref": "#/$defs/DriveAutomation" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DriveAutomation"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null
         }
       }
@@ -318,29 +703,78 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "ripOnInsert": { "type": "boolean", "default": false },
-        "delaySeconds": { "description": "Cancellable countdown before an automatic rip.", "type": "integer", "minimum": 0, "default": 10 },
-        "ejectWhenDone": { "type": "boolean", "default": true },
-        "ejectOnFailure": { "type": "boolean", "default": false },
-        "waitForMountSeconds": { "description": "AwaitMedia: wait up to this long for the OS to mount the disc; 0 = don't.", "type": "integer", "minimum": 0, "default": 30 },
-        "alreadyArchived": { "$ref": "common.json#/$defs/AlreadyArchived", "default": "skip" },
-        "desktopNotification": { "description": "Was automation.notify.", "type": "boolean", "default": true },
-        "playSound": { "type": "boolean", "default": true }
+        "ripOnInsert": {
+          "type": "boolean",
+          "default": false
+        },
+        "delaySeconds": {
+          "description": "Cancellable countdown before an automatic rip.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 10
+        },
+        "ejectWhenDone": {
+          "type": "boolean",
+          "default": true
+        },
+        "ejectOnFailure": {
+          "type": "boolean",
+          "default": false
+        },
+        "waitForMountSeconds": {
+          "description": "AwaitMedia: wait up to this long for the OS to mount the disc; 0 = don't.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 30
+        },
+        "alreadyArchived": {
+          "$ref": "common.json#/$defs/AlreadyArchived",
+          "default": "skip"
+        },
+        "desktopNotification": {
+          "description": "Was automation.notify.",
+          "type": "boolean",
+          "default": true
+        },
+        "playSound": {
+          "type": "boolean",
+          "default": true
+        }
       }
     },
     "Step": {
       "x-default-background": true,
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind"],
+      "required": [
+        "id",
+        "kind"
+      ],
       "properties": {
-        "id": { "$ref": "common.json#/$defs/EntryId" },
-        "name": { "type": "string", "default": "" },
-        "enabled": { "type": "boolean", "default": true },
-        "kind": { "enum": ["command", "handbrake"] },
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "name": {
+          "type": "string",
+          "default": ""
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "kind": {
+          "enum": [
+            "command",
+            "handbrake"
+          ]
+        },
         "runOn": {
           "description": "success: succeeded. failure: failed, cancelled, interrupted, or succeeded with read errors. always. Skipped jobs never run steps.",
-          "enum": ["success", "failure", "always"],
+          "enum": [
+            "success",
+            "failure",
+            "always"
+          ],
           "default": "success"
         },
         "background": {
@@ -352,58 +786,181 @@
           "type": "boolean",
           "default": false
         },
-        "timeoutSeconds": { "description": "Per run (per file for perFile and handbrake); 0 = none.", "type": "integer", "minimum": 0, "default": 0 },
+        "timeoutSeconds": {
+          "description": "Per run (per file for perFile and handbrake); 0 = none.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
         "command": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "executable": { "type": "string", "default": "" },
-            "interpreter": { "description": "e.g. /usr/bin/python3; empty = run directly (.ps1, .bat and .py get one on Windows).", "type": "string", "default": "" },
-            "arguments": { "description": "Split like a POSIX command line before tokens are filled in; a lone {files} expands to one argument per file.", "type": "string", "default": "{outputDir}" },
-            "workingDirectory": { "description": "Empty = the unit's folder.", "type": "string", "default": "" },
-            "perFile": { "type": "boolean", "default": false },
-            "environment": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} }
+            "executable": {
+              "type": "string",
+              "default": ""
+            },
+            "interpreter": {
+              "description": "e.g. /usr/bin/python3; empty = run directly (.ps1, .bat and .py get one on Windows).",
+              "type": "string",
+              "default": ""
+            },
+            "arguments": {
+              "description": "Split like a POSIX command line before tokens are filled in; a lone {files} expands to one argument per file.",
+              "type": "string",
+              "default": "{outputDir}"
+            },
+            "workingDirectory": {
+              "description": "Empty = the unit's folder.",
+              "type": "string",
+              "default": ""
+            },
+            "perFile": {
+              "type": "boolean",
+              "default": false
+            },
+            "environment": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {}
+            }
           }
         },
         "handbrake": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "executable": { "description": "Empty = found by ToolLocator.", "type": "string", "default": "" },
-            "preset": { "type": "string", "default": "H.265 MKV 1080p30" },
-            "presetFile": { "type": "string", "default": "" },
-            "outputPath": { "description": "Takes the step tokens; the extension picks the container. Never replaces a file.", "type": "string", "default": "{outputDir}/Encoded/{stem}.mkv" },
-            "extraArguments": { "type": "string", "default": "" }
+            "executable": {
+              "description": "Empty = found by ToolLocator.",
+              "type": "string",
+              "default": ""
+            },
+            "preset": {
+              "type": "string",
+              "default": "H.265 MKV 1080p30"
+            },
+            "presetFile": {
+              "type": "string",
+              "default": ""
+            },
+            "outputPath": {
+              "description": "Takes the step tokens; the extension picks the container. Never replaces a file.",
+              "type": "string",
+              "default": "{outputDir}/Encoded/{stem}.mkv"
+            },
+            "extraArguments": {
+              "type": "string",
+              "default": ""
+            }
           }
         }
       },
       "allOf": [
-        { "if": { "properties": { "kind": { "const": "command" } } }, "then": { "not": { "required": ["handbrake"] } } },
-        { "if": { "properties": { "kind": { "const": "handbrake" } } }, "then": { "not": { "required": ["command"] } } }
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "command"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "handbrake"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "handbrake"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "command"
+              ]
+            }
+          }
+        }
       ]
     },
     "Rule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "then"],
+      "required": [
+        "id",
+        "then"
+      ],
       "properties": {
-        "id": { "$ref": "common.json#/$defs/EntryId" },
-        "name": { "type": "string", "default": "" },
-        "enabled": { "type": "boolean", "default": true },
+        "id": {
+          "$ref": "common.json#/$defs/EntryId"
+        },
+        "name": {
+          "type": "string",
+          "default": ""
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "when": {
           "description": "Every condition given must hold; an empty when matches every disc. RuleMatcher.matches(when, facts).",
           "type": "object",
           "additionalProperties": false,
           "default": {},
           "properties": {
-            "nameOrLabel": { "description": "Case-insensitive regular expression matched against the movie / show name and against the disc label (was matchName).", "type": "string" },
-            "name": { "description": "Regular expression on the movie / show name only.", "type": "string" },
-            "label": { "description": "Regular expression on the disc label only.", "type": "string" },
-            "formats": { "description": "Format codes; a trailing * matches every code with that prefix (BR* = BR and BRe). Was matchFormats.", "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9]+\\*?$" } },
-            "kinds": { "type": "array", "items": { "$ref": "common.json#/$defs/MediaKind" } },
-            "drives": { "description": "Drive entry ids.", "type": "array", "items": { "$ref": "common.json#/$defs/EntryId" } },
-            "profiles": { "description": "The profile the disc got before rules were applied.", "type": "array", "items": { "$ref": "common.json#/$defs/EntryId" } },
-            "automatic": { "description": "true: automatic rips only; false: rips started by hand only.", "type": "boolean" }
+            "nameOrLabel": {
+              "description": "Case-insensitive regular expression matched against the movie / show name and against the disc label (was matchName).",
+              "type": "string"
+            },
+            "name": {
+              "description": "Regular expression on the movie / show name only.",
+              "type": "string"
+            },
+            "label": {
+              "description": "Regular expression on the disc label only.",
+              "type": "string"
+            },
+            "formats": {
+              "description": "Format codes; a trailing * matches every code with that prefix (BR* = BR and BRe). Was matchFormats.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9]+\\*?$"
+              }
+            },
+            "kinds": {
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/MediaKind"
+              }
+            },
+            "drives": {
+              "description": "Drive entry ids.",
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/EntryId"
+              }
+            },
+            "profiles": {
+              "description": "The profile the disc got before rules were applied.",
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/EntryId"
+              }
+            },
+            "automatic": {
+              "description": "true: automatic rips only; false: rips started by hand only.",
+              "type": "boolean"
+            }
           }
         },
         "then": {
@@ -411,9 +968,20 @@
           "additionalProperties": false,
           "minProperties": 1,
           "properties": {
-            "profile": { "description": "Switch to this profile (later rules still apply).", "$ref": "common.json#/$defs/EntryId" },
-            "set": { "$ref": "#/$defs/ProfilePatch" },
-            "steps": { "description": "Add these steps after the profile's.", "type": "array", "items": { "$ref": "common.json#/$defs/EntryId" } }
+            "profile": {
+              "description": "Switch to this profile (later rules still apply).",
+              "$ref": "common.json#/$defs/EntryId"
+            },
+            "set": {
+              "$ref": "#/$defs/ProfilePatch"
+            },
+            "steps": {
+              "description": "Add these steps after the profile's.",
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/EntryId"
+              }
+            }
           }
         }
       }
@@ -422,28 +990,71 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "pollIntervalSeconds": { "description": "Drive scan when idle; 0 = only on OS media events.", "type": "integer", "minimum": 0, "default": 10 },
-        "pollWhileRipping": { "type": "boolean", "default": false },
-        "defaults": { "description": "Automation of drives without an entry (or whose automation is null).", "$ref": "#/$defs/DriveAutomation" }
+        "pollIntervalSeconds": {
+          "description": "Drive scan when idle; 0 = only on OS media events.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 10
+        },
+        "pollWhileRipping": {
+          "type": "boolean",
+          "default": false
+        },
+        "defaults": {
+          "description": "Automation of drives without an entry (or whose automation is null).",
+          "$ref": "#/$defs/DriveAutomation"
+        }
       }
     },
     "Limits": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "acquisitions": { "description": "Acquire steps at once; 0 = one per drive (was maxConcurrentJobs).", "type": "integer", "minimum": 0, "default": 0 },
-        "processing": { "description": "Processing-queue jobs at once (was backgroundJobs).", "type": "integer", "minimum": 1, "default": 1 },
-        "cpu": { "description": "Cpu leases (OCR, transcode, split); 0 = cores / 2.", "type": "integer", "minimum": 0, "default": 0 },
-        "ioPerVolume": { "description": "Io(volume) leases (hashing, verifying, replicating).", "type": "integer", "minimum": 1, "default": 2 },
-        "stallTimeoutMinutes": { "description": "Stop a tool that prints nothing for this long; 0 = never.", "type": "integer", "minimum": 0, "default": 30 }
+        "acquisitions": {
+          "description": "Acquire steps at once; 0 = one per drive (was maxConcurrentJobs).",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "processing": {
+          "description": "Processing-queue jobs at once (was backgroundJobs).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "cpu": {
+          "description": "Cpu leases (OCR, transcode, split); 0 = cores / 2.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "ioPerVolume": {
+          "description": "Io(volume) leases (hashing, verifying, replicating).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 2
+        },
+        "stallTimeoutMinutes": {
+          "description": "Stop a tool that prints nothing for this long; 0 = never.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 30
+        }
       }
     },
     "Power": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "preventSleep": { "description": "Keep the computer awake while a non-maintenance lease is held.", "type": "boolean", "default": true },
-        "keepAwakeForMaintenance": { "type": "boolean", "default": true }
+        "preventSleep": {
+          "description": "Keep the computer awake while a non-maintenance lease is held.",
+          "type": "boolean",
+          "default": true
+        },
+        "keepAwakeForMaintenance": {
+          "type": "boolean",
+          "default": true
+        }
       }
     },
     "Maintenance": {
@@ -454,31 +1065,55 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "intervalDays": { "description": "Verify each unit again when its last check is this old; 0 = never (was archiveCheck.intervalDays).", "type": "integer", "minimum": 0, "default": 0 },
+            "intervalDays": {
+              "description": "Verify each unit again when its last check is this old; 0 = never (was archiveCheck.intervalDays).",
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
             "window": {
               "description": "Local times between which scheduled checks may run; null = any time.",
               "oneOf": [
-                { "type": "null" },
+                {
+                  "type": "null"
+                },
                 {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["start", "end"],
+                  "required": [
+                    "start",
+                    "end"
+                  ],
                   "properties": {
-                    "start": { "$ref": "common.json#/$defs/TimeOfDay" },
-                    "end": { "$ref": "common.json#/$defs/TimeOfDay" }
+                    "start": {
+                      "$ref": "common.json#/$defs/TimeOfDay"
+                    },
+                    "end": {
+                      "$ref": "common.json#/$defs/TimeOfDay"
+                    }
                   }
                 }
               ],
               "default": null
             },
-            "gbPerHour": { "description": "Read budget for scheduled checks; 0 = unlimited.", "type": "integer", "minimum": 0, "default": 0 }
+            "gbPerHour": {
+              "description": "Read budget for scheduled checks; 0 = unlimited.",
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
           }
         },
         "retention": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "jobLogsDays": { "description": "Prune jobs/<id>/ folders of finished jobs older than this; 0 = keep. Jobs and units themselves are never dropped.", "type": "integer", "minimum": 0, "default": 0 }
+            "jobLogsDays": {
+              "description": "Prune jobs/<id>/ folders of finished jobs older than this; 0 = keep. Jobs and units themselves are never dropped.",
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
           }
         }
       }
@@ -487,14 +1122,33 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "path": { "description": "makemkvcon; empty = ToolLocator (was makemkvconPath).", "type": "string", "default": "" },
+        "path": {
+          "description": "makemkvcon; empty = ToolLocator (was makemkvconPath).",
+          "type": "string",
+          "default": ""
+        },
         "registrationKey": {
           "description": "null = use the key MakeMKV is registered with.",
-          "oneOf": [{ "$ref": "common.json#/$defs/SecretRef" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/SecretRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null
         },
-        "autoUpdateBetaKey": { "description": "Register the current beta key at startup and when it expires; never replaces a purchased key.", "type": "boolean", "default": false },
-        "settings": { "description": "settings.conf keys for every drive (was globalSettings).", "$ref": "#/$defs/MakemkvSettings", "default": {} }
+        "autoUpdateBetaKey": {
+          "description": "Register the current beta key at startup and when it expires; never replaces a purchased key.",
+          "type": "boolean",
+          "default": false
+        },
+        "settings": {
+          "description": "settings.conf keys for every drive (was globalSettings).",
+          "$ref": "#/$defs/MakemkvSettings",
+          "default": {}
+        }
       }
     },
     "Tools": {
@@ -502,30 +1156,86 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mkvmerge": { "type": "string", "default": "" },
-        "mkvextract": { "type": "string", "default": "" },
-        "ffmpeg": { "type": "string", "default": "" },
-        "tesseract": { "type": "string", "default": "" },
-        "handbrake": { "type": "string", "default": "" },
-        "cyanrip": { "type": "string", "default": "" },
-        "abcde": { "type": "string", "default": "" },
-        "par2": { "type": "string", "default": "" },
-        "apprise": { "type": "string", "default": "" }
+        "mkvmerge": {
+          "type": "string",
+          "default": ""
+        },
+        "mkvextract": {
+          "type": "string",
+          "default": ""
+        },
+        "ffmpeg": {
+          "type": "string",
+          "default": ""
+        },
+        "tesseract": {
+          "type": "string",
+          "default": ""
+        },
+        "handbrake": {
+          "type": "string",
+          "default": ""
+        },
+        "cyanrip": {
+          "type": "string",
+          "default": ""
+        },
+        "abcde": {
+          "type": "string",
+          "default": ""
+        },
+        "par2": {
+          "type": "string",
+          "default": ""
+        },
+        "apprise": {
+          "type": "string",
+          "default": ""
+        }
       }
     },
     "Metadata": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": { "enum": ["none", "tmdb", "omdb"], "default": "none" },
+        "provider": {
+          "enum": [
+            "none",
+            "tmdb",
+            "omdb"
+          ],
+          "default": "none"
+        },
         "apiKey": {
           "description": "TMDb: v3 API key or read access token; OMDb: API key.",
-          "oneOf": [{ "$ref": "common.json#/$defs/SecretRef" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/SecretRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null
         },
-        "language": { "type": "string", "default": "en-US" },
-        "episodeTitles": { "type": "boolean", "default": true },
-        "nfo": { "description": "Media server layout: .nfo files and the poster.", "type": "boolean", "default": true }
+        "language": {
+          "type": "string",
+          "default": "en-US"
+        },
+        "episodeTitles": {
+          "type": "boolean",
+          "default": true
+        },
+        "absoluteEpisodes": {
+          "description": "TV shows numbered across seasons (One Piece episode 138): when the season doesn't list the disc's episode numbers, take the titles from TMDb's absolute episode order (an episode group) instead. Off: such episodes get no titles, as today.",
+          "type": "boolean",
+          "default": false
+        },
+        "nfo": {
+          "description": "Media server layout: .nfo files and the poster.",
+          "type": "boolean",
+          "default": true
+        }
       }
     },
     "Notifications": {
@@ -538,13 +1248,30 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "url"],
+            "required": [
+              "id",
+              "url"
+            ],
             "properties": {
-              "id": { "$ref": "common.json#/$defs/EntryId" },
-              "name": { "type": "string", "default": "" },
-              "url": { "description": "Webhook and service URLs carry their credentials, so the URL is always a secret.", "$ref": "common.json#/$defs/SecretRef" },
-              "enabled": { "type": "boolean", "default": true },
-              "onlyProblems": { "type": "boolean", "default": false }
+              "id": {
+                "$ref": "common.json#/$defs/EntryId"
+              },
+              "name": {
+                "type": "string",
+                "default": ""
+              },
+              "url": {
+                "description": "Webhook and service URLs carry their credentials, so the URL is always a secret.",
+                "$ref": "common.json#/$defs/SecretRef"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "onlyProblems": {
+                "type": "boolean",
+                "default": false
+              }
             }
           }
         }
@@ -559,17 +1286,37 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean", "default": false },
-            "address": { "description": "127.0.0.1 = this computer only; anything else needs a token (config.server.networkNeedsToken).", "type": "string", "default": "127.0.0.1" },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 51280 }
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "address": {
+              "description": "127.0.0.1 = this computer only; anything else needs a token (config.server.networkNeedsToken).",
+              "type": "string",
+              "default": "127.0.0.1"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 51280
+            }
           }
         },
         "tls": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "certificate": { "description": "PEM with its chain; both or neither.", "type": "string", "default": "" },
-            "key": { "description": "PEM private key file.", "type": "string", "default": "" }
+            "certificate": {
+              "description": "PEM with its chain; both or neither.",
+              "type": "string",
+              "default": ""
+            },
+            "key": {
+              "description": "PEM private key file.",
+              "type": "string",
+              "default": ""
+            }
           }
         },
         "tokens": {
@@ -578,19 +1325,38 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "token"],
+            "required": [
+              "id",
+              "token"
+            ],
             "properties": {
-              "id": { "$ref": "common.json#/$defs/EntryId" },
-              "name": { "type": "string", "default": "" },
-              "scope": { "description": "read: GET routes and events; control: everything.", "enum": ["read", "control"], "default": "control" },
-              "token": { "$ref": "common.json#/$defs/SecretRef" }
+              "id": {
+                "$ref": "common.json#/$defs/EntryId"
+              },
+              "name": {
+                "type": "string",
+                "default": ""
+              },
+              "scope": {
+                "description": "read: GET routes and events; control: everything.",
+                "enum": [
+                  "read",
+                  "control"
+                ],
+                "default": "control"
+              },
+              "token": {
+                "$ref": "common.json#/$defs/SecretRef"
+              }
             }
           }
         },
         "allowedHosts": {
           "description": "Host header names accepted over TCP besides localhost, 127.0.0.1 and [::1] (DNS-rebinding protection). With a token, any host is accepted.",
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": []
         }
       }
@@ -599,7 +1365,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "check": { "description": "Check GitHub releases for a newer Bromelia (backlog 15).", "type": "boolean", "default": false }
+        "check": {
+          "description": "Check GitHub releases for a newer Bromelia (backlog 15).",
+          "type": "boolean",
+          "default": false
+        }
       }
     }
   }

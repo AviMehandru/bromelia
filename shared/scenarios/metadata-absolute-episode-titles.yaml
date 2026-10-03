@@ -1,0 +1,26 @@
+title: With absoluteEpisodes on, episodes numbered across seasons (One Piece 138) get their titles from TMDb's absolute order
+from:
+  - claudeDocs/bromelia-handoff.md (absolutely numbered anime; a decision for the owner)
+  - rearchitecture-plan §30 decision 5; owner decision 2026-10-03 (an option, off by default)
+  - shared/scenarios/metadata-season-missing-numbers.yaml (the same disc with the option off)
+given:
+  disc: {volume: ONE_PIECE_S2_P7_D2, type: dvd, titles: [{duration: "0:22:00", source: 1}, {duration: "0:22:30", source: 2}]}
+  profile: {naming: {layout: mediaServer}}
+  configPatch: {metadata: {provider: tmdb, apiKey: {secret: metadata.apiKey}, nfo: false, absoluteEpisodes: true}}
+  http:
+    - {method: GET, url: "https://api.themoviedb.org/3/search/tv?*", status: 200, file: scenario-http/tmdb-search-tv-one-piece.json}
+    - {method: GET, url: "https://api.themoviedb.org/3/tv/37854/season/2?*", status: 200, file: scenario-http/tmdb-season-one-piece-2.json}
+    - {method: GET, url: "https://api.themoviedb.org/3/tv/37854/episode_groups?*", status: 200, file: scenario-http/tmdb-episode-groups-one-piece.json}
+    - {method: GET, url: "https://api.themoviedb.org/3/tv/episode_group/5b1e8e1f0e0a2631c9000002?*", status: 200, file: scenario-http/tmdb-episode-group-absolute.json}
+steps:
+  - open: {iso: true, as: disc}
+  - choose: {session: disc, titles: [0, 1], firstEpisode: 138}
+  - rip: {session: disc, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded}
+      log: {job: job, include: [metadata.seasonMissing, metadata.absoluteOrder]}
+      files:
+        under: "library/TV Shows/One Piece (1999)"
+        include:
+          - "Season 02/One Piece (1999) - S02E138 - Absolute episode 138 (fixture).mkv"
+          - "Season 02/One Piece (1999) - S02E139 - Absolute episode 139 (fixture).mkv"

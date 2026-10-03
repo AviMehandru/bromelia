@@ -1,0 +1,19 @@
+title: An interrupted rip can be continued from its kept staging, once the same disc is back
+from:
+  - rearchitecture-plan §20.4 (when the same fingerprint is inserted again, the UI offers to continue)
+  - owner decision 2026-10-03 (keep staging while it can be continued)
+given:
+  drives:
+    - {id: drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
+steps:
+  - rip: {drive: drive, as: job}
+  - kill: {at: "inStep:acquire"}
+  - restart: {}
+  - remove: {drive: drive}
+  - insert: {drive: drive, disc: sample-movie-one-title}
+  - expect:
+      events: {include: [{type: jobChanged, data: {job: {decision: {question: {code: decision.continueInterrupted}}}}}]}
+  - retry: {job: job, as: continued}
+  - expect:
+      job: {name: continued, outcome: succeeded, unit: {state: committed}}
+      files: {under: library, include: ["Sample Movie/SHA256SUMS"], exclude: [".bromelia/staging/{jobId:job}", "_Quarantine"]}

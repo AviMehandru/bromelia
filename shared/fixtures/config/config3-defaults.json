@@ -70,6 +70,7 @@
     "apiKey": null,
     "language": "en-US",
     "episodeTitles": true,
+    "absoluteEpisodes": false,
     "nfo": true
   },
   "notifications": {

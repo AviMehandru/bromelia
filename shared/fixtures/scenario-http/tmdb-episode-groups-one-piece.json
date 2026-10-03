@@ -1,0 +1,19 @@
+{
+  "id": 37854,
+  "results": [
+    {
+      "id": "5b1e8e1f0e0a2631c9000001",
+      "name": "Production order",
+      "type": 6,
+      "episode_count": 140,
+      "group_count": 1
+    },
+    {
+      "id": "5b1e8e1f0e0a2631c9000002",
+      "name": "Absolute order",
+      "type": 2,
+      "episode_count": 140,
+      "group_count": 2
+    }
+  ]
+}

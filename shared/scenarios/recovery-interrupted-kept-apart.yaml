@@ -1,0 +1,26 @@
+title: Choosing not to continue an interrupted rip moves its files from hidden staging to _Quarantine, with a note
+from:
+  - macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop
+  - docs/architecture.md#unfinished-jobs (an interrupted job's files become visible, with a note)
+  - owner decision 2026-10-03 (keep staging while it can be continued; quarantine when not continued)
+given:
+  disc: sample-movie-one-title
+steps:
+  - rip: {iso: true, as: job}
+  - kill: {at: "inStep:acquire"}
+  - restart: {}
+  - expect:
+      job: {name: job, outcome: interrupted}
+      files: {under: library, include: [".bromelia/staging/{jobId}"], exclude: ["_Quarantine"]}
+  - keepApart: job
+  - expect:
+      files:
+        under: library
+        include: ["_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt", "_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv"]
+        exclude: [".bromelia/staging/{jobId}"]
+      file: {path: "library/_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt", contains: ["NOT a finished archive"]}
+      log: {job: job, include: [recovery.keptApart]}
+      db: {archive_units: {count: 1, rows: [{state: quarantined, status: incomplete}]}}
+  - api: {method: POST, path: "/v1/jobs/{jobId:job}/keep-apart", headers: {X-Bromelia: "1"}, as: twice}
+  - expect:
+      response: {as: twice, status: 409, error: {code: job.notInterrupted}}

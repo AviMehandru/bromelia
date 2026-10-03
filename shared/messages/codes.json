@@ -83,6 +83,10 @@
       "kind": "error",
       "http": 409
     },
+    "job.notInterrupted": {
+      "kind": "error",
+      "http": 409
+    },
     "job.unknownStep": {
       "kind": "error",
       "params": {
@@ -1557,6 +1561,26 @@
       },
       "today": "JobRunner.lookUpEpisodeTitles"
     },
+    "metadata.absoluteOrder": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "provider": "string",
+        "title": "string",
+        "group": "string",
+        "titles": "list"
+      },
+      "today": "new: metadata.absoluteEpisodes (owner decision 5, 2026-10-03)"
+    },
+    "metadata.noAbsoluteOrder": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "provider": "string",
+        "title": "string"
+      },
+      "today": "new: metadata.absoluteEpisodes"
+    },
     "metadata.episodeTitlesFailed": {
       "kind": "log",
       "severity": "warning",
@@ -1830,6 +1854,14 @@
         "library": "string"
       },
       "http": 409
+    },
+    "library.notAttached": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "http": 409,
+      "today": "README.md (pick a one-off output folder); owner, 2026-10-03: picking a folder offers to attach it"
     },
     "unit.notFound": {
       "kind": "error",
@@ -2242,6 +2274,9 @@
     "decision.answer.startOver": {
       "kind": "label"
     },
+    "decision.answer.keepApart": {
+      "kind": "label"
+    },
     "recovery.interrupted": {
       "kind": "error",
       "params": {
@@ -2266,6 +2301,14 @@
       "kind": "log",
       "severity": "info",
       "today": "new: plan §15.8"
+    },
+    "recovery.keptApart": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "path": "path"
+      },
+      "today": "new: an interrupted rip's files go to _Quarantine once you choose not to continue (owner, 2026-10-03)"
     },
     "recovery.summary": {
       "kind": "log",

@@ -100,7 +100,8 @@
         "session.nothingToRip",
         "library.offline",
         "library.none",
-        "makemkv.notFound"
+        "makemkv.notFound",
+        "library.notAttached"
       ],
       "note": "Rip with the drive's profile and title rules; with options.titles, those titles of the open session as MKV files."
     },
@@ -206,7 +207,8 @@
         "session.noTitlesChosen",
         "drive.busy",
         "library.offline",
-        "library.none"
+        "library.none",
+        "library.notAttached"
       ]
     },
     {
@@ -291,7 +293,23 @@
         "job.unknownStep",
         "drive.notFound",
         "drive.busy"
-      ]
+      ],
+      "note": "A job that didn't succeed is run again as a new job. An interrupted job is continued from its kept staging (the same disc must be in the drive, or the backup must be complete)."
+    },
+    {
+      "operation": "keepApart",
+      "method": "POST",
+      "path": "/v1/jobs/{jobId}/keep-apart",
+      "auth": "control",
+      "response": {
+        "status": 204
+      },
+      "errors": [
+        "job.notFound",
+        "job.notInterrupted",
+        "library.offline"
+      ],
+      "note": "Don't continue an interrupted rip: its staged files move to _Quarantine/<name> [INCOMPLETE] with a note, and the job can't be continued any more. Not in plan §13.1's list (owner, 2026-10-03)."
     },
     {
       "operation": "decide",
