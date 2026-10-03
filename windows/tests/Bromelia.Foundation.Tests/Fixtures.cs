@@ -34,7 +34,11 @@ public static class Fixtures
 
     /// <summary>Runs every case of a <c>*.cases.json</c> file. <paramref name="run"/> returns false for a case
     /// it doesn't know, which fails the test: no case is skipped silently.</summary>
-    public static void RunCases(string relative, Func<string, JsonValue, JsonValue, bool> run)
+    public static void RunCases(string relative, Func<string, JsonValue, JsonValue, bool> run) => RunCases(relative, _ => true, run);
+
+    /// <summary>Runs the cases of a file whose id passes <paramref name="only"/>: for a file whose other cases
+    /// belong to a module that isn't built yet.</summary>
+    public static void RunCases(string relative, Func<string, bool> only, Func<string, JsonValue, JsonValue, bool> run)
     {
         var doc = Json(relative);
         var failures = new List<string>();
@@ -42,6 +46,7 @@ public static class Fixtures
         foreach (var c in doc["cases"]!.AsArray!)
         {
             var id = c["id"]!.AsString!;
+            if (!only(id)) continue;
             count++;
             try
             {

@@ -152,7 +152,8 @@ class Checker:
             return re.search(rf"\bfunc\s+{re.escape(fn)}\s*[(<]", text) or re.search(rf"\bvar\s+{re.escape(fn)}\b", text)
         if platform == "cs":
             fn = spelled.split(".", 1)[1]
-            return re.search(rf"\b{re.escape(fn)}\s*[(<]", text)
+            # a method, or a property (as Swift's check accepts a var)
+            return re.search(rf"\b{re.escape(fn)}\s*[(<]", text) or re.search(rf"\b{re.escape(fn)}\s*(=>|\{{)", text)
         return re.search(rf"\b{re.escape(spelled)}\s*\(", text)
 
     def selected(self):

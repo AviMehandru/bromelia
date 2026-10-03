@@ -761,6 +761,49 @@
             "name": "BroDriveJoin",
             "file": "linux/src/domain/robot/bro-drive-join.h"
           }
+        },
+        {
+          "name": "OsDrive",
+          "kind": "struct",
+          "fields": [
+            "device",
+            "identification",
+            "mountPath"
+          ],
+          "swift": {
+            "name": "OsDrive",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Robot/OsDrive.swift"
+          },
+          "cs": {
+            "name": "OsDrive",
+            "file": "windows/src/Bromelia.Domain/Robot/OsDrive.cs"
+          },
+          "c": {
+            "name": "BroOsDrive",
+            "file": "linux/src/domain/robot/bro-os-drive.h"
+          }
+        },
+        {
+          "name": "JoinedDrive",
+          "kind": "struct",
+          "doc": "A drive as the engine knows it: its DriveId, what MakeMKV reported and what the OS reported (either may be missing).",
+          "fields": [
+            "driveId",
+            "makemkv",
+            "os"
+          ],
+          "swift": {
+            "name": "JoinedDrive",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Robot/JoinedDrive.swift"
+          },
+          "cs": {
+            "name": "JoinedDrive",
+            "file": "windows/src/Bromelia.Domain/Robot/JoinedDrive.cs"
+          },
+          "c": {
+            "name": "BroJoinedDrive",
+            "file": "linux/src/domain/robot/bro-joined-drive.h"
+          }
         }
       ],
       "functions": [
@@ -859,7 +902,7 @@
         {
           "name": "DriveJoin.entryFor",
           "params": [
-            "config",
+            "drives",
             "drive"
           ],
           "returns": "DriveEntry?",
@@ -876,6 +919,39 @@
           "swift": "DriveJoin.shortModel(_:)",
           "cs": "DriveJoin.ShortModel",
           "c": "bro_drive_join_short_model"
+        },
+        {
+          "name": "DiscFlags.typeText",
+          "params": [
+            "flags"
+          ],
+          "returns": "String",
+          "doc": "MakeMKV's disc type: 'Blu-ray (AACS)', 'Blu-ray', 'HD DVD', 'DVD' or 'Disc'.",
+          "swift": "DiscFlags.typeText(_:)",
+          "cs": "DiscFlags.TypeText",
+          "c": "bro_disc_flags_type_text"
+        },
+        {
+          "name": "MakemkvDrive.isPresent",
+          "params": [
+            "drive"
+          ],
+          "returns": "Bool",
+          "doc": "A drive is there (state isn't noDrive, and it has a name or a device).",
+          "swift": "MakemkvDrive.isPresent(_:)",
+          "cs": "MakemkvDrive.IsPresent",
+          "c": "bro_makemkv_drive_is_present"
+        },
+        {
+          "name": "MakemkvNotice.isLicenseProblem",
+          "params": [
+            "notice"
+          ],
+          "returns": "Bool",
+          "doc": "MakeMKV needs the user: a key, an update or starting the evaluation.",
+          "swift": "MakemkvNotice.isLicenseProblem(_:)",
+          "cs": "MakemkvNotice.IsLicenseProblem",
+          "c": "bro_makemkv_notice_is_license_problem"
         }
       ]
     },
@@ -2426,6 +2502,53 @@
           "c": {
             "name": "BroMigrationResult",
             "file": "linux/src/domain/config/bro-migration-result.h"
+          }
+        },
+        {
+          "name": "DriveMatch",
+          "kind": "struct",
+          "doc": "How a drive entry finds its drive: driveName (case- and space-insensitive), else devicePath.",
+          "fields": [
+            "driveName",
+            "devicePath"
+          ],
+          "swift": {
+            "name": "DriveMatch",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/DriveMatch.swift"
+          },
+          "cs": {
+            "name": "DriveMatch",
+            "file": "windows/src/Bromelia.Domain/Config/DriveMatch.cs"
+          },
+          "c": {
+            "name": "BroDriveMatch",
+            "file": "linux/src/domain/config/bro-drive-match.h"
+          }
+        },
+        {
+          "name": "DriveEntry",
+          "kind": "struct",
+          "doc": "A drive of the configuration (config-3.json's Drive).",
+          "fields": [
+            "id",
+            "name",
+            "enabled",
+            "match",
+            "profile",
+            "makemkvSettings",
+            "automation"
+          ],
+          "swift": {
+            "name": "DriveEntry",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/DriveEntry.swift"
+          },
+          "cs": {
+            "name": "DriveEntry",
+            "file": "windows/src/Bromelia.Domain/Config/DriveEntry.cs"
+          },
+          "c": {
+            "name": "BroDriveEntry",
+            "file": "linux/src/domain/config/bro-drive-entry.h"
           }
         }
       ],
@@ -5471,27 +5594,6 @@
               "BRO_DEVICE_EVENT_MOUNTED",
               "BRO_DEVICE_EVENT_UNMOUNTED"
             ]
-          }
-        },
-        {
-          "name": "OsDrive",
-          "kind": "struct",
-          "fields": [
-            "device",
-            "identification",
-            "mountPath"
-          ],
-          "swift": {
-            "name": "OsDrive",
-            "file": "macos/BromeliaKit/Sources/BroPorts/OsDrive.swift"
-          },
-          "cs": {
-            "name": "OsDrive",
-            "file": "windows/src/Bromelia.Ports/OsDrive.cs"
-          },
-          "c": {
-            "name": "BroOsDrive",
-            "file": "linux/src/ports/bro-os-drive.h"
           }
         }
       ],

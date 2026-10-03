@@ -74,15 +74,29 @@ bro_test_same_json (GPtrArray *failures, const char *id, const char *what, const
 void
 bro_test_run_cases (const char *relative, BroTestCaseFunc run)
 {
+  bro_test_run_cases_only (relative, NULL, run);
+}
+
+void
+bro_test_run_cases_only (const char *relative, gboolean (*only) (const char *id), BroTestCaseFunc run)
+{
   g_autoptr (BroJsonValue) doc = bro_test_fixture_json (relative);
   BroJsonValue *cases = bro_json_value_member (doc, "cases");
   g_assert_cmpuint (bro_json_value_length (cases), >, 0);
   g_autoptr (GPtrArray) failures = g_ptr_array_new_with_free_func (g_free);
+  guint run_count = 0;
   for (guint i = 0; i < bro_json_value_length (cases); i++) {
     BroJsonValue *c = bro_json_value_at (cases, i);
     const char *id = bro_json_value_get_string (bro_json_value_member (c, "id"), "?");
+    if (only && !only (id))
+      continue;
+    run_count++;
     if (!run (id, bro_json_value_member (c, "given"), bro_json_value_member (c, "expect"), failures))
       bro_test_fail (failures, id, "no test handles this case");
+  }
+  if (run_count == 0) {
+    g_printerr ("%s: no cases\n", relative);
+    g_test_fail ();
   }
   if (failures->len) {
     GString *all = g_string_new (NULL);

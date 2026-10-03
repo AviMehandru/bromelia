@@ -33,10 +33,12 @@ public enum Fixtures {
 
     /// Runs every case of a `*.cases.json` file. `run` returns false for a case it doesn't know, which fails:
     /// no case is skipped silently. Returns the failures, one line each (empty when all pass).
-    public static func runCases(_ relative: String, _ run: (_ id: String, _ given: JsonValue, _ expect: JsonValue) throws -> Bool) throws -> [String] {
+    /// `only` picks the cases by id, for a file whose other cases belong to a module that isn't built yet.
+    public static func runCases(_ relative: String, only: (String) -> Bool = { _ in true },
+                                _ run: (_ id: String, _ given: JsonValue, _ expect: JsonValue) throws -> Bool) throws -> [String] {
         let doc = try json(relative)
         var failures: [String] = []
-        let cases = doc["cases"]?.array ?? []
+        let cases = (doc["cases"]?.array ?? []).filter { only($0["id"]?.string ?? "") }
         if cases.isEmpty { return ["\(relative) has no cases"] }
         for c in cases {
             let id = c["id"]?.string ?? "?"
@@ -47,6 +49,11 @@ public enum Fixtures {
             }
         }
         return failures.map { "\(relative): \($0)" }
+    }
+
+    /// Throws unless `condition` holds.
+    public static func check(_ condition: Bool, _ what: @autoclosure () -> String) throws {
+        if !condition { throw FixtureError(what()) }
     }
 
     /// Throws when the two differ, naming the value.
