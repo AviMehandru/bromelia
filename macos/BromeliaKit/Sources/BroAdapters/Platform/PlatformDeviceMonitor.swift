@@ -5,7 +5,7 @@ import DiskArbitration
 import Foundation
 import IOKit
 
-/// DeviceMonitor on macOS (plan §10.3): the optical drives in the IORegistry (IOCompactDiscServices and its DVD and
+/// DeviceMonitor on macOS (plan §10.3): the optical drives in the IORegistry (IOCDBlockStorageDevice: CD, DVD and
 /// Blu-ray subclasses), polled. A drive's device is its IORegistry path (stable whether or not it holds a disc); its
 /// identification is the drive's "Vendor Name Product Name"; media when it has a BSD disk below it, mounted where
 /// DiskArbitration says. DrivePoller turns changes into events.
@@ -37,7 +37,7 @@ public final class PlatformDeviceMonitor: DeviceMonitor, @unchecked Sendable {
 
     private static func snapshotNow() -> [OsDriveState] {
         var iterator: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOCompactDiscServices"), &iterator) == KERN_SUCCESS else { return [] }
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOCDBlockStorageDevice"), &iterator) == KERN_SUCCESS else { return [] }
         defer { IOObjectRelease(iterator) }
         var states: [OsDriveState] = []
         while case let service = IOIteratorNext(iterator), service != 0 {

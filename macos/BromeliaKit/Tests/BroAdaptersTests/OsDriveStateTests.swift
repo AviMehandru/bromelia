@@ -90,7 +90,7 @@ struct OsDriveStateTests {
     @Test func theDrivesAreWhatTheRegistryLists() throws {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/ioreg")
-        p.arguments = ["-r", "-c", "IOCompactDiscServices", "-d", "1"]
+        p.arguments = ["-r", "-c", "IOCDBlockStorageDevice", "-d", "1"]
         let pipe = Pipe()
         p.standardOutput = pipe
         try p.run()
