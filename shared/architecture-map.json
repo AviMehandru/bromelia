@@ -5595,6 +5595,31 @@
           }
         },
         {
+          "name": "MakemkvOptions",
+          "kind": "struct",
+          "doc": "The switches every makemkvcon run gets: the profile file, --minlength, --cache, --directio, more arguments, and whether to scan drives (default: --noscan).",
+          "fields": [
+            "profilePath",
+            "minLengthSeconds",
+            "cacheMB",
+            "directIO",
+            "extraArguments",
+            "scan"
+          ],
+          "swift": {
+            "name": "MakemkvOptions",
+            "file": "macos/BromeliaKit/Sources/BroDomain/MakemkvFiles/MakemkvOptions.swift"
+          },
+          "cs": {
+            "name": "MakemkvOptions",
+            "file": "windows/src/Bromelia.Domain/MakemkvFiles/MakemkvOptions.cs"
+          },
+          "c": {
+            "name": "BroMakemkvOptions",
+            "file": "linux/src/domain/makemkv-files/bro-makemkv-options.h"
+          }
+        },
+        {
           "name": "SourceResolver",
           "kind": "namespace",
           "swift": {
@@ -5644,7 +5669,8 @@
               "BRO_MAKEMKV_SOURCE_ISO",
               "BRO_MAKEMKV_SOURCE_FILE"
             ]
-          }
+          },
+          "doc": "A source makemkvcon can open: drive(index, device), iso(path) or file(path) (a folder with a disc structure)."
         },
         {
           "name": "BetaKeyPage",
@@ -5762,7 +5788,8 @@
           "throws": true,
           "swift": "MakemkvArgs.backup(_:decrypt:destination:options:)",
           "cs": "MakemkvArgs.Backup",
-          "c": "bro_makemkv_args_backup"
+          "c": "bro_makemkv_args_backup",
+          "doc": "Fails with backup.needsDrive for an image or folder: backup takes disc:N only."
         },
         {
           "name": "MakemkvArgs.scanDrives",

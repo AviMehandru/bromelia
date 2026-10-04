@@ -44,6 +44,13 @@
 #include "bro-profile-resolver.h"
 #include "bro-rule-matcher.h"
 #include "bro-step-filter.h"
+#include "bro-beta-key.h"
+#include "bro-beta-key-page.h"
+#include "bro-makemkv-args.h"
+#include "bro-profile-xml.h"
+#include "bro-settings-conf.h"
+#include "bro-settings-layers.h"
+#include "bro-source-resolver.h"
 #include "bro-notify-messages.h"
 #include "bro-notify-requests.h"
 #include "bro-omdb-parse.h"
@@ -2907,6 +2914,163 @@ test_check_notifications (void)
   g_assert_cmpstr (c, ==, "Cancelled");
 }
 
+/* ---- makemkv files ----------------------------------------------------------------------------------- */
+
+static GHashTable *
+string_map (BroJsonValue *v)
+{
+  GHashTable *t = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  for (guint i = 0; v && v->kind == BRO_JSON_VALUE_OBJECT && i < v->keys->len; i++)
+    g_hash_table_replace (t, g_strdup (v->keys->pdata[i]), g_strdup (bro_json_value_get_string (v->items->pdata[i], "")));
+  return t;
+}
+
+static BroJsonValue *
+string_map_json (GHashTable *t)
+{
+  BroJsonValue *o = bro_json_value_new_object ();
+  GHashTableIter it;
+  gpointer k, v;
+  g_hash_table_iter_init (&it, t);
+  while (g_hash_table_iter_next (&it, &k, &v))
+    bro_json_value_set (o, k, bro_json_value_new_string (v));
+  BroJsonValue *sorted = sorted_json (o);
+  bro_json_value_unref (o);
+  return sorted;
+}
+
+static BroMakemkvSource *
+makemkv_source_of (BroJsonValue *s)
+{
+  if (J (s, "drive"))
+    return bro_makemkv_source_new (BRO_MAKEMKV_SOURCE_DRIVE, bro_json_value_get_integer (J (J (s, "drive"), "index"), 0),
+                                   JS (J (s, "drive"), "device"), NULL);
+  if (JS (s, "iso"))
+    return bro_makemkv_source_new (BRO_MAKEMKV_SOURCE_ISO, 0, NULL, JS (s, "iso"));
+  return bro_makemkv_source_new (BRO_MAKEMKV_SOURCE_FILE, 0, NULL, JS (s, "folder"));
+}
+
+static void
+ignore_error (GMarkupParseContext *c, GError *e, gpointer d)
+{
+}
+
+static gboolean
+makemkv_files_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  if (JS (given, "text")) {
+    g_autoptr (GHashTable) parsed = bro_settings_conf_parse (JS (given, "text"));
+    g_autoptr (BroJsonValue) got = string_map_json (parsed);
+    g_autoptr (BroJsonValue) want = sorted_json (J (expect, "parse"));
+    bro_test_same_json (failures, id, "parse", want, got);
+    if (bro_json_value_get_bool (J (expect, "roundTrips"), FALSE)) {
+      g_autofree char *text = bro_settings_conf_render (parsed, "Test");
+      g_autoptr (GHashTable) again = bro_settings_conf_parse (text);
+      g_autoptr (BroJsonValue) got2 = string_map_json (again);
+      bro_test_same_json (failures, id, "round trip", got, got2);
+    }
+    return TRUE;
+  }
+  if (J (given, "generated")) {
+    g_autofree char *xml = bro_profile_xml_render (J (given, "generated"));
+    if (bro_json_value_get_bool (J (expect, "wellFormedXml"), FALSE)) {
+      GMarkupParser parser = { NULL, NULL, NULL, NULL, ignore_error };
+      g_autoptr (GMarkupParseContext) ctx = g_markup_parse_context_new (&parser, 0, NULL, NULL);
+      g_autoptr (GError) err = NULL;
+      if (!g_markup_parse_context_parse (ctx, xml, -1, &err) || !g_markup_parse_context_end_parse (ctx, &err))
+        bro_test_fail (failures, id, "not well-formed: %s", err ? err->message : "?");
+    }
+    BroJsonValue *contains = J (expect, "contains");
+    for (guint i = 0; i < bro_json_value_length (contains); i++)
+      if (!strstr (xml, bro_json_value_get_string (bro_json_value_at (contains, i), "")))
+        bro_test_fail (failures, id, "lacks %s", bro_json_value_get_string (bro_json_value_at (contains, i), ""));
+    if (bro_json_value_get_bool (J (expect, "containsMakemkvDefaultSelection"), FALSE)
+        && !strstr (xml, "app_DefaultSelectionString=\"" BRO_PROFILE_XML_MAKEMKV_DEFAULT_SELECTION "\""))
+      bro_test_fail (failures, id, "lacks the default selection");
+    return TRUE;
+  }
+  if (J (given, "global")) {
+    g_autoptr (GHashTable) global = string_map (J (given, "global")), profile = string_map (J (given, "profile")),
+                           drive = string_map (J (given, "drive"));
+    g_autoptr (GHashTable) merged = bro_settings_layers_merge (global, profile, drive, JS (given, "registrationKey"),
+                                                               JS (given, "selectionOverride"), JS (given, "makemkvDataDir"));
+    g_autoptr (BroJsonValue) got = string_map_json (merged);
+    g_autoptr (BroJsonValue) want = sorted_json (J (expect, "settings"));
+    bro_test_same_json (failures, id, "settings", want, got);
+    return TRUE;
+  }
+  if (JS (given, "command")) {
+    const char *command = JS (given, "command");
+    BroJsonValue *o = J (given, "options");
+    BroMakemkvOptions options = BRO_MAKEMKV_OPTIONS_NONE;
+    options.profile_path = JS (given, "profilePath");
+    if (J (o, "minLengthSeconds"))
+      options.min_length_seconds = bro_json_value_get_integer (J (o, "minLengthSeconds"), -1);
+    options.cache_mb = bro_json_value_get_integer (J (o, "cacheMB"), 0);
+    options.has_direct_io = J (o, "directIO") != NULL;
+    options.direct_io = bro_json_value_get_bool (J (o, "directIO"), FALSE);
+    g_autoptr (BroMakemkvSource) source = J (given, "source") ? makemkv_source_of (J (given, "source")) : NULL;
+    g_auto (GStrv) args = NULL;
+    g_autoptr (BroBroError) error = NULL;
+    if (strcmp (command, "info") == 0)
+      args = bro_makemkv_args_info (source, &options);
+    else if (strcmp (command, "mkv") == 0)
+      args = bro_makemkv_args_mkv (source, JS (given, "title"), JS (given, "destination"), &options);
+    else if (strcmp (command, "backup") == 0)
+      args = bro_makemkv_args_backup (source, bro_json_value_get_bool (J (given, "decrypt"), FALSE), JS (given, "destination"), &options, &error);
+    else
+      args = bro_makemkv_args_scan_drives ();
+    if (J (expect, "error")) {
+      bro_test_same_string (failures, id, "error", JS (J (expect, "error"), "code"), error ? error->code : NULL);
+      return TRUE;
+    }
+    if (!args) {
+      bro_test_fail (failures, id, "no arguments");
+      return TRUE;
+    }
+    g_autoptr (BroJsonValue) all = strv_json (args);
+    if (J (expect, "arguments"))
+      bro_test_same_json (failures, id, "arguments", J (expect, "arguments"), all);
+    BroJsonValue *end = J (expect, "endsWith");
+    if (end) {
+      guint n = g_strv_length (args), k = bro_json_value_length (end);
+      g_autoptr (BroJsonValue) tail = strv_json (n >= k ? args + (n - k) : args);
+      bro_test_same_json (failures, id, "endsWith", end, tail);
+    }
+    BroJsonValue *contains = J (expect, "contains");
+    for (guint i = 0; i < bro_json_value_length (contains); i++)
+      if (!g_strv_contains ((const char *const *) args, bro_json_value_get_string (bro_json_value_at (contains, i), "")))
+        bro_test_fail (failures, id, "lacks %s", bro_json_value_get_string (bro_json_value_at (contains, i), ""));
+    return TRUE;
+  }
+  if (JS (given, "path")) {
+    g_autoptr (BroMakemkvSource) source = bro_source_resolver_source (JS (given, "path"), bro_json_value_get_bool (J (given, "isDirectory"), FALSE));
+    BroMakemkvOptions none = BRO_MAKEMKV_OPTIONS_NONE;
+    g_auto (GStrv) args = bro_makemkv_args_info (source, &none);
+    bro_test_same_string (failures, id, "source", JS (expect, "source"), args[g_strv_length (args) - 1]);
+    return TRUE;
+  }
+  if (JS (given, "html") || JS (given, "htmlFile")) {
+    g_autofree char *file = JS (given, "htmlFile") ? bro_test_fixture_text (JS (given, "htmlFile"), NULL) : NULL;
+    g_autofree char *key = bro_beta_key_page_parse (file ? file : JS (given, "html"));
+    bro_test_same_string (failures, id, "key", JS (expect, "key"), key);
+    return TRUE;
+  }
+  if (J (given, "currentKey")) {
+    gboolean may = bro_beta_key_may_replace (JS (given, "currentKey"));
+    if (!may != !bro_json_value_get_bool (J (expect, "mayReplace"), FALSE))
+      bro_test_fail (failures, id, "mayReplace: got %d", may);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void
+test_makemkv_files_cases (void)
+{
+  bro_test_run_cases ("domain/makemkv-files.cases.json", makemkv_files_case);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -2950,5 +3114,6 @@ main (int argc, char **argv)
   g_test_add_func ("/metadata/cases", test_metadata_cases);
   g_test_add_func ("/notify/cases", test_notify_cases);
   g_test_add_func ("/notify/check", test_check_notifications);
+  g_test_add_func ("/makemkv-files/cases", test_makemkv_files_cases);
   return g_test_run ();
 }
