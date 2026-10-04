@@ -3,6 +3,7 @@
 #include "bro-test-english.h"
 #include "bro-test-fixtures.h"
 
+#include "bro-fingerprint.h"
 #include "bro-home-dir-isolation.h"
 #include "bro-makemkv-tool.h"
 #include "bro-platform-file-system.h"
@@ -1409,6 +1410,74 @@ test_makemkv_tool (void)
   bro_test_run_cases ("adapters/makemkv-tool.cases.json", makemkv_case);
 }
 
+/* The adapters together with the real makemkvcon on a disc image: only when BROMELIA_TEST_ISO names one (CLAUDE.md,
+ * "Real-disc tests"; makemkvcon must be on PATH). No drive is touched, and the settings are empty, so the owner's
+ * MakeMKV settings and key are never read. */
+static void
+test_real_iso (void)
+{
+  const char *iso = g_getenv ("BROMELIA_TEST_ISO");
+  g_autoptr (BroPlatformFileSystem) fs = NULL;
+  g_autoptr (BroPlatformProcessLauncher) launcher = NULL;
+  g_autoptr (BroHomeDirIsolation) isolation = NULL;
+  g_autoptr (BroSystemToolLocator) locator = NULL;
+  g_autoptr (BroMakemkvTool) tool = NULL;
+  g_autoptr (GHashTable) configured = NULL;
+  g_autoptr (GHashTable) candidates = NULL;
+  g_autoptr (GHashTable) names = NULL;
+  g_autoptr (BroMakemkvInvocation) invocation = NULL;
+  g_autoptr (BroMakemkvSource) source = NULL;
+  g_autoptr (BroListingRun) result = NULL;
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (TestCountingSink) sink = NULL;
+  g_auto (GStrv) path = NULL;
+  g_autofree char *work = NULL;
+  g_autofree char *fingerprint = NULL;
+  g_autofree char *transcript = NULL;
+  g_autofree char *transcript_path = NULL;
+  if (!iso || !*iso)
+    {
+      g_test_skip ("BROMELIA_TEST_ISO isn't set");
+      return;
+    }
+  fs = bro_platform_file_system_new ();
+  launcher = bro_platform_process_launcher_new ();
+  work = g_build_filename (fs_root, "iso", NULL);
+  remove_tree (fs_root);
+#ifdef __APPLE__
+  isolation = bro_home_dir_isolation_new (BRO_FILE_SYSTEM (fs), BRO_HOME_LAYOUT_MACOS);
+#else
+  isolation = bro_home_dir_isolation_new (BRO_FILE_SYSTEM (fs), BRO_HOME_LAYOUT_LINUX);
+#endif
+  configured = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  candidates = bro_platform_tool_paths_candidates (g_get_home_dir ());
+  names = bro_platform_tool_paths_names ();
+  path = g_strsplit (g_getenv ("PATH") ? g_getenv ("PATH") : "", ":", -1);
+  locator = bro_system_tool_locator_new (BRO_FILE_SYSTEM (fs), configured, candidates, names, (const char *const *) path, g_get_home_dir ());
+  tool = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), BRO_FILE_SYSTEM (fs), BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
+  invocation = bro_makemkv_invocation_new ();
+  invocation->settings->data_dir = g_strdup ("");
+  invocation->settings->work_directory = g_build_filename (work, "home", NULL);
+  invocation->has_stall_timeout = TRUE;
+  invocation->stall_timeout.seconds = 300;
+  transcript_path = g_build_filename (work, "makemkv.txt", NULL);
+  invocation->transcript = g_strdup (transcript_path);
+  source = bro_makemkv_source_new (BRO_MAKEMKV_SOURCE_ISO, 0, NULL, iso);
+  sink = g_object_new (TEST_TYPE_COUNTING_SINK, NULL);
+  result = bro_makemkv_tool_listing (tool, source, invocation, BRO_RUN_SINK (sink), NULL, &error);
+  g_assert_null (error);
+  g_assert_nonnull (result);
+  g_assert_cmpstr (bro_status_word_to_wire (result->run->outcome->status), ==, "success");
+  g_assert_cmpuint (result->listing->titles->len, >, 0);
+  g_assert_cmpint (sink->events, >, 0);
+  fingerprint = bro_fingerprint_of (result->listing);
+  g_test_message ("%u titles, %s, fingerprint %s", result->listing->titles->len, result->run->version, fingerprint);
+  g_assert_true (fingerprint && (g_str_has_prefix (fingerprint, "v1:c13d733d") || g_str_has_prefix (fingerprint, "v1:742cbae9")));
+  g_assert_true (g_file_get_contents (transcript_path, &transcript, NULL, NULL));
+  g_assert_true (g_str_has_prefix (transcript, "==== "));
+  g_assert_nonnull (strstr (transcript, " exit status 0\n"));
+}
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -1508,6 +1577,7 @@ main (int argc, char **argv)
   g_test_add_func ("/tool-locator/cases", test_tool_locator);
   g_test_add_func ("/tool-locator/platform-paths", test_tool_paths);
   g_test_add_func ("/makemkv-tool/cases", test_makemkv_tool);
+  g_test_add_func ("/makemkv-tool/real-iso", test_real_iso);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);
