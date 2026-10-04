@@ -6,6 +6,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case jobSource = "job.source"
     case jobFinished = "job.finished"
     case jobCancelledByUser = "job.cancelledByUser"
+    case jobCancelled = "job.cancelled"
     case jobNotFound = "job.notFound"
     case jobNotRetryable = "job.notRetryable"
     case jobNotAwaitingDecision = "job.notAwaitingDecision"

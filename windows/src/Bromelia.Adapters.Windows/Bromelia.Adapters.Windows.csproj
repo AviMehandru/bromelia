@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- L3 Adapters, Windows part (rearchitecture plan §10.3): the ports that need Windows APIs (Job Objects, the
+       registry, Credential Manager, device notifications, …). Builds anywhere; runs on Windows only. -->
+  <PropertyGroup>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <RootNamespace>Bromelia.Adapters.Windows</RootNamespace>
+    <AssemblyName>Bromelia.Adapters.Windows</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.Versioning.SupportedOSPlatformAttribute">
+      <_Parameter1>windows</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bromelia.Foundation\Bromelia.Foundation.csproj" />
+    <ProjectReference Include="..\Bromelia.Domain\Bromelia.Domain.csproj" />
+    <ProjectReference Include="..\Bromelia.Ports\Bromelia.Ports.csproj" />
+    <ProjectReference Include="..\Bromelia.Adapters\Bromelia.Adapters.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -40,7 +40,7 @@ jobs:
         run: |
           xcodebuild -project Bromelia.xcodeproj -scheme Bromelia -destination 'platform=macOS' \
             -derivedDataPath build/DerivedData test
-      # The rebuild's layers (BromeliaKit): Foundation, Domain and Ports against shared/fixtures.
+      # The rebuild's layers (BromeliaKit): Foundation, Domain, Ports and Adapters.
       - name: BromeliaKit tests
         working-directory: macos/BromeliaKit
         run: swift test
@@ -56,7 +56,7 @@ jobs:
       - name: Test core
         working-directory: windows
         run: dotnet test tests/Bromelia.Core.Tests/Bromelia.Core.Tests.csproj
-      # The rebuild's layers: Foundation, Domain and Ports against shared/fixtures. One step each: in a
+      # The rebuild's layers: Foundation, Domain, Ports and Adapters. One step each: in a
       # multi-line PowerShell step only the last command's exit code fails the step.
       - name: Test rebuild Foundation
         working-directory: windows
@@ -67,6 +67,12 @@ jobs:
       - name: Test rebuild Ports
         working-directory: windows
         run: dotnet test tests/Bromelia.Ports.Tests/Bromelia.Ports.Tests.csproj
+      - name: Test rebuild Adapters
+        working-directory: windows
+        run: dotnet test tests/Bromelia.Adapters.Tests/Bromelia.Adapters.Tests.csproj
+      - name: Test rebuild Windows adapters (Job Objects, registry, devices, …)
+        working-directory: windows
+        run: dotnet test tests/Bromelia.Adapters.Windows.Tests/Bromelia.Adapters.Windows.Tests.csproj
       # The WinUI app is built with Visual Studio's MSBuild, not `dotnet build`: Windows App SDK 1.6
       # loads its PRI tasks (Microsoft.Build.Packaging.Pri.Tasks.dll) from Visual Studio's
       # MSBuild\Microsoft\VisualStudio\v<version>\AppxPackage folder, which the .NET SDK does not ship.

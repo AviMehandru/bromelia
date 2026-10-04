@@ -3,6 +3,7 @@
   "job.source": "{mode, select, mkv {Rip titles to MKV} backup {Backup (encrypted, 1:1)} backupDecrypted {Backup (decrypted)} backupThenMkv {Decrypted backup, then MKV from backup} infoOnly {Scan only (save disc information)} audioCD {Rip audio CD} dataImage {Image data disc (ISO)} other {{mode}}} from {source} using profile “{profile}”",
   "job.finished": "Finished: {outcome, select, succeeded {Completed} succeededWithReadErrors {Completed with read errors} succeededStepsFailed {Completed; a post-processing step failed} failed {Failed} cancelled {Cancelled} skipped {Skipped} interrupted {Interrupted} other {{outcome}}} in {elapsed, duration}",
   "job.cancelledByUser": "Cancelled by user",
+  "job.cancelled": "Cancelled",
   "job.notFound": "No such job",
   "job.notRetryable": "Only a finished job that didn't succeed can be retried",
   "job.notAwaitingDecision": "This job isn't waiting for an answer",

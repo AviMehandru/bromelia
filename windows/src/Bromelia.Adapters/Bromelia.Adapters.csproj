@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- L3 Adapters, portable part (rearchitecture plan §10): tools, HTTP, the store and anything else that needs
+       no Windows API. Implements the ports; knows nothing about services or steps. -->
+  <PropertyGroup>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <RootNamespace>Bromelia.Adapters</RootNamespace>
+    <AssemblyName>Bromelia.Adapters</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bromelia.Foundation\Bromelia.Foundation.csproj" />
+    <ProjectReference Include="..\Bromelia.Domain\Bromelia.Domain.csproj" />
+    <ProjectReference Include="..\Bromelia.Ports\Bromelia.Ports.csproj" />
+  </ItemGroup>
+
+</Project>

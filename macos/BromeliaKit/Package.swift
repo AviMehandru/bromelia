@@ -10,16 +10,19 @@ let package = Package(
         .library(name: "BroFoundation", targets: ["BroFoundation"]),
         .library(name: "BroDomain", targets: ["BroDomain"]),
         .library(name: "BroPorts", targets: ["BroPorts"]),
+        .library(name: "BroAdapters", targets: ["BroAdapters"]),
     ],
     targets: [
         .target(name: "BroFoundation"),
         .target(name: "BroDomain", dependencies: ["BroFoundation"]),
         .target(name: "BroPorts", dependencies: ["BroFoundation", "BroDomain"]),
+        .target(name: "BroAdapters", dependencies: ["BroFoundation", "BroDomain", "BroPorts"]),
         // Reads shared/fixtures for the tests; not part of any layer.
         .target(name: "BroTestSupport", dependencies: ["BroFoundation"], path: "Tests/BroTestSupport"),
         .testTarget(name: "BroFoundationTests", dependencies: ["BroFoundation", "BroTestSupport"]),
         .testTarget(name: "BroDomainTests", dependencies: ["BroDomain", "BroTestSupport"]),
         .testTarget(name: "BroPortsTests", dependencies: ["BroPorts", "BroTestSupport"]),
+        .testTarget(name: "BroAdaptersTests", dependencies: ["BroAdapters", "BroTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

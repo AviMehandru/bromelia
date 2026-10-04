@@ -1,0 +1,326 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
+using Bromelia.Domain;
+using Bromelia.Foundation;
+using Bromelia.Ports;
+
+namespace Bromelia.Adapters.Windows;
+
+/// <summary>Starts processes in a Job Object and watches them (plan §10.3): stalls, stopping, abandonment 30 s after
+/// the kill, output read for at most 5 s after exit, a transcript of every line.
+///
+/// Windows has no signals, so both stop policies end the whole job at once (TerminateJobObject); the exit status is
+/// then -1. The job also has KILL_ON_JOB_CLOSE until the process has ended, so a crashed engine leaves no tools
+/// behind. A process the tool leaves running after a normal exit is left alone, as on macOS and Linux.</summary>
+public sealed class PlatformProcessLauncher : IProcessLauncher
+{
+    public IRunningProcess Start(ProcessSpec spec) => Running.Start(spec);
+
+    /// <summary>The program and arguments actually run: the spec's interpreter first, else one chosen from the
+    /// script's extension (.ps1: PowerShell, .bat and .cmd: cmd.exe, .py: the py launcher).</summary>
+    public static CommandLine Invocation(ProcessSpec spec)
+    {
+        var exe = spec.Executable;
+        IEnumerable<string> Then(params string[] first) => first.Concat(spec.Arguments);
+        if (!string.IsNullOrWhiteSpace(spec.Interpreter))
+            return new CommandLine(spec.Interpreter!.Trim(), Then(exe).ToList());
+        switch (Path.GetExtension(exe).ToLowerInvariant())
+        {
+            case ".ps1":
+                return new CommandLine("powershell.exe", Then("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", exe).ToList());
+            case ".bat":
+            case ".cmd":
+                return new CommandLine(Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } c ? c : "cmd.exe", Then("/c", exe).ToList());
+            case ".py":
+                return new CommandLine("py.exe", Then(exe).ToList());
+        }
+        return new CommandLine(exe, spec.Arguments.ToList());
+    }
+
+    sealed class Running : IRunningProcess
+    {
+        static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(250);
+
+        readonly Process _process;
+        readonly IntPtr _job;
+        readonly ProcessSpec _spec;
+        readonly Channel<OutputLine> _lines = Channel.CreateUnbounded<OutputLine>(new UnboundedChannelOptions { SingleReader = true });
+        readonly object _gate = new();
+        readonly TaskCompletionSource _killed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        readonly Transcript? _transcript;
+        readonly Task<ProcessExit> _exit;
+        Timer? _watchdog;
+        long _lastOutput = Environment.TickCount64;
+        StopReason? _reason;
+        Duration? _stalled;
+
+        Running(ProcessSpec spec, Process process, IntPtr job, Transcript? transcript)
+        {
+            _spec = spec;
+            _process = process;
+            _job = job;
+            _transcript = transcript;
+            var pumps = new[] { Pump(process.StandardOutput, OutputSource.Stdout), Pump(process.StandardError, OutputSource.Stderr) };
+            if (spec.StallTimeout is not null) _watchdog = new Timer(_ => Watch(), null, Tick, Tick);
+            _exit = Finish(pumps);
+        }
+
+        public static Running Start(ProcessSpec spec)
+        {
+            var cmd = Invocation(spec);
+            var transcript = spec.Transcript is { Length: > 0 } t ? new Transcript(t) : null;
+            transcript?.Write($"==== {Instant.Format(Now())} $ {string.Join(" ", new[] { cmd.Executable }.Concat(cmd.Arguments).Select(ArgumentSplitter.Quote))}");
+            try
+            {
+                if (spec.WorkingDirectory is { Length: > 0 } wd && !Directory.Exists(wd))
+                    throw new DirectoryNotFoundException($"the working folder {wd} doesn't exist");
+                var psi = new ProcessStartInfo(cmd.Executable)
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    RedirectStandardInput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = new UTF8Encoding(false),
+                    StandardErrorEncoding = new UTF8Encoding(false),
+                };
+                foreach (var a in cmd.Arguments) psi.ArgumentList.Add(a);
+                foreach (var kv in spec.Environment) psi.Environment[kv.Key] = kv.Value;
+                if (spec.WorkingDirectory is { Length: > 0 } dir) psi.WorkingDirectory = dir;
+
+                var job = Native.CreateKillOnCloseJob();
+                var p = new Process { StartInfo = psi };
+                try
+                {
+                    p.Start();
+                }
+                catch
+                {
+                    Native.CloseHandle(job);
+                    throw;
+                }
+                // A child the process starts in the moment before this call escapes the job; Process.Start can't
+                // start it suspended. Stop then still ends the process tree (see Kill).
+                if (job != IntPtr.Zero && !Native.AssignProcessToJobObject(job, p.Handle))
+                {
+                    Native.CloseHandle(job);
+                    job = IntPtr.Zero;
+                }
+                p.StandardInput.Close();
+                return new Running(spec, p, job, transcript);
+            }
+            catch (Exception e) when (e is Win32Exception or IOException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                transcript?.Write($"==== {Instant.Format(Now())} could not start: {e.Message}");
+                transcript?.Dispose();
+                throw new BroFailure(new BroMessage(MessageCode.ProcessCouldNotStart, Severity.Error,
+                    ("tool", JsonValue.Of(Path.GetFileName(cmd.Executable))), ("reason", JsonValue.Of(e.Message))).ToError());
+            }
+        }
+
+        public IAsyncEnumerable<OutputLine> Lines() => _lines.Reader.ReadAllAsync();
+
+        public Task<ProcessExit> Wait() => _exit;
+
+        public void Stop(StopReason reason)
+        {
+            lock (_gate)
+            {
+                if (_reason is not null) return;
+                _reason = reason;
+            }
+            Kill();
+        }
+
+        static Instant Now() => new(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+        void Watch()
+        {
+            var limit = _spec.StallTimeout!.Value;
+            var quiet = (Environment.TickCount64 - Interlocked.Read(ref _lastOutput)) / 1000.0;
+            if (quiet < limit.Seconds) return;
+            lock (_gate)
+            {
+                if (_reason is not null) return;
+                _reason = StopReason.Stalled;
+                _stalled = new Duration(Math.Round(quiet, 3));
+            }
+            Kill();
+        }
+
+        void Kill()
+        {
+            try
+            {
+                if (_process.HasExited) return;
+                if (_job == IntPtr.Zero || !Native.TerminateJobObject(_job, unchecked((uint)-1)))
+                    _process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) { }
+            catch (Win32Exception) { }
+            _killed.TrySetResult();
+        }
+
+        async Task Pump(StreamReader reader, OutputSource source)
+        {
+            string? line;
+            while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
+            {
+                Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
+                if (line.Length == 0) continue;
+                _transcript?.Write(line);
+                _lines.Writer.TryWrite(new OutputLine(source, line, Now()));
+            }
+        }
+
+        async Task<ProcessExit> Finish(Task[] pumps)
+        {
+            var exited = _process.WaitForExitAsync();
+            var abandon = _killed.Task.ContinueWith(_ => Task.Delay(TimeSpan.FromSeconds(30)), TaskScheduler.Default).Unwrap();
+            var abandoned = await Task.WhenAny(exited, abandon).ConfigureAwait(false) != exited;
+            // Output normally ends with the process. A child it left behind may keep the pipes open: don't wait long.
+            if (!abandoned) await Task.WhenAny(Task.WhenAll(pumps), Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
+            _watchdog?.Dispose();
+            _watchdog = null;
+            _lines.Writer.TryComplete();
+            if (_job != IntPtr.Zero)
+            {
+                Native.KeepProcessesOnClose(_job);
+                Native.CloseHandle(_job);
+            }
+            ProcessExit exit;
+            lock (_gate)
+                exit = new ProcessExit(abandoned ? -1 : _process.ExitCode, null, _stalled, abandoned,
+                    _reason is StopReason.Cancelled or StopReason.Shutdown);
+            if (_transcript is not null)
+            {
+                _transcript.Write($"==== {Instant.Format(Now())} {Transcript.Ending(exit)}");
+                _transcript.Dispose();
+            }
+            return exit;
+        }
+    }
+
+    /// <summary>The transcript file: appended to, one line at a time, from both output pumps.</summary>
+    sealed class Transcript : IDisposable
+    {
+        readonly StreamWriter? _writer;
+
+        public Transcript(string path)
+        {
+            try
+            {
+                if (Path.GetDirectoryName(path) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
+                _writer = new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read), new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true };
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { _writer = null; }
+        }
+
+        /// <summary><c>exit status 0</c>, <c>signal 15</c> or <c>abandoned</c>, then <c>, stalled</c> and
+        /// <c>, cancelled</c> when they apply.</summary>
+        public static string Ending(ProcessExit exit)
+        {
+            var s = exit.Abandoned ? "abandoned" : exit.Signal is { } sig ? $"signal {sig}" : $"exit status {exit.Status}";
+            if (exit.Stalled is not null) s += ", stalled";
+            if (exit.Cancelled) s += ", cancelled";
+            return s;
+        }
+
+        public void Write(string line)
+        {
+            if (_writer is null) return;
+            lock (_writer)
+            {
+                try { _writer.WriteLine(line); }
+                catch (IOException) { }
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_writer is null) return;
+            lock (_writer) _writer.Dispose();
+        }
+    }
+
+    static class Native
+    {
+        const int JobObjectExtendedLimitInformation = 9;
+        const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct BasicLimits
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct IoCounters
+        {
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount, ReadTransferCount, WriteTransferCount, OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct ExtendedLimits
+        {
+            public BasicLimits BasicLimitInformation;
+            public IoCounters IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr CreateJobObjectW(IntPtr attributes, string? name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimits info, uint length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr handle);
+
+        /// <summary>A job whose processes end when its last handle closes (the engine crashing included); zero
+        /// when Windows refuses one.</summary>
+        public static IntPtr CreateKillOnCloseJob()
+        {
+            var job = CreateJobObjectW(IntPtr.Zero, null);
+            if (job == IntPtr.Zero) return IntPtr.Zero;
+            var info = new ExtendedLimits();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref info, (uint)Marshal.SizeOf<ExtendedLimits>())) return job;
+            CloseHandle(job);
+            return IntPtr.Zero;
+        }
+
+        /// <summary>Clears KILL_ON_JOB_CLOSE, so closing the handle leaves what is still running alone.</summary>
+        public static void KeepProcessesOnClose(IntPtr job)
+        {
+            var info = new ExtendedLimits();
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref info, (uint)Marshal.SizeOf<ExtendedLimits>());
+        }
+    }
+}

@@ -11,6 +11,7 @@ typedef enum {
   BRO_MSG_JOB_SOURCE, /* job.source */
   BRO_MSG_JOB_FINISHED, /* job.finished */
   BRO_MSG_JOB_CANCELLED_BY_USER, /* job.cancelledByUser */
+  BRO_MSG_JOB_CANCELLED, /* job.cancelled */
   BRO_MSG_JOB_NOT_FOUND, /* job.notFound */
   BRO_MSG_JOB_NOT_RETRYABLE, /* job.notRetryable */
   BRO_MSG_JOB_NOT_AWAITING_DECISION, /* job.notAwaitingDecision */

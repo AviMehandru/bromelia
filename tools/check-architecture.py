@@ -10,6 +10,10 @@
             a phase ≤ --require-phase.
   unmapped  public symbols in the layer folders that the map doesn't list (reported; fail with --strict).
 
+  only      a type or function with "only": ["cs"] (and a "why") exists on those platforms alone: platform
+            adapters that only one OS has (the Windows registry swap, macOS's drutil parser). Presence is
+            checked on those platforms only.
+
   idioms    the map's "idioms" section lists, per platform, public symbols that a language idiom of plan §6 needs
             and the other platforms don't have (C#'s BroFailure, C's accessors and boxed-type helpers). They
             aren't reported as unmapped. A C# type nested in a mapped enum and named after one of its cases (an
@@ -49,7 +53,7 @@ def expected_spellings(module_key, module, layers):
     layer = layers[module["layer"]]
     folder = module["folder"]
     cfolder = module.get("cFolder", module_key.split("/")[1] if folder else "")
-    csroot = layer["cs"] if isinstance(layer["cs"], str) else layer["cs"][0]
+    csroot = module.get("csRoot") or (layer["cs"] if isinstance(layer["cs"], str) else layer["cs"][0])
     types = {}
     for t in module["types"]:
         name = t["name"]
@@ -95,9 +99,14 @@ class Checker:
                 self.lint_errors.append(f"{key}: unknown layer {m['layer']}")
                 continue
             types, funcs = expected_spellings(key, m, layers)
+            if m.get("csRoot") and m["csRoot"] not in (layers[m["layer"]]["cs"] if isinstance(layers[m["layer"]]["cs"], list) else [layers[m["layer"]]["cs"]]):
+                self.lint_errors.append(f"{key}: csRoot {m['csRoot']} isn't one of the layer's C# folders")
+            for entry in m["types"] + m["functions"]:
+                if "only" in entry and (not entry.get("why") or not set(entry["only"]) <= set(PLATFORMS)):
+                    self.lint_errors.append(f"{key}: {entry['name']}: \"only\" needs known platforms and a why")
             for t in m["types"]:
                 exp = types[t["name"]]
-                for p in PLATFORMS:
+                for p in t.get("only", PLATFORMS):
                     if t.get(p) != exp[p]:
                         self.lint_errors.append(f"{key}: type {t['name']}: {p} spelling {t.get(p)} should be {exp[p]}")
                     f = exp[p]["file"]
@@ -106,7 +115,7 @@ class Checker:
                     seen_files[f] = t["name"]
             for f in m["functions"]:
                 exp = funcs[f["name"]]
-                for p in PLATFORMS:
+                for p in f.get("only", PLATFORMS):
                     if f.get(p) != exp[p]:
                         self.lint_errors.append(f"{key}: {f['name']}: {p} spelling {f.get(p)} should be {exp[p]}")
                 if f["name"] in seen_funcs:
@@ -166,11 +175,15 @@ class Checker:
         req = self.args.require_phase
         for key, m in self.selected().items():
             for t in m["types"]:
+                if platform not in t.get("only", PLATFORMS):
+                    continue
                 f = ROOT / t[platform]["file"]
                 text = f.read_text(encoding="utf-8", errors="replace") if f.exists() else ""
                 if not text or not self.defines_type(platform, text, t[platform]["name"], t["kind"]):
                     self.missing.append((platform, t.get("phase", m["phase"]), f"{key}: type {t[platform]['name']} ({t[platform]['file']})"))
             for fn in m["functions"]:
+                if platform not in fn.get("only", PLATFORMS):
+                    continue
                 owner = fn["name"].split(".")[0]
                 entry = self.types[owner][0][1] if owner in self.types else None
                 f = ROOT / entry[platform]["file"] if entry else None
@@ -184,24 +197,26 @@ class Checker:
     # ---- unmapped public symbols ------------------------------------------------------------------
     def unmapped_symbols(self, platform):
         layers = self.doc["layers"]
-        known_types = {t[platform]["name"] for es in self.types.values() for _, t in es}
+        known_types = {t[platform]["name"] for es in self.types.values() for _, t in es if platform in t}
         idioms = [i["symbol"] for i in self.doc.get("idioms", {}).get(platform, [])]
         known_types |= set(idioms)
         if platform == "cs":
-            known_types |= {c for es in self.types.values() for _, t in es for c in t["cs"].get("cases", [])}
+            known_types |= {c for es in self.types.values() for _, t in es if "cs" in t for c in t["cs"].get("cases", [])}
         only = None
         if self.args.module:
-            only = {(ROOT / t[platform]["file"]).resolve() for m in self.selected().values() for t in m["types"]}
+            only = {(ROOT / t[platform]["file"]).resolve() for m in self.selected().values() for t in m["types"] if platform in t}
         known_funcs = set()
         for m in self.doc["modules"].values():
             for fn in m["functions"]:
+                if platform not in fn:
+                    continue
                 s = fn[platform]
                 known_funcs.add(s if platform == "c" else s.split(".", 1)[1].split("(")[0])
         known_funcs |= set(idioms)
 
         def known(name, pool):
             return name in pool or any(fnmatch.fnmatchcase(name, i) for i in idioms)
-        for lname in ("foundation", "domain", "ports"):
+        for lname in ("foundation", "domain", "ports", "adapters"):
             roots = layers[lname][platform]
             for root in roots if isinstance(roots, list) else [roots]:
                 base = ROOT / root
@@ -248,7 +263,8 @@ class Checker:
             unm = [x for x in self.unmapped if x[0] == p]
             due = [x for x in miss if self.args.require_phase is not None and x[1] <= self.args.require_phase]
             later = [x for x in miss if self.args.module and x[1] > min(m["phase"] for m in modules.values())]
-            print(f"{PLATFORMS[p]}: {nt + nf - len(miss)} of {nt + nf} entries present, {len(miss)} missing"
+            total = sum(1 for m in modules.values() for e in m["types"] + m["functions"] if p in e.get("only", PLATFORMS))
+            print(f"{PLATFORMS[p]}: {total - len(miss)} of {total} entries present, {len(miss)} missing"
                   f"{f' ({len(later)} of a later phase)' if later else ''}"
                   f"{f' ({len(due)} due by phase {self.args.require_phase})' if self.args.require_phase is not None else ''}, {len(unm)} unmapped public symbol(s)")
             if not self.args.quiet:

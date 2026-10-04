@@ -8,6 +8,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "job.source",
   "job.finished",
   "job.cancelledByUser",
+  "job.cancelled",
   "job.notFound",
   "job.notRetryable",
   "job.notAwaitingDecision",

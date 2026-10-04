@@ -9476,6 +9476,124 @@
           "c": "bro_engine_lock_acquire"
         }
       ]
+    },
+    "adapters/process-launcher": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "ProcessLauncher on the real OS (plan §10.3): posix_spawn in its own process group (macOS), a Job Object (Windows), g_subprocess with setpgid and a watchdog thread (Linux). Stall watchdog, stop escalation, abandonment, transcripts, interpreters for scripts.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformProcessLauncher",
+          "kind": "class",
+          "doc": "Starts processes in their own process group (Windows: Job Object) and watches them: stalls, stop escalation (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for at most 5 s after exit, a transcript of every line.",
+          "swift": {
+            "name": "PlatformProcessLauncher",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/PlatformProcessLauncher.swift"
+          },
+          "cs": {
+            "name": "PlatformProcessLauncher",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/PlatformProcessLauncher.cs"
+          },
+          "c": {
+            "name": "BroPlatformProcessLauncher",
+            "file": "linux/src/adapters/platform/bro-platform-process-launcher.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformProcessLauncher.start",
+          "params": [
+            "spec"
+          ],
+          "returns": "RunningProcess",
+          "throws": true,
+          "swift": "PlatformProcessLauncher.start(_:)",
+          "cs": "PlatformProcessLauncher.Start",
+          "c": "bro_platform_process_launcher_start"
+        },
+        {
+          "name": "PlatformProcessLauncher.invocation",
+          "params": [
+            "spec"
+          ],
+          "returns": "CommandLine",
+          "doc": "The program and arguments actually run: the spec's interpreter first, else one chosen from the script's extension (Windows: .ps1, .bat/.cmd, .py) or /bin/sh for a file without the execute bit (macOS, Linux).",
+          "swift": "PlatformProcessLauncher.invocation(_:)",
+          "cs": "PlatformProcessLauncher.Invocation",
+          "c": "bro_platform_process_launcher_invocation"
+        }
+      ]
+    },
+    "adapters/system-clock": {
+      "layer": "adapters",
+      "folder": "Clock",
+      "cFolder": "clock",
+      "doc": "The real clock (Clock port).",
+      "phase": 2,
+      "types": [
+        {
+          "name": "SystemClock",
+          "kind": "class",
+          "doc": "Wall time, a monotonic clock, cancellable sleeps and timers.",
+          "swift": {
+            "name": "SystemClock",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Clock/SystemClock.swift"
+          },
+          "cs": {
+            "name": "SystemClock",
+            "file": "windows/src/Bromelia.Adapters/Clock/SystemClock.cs"
+          },
+          "c": {
+            "name": "BroSystemClock",
+            "file": "linux/src/adapters/clock/bro-system-clock.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "SystemClock.now",
+          "params": [],
+          "returns": "Instant",
+          "swift": "SystemClock.now()",
+          "cs": "SystemClock.Now",
+          "c": "bro_system_clock_now"
+        },
+        {
+          "name": "SystemClock.monotonic",
+          "params": [],
+          "returns": "Duration",
+          "swift": "SystemClock.monotonic()",
+          "cs": "SystemClock.Monotonic",
+          "c": "bro_system_clock_monotonic"
+        },
+        {
+          "name": "SystemClock.sleep",
+          "params": [
+            "duration",
+            "cancel"
+          ],
+          "throws": true,
+          "async": true,
+          "swift": "SystemClock.sleep(_:cancel:)",
+          "cs": "SystemClock.Sleep",
+          "c": "bro_system_clock_sleep"
+        },
+        {
+          "name": "SystemClock.timer",
+          "params": [
+            "schedule",
+            "handler"
+          ],
+          "returns": "TimerHandle",
+          "swift": "SystemClock.timer(_:handler:)",
+          "cs": "SystemClock.Timer",
+          "c": "bro_system_clock_timer"
+        }
+      ]
     }
   }
 }

@@ -9,7 +9,8 @@
     "EngineLock.acquire",
     "FileSystem.writeAtomically",
     "FileSystem.openForReading",
-    "FileSystem.createDirectory"
+    "FileSystem.createDirectory",
+    "PlatformProcessLauncher.invocation"
   ],
   "description": "What every platform's adapters must do on the real OS (plan §26, 'Platform adapters'). These aren't run by a shared runner: each platform's adapter tests implement every case.",
   "cases": [
@@ -61,10 +62,11 @@
     {
       "id": "cancel-escalates",
       "from": [
-        "linux /reliability/cancel-without-main-loop"
+        "linux /reliability/cancel-without-main-loop",
+        "rearchitecture-plan §9 RunningProcess.stop ((INT →) TERM → KILL, 5 s apart)"
       ],
       "given": {
-        "command": "a child that ignores SIGINT",
+        "command": "a child that ignores SIGINT (sh: trap '' INT)",
         "stopPolicy": "interruptFirst",
         "cancelAfter": 0.5
       },
@@ -73,9 +75,12 @@
         "within": 12,
         "signals": [
           "INT",
-          "KILL after 5 s"
+          "TERM after 5 s",
+          "KILL after 10 s"
         ],
-        "rule": "Works without any main loop running (the watchdog has its own thread)."
+        "endedBy": "TERM",
+        "rule": "Works without any main loop running (the watchdog has its own thread).",
+        "windows": "No signals: TerminateJobObject at once, exit status -1, no signal."
       }
     },
     {
@@ -84,14 +89,16 @@
         "docs/architecture.md#stopping-processes (makemkvcon ignores SIGINT: SIGTERM, then SIGKILL after 5 s)"
       ],
       "given": {
-        "command": "a child that ignores SIGINT",
+        "command": "a child that ignores SIGINT and SIGTERM",
         "stopPolicy": "terminateFirst"
       },
       "expect": {
         "signals": [
           "TERM",
           "KILL after 5 s"
-        ]
+        ],
+        "endedBy": "KILL",
+        "exitStatus": -1
       }
     },
     {
@@ -104,7 +111,8 @@
       },
       "expect": {
         "abandoned": true,
-        "within": 36
+        "within": 36,
+        "note": "Not reproducible in a test (a process stuck in the kernel); covered by reading the code."
       }
     },
     {
@@ -113,10 +121,18 @@
         "docs/architecture.md#stopping-processes (output read for at most 5 more seconds after exit)"
       ],
       "given": {
-        "command": "exits but leaves a child holding the pipe"
+        "command": [
+          "/bin/sh",
+          "-c",
+          "sleep 20 & echo done"
+        ]
       },
       "expect": {
-        "returnsWithin": 6
+        "returnsWithin": 8,
+        "lines": [
+          "done"
+        ],
+        "exitCode": 0
       }
     },
     {
@@ -125,10 +141,16 @@
         "rearchitecture-plan §10.3 (posix_spawn + process group; Job Object; setpgid)"
       ],
       "given": {
-        "command": "a shell that starts a background child"
+        "command": [
+          "/bin/sh",
+          "-c",
+          "sleep 60 & echo $! > child.pid; sleep 60"
+        ]
       },
       "expect": {
-        "stopKillsTheGroup": true
+        "stopKillsTheGroup": true,
+        "rule": "Signals go to the process group; once a stopped process has ended, what is left of its group is killed (a shell's background child ignores SIGINT). A process left running after a normal exit is left alone.",
+        "windows": "The Job Object: TerminateJobObject ends every process in it."
       }
     },
     {
@@ -144,7 +166,116 @@
         "transcript": "t.txt"
       },
       "expect": {
-        "transcript": "==== <instant> $ /bin/echo hi\nhi\n==== <instant> exit status 0\n"
+        "transcript": "==== <instant> $ /bin/echo hi\nhi\n==== <instant> exit status 0\n",
+        "endings": {
+          "exit": "exit status <n>",
+          "signal": "signal <n>",
+          "abandoned": "abandoned",
+          "then": ", stalled / , cancelled when they apply",
+          "couldNotStart": "==== <instant> could not start: <reason>"
+        },
+        "commandLine": "ArgumentSplitter.quote of each word of the invocation (after the interpreter choice)"
+      }
+    },
+    {
+      "id": "exit-reporting",
+      "from": [
+        "rearchitecture-plan §9 ProcessExit"
+      ],
+      "given": {
+        "cases": [
+          "exits with n",
+          "killed by a signal",
+          "stopped (cancelled or shutdown)",
+          "stalled"
+        ]
+      },
+      "expect": {
+        "exit": "status n, no signal",
+        "signal": "status -1, signal n (macOS, Linux)",
+        "cancelled": "cancelled true for StopReason cancelled and shutdown",
+        "stalled": "stalled = the silence that stopped it",
+        "abandoned": "status -1, abandoned true"
+      }
+    },
+    {
+      "id": "output-lines",
+      "from": [
+        "docs/architecture.md (lines split on \\n, \\r or \\r\\n; empty lines dropped)"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "echo $X; pwd; echo oops >&2"
+        ],
+        "environment": {
+          "X": "from the spec"
+        },
+        "workingDirectory": "<dir>"
+      },
+      "expect": {
+        "lines": [
+          {
+            "stream": "stdout",
+            "text": "from the spec"
+          },
+          {
+            "stream": "stdout",
+            "text": "<dir>"
+          },
+          {
+            "stream": "stderr",
+            "text": "oops"
+          }
+        ],
+        "rule": "The spec's environment is added to the engine's; stdin is empty (/dev/null); invalid UTF-8 is replaced."
+      }
+    },
+    {
+      "id": "could-not-start",
+      "from": [
+        "rearchitecture-plan §9 ProcessLauncher.start"
+      ],
+      "given": {
+        "cases": [
+          "a program that doesn't exist",
+          "a working folder that doesn't exist"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "process.couldNotStart",
+          "params": {
+            "tool": "<program's file name>",
+            "reason": "<the system's reason>"
+          }
+        }
+      }
+    },
+    {
+      "id": "interpreter",
+      "from": [
+        "macos TemplateTests.postProcessInvocation", "windows TemplateTests.PostProcessInvocation",
+        "docs/architecture.md#post-processing (scripts run through an interpreter)"
+      ],
+      "given": {
+        "cases": [
+          "spec.interpreter set",
+          "a script without the execute bit (macOS, Linux)",
+          ".ps1 / .bat / .cmd / .py (Windows)"
+        ]
+      },
+      "expect": {
+        "interpreter": "<interpreter> <script> <arguments>",
+        "noExecuteBit": "/bin/sh <script> <arguments>",
+        "windows": {
+          ".ps1": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>",
+          ".bat": "%ComSpec% /c <script>",
+          ".cmd": "%ComSpec% /c <script>",
+          ".py": "py.exe <script>"
+        },
+        "function": "PlatformProcessLauncher.invocation"
       }
     },
     {

@@ -64,6 +64,11 @@
       "severity": "warning",
       "today": "JobRunner.run: \"Cancelled by user\" / \"Job cancelled\""
     },
+    "job.cancelled": {
+      "kind": "error",
+      "severity": "info",
+      "today": "new: a wait or sleep that was cancelled (Clock.sleep, DriveControl.waitForMount); the caller decides what it means"
+    },
     "job.notFound": {
       "kind": "error",
       "data": {
