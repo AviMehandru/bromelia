@@ -20,7 +20,7 @@ RUN if [ "$ACCEPT_MAKEMKV_EULA" != "yes" ]; then \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential pkg-config ca-certificates curl \
       libssl-dev libexpat1-dev libavcodec-dev zlib1g-dev \
-      meson ninja-build libglib2.0-dev libjson-glib-dev libsqlite3-dev libsoup-3.0-dev \
+      meson ninja-build libglib2.0-dev libjson-glib-dev libsqlite3-dev libsoup-3.0-dev libsecret-1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # MakeMKV (makemkvcon only: no GUI).

@@ -10699,6 +10699,78 @@
           "c": "bro_platform_power_manager_inhibit"
         }
       ]
+    },
+    "adapters/keystore": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "Keystore (plan §10.3; shared/fixtures/adapters/keystore.cases.json): the login Keychain (macOS), Credential Manager (Windows), the Secret Service through libsecret (Linux). When the system store can't be used at all (no keychain, no logon session, no Secret Service), the secrets are files <fallbackDir>/<name>, 0600 in a 0700 folder; decided once, at the first call. Never prompts: a locked keyring fails with keystore.failed. Names are SecretRef names.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformKeystore",
+          "kind": "class",
+          "doc": "Secrets by SecretRef name in the system's store, or the fallback files.",
+          "swift": {
+            "name": "PlatformKeystore",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/PlatformKeystore.swift"
+          },
+          "cs": {
+            "name": "PlatformKeystore",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/PlatformKeystore.cs"
+          },
+          "c": {
+            "name": "BroPlatformKeystore",
+            "file": "linux/src/adapters/platform/bro-platform-keystore.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformKeystore.get",
+          "params": [
+            "name"
+          ],
+          "returns": "String?",
+          "throws": true,
+          "doc": "None when there is no such secret.",
+          "swift": "PlatformKeystore.get(_:)",
+          "cs": "PlatformKeystore.Get",
+          "c": "bro_platform_keystore_get"
+        },
+        {
+          "name": "PlatformKeystore.set",
+          "params": [
+            "name",
+            "value"
+          ],
+          "throws": true,
+          "swift": "PlatformKeystore.set(_:value:)",
+          "cs": "PlatformKeystore.Set",
+          "c": "bro_platform_keystore_set"
+        },
+        {
+          "name": "PlatformKeystore.remove",
+          "params": [
+            "name"
+          ],
+          "throws": true,
+          "doc": "Removing a secret that isn't there is fine.",
+          "swift": "PlatformKeystore.remove(_:)",
+          "cs": "PlatformKeystore.Remove",
+          "c": "bro_platform_keystore_remove"
+        },
+        {
+          "name": "PlatformKeystore.backend",
+          "params": [],
+          "returns": "String",
+          "doc": "Where the secrets are: keychain, credentialManager, secretService or file.",
+          "swift": "PlatformKeystore.backend()",
+          "cs": "PlatformKeystore.Backend",
+          "c": "bro_platform_keystore_backend"
+        }
+      ]
     }
   }
 }

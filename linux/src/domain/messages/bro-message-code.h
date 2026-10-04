@@ -268,6 +268,7 @@ typedef enum {
   BRO_MSG_FS_PARENT_MISSING, /* fs.parentMissing */
   BRO_MSG_FS_FAILED, /* fs.failed */
   BRO_MSG_STORE_FAILED, /* store.failed */
+  BRO_MSG_KEYSTORE_FAILED, /* keystore.failed */
   BRO_MSG_ARCHIVE_RECORD_WRITTEN, /* archive.recordWritten */
   BRO_MSG_ARCHIVE_RENAME_FAILED, /* archive.renameFailed */
   BRO_MSG_ARCHIVE_SYNCED, /* archive.synced */

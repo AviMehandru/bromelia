@@ -191,10 +191,12 @@ The app is unpackaged and self-contained (Windows App SDK included). MakeMKV is 
 `Program Files (x86)\MakeMKV` automatically.
 
 ### Linux
-Requires GTK ≥ 4.12, libadwaita ≥ 1.5, json-glib and meson (Debian 13, Ubuntu 24.04, Fedora 40 or newer).
+Requires GTK ≥ 4.12, libadwaita ≥ 1.5, json-glib, SQLite ≥ 3.37, libsoup 3, libsecret and meson (Debian 13,
+Ubuntu 24.04, Fedora 40 or newer).
 
 ```bash
-sudo apt install meson ninja-build libgtk-4-dev libadwaita-1-dev libjson-glib-dev   # Debian / Ubuntu
+sudo apt install meson ninja-build libgtk-4-dev libadwaita-1-dev libjson-glib-dev \
+  libsqlite3-dev libsoup-3.0-dev libsecret-1-dev   # Debian / Ubuntu
 cd linux
 meson setup builddir
 ninja -C builddir

@@ -1762,6 +1762,15 @@
       "http": 500,
       "today": "new: SqliteStore (plan §10.4); reason is SQLite's text"
     },
+    "keystore.failed": {
+      "kind": "error",
+      "params": {
+        "name": "string",
+        "reason": "string"
+      },
+      "http": 500,
+      "today": "new: PlatformKeystore (plan §10.3); reason is the system's text, or that the name isn't a secret name"
+    },
     "archive.recordWritten": {
       "kind": "log",
       "severity": "info",
