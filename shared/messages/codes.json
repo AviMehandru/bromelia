@@ -2683,6 +2683,14 @@
       },
       "http": 503
     },
+    "tool.notFoundAt": {
+      "kind": "problem",
+      "params": {
+        "tool": "string",
+        "path": "path"
+      },
+      "today": "Paths.resolveTool: a configured path that doesn't exist (nil today, no reason given)"
+    },
     "tool.version": {
       "kind": "log",
       "severity": "info",

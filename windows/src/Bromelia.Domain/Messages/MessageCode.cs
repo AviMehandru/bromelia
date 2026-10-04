@@ -412,12 +412,13 @@ public readonly record struct MessageCode
     public static readonly MessageCode HostStopRequested = new(399);
     public static readonly MessageCode PowerUnavailable = new(400);
     public static readonly MessageCode ToolMissing = new(401);
-    public static readonly MessageCode ToolVersion = new(402);
-    public static readonly MessageCode ReplicaLagging = new(403);
-    public static readonly MessageCode ReplicaVerifyFailed = new(404);
-    public static readonly MessageCode RepairRepaired = new(405);
-    public static readonly MessageCode RepairImpossible = new(406);
-    public static readonly MessageCode InternalUnexpected = new(407);
+    public static readonly MessageCode ToolNotFoundAt = new(402);
+    public static readonly MessageCode ToolVersion = new(403);
+    public static readonly MessageCode ReplicaLagging = new(404);
+    public static readonly MessageCode ReplicaVerifyFailed = new(405);
+    public static readonly MessageCode RepairRepaired = new(406);
+    public static readonly MessageCode RepairImpossible = new(407);
+    public static readonly MessageCode InternalUnexpected = new(408);
 
     private static readonly string[] Codes =
     {
@@ -823,6 +824,7 @@ public readonly record struct MessageCode
         "host.stopRequested",
         "power.unavailable",
         "tool.missing",
+        "tool.notFoundAt",
         "tool.version",
         "replica.lagging",
         "replica.verifyFailed",

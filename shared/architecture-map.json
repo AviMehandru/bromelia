@@ -9962,6 +9962,91 @@
           "cs": "MakemkvRegistry.Remove"
         }
       ]
+    },
+    "adapters/tool-locator": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "ToolLocator (plan §9): the configured path, else mkvextract next to mkvmerge, else the platform's usual install folders, else the search path; why it wasn't found otherwise. shared/fixtures/adapters/tool-locator.cases.json pins the order.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "SystemToolLocator",
+          "kind": "class",
+          "doc": "Finds tools on disk through FileSystem; versions and capabilities come from the tools themselves (phase 3).",
+          "swift": {
+            "name": "SystemToolLocator",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/SystemToolLocator.swift"
+          },
+          "cs": {
+            "name": "SystemToolLocator",
+            "file": "windows/src/Bromelia.Adapters/Tools/SystemToolLocator.cs"
+          },
+          "c": {
+            "name": "BroSystemToolLocator",
+            "file": "linux/src/adapters/tools/bro-system-tool-locator.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "SystemToolLocator.locate",
+          "params": [
+            "tool"
+          ],
+          "returns": "ToolInfo",
+          "swift": "SystemToolLocator.locate(_:)",
+          "cs": "SystemToolLocator.Locate",
+          "c": "bro_system_tool_locator_locate"
+        }
+      ]
+    },
+    "adapters/tool-paths": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "Where each tool is usually installed, and its program names, on this platform (today's candidate lists).",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformToolPaths",
+          "kind": "namespace",
+          "doc": "The candidates and program names SystemToolLocator gets in production.",
+          "swift": {
+            "name": "PlatformToolPaths",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/PlatformToolPaths.swift"
+          },
+          "cs": {
+            "name": "PlatformToolPaths",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/PlatformToolPaths.cs"
+          },
+          "c": {
+            "name": "BroPlatformToolPaths",
+            "file": "linux/src/adapters/platform/bro-platform-tool-paths.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformToolPaths.candidates",
+          "params": [
+            "home"
+          ],
+          "returns": "[ToolKind: [String]]",
+          "swift": "PlatformToolPaths.candidates(_:)",
+          "cs": "PlatformToolPaths.Candidates",
+          "c": "bro_platform_tool_paths_candidates"
+        },
+        {
+          "name": "PlatformToolPaths.names",
+          "params": [],
+          "returns": "[ToolKind: [String]]",
+          "swift": "PlatformToolPaths.names()",
+          "cs": "PlatformToolPaths.Names",
+          "c": "bro_platform_tool_paths_names"
+        }
+      ]
     }
   }
 }

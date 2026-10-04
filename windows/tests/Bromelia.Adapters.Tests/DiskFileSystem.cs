@@ -8,7 +8,10 @@ namespace Bromelia.Adapters.Tests;
 internal sealed class DiskFileSystem : IFileSystem
 {
     public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
-    public PortFileInfo Stat(string path) => throw new NotSupportedException();
+    public PortFileInfo Stat(string path) =>
+        Directory.Exists(path) ? new PortFileInfo(0, true, new Bromelia.Foundation.Instant(0))
+        : File.Exists(path) ? new PortFileInfo(new System.IO.FileInfo(path).Length, false, new Bromelia.Foundation.Instant(0))
+        : throw new Bromelia.Foundation.BroFailure(new Bromelia.Foundation.BroError("fs.notFound"));
     public IReadOnlyList<DirectoryEntry> List(string directory) =>
         new DirectoryInfo(directory).EnumerateFileSystemInfos().Select(e => new DirectoryEntry(e.Name, e is DirectoryInfo)).ToList();
     public byte[] Read(string path) => File.ReadAllBytes(path);

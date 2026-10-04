@@ -1,0 +1,556 @@
+{
+  "functions": [
+    "SystemToolLocator.locate"
+  ],
+  "description": "How SystemToolLocator finds a tool (plan §9 ToolLocator), the same on the three platforms; the names, candidates and search path come from PlatformToolPaths and the environment in production. given.files exist under an empty temporary folder, <root> (a name ending in / is a folder); '~/' in a configured path or a candidate is given.home. Order: the configured path (when set, nothing else is tried); mkvextract next to the mkvmerge that was found; the candidates in order; each folder of the search path with each name in order. expect.path none means not found, with expect.why.",
+  "cases": [
+    {
+      "id": "configured",
+      "from": [
+        "today's Paths.resolveTool (macOS), Paths.ResolveTool (Windows), find_tool (Linux): a configured path wins"
+      ],
+      "given": {
+        "files": [
+          "custom/makemkvcon"
+        ],
+        "configured": {
+          "makemkvcon": "<root>/custom/makemkvcon"
+        },
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": "<root>/custom/makemkvcon"
+      }
+    },
+    {
+      "id": "configured-tilde",
+      "given": {
+        "files": [
+          "home/bin/makemkvcon"
+        ],
+        "configured": {
+          "makemkvcon": "~/bin/makemkvcon"
+        },
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": "<root>/home/bin/makemkvcon"
+      }
+    },
+    {
+      "id": "configured-missing-is-not-searched",
+      "given": {
+        "files": [
+          "usr/bin/makemkvcon"
+        ],
+        "configured": {
+          "makemkvcon": "<root>/custom/makemkvcon"
+        },
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": null,
+        "why": {
+          "code": "tool.notFoundAt",
+          "params": {
+            "tool": "makemkvcon",
+            "path": "<root>/custom/makemkvcon"
+          }
+        }
+      }
+    },
+    {
+      "id": "configured-folder-is-not-a-tool",
+      "given": {
+        "files": [
+          "custom/makemkvcon/"
+        ],
+        "configured": {
+          "makemkvcon": "<root>/custom/makemkvcon"
+        },
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": null,
+        "why": {
+          "code": "tool.notFoundAt",
+          "params": {
+            "tool": "makemkvcon",
+            "path": "<root>/custom/makemkvcon"
+          }
+        }
+      }
+    },
+    {
+      "id": "candidates-in-order",
+      "given": {
+        "files": [
+          "Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+          "home/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+          "usr/bin/makemkvcon"
+        ],
+        "configured": {},
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+      }
+    },
+    {
+      "id": "candidate-in-home",
+      "given": {
+        "files": [
+          "home/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+          "usr/bin/makemkvcon"
+        ],
+        "configured": {},
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": "<root>/home/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+      }
+    },
+    {
+      "id": "search-path-in-order-and-names-in-order",
+      "given": {
+        "files": [
+          "usr/bin/makemkvcon64",
+          "usr/local/bin/makemkvcon"
+        ],
+        "configured": {},
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": "<root>/usr/local/bin/makemkvcon",
+        "rule": "folders of the search path in order; in each folder the names in order"
+      }
+    },
+    {
+      "id": "search-path-second-name",
+      "given": {
+        "files": [
+          "usr/bin/makemkvcon"
+        ],
+        "configured": {},
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "makemkvcon"
+      },
+      "expect": {
+        "path": "<root>/usr/bin/makemkvcon"
+      }
+    },
+    {
+      "id": "missing",
+      "given": {
+        "files": [],
+        "configured": {},
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "handbrake"
+      },
+      "expect": {
+        "path": null,
+        "why": {
+          "code": "tool.missing",
+          "params": {
+            "tool": "handbrake"
+          }
+        }
+      }
+    },
+    {
+      "id": "sibling",
+      "from": [
+        "today's find_tool (Linux): mkvextract next to mkvmerge"
+      ],
+      "given": {
+        "files": [
+          "opt/bin/mkvmerge",
+          "opt/bin/mkvextract",
+          "usr/bin/mkvextract"
+        ],
+        "configured": {},
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "mkvextract"
+      },
+      "expect": {
+        "path": "<root>/opt/bin/mkvextract"
+      }
+    },
+    {
+      "id": "sibling-of-a-configured-tool",
+      "given": {
+        "files": [
+          "mkv/mkvmerge",
+          "mkv/mkvextract",
+          "usr/bin/mkvextract"
+        ],
+        "configured": {
+          "mkvmerge": "<root>/mkv/mkvmerge"
+        },
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "mkvextract"
+      },
+      "expect": {
+        "path": "<root>/mkv/mkvextract"
+      }
+    },
+    {
+      "id": "no-sibling-falls-back",
+      "given": {
+        "files": [
+          "opt/bin/mkvmerge",
+          "usr/bin/mkvextract"
+        ],
+        "configured": {},
+        "names": {
+          "makemkvcon": [
+            "makemkvcon64",
+            "makemkvcon"
+          ],
+          "mkvmerge": [
+            "mkvmerge"
+          ],
+          "mkvextract": [
+            "mkvextract"
+          ],
+          "handbrake": [
+            "HandBrakeCLI"
+          ]
+        },
+        "candidates": {
+          "makemkvcon": [
+            "<root>/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+            "~/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
+          ],
+          "mkvmerge": [
+            "<root>/opt/bin/mkvmerge"
+          ]
+        },
+        "searchPath": [
+          "<root>/usr/local/bin",
+          "<root>/usr/bin"
+        ],
+        "home": "<root>/home",
+        "tool": "mkvextract"
+      },
+      "expect": {
+        "path": "<root>/usr/bin/mkvextract"
+      }
+    }
+  ]
+}

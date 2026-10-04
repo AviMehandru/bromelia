@@ -401,6 +401,7 @@
   "host.stopRequested": "Stopping at the request of {who}",
   "power.unavailable": "Can't keep the computer awake while jobs run ({reason})",
   "tool.missing": "{tool} was not found. Install it or set its location in Settings → Tools.",
+  "tool.notFoundAt": "{tool} isn't at {path}, where the settings say it is",
   "tool.version": "{tool} {version} at {path}",
   "replica.lagging": "{count, plural, one {# archive hasn't} other {# archives haven't}} been copied to “{target}” yet",
   "replica.verifyFailed": "The copy on “{target}” doesn't match: {summary}",

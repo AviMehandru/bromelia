@@ -5,6 +5,8 @@
 #include "bro-home-dir-isolation.h"
 #include "bro-platform-file-system.h"
 #include "bro-platform-process-launcher.h"
+#include "bro-platform-tool-paths.h"
+#include "bro-system-tool-locator.h"
 #include "bro-system-clock.h"
 
 #include <errno.h>
@@ -758,6 +760,124 @@ test_home_isolation (void)
   bro_test_run_cases ("adapters/settings-isolation.cases.json", isolation_case);
 }
 
+/* ---- the tool locator ------------------------------------------------------------------------------ */
+
+static char *
+with_root (const char *text)
+{
+  g_autoptr (GString) s = g_string_new (text);
+  g_string_replace (s, "<root>", fs_root, 0);
+  return g_string_free (g_steal_pointer (&s), FALSE);
+}
+
+static GHashTable *
+tool_lists (BroJsonValue *v, gboolean rooted)
+{
+  GHashTable *t = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) g_strfreev);
+  for (guint i = 0; v && i < bro_json_value_length (v); i++)
+    {
+      BroJsonValue *list = bro_json_value_at (v, i);
+      BroToolKind tool;
+      char **items = g_new0 (char *, bro_json_value_length (list) + 1);
+      for (guint j = 0; j < bro_json_value_length (list); j++)
+        {
+          const char *x = bro_json_value_get_string (bro_json_value_at (list, j), "");
+          items[j] = rooted ? with_root (x) : g_strdup (x);
+        }
+      if (bro_tool_kind_from_wire (v->keys->pdata[i], &tool))
+        g_hash_table_insert (t, GINT_TO_POINTER (tool), items);
+      else
+        g_strfreev (items);
+    }
+  return t;
+}
+
+static gboolean
+locator_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (GHashTable) configured = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  g_autoptr (GHashTable) candidates = tool_lists (bro_json_value_member (given, "candidates"), TRUE);
+  g_autoptr (GHashTable) names = tool_lists (bro_json_value_member (given, "names"), FALSE);
+  g_autoptr (GPtrArray) search = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroSystemToolLocator) locator = NULL;
+  g_autoptr (BroToolInfo) info = NULL;
+  g_autofree char *home = with_root (bro_json_value_get_string (bro_json_value_member (given, "home"), ""));
+  BroJsonValue *files = bro_json_value_member (given, "files");
+  BroJsonValue *conf = bro_json_value_member (given, "configured");
+  BroJsonValue *path_list = bro_json_value_member (given, "searchPath");
+  const char *want = bro_json_value_get_string (bro_json_value_member (expect, "path"), NULL);
+  BroToolKind tool = BRO_TOOL_KIND_MAKEMKVCON;
+  remove_tree (fs_root);
+  g_mkdir_with_parents (fs_root, 0755);
+  for (guint i = 0; i < bro_json_value_length (files); i++)
+    {
+      const char *f = bro_json_value_get_string (bro_json_value_at (files, i), "");
+      g_autofree char *path = fs_path (f);
+      if (g_str_has_suffix (f, "/"))
+        g_mkdir_with_parents (path, 0755);
+      else
+        {
+          g_autofree char *dir = g_path_get_dirname (path);
+          g_mkdir_with_parents (dir, 0755);
+          g_file_set_contents (path, "", 0, NULL);
+        }
+    }
+  for (guint i = 0; i < bro_json_value_length (conf); i++)
+    if (bro_tool_kind_from_wire (conf->keys->pdata[i], &tool))
+      g_hash_table_insert (configured, GINT_TO_POINTER (tool), with_root (bro_json_value_get_string (bro_json_value_at (conf, i), "")));
+  for (guint i = 0; i < bro_json_value_length (path_list); i++)
+    g_ptr_array_add (search, with_root (bro_json_value_get_string (bro_json_value_at (path_list, i), "")));
+  g_ptr_array_add (search, NULL);
+  locator = bro_system_tool_locator_new (BRO_FILE_SYSTEM (fs), configured, candidates, names, (const char *const *) search->pdata, home);
+  bro_tool_kind_from_wire (bro_json_value_get_string (bro_json_value_member (given, "tool"), ""), &tool);
+  info = bro_tool_locator_locate (BRO_TOOL_LOCATOR (locator), tool);
+  if (want)
+    {
+      g_autofree char *got = shown_path (info->path);
+      bro_test_same_string (failures, id, "path", want, got);
+      if (info->why)
+        bro_test_fail (failures, id, "a reason although found");
+    }
+  else
+    {
+      BroJsonValue *why = bro_json_value_member (expect, "why");
+      BroJsonValue *params = bro_json_value_member (why, "params");
+      g_autoptr (BroJsonValue) got = info->why ? bro_bro_message_to_json (info->why) : NULL;
+      BroJsonValue *got_params = got ? bro_json_value_member (got, "params") : NULL;
+      if (info->path)
+        bro_test_fail (failures, id, "found %s", info->path);
+      bro_test_same_string (failures, id, "code", bro_json_value_get_string (bro_json_value_member (why, "code"), ""),
+                            got ? bro_json_value_get_string (bro_json_value_member (got, "code"), "") : NULL);
+      for (guint i = 0; params && i < bro_json_value_length (params); i++)
+        {
+          const char *key = params->keys->pdata[i];
+          const char *actual = bro_json_value_get_string (bro_json_value_member (got_params, key), "");
+          g_autofree char *shown = g_str_equal (key, "path") ? shown_path (actual) : g_strdup (actual);
+          bro_test_same_string (failures, id, key, bro_json_value_get_string (bro_json_value_at (params, i), ""), shown);
+        }
+    }
+  return TRUE;
+}
+
+static void
+test_tool_locator (void)
+{
+  bro_test_run_cases ("adapters/tool-locator.cases.json", locator_case);
+}
+
+static void
+test_tool_paths (void)
+{
+  g_autoptr (GHashTable) c = bro_platform_tool_paths_candidates ("/home/me");
+  g_autoptr (GHashTable) n = bro_platform_tool_paths_names ();
+  const char *const *mk = g_hash_table_lookup (c, GINT_TO_POINTER (BRO_TOOL_KIND_MAKEMKVCON));
+  const char *const *hb = g_hash_table_lookup (n, GINT_TO_POINTER (BRO_TOOL_KIND_HANDBRAKE));
+  g_assert_true (g_strv_contains (mk, "/usr/bin/makemkvcon"));
+  g_assert_cmpstr (hb[0], ==, "HandBrakeCLI");
+  g_assert_cmpuint (g_hash_table_size (n), ==, BRO_TOOL_KIND_APPRISE + 1);
+}
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -854,6 +974,8 @@ main (int argc, char **argv)
   g_test_add_func ("/file-system/durable-and-uncached", test_fs_durable_and_uncached);
   g_test_add_func ("/file-system/volume", test_fs_volume);
   g_test_add_func ("/settings-isolation/home", test_home_isolation);
+  g_test_add_func ("/tool-locator/cases", test_tool_locator);
+  g_test_add_func ("/tool-locator/platform-paths", test_tool_paths);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

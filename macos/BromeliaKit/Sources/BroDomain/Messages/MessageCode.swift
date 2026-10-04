@@ -404,6 +404,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case hostStopRequested = "host.stopRequested"
     case powerUnavailable = "power.unavailable"
     case toolMissing = "tool.missing"
+    case toolNotFoundAt = "tool.notFoundAt"
     case toolVersion = "tool.version"
     case replicaLagging = "replica.lagging"
     case replicaVerifyFailed = "replica.verifyFailed"

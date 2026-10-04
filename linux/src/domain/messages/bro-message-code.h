@@ -409,6 +409,7 @@ typedef enum {
   BRO_MSG_HOST_STOP_REQUESTED, /* host.stopRequested */
   BRO_MSG_POWER_UNAVAILABLE, /* power.unavailable */
   BRO_MSG_TOOL_MISSING, /* tool.missing */
+  BRO_MSG_TOOL_NOT_FOUND_AT, /* tool.notFoundAt */
   BRO_MSG_TOOL_VERSION, /* tool.version */
   BRO_MSG_REPLICA_LAGGING, /* replica.lagging */
   BRO_MSG_REPLICA_VERIFY_FAILED, /* replica.verifyFailed */

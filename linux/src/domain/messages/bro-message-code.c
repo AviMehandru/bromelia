@@ -406,6 +406,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "host.stopRequested",
   "power.unavailable",
   "tool.missing",
+  "tool.notFoundAt",
   "tool.version",
   "replica.lagging",
   "replica.verifyFailed",
