@@ -10659,6 +10659,46 @@
           "c": "bro_mkv_tool_nix_chapter_times"
         }
       ]
+    },
+    "adapters/power-manager": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "PowerManager (plan §10.3): an IOKit assertion against idle sleep (macOS), SetThreadExecutionState(ES_SYSTEM_REQUIRED) held by a dedicated thread (Windows), a logind inhibitor (Linux: sleep:idle, or idle alone when logind refuses sleep to a process outside a desktop session). Each guard holds its own; releasing one leaves the others.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformPowerManager",
+          "kind": "class",
+          "doc": "Keeps the computer awake while a guard is held; power.unavailable when the system refuses.",
+          "swift": {
+            "name": "PlatformPowerManager",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/PlatformPowerManager.swift"
+          },
+          "cs": {
+            "name": "PlatformPowerManager",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/PlatformPowerManager.cs"
+          },
+          "c": {
+            "name": "BroPlatformPowerManager",
+            "file": "linux/src/adapters/platform/bro-platform-power-manager.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformPowerManager.inhibit",
+          "params": [
+            "reason"
+          ],
+          "returns": "PowerGuard",
+          "throws": true,
+          "swift": "PlatformPowerManager.inhibit(_:)",
+          "cs": "PlatformPowerManager.Inhibit",
+          "c": "bro_platform_power_manager_inhibit"
+        }
+      ]
     }
   }
 }

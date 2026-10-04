@@ -19,6 +19,7 @@
 #include "bro-sqlite-store.h"
 #ifdef BRO_HAVE_LIBSOUP
 #include "bro-platform-http-client.h"
+#include "bro-platform-power-manager.h"
 #endif
 #include <gio/gio.h>
 #include "bro-system-tool-locator.h"
@@ -1545,6 +1546,7 @@ test_real_iso (void)
 #include "test-http.inc"
 #include "test-metadata.inc"
 #include "test-mkv.inc"
+#include "test-power.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1657,6 +1659,7 @@ main (int argc, char **argv)
   g_test_add_func ("/http/beta-key-source", test_beta_key_source);
   g_test_add_func ("/http/metadata-client", test_metadata_client);
   g_test_add_func ("/mkvtoolnix/cases", test_mkvtoolnix);
+  g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

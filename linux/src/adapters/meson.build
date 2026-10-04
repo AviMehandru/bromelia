@@ -13,6 +13,7 @@ bro_adapters_sources = files(
   'http/bro-metadata-client.c',
   'http/bro-notification-sender.c',
   'platform/bro-platform-file-system.c',
+  'platform/bro-platform-power-manager.c',
   'platform/bro-platform-process-launcher.c',
   'platform/bro-platform-tool-paths.c',
   'store/bro-migrations.c',
