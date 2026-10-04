@@ -44,6 +44,7 @@
 #include "bro-profile-resolver.h"
 #include "bro-rule-matcher.h"
 #include "bro-step-filter.h"
+#include "bro-nfo.h"
 #include "bro-beta-key.h"
 #include "bro-beta-key-page.h"
 #include "bro-makemkv-args.h"
@@ -3071,6 +3072,44 @@ test_makemkv_files_cases (void)
   bro_test_run_cases ("domain/makemkv-files.cases.json", makemkv_files_case);
 }
 
+/* ---- nfo --------------------------------------------------------------------------------------------- */
+
+static void
+test_nfo_cases (void)
+{
+  g_autoptr (BroJsonValue) f = bro_test_fixture_json ("nfo/nfo-cases.json");
+  BroJsonValue *cases = J (f, "cases");
+  for (guint i = 0; i < bro_json_value_length (cases); i++) {
+    BroJsonValue *c = bro_json_value_at (cases, i);
+    g_autofree char *rel = g_strconcat ("nfo/", JS (c, "nfo"), NULL);
+    g_autofree char *want = bro_test_fixture_text (rel, NULL);
+    gboolean tv = g_strcmp0 (JS (c, "kind"), "tv") == 0, tmdb = g_strcmp0 (JS (c, "provider"), "tmdb") == 0;
+    g_autofree char *got = NULL;
+    if (JS (c, "seasonFile")) {
+      g_autofree char *file = g_strconcat ("lookup/", JS (c, "seasonFile"), NULL);
+      g_autoptr (GBytes) bytes = fixture_bytes (file);
+      g_autoptr (GHashTable) season = tmdb ? bro_tmdb_parse_season (bytes) : bro_omdb_parse_season (bytes);
+      int e = bro_json_value_get_integer (J (c, "episode"), 0);
+      BroEpisodeDetails *d = g_hash_table_lookup (season, GINT_TO_POINTER (e));
+      g_assert_nonnull (d);
+      got = bro_nfo_episode (JS (c, "show"), bro_json_value_get_integer (J (c, "season"), 0), e, d);
+    } else {
+      BroMediaKind kind = tv ? BRO_MEDIA_KIND_TV : BRO_MEDIA_KIND_MOVIE;
+      g_autoptr (BroCandidate) match = NULL;
+      if (JS (c, "details")) {
+        g_autofree char *file = g_strconcat ("lookup/", JS (c, "details"), NULL);
+        g_autoptr (GBytes) bytes = fixture_bytes (file);
+        match = tmdb ? bro_tmdb_parse_details (bytes, kind) : bro_omdb_parse_details (bytes, TRUE, kind);
+      } else {
+        match = bro_candidate_new (JS (J (c, "match"), "title"), "");
+      }
+      g_assert_nonnull (match);
+      got = tv ? bro_nfo_show (match) : bro_nfo_movie (match);
+    }
+    g_assert_cmpstr (got, ==, want);
+  }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -3115,5 +3154,6 @@ main (int argc, char **argv)
   g_test_add_func ("/notify/cases", test_notify_cases);
   g_test_add_func ("/notify/check", test_check_notifications);
   g_test_add_func ("/makemkv-files/cases", test_makemkv_files_cases);
+  g_test_add_func ("/nfo/cases", test_nfo_cases);
   return g_test_run ();
 }
