@@ -1,0 +1,80 @@
+{
+  "functions": [
+    "PlatformHttpClient.send"
+  ],
+  "description": "PlatformHttpClient against a small HTTP/1.1 server the test runs on 127.0.0.1 (plan §9 HttpClient): URLSession, HttpClient, libsoup. The server's routes: /echo answers 200 with the JSON {method, path, header (the X-Test request header, or null), body (the request body as text)}; /status/<n> answers <n> with the body 'status <n>'; /slow waits 5 s, then answers 200. given.url's <server> is the server's address (http://127.0.0.1:<port>); <closed> is a port nothing listens on. Any status is an answer; no answer is http.failed with the system's reason; a cancelled call is job.cancelled.",
+  "cases": [
+    {
+      "id": "get-echo",
+      "given": {
+        "method": "GET",
+        "url": "<server>/echo",
+        "headers": {
+          "X-Test": "one"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "method": "GET",
+          "path": "/echo",
+          "header": "one",
+          "body": ""
+        }
+      }
+    },
+    {
+      "id": "post-body",
+      "given": {
+        "method": "POST",
+        "url": "<server>/echo",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\"a\":1}"
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "method": "POST",
+          "path": "/echo",
+          "header": null,
+          "body": "{\"a\":1}"
+        }
+      }
+    },
+    {
+      "id": "any-status-is-an-answer",
+      "given": {
+        "method": "GET",
+        "url": "<server>/status/503"
+      },
+      "expect": {
+        "status": 503,
+        "text": "status 503"
+      }
+    },
+    {
+      "id": "no-answer",
+      "given": {
+        "method": "GET",
+        "url": "<closed>/echo"
+      },
+      "expect": {
+        "error": "http.failed"
+      }
+    },
+    {
+      "id": "cancelled",
+      "given": {
+        "method": "GET",
+        "url": "<server>/slow",
+        "cancelAfter": 0.3
+      },
+      "expect": {
+        "error": "job.cancelled",
+        "within": 3
+      }
+    }
+  ]
+}

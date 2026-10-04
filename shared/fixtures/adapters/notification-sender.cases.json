@@ -1,0 +1,140 @@
+{
+  "functions": [
+    "NotificationSender.send",
+    "AppriseTool.send"
+  ],
+  "description": "NotificationSender against a fake HttpClient (it answers given.answer: a status, or no answer with a reason) and AppriseTool on a scripted launcher (apprise found at /opt/apprise unless given.apprise is null; it exits with given.appriseExit). Title T, body B. expect.request is what was sent over HTTP (the body compared as JSON when it is JSON); expect.apprise is the apprise command line; expect.error the code and params of the failure. URLs are secrets, so no message carries one: badUrl and needsApprise name the scheme, httpFailed and failed the host of the request.",
+  "cases": [
+    {
+      "id": "discord",
+      "from": [
+        "shared/fixtures/notifications.json"
+      ],
+      "given": {
+        "url": "https://discord.com/api/webhooks/1/x",
+        "status": "success",
+        "answer": {
+          "status": 204
+        }
+      },
+      "expect": {
+        "request": {
+          "method": "POST",
+          "url": "https://discord.com/api/webhooks/1/x",
+          "json": {
+            "content": "**T**\nB"
+          }
+        }
+      }
+    },
+    {
+      "id": "http-error",
+      "given": {
+        "url": "ntfy://alerts",
+        "status": "failed",
+        "answer": {
+          "status": 500
+        }
+      },
+      "expect": {
+        "request": {
+          "method": "POST",
+          "url": "https://ntfy.sh/alerts",
+          "text": "B"
+        },
+        "error": {
+          "code": "notify.httpFailed",
+          "params": {
+            "host": "ntfy.sh",
+            "status": 500
+          }
+        }
+      }
+    },
+    {
+      "id": "no-answer",
+      "given": {
+        "url": "ntfy://alerts",
+        "status": "success",
+        "answer": {
+          "reason": "connection refused"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "notify.failed",
+          "params": {
+            "host": "ntfy.sh",
+            "reason": "connection refused"
+          }
+        }
+      }
+    },
+    {
+      "id": "apprise",
+      "given": {
+        "url": "mailto://user:pass@example.org",
+        "status": "success",
+        "appriseExit": 0
+      },
+      "expect": {
+        "apprise": [
+          "/opt/apprise",
+          "-t",
+          "T",
+          "-b",
+          "B",
+          "mailto://user:pass@example.org"
+        ]
+      }
+    },
+    {
+      "id": "apprise-failed",
+      "given": {
+        "url": "mailto://user:pass@example.org",
+        "status": "success",
+        "appriseExit": 2
+      },
+      "expect": {
+        "error": {
+          "code": "notify.appriseFailed",
+          "params": {
+            "status": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "apprise-missing",
+      "given": {
+        "url": "mailto://user:pass@example.org",
+        "status": "success",
+        "apprise": null
+      },
+      "expect": {
+        "error": {
+          "code": "notify.needsApprise",
+          "params": {
+            "target": "mailto"
+          }
+        }
+      }
+    },
+    {
+      "id": "not-a-url",
+      "given": {
+        "url": "not a url",
+        "status": "success"
+      },
+      "expect": {
+        "error": {
+          "code": "notify.badUrl",
+          "params": {
+            "target": "not a url"
+          }
+        },
+        "rule": "a value without a scheme isn't a secret URL, so it is named"
+      }
+    }
+  ]
+}

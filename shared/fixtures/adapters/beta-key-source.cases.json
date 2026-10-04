@@ -1,0 +1,75 @@
+{
+  "functions": [
+    "BetaKeySource.currentKey"
+  ],
+  "description": "BetaKeySource against a fake HttpClient: it GETs MakeMKV's forum post (BetaKeyPage.url) and reads the key with BetaKeyPage.parse.",
+  "cases": [
+    {
+      "id": "key",
+      "given": {
+        "answer": {
+          "status": 200,
+          "file": "domain/beta-key-page.html"
+        }
+      },
+      "expect": {
+        "keyPrefix": "T-",
+        "request": {
+          "method": "GET"
+        }
+      }
+    },
+    {
+      "id": "http-status",
+      "given": {
+        "answer": {
+          "status": 503,
+          "text": "busy"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "makemkv.betaKey.http",
+          "params": {
+            "status": 503
+          }
+        }
+      }
+    },
+    {
+      "id": "no-key",
+      "given": {
+        "answer": {
+          "status": 200,
+          "text": "<html>nothing here</html>"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "makemkv.betaKey.notFound"
+        }
+      }
+    },
+    {
+      "id": "no-answer",
+      "given": {
+        "answer": {
+          "reason": "offline"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "makemkv.betaKey.fetchFailed",
+          "params": {
+            "reason": {
+              "code": "http.failed",
+              "params": {
+                "reason": "offline"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

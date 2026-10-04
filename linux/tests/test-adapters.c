@@ -9,7 +9,15 @@
 #include "bro-platform-file-system.h"
 #include "bro-platform-process-launcher.h"
 #include "bro-platform-tool-paths.h"
+#include "bro-apprise-tool.h"
+#include "bro-beta-key-page.h"
+#include "bro-beta-key-source.h"
+#include "bro-notification-sender.h"
 #include "bro-sqlite-store.h"
+#ifdef BRO_HAVE_LIBSOUP
+#include "bro-platform-http-client.h"
+#endif
+#include <gio/gio.h>
 #include "bro-system-tool-locator.h"
 #include <sqlite3.h>
 #include "bro-system-clock.h"
@@ -1136,7 +1144,8 @@ G_DECLARE_FINAL_TYPE (TestFixedLocator, test_fixed_locator, TEST, FIXED_LOCATOR,
 
 struct _TestFixedLocator {
   GObject parent_instance;
-  char *path;
+  char *path;    /* makemkvcon */
+  char *apprise;
 };
 
 static void test_fixed_locator_iface_init (BroToolLocatorInterface *iface);
@@ -1150,6 +1159,8 @@ fl_locate (BroToolLocator *l, BroToolKind tool)
   info->tool = tool;
   if (tool == BRO_TOOL_KIND_MAKEMKVCON && self->path)
     info->path = g_strdup (self->path);
+  else if (tool == BRO_TOOL_KIND_APPRISE && self->apprise)
+    info->path = g_strdup (self->apprise);
   else
     {
       BroJsonValue *params = bro_json_value_new_object ();
@@ -1159,7 +1170,13 @@ fl_locate (BroToolLocator *l, BroToolKind tool)
   return info;
 }
 
-static void test_fixed_locator_finalize (GObject *o) { g_free (TEST_FIXED_LOCATOR (o)->path); G_OBJECT_CLASS (test_fixed_locator_parent_class)->finalize (o); }
+static void
+test_fixed_locator_finalize (GObject *o)
+{
+  g_free (TEST_FIXED_LOCATOR (o)->path);
+  g_free (TEST_FIXED_LOCATOR (o)->apprise);
+  G_OBJECT_CLASS (test_fixed_locator_parent_class)->finalize (o);
+}
 static void test_fixed_locator_class_init (TestFixedLocatorClass *k) { G_OBJECT_CLASS (k)->finalize = test_fixed_locator_finalize; }
 static void test_fixed_locator_init (TestFixedLocator *self) {}
 static void test_fixed_locator_iface_init (BroToolLocatorInterface *iface) { iface->locate = fl_locate; }
@@ -1481,6 +1498,7 @@ test_real_iso (void)
 }
 
 #include "test-store.inc"
+#include "test-http.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1588,6 +1606,9 @@ main (int argc, char **argv)
   g_test_add_func ("/store/round-trips", test_store_round_trips);
   g_test_add_func ("/store/transaction", test_store_transaction);
   g_test_add_func ("/store/schema", test_store_schema);
+  g_test_add_func ("/http/client", test_http_client);
+  g_test_add_func ("/http/notification-sender", test_notification_sender);
+  g_test_add_func ("/http/beta-key-source", test_beta_key_source);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

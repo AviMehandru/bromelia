@@ -10311,6 +10311,172 @@
           "c": "bro_sqlite_store_close"
         }
       ]
+    },
+    "adapters/http-client": {
+      "layer": "adapters",
+      "folder": "Http",
+      "cFolder": "http",
+      "doc": "HttpClient (plan §6, §9): URLSession, .NET HttpClient, libsoup 3. Any status is an answer; no answer is http.failed with the system's reason; a cancelled call is job.cancelled. shared/fixtures/adapters/http-client.cases.json runs against a local server.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformHttpClient",
+          "kind": "class",
+          "doc": "Sends the requests Domain builds. Follows redirects; 60 s timeout; User-Agent Bromelia unless the request sets one.",
+          "swift": {
+            "name": "PlatformHttpClient",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Http/PlatformHttpClient.swift"
+          },
+          "cs": {
+            "name": "PlatformHttpClient",
+            "file": "windows/src/Bromelia.Adapters/Http/PlatformHttpClient.cs"
+          },
+          "c": {
+            "name": "BroPlatformHttpClient",
+            "file": "linux/src/adapters/http/bro-platform-http-client.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformHttpClient.send",
+          "params": [
+            "request",
+            "cancel"
+          ],
+          "returns": "HttpResponse",
+          "throws": true,
+          "async": true,
+          "swift": "PlatformHttpClient.send(_:cancel:)",
+          "cs": "PlatformHttpClient.Send",
+          "c": "bro_platform_http_client_send"
+        }
+      ]
+    },
+    "adapters/apprise-tool": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "The apprise command (plan §10.1): apprise -t <title> -b <body> <url>.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "AppriseTool",
+          "kind": "class",
+          "doc": "Runs apprise through the ProcessLauncher; notify.needsApprise when the locator can't find it, notify.appriseFailed when it exits non-zero.",
+          "swift": {
+            "name": "AppriseTool",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/AppriseTool.swift"
+          },
+          "cs": {
+            "name": "AppriseTool",
+            "file": "windows/src/Bromelia.Adapters/Tools/AppriseTool.cs"
+          },
+          "c": {
+            "name": "BroAppriseTool",
+            "file": "linux/src/adapters/tools/bro-apprise-tool.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "AppriseTool.send",
+          "params": [
+            "url",
+            "title",
+            "body",
+            "cancel"
+          ],
+          "throws": true,
+          "async": true,
+          "swift": "AppriseTool.send(_:title:body:cancel:)",
+          "cs": "AppriseTool.Send",
+          "c": "bro_apprise_tool_send"
+        }
+      ]
+    },
+    "adapters/notification-sender": {
+      "layer": "adapters",
+      "folder": "Http",
+      "cFolder": "http",
+      "doc": "Notifications (plan §10.2): NotifyRequests.build, then the HttpClient or Apprise. shared/fixtures/adapters/notification-sender.cases.json.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "NotificationSender",
+          "kind": "class",
+          "doc": "Sends one notification; fails with notify.badUrl, notify.httpFailed, notify.failed, notify.needsApprise or notify.appriseFailed (never naming the URL, a secret).",
+          "swift": {
+            "name": "NotificationSender",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Http/NotificationSender.swift"
+          },
+          "cs": {
+            "name": "NotificationSender",
+            "file": "windows/src/Bromelia.Adapters/Http/NotificationSender.cs"
+          },
+          "c": {
+            "name": "BroNotificationSender",
+            "file": "linux/src/adapters/http/bro-notification-sender.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "NotificationSender.send",
+          "params": [
+            "url",
+            "title",
+            "body",
+            "status",
+            "cancel"
+          ],
+          "throws": true,
+          "async": true,
+          "swift": "NotificationSender.send(_:title:body:status:cancel:)",
+          "cs": "NotificationSender.Send",
+          "c": "bro_notification_sender_send"
+        }
+      ]
+    },
+    "adapters/beta-key-source": {
+      "layer": "adapters",
+      "folder": "Http",
+      "cFolder": "http",
+      "doc": "MakeMKV's free beta key (plan §10.2): the forum post, read with BetaKeyPage.parse. shared/fixtures/adapters/beta-key-source.cases.json.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "BetaKeySource",
+          "kind": "class",
+          "doc": "Fetches the current beta key; makemkv.betaKey.http, .notFound or .fetchFailed otherwise.",
+          "swift": {
+            "name": "BetaKeySource",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Http/BetaKeySource.swift"
+          },
+          "cs": {
+            "name": "BetaKeySource",
+            "file": "windows/src/Bromelia.Adapters/Http/BetaKeySource.cs"
+          },
+          "c": {
+            "name": "BroBetaKeySource",
+            "file": "linux/src/adapters/http/bro-beta-key-source.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "BetaKeySource.currentKey",
+          "params": [
+            "cancel"
+          ],
+          "returns": "String",
+          "throws": true,
+          "async": true,
+          "swift": "BetaKeySource.currentKey(_:)",
+          "cs": "BetaKeySource.CurrentKey",
+          "c": "bro_beta_key_source_current_key"
+        }
+      ]
     }
   }
 }
