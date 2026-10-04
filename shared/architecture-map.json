@@ -10895,6 +10895,54 @@
           "c": "bro_cd_ripper_rip"
         }
       ]
+    },
+    "adapters/video-ts-byte-source": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "The Domain ByteSource over a DVD (shared/fixtures/adapters/video-ts-byte-source.cases.json): VIDEO_TS inside an ISO 9660 / UDF bridge image (or a disc device, read in whole sectors), a VIDEO_TS folder, or the folder that contains one. Today's IsoVideoTs and FolderVideoTs; reads now stop at the end of a file.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "VideoTsByteSource",
+          "kind": "class",
+          "doc": "A DVD's VIDEO_TS files, read by name and offset.",
+          "swift": {
+            "name": "VideoTsByteSource",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/VideoTsByteSource.swift"
+          },
+          "cs": {
+            "name": "VideoTsByteSource",
+            "file": "windows/src/Bromelia.Adapters/Tools/VideoTsByteSource.cs"
+          },
+          "c": {
+            "name": "BroVideoTsByteSource",
+            "file": "linux/src/adapters/tools/bro-video-ts-byte-source.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "VideoTsByteSource.open",
+          "params": [
+            "path"
+          ],
+          "returns": "VideoTsByteSource?",
+          "doc": "None for anything that isn't an image with VIDEO_TS or a folder with (or that is) VIDEO_TS holding VIDEO_TS.IFO.",
+          "swift": "VideoTsByteSource.open(_:)",
+          "cs": "VideoTsByteSource.Open",
+          "c": "bro_video_ts_byte_source_open"
+        },
+        {
+          "name": "VideoTsByteSource.label",
+          "params": [],
+          "returns": "String",
+          "doc": "The image's volume name, or the name of the folder that contains VIDEO_TS.",
+          "swift": "VideoTsByteSource.label()",
+          "cs": "VideoTsByteSource.Label",
+          "c": "bro_video_ts_byte_source_label"
+        }
+      ]
     }
   }
 }

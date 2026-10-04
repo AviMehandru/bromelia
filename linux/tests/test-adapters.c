@@ -23,6 +23,8 @@
 #include "bro-platform-keystore.h"
 #include "bro-hand-brake.h"
 #include "bro-cd-ripper.h"
+#include "bro-dvd-nav.h"
+#include "bro-video-ts-byte-source.h"
 #endif
 #include <gio/gio.h>
 #include "bro-system-tool-locator.h"
@@ -1577,6 +1579,7 @@ test_real_iso (void)
 #include "test-keystore.inc"
 #include "test-handbrake.inc"
 #include "test-cd-ripper.inc"
+#include "test-video-ts.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1692,6 +1695,8 @@ main (int argc, char **argv)
   g_test_add_func ("/handbrake/cases", test_handbrake);
   g_test_add_func ("/handbrake/real", test_handbrake_real);
   g_test_add_func ("/cd-ripper/cases", test_cd_ripper);
+  g_test_add_func ("/video-ts/cases", test_video_ts);
+  g_test_add_func ("/video-ts/real-iso", test_video_ts_real_iso);
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
   g_test_add_func ("/keystore/files", test_keystore_files);
