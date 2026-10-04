@@ -11001,6 +11001,50 @@
           "c": "bro_menu_ocr_read_numbers"
         }
       ]
+    },
+    "adapters/data-imager": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "Data discs to ISO images (plan §10.1; shared/fixtures/adapters/data-imager.cases.json): every sector of DriveControl.openRaw, 512 at a time, into a hidden '.<name>.part-…' file that is flushed and renamed to the image only once every sector was read; a chunk that fails is read again sector by sector so other.readError names the first bad byte; a short read is an error. rescue (ddrescue-style retries) is phase 7.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "DataImager",
+          "kind": "class",
+          "doc": "The data disc imager. Holds no state between calls.",
+          "swift": {
+            "name": "DataImager",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/DataImager.swift"
+          },
+          "cs": {
+            "name": "DataImager",
+            "file": "windows/src/Bromelia.Adapters/Tools/DataImager.cs"
+          },
+          "c": {
+            "name": "BroDataImager",
+            "file": "linux/src/adapters/tools/bro-data-imager.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "DataImager.copy",
+          "params": [
+            "device",
+            "destIso",
+            "sink",
+            "cancel"
+          ],
+          "returns": "Int64",
+          "throws": true,
+          "async": true,
+          "doc": "The bytes copied.",
+          "swift": "DataImager.copy(_:destIso:sink:cancel:)",
+          "cs": "DataImager.Copy",
+          "c": "bro_data_imager_copy"
+        }
+      ]
     }
   }
 }

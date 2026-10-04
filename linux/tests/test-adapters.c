@@ -26,6 +26,7 @@
 #include "bro-dvd-nav.h"
 #include "bro-video-ts-byte-source.h"
 #include "bro-menu-ocr.h"
+#include "bro-data-imager.h"
 #endif
 #include <gio/gio.h>
 #include "bro-system-tool-locator.h"
@@ -1582,6 +1583,7 @@ test_real_iso (void)
 #include "test-cd-ripper.inc"
 #include "test-video-ts.inc"
 #include "test-menu-ocr.inc"
+#include "test-data-imager.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1701,6 +1703,7 @@ main (int argc, char **argv)
   g_test_add_func ("/video-ts/real-iso", test_video_ts_real_iso);
   g_test_add_func ("/menu-ocr/cases", test_menu_ocr);
   g_test_add_func ("/menu-ocr/real", test_menu_ocr_real);
+  g_test_add_func ("/data-imager/cases", test_data_imager);
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
   g_test_add_func ("/keystore/files", test_keystore_files);
