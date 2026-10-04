@@ -14,6 +14,10 @@ G_BEGIN_DECLS
  * disc. */
 BroPreviousEpisode *bro_episode_continuation_choose (const BroContinuationQuery *query, GPtrArray *candidates);
 
+/* Whether an archived disc is of the query's set: the same show (its name or its label's title, normalised) and the
+ * same season, part and volume. */
+gboolean bro_episode_continuation_same_set (const BroArchivedDisc *r, const BroContinuationQuery *q);
+
 /* The highest episode number of @season in @file_names (… S02E05 …); FALSE when none. */
 gboolean bro_episode_continuation_highest_in_season (const char *const *file_names, int season, int *out);
 

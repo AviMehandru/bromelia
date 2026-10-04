@@ -1,0 +1,1544 @@
+{
+  "functions": [
+    "SqliteStore.open",
+    "SqliteStore.migrate"
+  ],
+  "description": "SqliteStore's queries, the same on the three platforms (plan §10.4). Each case opens a new database, migrates it, inserts given.rows table by table in the order given (columns not listed take their defaults; null is SQL NULL; lookup_cache.response, a BLOB, is given as text and stored as its UTF-8 bytes), then makes given.call with given.args and checks the result by ids (or the fields listed). The store's clock says 2026-10-04T12:00:00.000Z. Each platform also checks that every record type it writes reads back equal (a database is never shared between platforms, so the JSON columns needn't be byte-identical across them).",
+  "cases": [
+    {
+      "id": "jobs-active",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "queued",
+              "queue": "acquisition",
+              "position": 1,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-02T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "waitingForResources",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "jobs.active"
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000005",
+          "00000000-0000-4000-8000-000000000002",
+          "00000000-0000-4000-8000-000000000001",
+          "00000000-0000-4000-8000-000000000004"
+        ],
+        "rule": "unfinished; acquisition, processing, maintenance; then position, then created_at"
+      }
+    },
+    {
+      "id": "jobs-query",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-02T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "verify",
+              "state": "finished",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-04T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-06T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "queued",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-07T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "state": "finished",
+          "kind": "videoDisc",
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000003",
+          "00000000-0000-4000-8000-000000000001"
+        ],
+        "rule": "newest first (created_at), then a page"
+      }
+    },
+    {
+      "id": "jobs-query-finished-after-and-paging",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-02T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-04T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-06T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-07T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-08T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "finishedAfter": "2026-10-03T12:00:00.000Z",
+          "limit": 2,
+          "offset": 1
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000003",
+          "00000000-0000-4000-8000-000000000002"
+        ]
+      }
+    },
+    {
+      "id": "steps-completed",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "queued",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          "job_steps": [
+            {
+              "job_id": "00000000-0000-4000-8000-000000000001",
+              "seq": 2,
+              "kind": "acquire",
+              "state": "succeeded"
+            },
+            {
+              "job_id": "00000000-0000-4000-8000-000000000001",
+              "seq": 0,
+              "kind": "awaitMedia",
+              "state": "succeeded"
+            },
+            {
+              "job_id": "00000000-0000-4000-8000-000000000001",
+              "seq": 1,
+              "kind": "probe",
+              "state": "failed"
+            },
+            {
+              "job_id": "00000000-0000-4000-8000-000000000001",
+              "seq": 3,
+              "kind": "seal",
+              "state": "running"
+            }
+          ]
+        },
+        "call": "steps.completed",
+        "args": {
+          "jobId": "00000000-0000-4000-8000-000000000001"
+        }
+      },
+      "expect": {
+        "seqs": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "id": "steps-load",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "queued",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          "job_steps": [
+            {
+              "job_id": "00000000-0000-4000-8000-000000000001",
+              "seq": 1,
+              "kind": "probe",
+              "state": "failed"
+            },
+            {
+              "job_id": "00000000-0000-4000-8000-000000000001",
+              "seq": 0,
+              "kind": "awaitMedia",
+              "state": "succeeded"
+            }
+          ]
+        },
+        "call": "steps.load",
+        "args": {
+          "jobId": "00000000-0000-4000-8000-000000000001"
+        }
+      },
+      "expect": {
+        "seqs": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "units-query",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            },
+            {
+              "id": "other",
+              "name": "Library",
+              "path": "/other",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "Unit 1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Alpha",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "library_id": "lib",
+              "path": "Unit 2",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "alphabet soup",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000103",
+              "library_id": "lib",
+              "path": "Unit 3",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Beta",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000104",
+              "library_id": "other",
+              "path": "Unit 4",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "ALPHA two",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000105",
+              "library_id": "lib",
+              "path": "Unit 5",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "missing",
+              "status": "success",
+              "name": "Alpha missing",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "units.query",
+        "args": {
+          "libraryId": "lib",
+          "text": "ALPHA",
+          "state": "committed",
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000102",
+          "00000000-0000-4000-8000-000000000101"
+        ],
+        "rule": "the library; the name contains the text, ignoring case; the state; newest first"
+      }
+    },
+    {
+      "id": "units-least-recently-verified",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "Unit 1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 1",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "library_id": "lib",
+              "path": "Unit 2",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 2",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000103",
+              "library_id": "lib",
+              "path": "Unit 3",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 3",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000104",
+              "library_id": "lib",
+              "path": "Unit 4",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "quarantined",
+              "status": "success",
+              "name": "Unit 4",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000105",
+              "library_id": "lib",
+              "path": "Unit 5",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 5",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          "checks": [
+            {
+              "id": "00000000-0000-4000-8000-000000000201",
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "folder": "/archive/Unit 1",
+              "started_at": "2026-10-05T12:00:00.000Z",
+              "finished_at": "2026-10-05T12:00:00.000Z",
+              "result": "ok"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000202",
+              "unit_id": "00000000-0000-4000-8000-000000000102",
+              "folder": "/archive/Unit 2",
+              "started_at": "2026-10-03T12:00:00.000Z",
+              "finished_at": "2026-10-03T12:00:00.000Z",
+              "result": "ok"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000203",
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "folder": "/archive/Unit 1",
+              "started_at": "2026-10-02T12:00:00.000Z",
+              "finished_at": "2026-10-02T12:00:00.000Z",
+              "result": "ok"
+            }
+          ]
+        },
+        "call": "units.leastRecentlyVerified",
+        "args": {
+          "limit": 3
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000103",
+          "00000000-0000-4000-8000-000000000105",
+          "00000000-0000-4000-8000-000000000102"
+        ],
+        "rule": "committed units; never checked first (oldest first), then by their latest check"
+      }
+    },
+    {
+      "id": "units-open-intents",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "Unit 1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Unit 1",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": null
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "library_id": "lib",
+              "path": "Unit 2",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Unit 2",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": null
+            }
+          ],
+          "commit_intents": [
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000102",
+              "job_id": "00000000-0000-4000-8000-000000000009",
+              "staging": "/s/2",
+              "destination": "/archive/Unit 2",
+              "created_at": "2026-10-02T12:00:00.000Z"
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "job_id": "00000000-0000-4000-8000-000000000008",
+              "staging": "/s/1",
+              "destination": "/archive/Unit 1",
+              "created_at": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          "commit_items": [
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "seq": 1,
+              "from_path": "b.mkv",
+              "to_path": "b.mkv",
+              "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "moved": 1
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "seq": 0,
+              "from_path": "a.mkv",
+              "to_path": "a (2).mkv",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000102",
+              "seq": 0,
+              "from_path": "x",
+              "to_path": "x",
+              "is_dir": 1
+            }
+          ]
+        },
+        "call": "units.openIntents"
+      },
+      "expect": {
+        "intents": [
+          [
+            "00000000-0000-4000-8000-000000000101",
+            [
+              "0 a.mkv a (2).mkv",
+              "1 b.mkv b.mkv moved"
+            ]
+          ],
+          [
+            "00000000-0000-4000-8000-000000000102",
+            [
+              "0 x x dir"
+            ]
+          ]
+        ],
+        "rule": "oldest first; items in seq order"
+      }
+    },
+    {
+      "id": "catalog-archived-before",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "Unit 1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 1",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "fingerprint": "v1:aa"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "library_id": "lib",
+              "path": "Unit 2",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 2",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-03T12:00:00.000Z",
+              "fingerprint": "v1:aa"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000103",
+              "library_id": "lib",
+              "path": "Unit 3",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 3",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "fingerprint": "v1:bb"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000104",
+              "library_id": "lib",
+              "path": "Unit 4",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "quarantined",
+              "status": "errors",
+              "name": "Unit 4",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "fingerprint": "v1:aa"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000105",
+              "library_id": "lib",
+              "path": "Unit 5",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Unit 5",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": null,
+              "fingerprint": "v1:aa"
+            }
+          ]
+        },
+        "call": "catalog.archivedBefore",
+        "args": {
+          "fingerprint": "v1:aa"
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000102",
+          "00000000-0000-4000-8000-000000000101"
+        ],
+        "rule": "committed units with the fingerprint, newest commit first"
+      }
+    },
+    {
+      "id": "catalog-previous-disc",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "One Piece/S2 P7 D1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "One Piece",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 1,
+              "label": "ONE_PIECE_S2_P7_D1",
+              "season": 2,
+              "part": 7
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "library_id": "lib",
+              "path": "One Piece/S2 P7 D1 again",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "One Piece",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 1,
+              "label": "ONE_PIECE_S2_P7_D1",
+              "season": 2,
+              "part": 7
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000103",
+              "library_id": "lib",
+              "path": "Other/D1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Other Show",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 1,
+              "label": "OTHER_S2_P7_D1",
+              "season": 2,
+              "part": 7
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000104",
+              "library_id": "lib",
+              "path": "One Piece/S2 P6 D1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "One Piece",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 1,
+              "label": "ONE_PIECE_S2_P6_D1",
+              "season": 2,
+              "part": 6
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000105",
+              "library_id": "lib",
+              "path": "One Piece/S2 P7 D1 bad",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "quarantined",
+              "status": "incomplete",
+              "name": "One Piece",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 1,
+              "label": "ONE_PIECE_S2_P7_D1",
+              "season": 2,
+              "part": 7
+            }
+          ],
+          "unit_files": [
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "path": "e1.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 13
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "path": "e2.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 14
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000102",
+              "path": "e1.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 15
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000103",
+              "path": "x.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 40
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000104",
+              "path": "y.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 50
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000105",
+              "path": "z.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 60
+            }
+          ]
+        },
+        "call": "catalog.previousDisc",
+        "args": {
+          "name": "One Piece",
+          "labelTitle": "ONE PIECE",
+          "season": 2,
+          "part": 7,
+          "disc": 2
+        }
+      },
+      "expect": {
+        "previous": {
+          "name": "One Piece",
+          "disc": 1,
+          "lastEpisode": 15,
+          "folder": "/archive/One Piece/S2 P7 D1 again"
+        },
+        "rule": "committed TV units (success or errors) of the same set (EpisodeContinuation.sameSet) whose disc is one lower; the one with the highest episode"
+      }
+    },
+    {
+      "id": "catalog-previous-disc-none",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "P",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "One Piece",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 2,
+              "label": "ONE_PIECE_S2_P7_D1",
+              "season": 2,
+              "part": 7
+            }
+          ],
+          "unit_files": [
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "path": "e.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 20
+            }
+          ]
+        },
+        "call": "catalog.previousDisc",
+        "args": {
+          "name": "One Piece",
+          "labelTitle": "ONE PIECE",
+          "season": 2,
+          "part": 7,
+          "disc": 2
+        }
+      },
+      "expect": {
+        "previous": null
+      }
+    },
+    {
+      "id": "catalog-highest-episode",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "a",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "One Piece",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 1,
+              "label": "ONE_PIECE_S2_P7_D1",
+              "season": 2,
+              "part": 7
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "library_id": "lib",
+              "path": "b",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "One Piece",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 3,
+              "label": "ONE_PIECE_S2_P7_D1",
+              "season": 2,
+              "part": 7
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000103",
+              "library_id": "lib",
+              "path": "c",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Other Show",
+              "kind": "tv",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z",
+              "disc": 1,
+              "label": "OTHER",
+              "season": 2,
+              "part": 7
+            }
+          ],
+          "unit_files": [
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "path": "e.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 13
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000102",
+              "path": "e.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 30
+            },
+            {
+              "unit_id": "00000000-0000-4000-8000-000000000103",
+              "path": "e.mkv",
+              "size": 1,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "role": "title",
+              "episode": 99
+            }
+          ]
+        },
+        "call": "catalog.highestEpisode",
+        "args": {
+          "name": "One Piece",
+          "labelTitle": "ONE PIECE",
+          "season": 2,
+          "part": 7,
+          "disc": 2
+        }
+      },
+      "expect": {
+        "episode": 30,
+        "rule": "the highest episode of any committed disc of the same set"
+      }
+    },
+    {
+      "id": "catalog-works",
+      "given": {
+        "rows": {
+          "works": [
+            {
+              "id": "00000000-0000-4000-8000-000000000301",
+              "kind": "movie",
+              "title": "The Matrix",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "updated_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000302",
+              "kind": "movie",
+              "title": "matrix reloaded",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "updated_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000303",
+              "kind": "tv",
+              "title": "One Piece",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "updated_at": "2026-10-01T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "catalog.works",
+        "args": {
+          "query": "MATRIX"
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000302",
+          "00000000-0000-4000-8000-000000000301"
+        ],
+        "rule": "the title contains the text, ignoring case; by title, ignoring case"
+      }
+    },
+    {
+      "id": "catalog-set",
+      "given": {
+        "rows": {
+          "works": [
+            {
+              "id": "00000000-0000-4000-8000-000000000303",
+              "kind": "tv",
+              "title": "One Piece",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "updated_at": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          "disc_sets": [
+            {
+              "id": "00000000-0000-4000-8000-000000000401",
+              "work_id": "00000000-0000-4000-8000-000000000303",
+              "label_title": "ONE PIECE",
+              "season": 2,
+              "part": 7,
+              "description": "Season 2 Part 7",
+              "known_count": 4
+            }
+          ]
+        },
+        "call": "catalog.set",
+        "args": {
+          "setId": "00000000-0000-4000-8000-000000000401"
+        }
+      },
+      "expect": {
+        "set": {
+          "workId": "00000000-0000-4000-8000-000000000303",
+          "labelTitle": "ONE PIECE",
+          "season": 2,
+          "part": 7,
+          "volume": null,
+          "description": "Season 2 Part 7",
+          "knownCount": 4
+        }
+      }
+    },
+    {
+      "id": "checks-for-unit-and-latest",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "Unit 1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 1",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          "checks": [
+            {
+              "id": "00000000-0000-4000-8000-000000000201",
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "folder": "/archive/Unit 1",
+              "started_at": "2026-10-01T12:00:00.000Z",
+              "finished_at": "2026-10-01T12:00:00.000Z",
+              "result": "ok"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000202",
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "folder": "/archive/Unit 1",
+              "started_at": "2026-10-03T12:00:00.000Z",
+              "finished_at": "2026-10-03T12:00:00.000Z",
+              "result": "damaged",
+              "changed": "[\"a.mkv\"]"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000203",
+              "unit_id": null,
+              "folder": "/archive/Loose",
+              "started_at": "2026-10-02T12:00:00.000Z",
+              "finished_at": "2026-10-02T12:00:00.000Z",
+              "result": "ok"
+            }
+          ]
+        },
+        "call": "checks.forUnit",
+        "args": {
+          "unitId": "00000000-0000-4000-8000-000000000101"
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000202",
+          "00000000-0000-4000-8000-000000000201"
+        ],
+        "latestFolder": "/archive/Unit 1",
+        "latest": "00000000-0000-4000-8000-000000000202",
+        "changed": [
+          "a.mkv"
+        ]
+      }
+    },
+    {
+      "id": "replicas-lagging",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/archive",
+              "marker_id": "m",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1
+            }
+          ],
+          "archive_units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "library_id": "lib",
+              "path": "Unit 1",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 1",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "library_id": "lib",
+              "path": "Unit 2",
+              "record_file": "bromelia-x.json",
+              "record_version": 3,
+              "state": "committed",
+              "status": "success",
+              "name": "Unit 2",
+              "kind": "movie",
+              "format": "bluray",
+              "format_code": "BD",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "committed_at": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          "replicas": [
+            {
+              "id": "00000000-0000-4000-8000-000000000501",
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "target_id": "nas",
+              "path": "/nas/1",
+              "state": "verified",
+              "verified_at": "2026-10-01T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000502",
+              "unit_id": "00000000-0000-4000-8000-000000000101",
+              "target_id": "usb",
+              "path": "/usb/1",
+              "state": "pending"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000503",
+              "unit_id": "00000000-0000-4000-8000-000000000102",
+              "target_id": "nas",
+              "path": "/nas/2",
+              "state": "failed"
+            }
+          ]
+        },
+        "call": "replicas.lagging"
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000502",
+          "00000000-0000-4000-8000-000000000503"
+        ],
+        "rule": "not verified, by id"
+      }
+    },
+    {
+      "id": "outbox-due",
+      "given": {
+        "rows": {
+          "outbox": [
+            {
+              "id": "00000000-0000-4000-8000-000000000601",
+              "target_id": "t",
+              "title": "{\"code\":\"notify.test.title\"}",
+              "body": "[]",
+              "status": "success",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "next_attempt_at": "2026-10-04T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000602",
+              "target_id": "t",
+              "title": "{\"code\":\"notify.test.title\"}",
+              "body": "[]",
+              "status": "success",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "next_attempt_at": "2026-10-03T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000603",
+              "target_id": "t",
+              "title": "{\"code\":\"notify.test.title\"}",
+              "body": "[]",
+              "status": "success",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "next_attempt_at": "2026-10-05T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000604",
+              "target_id": "t",
+              "title": "{\"code\":\"notify.test.title\"}",
+              "body": "[]",
+              "status": "success",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "next_attempt_at": "2026-10-01T12:00:00.000Z",
+              "sent_at": "2026-10-02T12:00:00.000Z"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000605",
+              "target_id": "t",
+              "title": "{\"code\":\"notify.test.title\"}",
+              "body": "[]",
+              "status": "success",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "next_attempt_at": null
+            }
+          ]
+        },
+        "call": "outbox.due",
+        "args": {
+          "now": "2026-10-04T12:00:00.000Z"
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000602",
+          "00000000-0000-4000-8000-000000000601"
+        ],
+        "rule": "unsent, next attempt at or before now, soonest first; no next attempt means given up"
+      }
+    },
+    {
+      "id": "lookup-cache-expiry",
+      "given": {
+        "rows": {
+          "lookup_cache": [
+            {
+              "provider": "tmdb",
+              "request_key": "search?q=a",
+              "status": 200,
+              "response": "fresh",
+              "fetched_at": "2026-10-01T12:00:00.000Z",
+              "expires_at": "2026-10-05T12:00:00.000Z"
+            },
+            {
+              "provider": "tmdb",
+              "request_key": "search?q=b",
+              "status": 200,
+              "response": "stale",
+              "fetched_at": "2026-10-01T12:00:00.000Z",
+              "expires_at": "2026-10-03T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "lookupCache.get",
+        "args": {
+          "provider": "tmdb",
+          "keys": [
+            "search?q=a",
+            "search?q=b"
+          ]
+        }
+      },
+      "expect": {
+        "bodies": [
+          "fresh",
+          null
+        ],
+        "rule": "an answer is returned until it expires (the store's clock says 2026-10-04T12:00:00.000Z)"
+      }
+    },
+    {
+      "id": "drives-record-stats-adds",
+      "given": {
+        "rows": {
+          "drives": [
+            {
+              "id": "d1",
+              "identification": "BD-RE X",
+              "first_seen_at": "2026-10-01T12:00:00.000Z",
+              "last_seen_at": "2026-10-01T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "drives.recordStats",
+        "args": {
+          "driveId": "d1",
+          "day": "2026-10-04",
+          "twice": {
+            "jobs": 1,
+            "failedJobs": 0,
+            "readErrorJobs": 1,
+            "readErrors": 7,
+            "bytesRead": 100,
+            "secondsReading": 1.5
+          },
+          "then": {
+            "jobs": 2,
+            "failedJobs": 1,
+            "readErrorJobs": 0,
+            "readErrors": 0,
+            "bytesRead": 200,
+            "secondsReading": 3.0
+          }
+        }
+      },
+      "expect": {
+        "row": {
+          "jobs": 3,
+          "failed_jobs": 1,
+          "read_error_jobs": 1,
+          "read_errors": 7,
+          "bytes_read": 300,
+          "seconds_reading": 4.5
+        }
+      }
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 # L3 Adapters (rearchitecture plan §10): the ports on Linux (platform/) and the portable tools, HTTP and store
 # adapters. GIO and other system libraries are allowed here, never in Domain or Engine.
-bro_adapters_inc = include_directories('platform', 'clock', 'tools')
+sqlite_dep = dependency('sqlite3', version: '>= 3.37') # STRICT tables
+
+bro_adapters_inc = include_directories('platform', 'clock', 'store', 'tools')
 
 bro_adapters_lib = static_library('bro-adapters',
   files(
@@ -8,6 +10,8 @@ bro_adapters_lib = static_library('bro-adapters',
     'platform/bro-platform-file-system.c',
     'platform/bro-platform-process-launcher.c',
     'platform/bro-platform-tool-paths.c',
+    'store/bro-migrations.c',
+    'store/bro-sqlite-store.c',
     'tools/bro-home-dir-isolation.c',
     'tools/bro-home-layout.c',
     'tools/bro-listing-run.c',
@@ -18,11 +22,11 @@ bro_adapters_lib = static_library('bro-adapters',
     'tools/bro-system-tool-locator.c',
   ),
   include_directories: bro_adapters_inc,
-  dependencies: [bro_ports_dep, gio_dep, gio_unix_dep],
+  dependencies: [bro_ports_dep, gio_dep, gio_unix_dep, sqlite_dep],
 )
 
 bro_adapters_dep = declare_dependency(
   link_with: bro_adapters_lib,
   include_directories: bro_adapters_inc,
-  dependencies: [bro_ports_dep, gio_dep, gio_unix_dep],
+  dependencies: [bro_ports_dep, gio_dep, gio_unix_dep, sqlite_dep],
 )

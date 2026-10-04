@@ -3,8 +3,8 @@ import BroFoundation
 
 /// The job_steps table.
 public protocol StepRepository: Sendable {
-    /// Records how step seq ended.
-    func save(_ jobId: Id, seq: Int, result: StepResult) async throws(BroError)
+    /// Writes the step's row (inserted, or replaced for the same job and seq).
+    func save(_ step: StepRecord) async throws(BroError)
 
     /// The steps that succeeded, in order.
     func completed(_ jobId: Id) async throws(BroError) -> [StepRecord]

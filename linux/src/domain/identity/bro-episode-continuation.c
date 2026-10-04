@@ -27,8 +27,8 @@ _bro_identity_normalize_name (const char *name)
   return g_string_free (out, FALSE);
 }
 
-static gboolean
-same_set (const BroArchivedDisc *r, const BroContinuationQuery *q)
+gboolean
+bro_episode_continuation_same_set (const BroArchivedDisc *r, const BroContinuationQuery *q)
 {
   g_autofree char *name = _bro_identity_normalize_name (q->name);
   g_autofree char *title = _bro_identity_normalize_name (q->label_title);
@@ -47,7 +47,7 @@ bro_episode_continuation_choose (const BroContinuationQuery *q, GPtrArray *candi
   gboolean later = FALSE;
   for (guint i = 0; i < candidates->len; i++) {
     const BroArchivedDisc *r = candidates->pdata[i];
-    if (!same_set (r, q))
+    if (!bro_episode_continuation_same_set (r, q))
       continue;
     if (r->disc == q->disc - 1 && r->last_episode >= 0 && (!prev || r->last_episode > prev->last_episode))
       prev = r;

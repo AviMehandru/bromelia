@@ -264,6 +264,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "fs.alreadyExists",
   "fs.parentMissing",
   "fs.failed",
+  "store.failed",
   "archive.recordWritten",
   "archive.renameFailed",
   "archive.synced",

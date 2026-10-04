@@ -15,13 +15,13 @@ G_DECLARE_INTERFACE (BroStepRepository, bro_step_repository, BRO, STEP_REPOSITOR
 struct _BroStepRepositoryInterface {
   GTypeInterface parent_iface;
 
-  gboolean (*save) (BroStepRepository *self, BroId job_id, int seq, const BroStepResult *result, BroBroError **error);
+  gboolean (*save) (BroStepRepository *self, const BroStepRecord *step, BroBroError **error);
   GPtrArray *(*completed) (BroStepRepository *self, BroId job_id, BroBroError **error);
   GPtrArray *(*load) (BroStepRepository *self, BroId job_id, BroBroError **error);
 };
 
-/* Records how step seq ended. FALSE and @error set on failure. */
-gboolean bro_step_repository_save (BroStepRepository *self, BroId job_id, int seq, const BroStepResult *result, BroBroError **error);
+/* Writes the step's row (inserted, or replaced for the same job and seq). FALSE and @error set on failure. */
+gboolean bro_step_repository_save (BroStepRepository *self, const BroStepRecord *step, BroBroError **error);
 
 /* The steps that succeeded, in order. */
 GPtrArray *bro_step_repository_completed (BroStepRepository *self, BroId job_id, BroBroError **error);

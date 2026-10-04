@@ -9,10 +9,10 @@ bro_step_repository_default_init (BroStepRepositoryInterface *iface)
 }
 
 gboolean
-bro_step_repository_save (BroStepRepository *self, BroId job_id, int seq, const BroStepResult *result, BroBroError **error)
+bro_step_repository_save (BroStepRepository *self, const BroStepRecord *step, BroBroError **error)
 {
   g_return_val_if_fail (BRO_IS_STEP_REPOSITORY (self), FALSE);
-  return BRO_STEP_REPOSITORY_GET_IFACE (self)->save (self, job_id, seq, result, error);
+  return BRO_STEP_REPOSITORY_GET_IFACE (self)->save (self, step, error);
 }
 
 GPtrArray *

@@ -9,7 +9,9 @@
 #include "bro-platform-file-system.h"
 #include "bro-platform-process-launcher.h"
 #include "bro-platform-tool-paths.h"
+#include "bro-sqlite-store.h"
 #include "bro-system-tool-locator.h"
+#include <sqlite3.h>
 #include "bro-system-clock.h"
 
 #include <errno.h>
@@ -1478,6 +1480,8 @@ test_real_iso (void)
   g_assert_nonnull (strstr (transcript, " exit status 0\n"));
 }
 
+#include "test-store.inc"
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -1558,6 +1562,8 @@ main (int argc, char **argv)
   {
     char *real = realpath (scratch, NULL); /* macOS: /var → /private/var, so error paths match */
     fs_root = g_build_filename (real, "fs", NULL);
+    store_dir = g_build_filename (real, "store", NULL);
+    g_mkdir_with_parents (store_dir, 0755);
     free (real);
   }
   g_test_add_func ("/process/stall-stops", test_stall_stops);
@@ -1578,6 +1584,10 @@ main (int argc, char **argv)
   g_test_add_func ("/tool-locator/platform-paths", test_tool_paths);
   g_test_add_func ("/makemkv-tool/cases", test_makemkv_tool);
   g_test_add_func ("/makemkv-tool/real-iso", test_real_iso);
+  g_test_add_func ("/store/cases", test_store_cases);
+  g_test_add_func ("/store/round-trips", test_store_round_trips);
+  g_test_add_func ("/store/transaction", test_store_transaction);
+  g_test_add_func ("/store/schema", test_store_schema);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);
@@ -1586,5 +1596,6 @@ main (int argc, char **argv)
   g_spawn_command_line_sync (cleanup, NULL, NULL, NULL, NULL);
   g_free (scratch);
   g_free (fs_root);
+  g_free (store_dir);
   return status;
 }

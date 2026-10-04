@@ -40,7 +40,9 @@ public static class EpisodeContinuation
 
     private static readonly Regex SeasonEpisode = new(@"[Ss]([0-9]{1,3})[Ee]([0-9]{1,4})", RegexOptions.CultureInvariant);
 
-    private static bool SameSet(ArchivedDisc r, ContinuationQuery q)
+    /// <summary>Whether an archived disc is of the query's set: the same show (its name or its label's title,
+    /// normalised) and the same season, part and volume.</summary>
+    public static bool SameSet(ArchivedDisc r, ContinuationQuery q)
     {
         string name = Names.Normalize(q.Name), title = Names.Normalize(q.LabelTitle);
         var sameShow = (name.Length > 0 && Names.Normalize(r.Name) == name) || (title.Length > 0 && Names.Normalize(r.LabelTitle) == title);

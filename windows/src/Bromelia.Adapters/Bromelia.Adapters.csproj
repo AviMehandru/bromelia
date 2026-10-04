@@ -13,6 +13,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- SqliteStore (plan §6): bundles SQLite 3.4x with JSON1, so STRICT tables and json_valid work everywhere. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Bromelia.Foundation\Bromelia.Foundation.csproj" />
     <ProjectReference Include="..\Bromelia.Domain\Bromelia.Domain.csproj" />
     <ProjectReference Include="..\Bromelia.Ports\Bromelia.Ports.csproj" />

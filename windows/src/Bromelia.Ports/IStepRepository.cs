@@ -9,8 +9,8 @@ namespace Bromelia.Ports;
 /// <summary>The job_steps table.</summary>
 public interface IStepRepository
 {
-    /// <summary>Records how step seq ended.</summary>
-    Task Save(Id jobId, int seq, StepResult result);
+    /// <summary>Writes the step's row (inserted, or replaced for the same job and seq).</summary>
+    Task Save(StepRecord step);
 
     /// <summary>The steps that succeeded, in order.</summary>
     Task<IReadOnlyList<StepRecord>> Completed(Id jobId);

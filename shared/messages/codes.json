@@ -1753,6 +1753,15 @@
       },
       "today": "new: the FileSystem port; reason is the system's text"
     },
+    "store.failed": {
+      "kind": "error",
+      "params": {
+        "operation": "string",
+        "reason": "string"
+      },
+      "http": 500,
+      "today": "new: SqliteStore (plan §10.4); reason is SQLite's text"
+    },
     "archive.recordWritten": {
       "kind": "log",
       "severity": "info",

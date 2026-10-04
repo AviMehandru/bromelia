@@ -29,6 +29,9 @@ jobs:
       # The configuration schema is compiled into each platform's Domain.
       - name: Generated configuration schema
         run: python3 tools/gen-config-schema.py --check
+      # The database migrations are compiled into each platform's Adapters.
+      - name: Generated migrations
+        run: python3 tools/gen-migrations.py --check
 
   macos:
     name: macOS (SwiftUI)
@@ -154,7 +157,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build libgtk-4-dev libadwaita-1-dev libjson-glib-dev glib-networking openssl
+          sudo apt-get install -y meson ninja-build libgtk-4-dev libadwaita-1-dev libjson-glib-dev libsqlite3-dev glib-networking openssl
       - name: Build
         working-directory: linux
         run: |

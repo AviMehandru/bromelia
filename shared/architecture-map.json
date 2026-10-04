@@ -2329,6 +2329,19 @@
           "c": "bro_episode_continuation_choose"
         },
         {
+          "name": "EpisodeContinuation.sameSet",
+          "params": [
+            "disc",
+            "query"
+          ],
+          "returns": "Bool",
+          "phase": 2,
+          "doc": "Whether an archived disc is of the query's set (same show by name or label title, same season, part and volume). Public for CatalogRepository, which picks candidates with it.",
+          "swift": "EpisodeContinuation.sameSet(_:query:)",
+          "cs": "EpisodeContinuation.SameSet",
+          "c": "bro_episode_continuation_same_set"
+        },
+        {
           "name": "EpisodeContinuation.highestInSeason",
           "params": [
             "fileNames",
@@ -8337,11 +8350,9 @@
         {
           "name": "StepRepository.save",
           "params": [
-            "jobId",
-            "seq",
-            "result"
+            "step"
           ],
-          "swift": "StepRepository.save(_:seq:result:)",
+          "swift": "StepRepository.save(_:)",
           "cs": "StepRepository.Save",
           "c": "bro_step_repository_save"
         },
@@ -10229,6 +10240,75 @@
           "swift": "RunSink.event(_:)",
           "cs": "RunSink.Event",
           "c": "bro_run_sink_event"
+        }
+      ]
+    },
+    "adapters/sqlite-store": {
+      "layer": "adapters",
+      "folder": "Store",
+      "cFolder": "store",
+      "doc": "Store on SQLite (plan §10.4, §23): the shared migrations run verbatim (compiled in by tools/gen-migrations.py), WAL, synchronous=FULL, foreign keys on; every repository of the Store port. One connection, every call serialised (a read pool can come when measurements ask for it). Times as ISO 8601 text, enums as their wire names, JSON columns in the canonical encoding. shared/fixtures/adapters/store.cases.json pins the queries.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "SqliteStore",
+          "kind": "class",
+          "doc": "The Store port on SQLite (Microsoft.Data.Sqlite, the system SQLite3, sqlite3).",
+          "swift": {
+            "name": "SqliteStore",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Store/SqliteStore.swift"
+          },
+          "cs": {
+            "name": "SqliteStore",
+            "file": "windows/src/Bromelia.Adapters/Store/SqliteStore.cs"
+          },
+          "c": {
+            "name": "BroSqliteStore",
+            "file": "linux/src/adapters/store/bro-sqlite-store.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "SqliteStore.open",
+          "params": [
+            "path",
+            "clock"
+          ],
+          "returns": "SqliteStore",
+          "throws": true,
+          "doc": "Opens (creating) the database file; \":memory:\" for a private in-memory one (tests). Doesn't migrate.",
+          "swift": "SqliteStore.open(_:clock:)",
+          "cs": "SqliteStore.Open",
+          "c": "bro_sqlite_store_open"
+        },
+        {
+          "name": "SqliteStore.migrate",
+          "params": [],
+          "throws": true,
+          "async": true,
+          "swift": "SqliteStore.migrate()",
+          "cs": "SqliteStore.Migrate",
+          "c": "bro_sqlite_store_migrate"
+        },
+        {
+          "name": "SqliteStore.transaction",
+          "params": [
+            "block"
+          ],
+          "throws": true,
+          "async": true,
+          "doc": "BEGIN IMMEDIATE … COMMIT around block, which must use the store it is given; a failure rolls back.",
+          "swift": "SqliteStore.transaction(_:)",
+          "cs": "SqliteStore.Transaction",
+          "c": "bro_sqlite_store_transaction"
+        },
+        {
+          "name": "SqliteStore.close",
+          "params": [],
+          "swift": "SqliteStore.close()",
+          "cs": "SqliteStore.Close",
+          "c": "bro_sqlite_store_close"
         }
       ]
     }
