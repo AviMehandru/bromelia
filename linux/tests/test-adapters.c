@@ -20,6 +20,7 @@
 #ifdef BRO_HAVE_LIBSOUP
 #include "bro-platform-http-client.h"
 #include "bro-platform-power-manager.h"
+#include "bro-platform-keystore.h"
 #endif
 #include <gio/gio.h>
 #include "bro-system-tool-locator.h"
@@ -1547,6 +1548,7 @@ test_real_iso (void)
 #include "test-metadata.inc"
 #include "test-mkv.inc"
 #include "test-power.inc"
+#include "test-keystore.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1660,6 +1662,9 @@ main (int argc, char **argv)
   g_test_add_func ("/http/metadata-client", test_metadata_client);
   g_test_add_func ("/mkvtoolnix/cases", test_mkvtoolnix);
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
+  g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
+  g_test_add_func ("/keystore/files", test_keystore_files);
+  g_test_add_func ("/keystore/secret-service", test_keystore_secret_service);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

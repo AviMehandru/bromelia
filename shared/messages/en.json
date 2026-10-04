@@ -260,6 +260,7 @@
   "fs.parentMissing": "{path} doesn't exist, so nothing was created in it",
   "fs.failed": "Could not {operation} {path}: {reason}",
   "store.failed": "The database failed ({operation}): {reason}",
+  "keystore.failed": "Couldn't use the secret “{name}”: {reason}",
   "archive.recordWritten": "Wrote the archive record {file}",
   "archive.renameFailed": "Could not rename {path}: {reason}",
   "archive.synced": "Flushed {count, plural, one {# file} other {# files}} and their folders to disk",
