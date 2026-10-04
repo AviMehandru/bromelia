@@ -33,7 +33,7 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = Self.withoutUI { SecItemCopyMatching(query as CFDictionary, &result) }
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw failed(name, status) }
         return String(decoding: (result as? Data) ?? Data(), as: UTF8.self)
@@ -43,12 +43,12 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
         try check(name)
         guard useSystem() else { return try writeFile(name, value) }
         let data = Data(value.utf8)
-        var status = SecItemUpdate(item(name) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        var status = Self.withoutUI { SecItemUpdate(item(name) as CFDictionary, [kSecValueData as String: data] as CFDictionary) }
         if status == errSecItemNotFound {
             var add = item(name)
             add[kSecValueData as String] = data
             add[kSecAttrLabel as String] = "\(service): \(name)"
-            status = SecItemAdd(add as CFDictionary, nil)
+            status = Self.withoutUI { SecItemAdd(add as CFDictionary, nil) }
         }
         guard status == errSecSuccess else { throw failed(name, status) }
     }
@@ -59,7 +59,7 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
             if unlink(filePath(name)) != 0 && errno != ENOENT { throw failed(name, String(cString: strerror(errno))) }
             return
         }
-        let status = SecItemDelete(item(name) as CFDictionary)
+        let status = Self.withoutUI { SecItemDelete(item(name) as CFDictionary) }
         guard status == errSecSuccess || status == errSecItemNotFound else { throw failed(name, status) }
     }
 
@@ -78,11 +78,32 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
             if let system { return system }
             var query = item("bromelia.probe")
             query[kSecMatchLimit as String] = kSecMatchLimitOne
-            let status = SecItemCopyMatching(query as CFDictionary, nil)
+            let status = Self.withoutUI { SecItemCopyMatching(query as CFDictionary, nil) }
             let usable = status != errSecNoSuchKeychain && status != errSecNotAvailable
             system = usable
             return usable
         }
+    }
+
+    /// The file-based login keychain ignores `interactionNotAllowed` and shows its unlock dialog when it is locked
+    /// (found with a stored secret and a locked keychain); SecKeychainSetUserInteractionAllowed is the only switch for that
+    /// dialog. It is deprecated without a replacement, so it is looked up with dlsym (no warning), turned off around each
+    /// call and restored, under one lock (the setting is per process).
+    private static let interactionLock = NSLock()
+    private typealias GetInteraction = @convention(c) (UnsafeMutablePointer<DarwinBoolean>) -> OSStatus
+    private typealias SetInteraction = @convention(c) (DarwinBoolean) -> OSStatus
+    nonisolated(unsafe) private static let security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW)
+    private static let getInteraction = dlsym(security, "SecKeychainGetUserInteractionAllowed").map { unsafeBitCast($0, to: GetInteraction.self) }
+    private static let setInteraction = dlsym(security, "SecKeychainSetUserInteractionAllowed").map { unsafeBitCast($0, to: SetInteraction.self) }
+
+    private static func withoutUI<T>(_ body: () -> T) -> T {
+        interactionLock.lock()
+        defer { interactionLock.unlock() }
+        var was: DarwinBoolean = true
+        guard let getInteraction, let setInteraction, getInteraction(&was) == errSecSuccess else { return body() }
+        _ = setInteraction(false)
+        defer { _ = setInteraction(was) }
+        return body()
     }
 
     // MARK: - Files
