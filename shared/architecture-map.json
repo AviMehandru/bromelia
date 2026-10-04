@@ -10771,6 +10771,84 @@
           "c": "bro_platform_keystore_backend"
         }
       ]
+    },
+    "adapters/handbrake": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "HandBrakeCLI (plan §10.1; shared/fixtures/adapters/handbrake.cases.json): one encode per ripped MKV with HandBrakeArgs.build, in the output's folder, progress as ProgressValue and the lines HandBrakeArgs.keepLine keeps as Raw; the step's timeoutSeconds is a Clock timer that stops it. The step's own executable when set (tool.notFoundAt), else the locator's (tool.missing). presets lists HandBrakeCLI --preset-list, or the built-in presets when it can't.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "HandBrake",
+          "kind": "class",
+          "doc": "The HandBrakeCLI adapter. Holds no state between calls.",
+          "swift": {
+            "name": "HandBrake",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/HandBrake.swift"
+          },
+          "cs": {
+            "name": "HandBrake",
+            "file": "windows/src/Bromelia.Adapters/Tools/HandBrake.cs"
+          },
+          "c": {
+            "name": "BroHandBrake",
+            "file": "linux/src/adapters/tools/bro-hand-brake.h"
+          }
+        },
+        {
+          "name": "HandBrakeRun",
+          "kind": "struct",
+          "fields": [
+            "exit",
+            "timedOut"
+          ],
+          "doc": "An encode: HandBrakeCLI's exit, and whether the step's timeout stopped it.",
+          "swift": {
+            "name": "HandBrakeRun",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/HandBrakeRun.swift"
+          },
+          "cs": {
+            "name": "HandBrakeRun",
+            "file": "windows/src/Bromelia.Adapters/Tools/HandBrakeRun.cs"
+          },
+          "c": {
+            "name": "BroHandBrakeRun",
+            "file": "linux/src/adapters/tools/bro-hand-brake-run.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "HandBrake.presets",
+          "params": [
+            "cancel"
+          ],
+          "returns": "[String]",
+          "throws": true,
+          "async": true,
+          "doc": "HandBrakeCLI --preset-list's names in its order; the built-in presets when it is missing or fails.",
+          "swift": "HandBrake.presets(_:)",
+          "cs": "HandBrake.Presets",
+          "c": "bro_hand_brake_presets"
+        },
+        {
+          "name": "HandBrake.encode",
+          "params": [
+            "step",
+            "input",
+            "output",
+            "sink",
+            "cancel"
+          ],
+          "returns": "HandBrakeRun",
+          "throws": true,
+          "async": true,
+          "swift": "HandBrake.encode(_:input:output:sink:cancel:)",
+          "cs": "HandBrake.Encode",
+          "c": "bro_hand_brake_encode"
+        }
+      ]
     }
   }
 }

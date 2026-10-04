@@ -21,6 +21,7 @@
 #include "bro-platform-http-client.h"
 #include "bro-platform-power-manager.h"
 #include "bro-platform-keystore.h"
+#include "bro-hand-brake.h"
 #endif
 #include <gio/gio.h>
 #include "bro-system-tool-locator.h"
@@ -906,6 +907,7 @@ G_DECLARE_FINAL_TYPE (TestScript, test_script, TEST, SCRIPT, GObject)
 struct _TestScript {
   GObject parent_instance;
   GStrv lines;
+  GArray *stderr_at; /* int: the indexes of the lines that come on stderr (nullable) */
   int exit_code;
   char *write_file_in;
   int cancel_after;
@@ -934,6 +936,9 @@ script_lines (BroRunningProcess *p)
     {
       line = bro_output_line_new ();
       line->stream = BRO_OUTPUT_SOURCE_STDOUT;
+      for (guint i = 0; self->stderr_at && i < self->stderr_at->len; i++)
+        if (g_array_index (self->stderr_at, int, i) == self->handed)
+          line->stream = BRO_OUTPUT_SOURCE_STDERR;
       line->text = g_strdup (self->lines[self->handed++]);
       return line;
     }
@@ -991,6 +996,7 @@ test_script_finalize (GObject *o)
 {
   TestScript *self = TEST_SCRIPT (o);
   g_strfreev (self->lines);
+  g_clear_pointer (&self->stderr_at, g_array_unref);
   g_strfreev (self->arguments);
   g_free (self->write_file_in);
   g_free (self->write_text);
@@ -1014,6 +1020,7 @@ G_DECLARE_FINAL_TYPE (TestScriptedLauncher, test_scripted_launcher, TEST, SCRIPT
 struct _TestScriptedLauncher {
   GObject parent_instance;
   GStrv lines;
+  GArray *stderr_at; /* int (nullable) */
   int exit_code;
   char *write_file_in;
   int cancel_after;
@@ -1056,6 +1063,7 @@ launcher_start (BroProcessLauncher *l, const BroProcessSpec *spec, BroBroError *
   TestScript *script = g_object_new (TEST_TYPE_SCRIPT, NULL);
   g_ptr_array_add (self->started, spec_copy (spec));
   script->lines = g_strdupv (self->lines);
+  script->stderr_at = self->stderr_at ? g_array_ref (self->stderr_at) : NULL;
   script->exit_code = self->exit_code;
   script->write_file_in = g_strdup (self->write_file_in);
   script->cancel_after = self->cancel_after;
@@ -1073,6 +1081,7 @@ test_scripted_launcher_finalize (GObject *o)
 {
   TestScriptedLauncher *self = TEST_SCRIPTED_LAUNCHER (o);
   g_strfreev (self->lines);
+  g_clear_pointer (&self->stderr_at, g_array_unref);
   g_free (self->write_file_in);
   g_free (self->write_text);
   g_ptr_array_unref (self->started);
@@ -1186,6 +1195,7 @@ struct _TestFixedLocator {
   char *apprise;
   char *mkvmerge;
   char *mkvextract;
+  char *handbrake;
 };
 
 static void test_fixed_locator_iface_init (BroToolLocatorInterface *iface);
@@ -1205,6 +1215,8 @@ fl_locate (BroToolLocator *l, BroToolKind tool)
     info->path = g_strdup (self->mkvmerge);
   else if (tool == BRO_TOOL_KIND_MKVEXTRACT && self->mkvextract)
     info->path = g_strdup (self->mkvextract);
+  else if (tool == BRO_TOOL_KIND_HANDBRAKE && self->handbrake)
+    info->path = g_strdup (self->handbrake);
   else
     {
       BroJsonValue *params = bro_json_value_new_object ();
@@ -1221,6 +1233,7 @@ test_fixed_locator_finalize (GObject *o)
   g_free (TEST_FIXED_LOCATOR (o)->apprise);
   g_free (TEST_FIXED_LOCATOR (o)->mkvmerge);
   g_free (TEST_FIXED_LOCATOR (o)->mkvextract);
+  g_free (TEST_FIXED_LOCATOR (o)->handbrake);
   G_OBJECT_CLASS (test_fixed_locator_parent_class)->finalize (o);
 }
 static void test_fixed_locator_class_init (TestFixedLocatorClass *k) { G_OBJECT_CLASS (k)->finalize = test_fixed_locator_finalize; }
@@ -1549,6 +1562,7 @@ test_real_iso (void)
 #include "test-mkv.inc"
 #include "test-power.inc"
 #include "test-keystore.inc"
+#include "test-handbrake.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1661,6 +1675,8 @@ main (int argc, char **argv)
   g_test_add_func ("/http/beta-key-source", test_beta_key_source);
   g_test_add_func ("/http/metadata-client", test_metadata_client);
   g_test_add_func ("/mkvtoolnix/cases", test_mkvtoolnix);
+  g_test_add_func ("/handbrake/cases", test_handbrake);
+  g_test_add_func ("/handbrake/real", test_handbrake_real);
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
   g_test_add_func ("/keystore/files", test_keystore_files);

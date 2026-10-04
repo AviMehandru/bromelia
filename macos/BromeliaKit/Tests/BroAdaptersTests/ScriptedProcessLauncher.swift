@@ -12,6 +12,8 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
     private(set) var started: [ProcessSpec] = []
     private(set) var last: Script?
     var lines: [String] = []
+    /// The indexes of the lines that come on stderr (the others on stdout).
+    var stderr: Set<Int> = []
     var exitCode = 0
     var writeFileIn: String?
     var afterLine: (@Sendable (Int) -> Void)?
@@ -34,7 +36,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             let path = spec.arguments[w.index], text = w.text
             effects.append { FileManager.default.createFile(atPath: path, contents: Data(text.utf8)) }
         }
-        let script = Script(lines: lines, exitCode: exitCode, writeFileIn: writeFileIn, afterLine: afterLine, effects: effects)
+        let script = Script(lines: lines, stderr: stderr, exitCode: exitCode, writeFileIn: writeFileIn, afterLine: afterLine, effects: effects)
         lock.withLock {
             started.append(spec)
             last = script
@@ -45,6 +47,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
     final class Script: RunningProcess, @unchecked Sendable {
         private let lock = NSLock()
         private let script: [String]
+        private let stderr: Set<Int>
         private let exitCode: Int
         private let writeFileIn: String?
         private let afterLine: (@Sendable (Int) -> Void)?
@@ -54,8 +57,9 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         private var result: ProcessExit?
         private var waiters: [CheckedContinuation<ProcessExit, Never>] = []
 
-        init(lines: [String], exitCode: Int, writeFileIn: String?, afterLine: (@Sendable (Int) -> Void)?, effects: [@Sendable () -> Void] = []) {
+        init(lines: [String], stderr: Set<Int> = [], exitCode: Int, writeFileIn: String?, afterLine: (@Sendable (Int) -> Void)?, effects: [@Sendable () -> Void] = []) {
             script = lines
+            self.stderr = stderr
             self.effects = effects
             self.exitCode = exitCode
             self.writeFileIn = writeFileIn
@@ -73,10 +77,10 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             lock.lock()
             if stoppedBy == nil, handed > 0 { let n = handed; lock.unlock(); afterLine?(n); lock.lock() }
             if stoppedBy == nil && handed < script.count {
-                let text = script[handed]
+                let text = script[handed], stream: OutputSource = stderr.contains(handed) ? .stderr : .stdout
                 handed += 1
                 lock.unlock()
-                return OutputLine(stream: .stdout, text: text, at: Instant(unixMilliseconds: 0))
+                return OutputLine(stream: stream, text: text, at: Instant(unixMilliseconds: 0))
             }
             let exit: ProcessExit
             if let reason = stoppedBy {

@@ -31,7 +31,7 @@ internal sealed class MapLocator : IToolLocator
     readonly Dictionary<ToolKind, string> _paths;
     public MapLocator(Dictionary<ToolKind, string> paths) { _paths = paths; }
     public ToolInfo Locate(ToolKind tool) => _paths.TryGetValue(tool, out var p) ? new ToolInfo(tool, p, null, new List<string>())
-        : new ToolInfo(tool, null, null, new List<string>(), new BroMessage(MessageCode.ToolMissing, Severity.Warning));
+        : new ToolInfo(tool, null, null, new List<string>(), new BroMessage(MessageCode.ToolMissing, Severity.Warning, ("tool", JsonValue.Of(EnumWire.Name(tool)))));
 }
 
 /// <summary>http-client.cases.json, notification-sender.cases.json and beta-key-source.cases.json.</summary>

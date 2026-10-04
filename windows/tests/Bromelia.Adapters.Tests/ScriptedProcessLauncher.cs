@@ -11,6 +11,8 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
 {
     public readonly List<ProcessSpec> Started = new();
     public IReadOnlyList<string> Lines = Array.Empty<string>();
+    /// <summary>The indexes of the lines that come on stderr (the others on stdout).</summary>
+    public ISet<int> Stderr = new HashSet<int>();
     public int ExitCode;
     public string? WriteFileIn;
     public Action<int>? AfterLine;
@@ -50,7 +52,7 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
                 await Task.Yield();
                 if (_stopped != null) break;
                 Handed++;
-                yield return new OutputLine(OutputSource.Stdout, text, new Instant(0));
+                yield return new OutputLine(_owner.Stderr.Contains(Handed - 1) ? OutputSource.Stderr : OutputSource.Stdout, text, new Instant(0));
                 _owner.AfterLine?.Invoke(Handed);
             }
             if (_stopped is { } reason)

@@ -115,7 +115,7 @@ struct MapLocator: ToolLocator {
     let paths: [ToolKind: String]
     func locate(_ tool: ToolKind) -> ToolInfo {
         if let p = paths[tool] { return ToolInfo(tool: tool, path: p, capabilities: []) }
-        return ToolInfo(tool: tool, capabilities: [], why: BroMessage(.toolMissing, severity: .warning))
+        return ToolInfo(tool: tool, capabilities: [], why: BroMessage(.toolMissing, [("tool", .string(tool.rawValue))], severity: .warning))
     }
 }
 

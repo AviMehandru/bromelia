@@ -1,0 +1,206 @@
+{
+  "description": "HandBrake (plan §10.1), against a scripted launcher. encode(step, input, output, sink, cancel) runs HandBrakeCLI with HandBrakeArgs.build in the output's folder (stop: interruptFirst, no stall timeout: a long scan can be silent) and returns {exit, timedOut}: the step's timeoutSeconds (0: none) is a clock timer that stops the encode. Every progress line ('Encoding: task t of n, p %', split on \\r by the launcher) becomes a ProgressValue (current = p × 100 of 10000 for the task, total = the share of all n tasks); the lines HandBrakeArgs.keepLine keeps (every 10 % of a task, and every other line) go to the sink as Raw. The step's own executable (a leading ~ is the home folder) is used when set and must exist (tool.notFoundAt); otherwise the locator's (tool.missing). presets(cancel) lists HandBrakeCLI --preset-list's names (stderr: a category is a line ending in '/' at column 0; its presets are indented 4 spaces, their descriptions 8); when HandBrakeCLI is missing or fails, the presets built into HandBrake 1.6 and later that today's apps offer. In 'lines', a string is a stdout line and {stderr} a stderr line; <handbrake> is the located tool, <root> a scratch folder, <home> the home folder.",
+  "cases": [
+    {
+      "id": "encode",
+      "given": {
+        "op": "encode",
+        "step": { "id": "s1", "kind": "handbrake", "handbrake": { "preset": "H.265 MKV 1080p30", "extraArguments": "--all-audio --subtitle-lang-list \"eng,jpn\"" } },
+        "input": "<root>/Movie/title_t00.mkv",
+        "output": "<root>/Encoded/title_t00.mkv",
+        "lines": [
+          { "stderr": "[12:00:00] hb_init: starting libhb thread" },
+          "Encoding: task 1 of 1, 5.00 % (100.00 fps, avg 90.00 fps, ETA 00h01m00s)",
+          "Encoding: task 1 of 1, 9.50 % (101.00 fps, avg 95.00 fps, ETA 00h00m55s)",
+          "Encoding: task 1 of 1, 12.34 % (102.00 fps, avg 96.00 fps, ETA 00h00m50s)",
+          "Encoding: task 1 of 1, 55.00 % (103.00 fps, avg 97.00 fps, ETA 00h00m20s)",
+          "Encoding: task 1 of 1, 100.00 %",
+          { "stderr": "Encode done!" }
+        ],
+        "exitCode": 0
+      },
+      "expect": {
+        "argv": ["<handbrake>", "--preset", "H.265 MKV 1080p30", "-i", "<root>/Movie/title_t00.mkv", "-o", "<root>/Encoded/title_t00.mkv", "--all-audio", "--subtitle-lang-list", "eng,jpn"],
+        "workingDirectory": "<root>/Encoded",
+        "progress": [[500, 500], [950, 950], [1234, 1234], [5500, 5500], [10000, 10000]],
+        "raw": [
+          "[12:00:00] hb_init: starting libhb thread",
+          "Encoding: task 1 of 1, 5.00 % (100.00 fps, avg 90.00 fps, ETA 00h01m00s)",
+          "Encoding: task 1 of 1, 12.34 % (102.00 fps, avg 96.00 fps, ETA 00h00m50s)",
+          "Encoding: task 1 of 1, 55.00 % (103.00 fps, avg 97.00 fps, ETA 00h00m20s)",
+          "Encoding: task 1 of 1, 100.00 %",
+          "Encode done!"
+        ],
+        "status": 0,
+        "timedOut": false
+      }
+    },
+    {
+      "id": "two-tasks",
+      "given": {
+        "op": "encode",
+        "step": { "id": "s1", "kind": "handbrake", "handbrake": { "preset": "Fast 1080p30", "extraArguments": "--two-pass" } },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv",
+        "lines": [
+          "Encoding: task 1 of 2, 50.00 %",
+          "Encoding: task 1 of 2, 100.00 %",
+          "Encoding: task 2 of 2, 50.00 %",
+          "Encoding: task 2 of 2, 100.00 %"
+        ],
+        "exitCode": 0
+      },
+      "expect": {
+        "argv": ["<handbrake>", "--preset", "Fast 1080p30", "-i", "<root>/in.mkv", "-o", "<root>/out.mkv", "--two-pass"],
+        "progress": [[5000, 2500], [10000, 5000], [5000, 7500], [10000, 10000]],
+        "status": 0,
+        "timedOut": false
+      }
+    },
+    {
+      "id": "preset-file-in-home",
+      "given": {
+        "op": "encode",
+        "step": { "id": "s1", "kind": "handbrake", "handbrake": { "preset": "My Preset", "presetFile": "~/presets/my.json" } },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv",
+        "lines": [],
+        "exitCode": 0
+      },
+      "expect": {
+        "argv": ["<handbrake>", "--preset-import-file", "<home>/presets/my.json", "--preset", "My Preset", "-i", "<root>/in.mkv", "-o", "<root>/out.mkv"],
+        "status": 0,
+        "timedOut": false
+      }
+    },
+    {
+      "id": "the-step-s-own-executable",
+      "given": {
+        "op": "encode",
+        "files": ["<root>/bin/HandBrakeCLI"],
+        "step": { "id": "s1", "kind": "handbrake", "handbrake": { "executable": "<root>/bin/HandBrakeCLI" } },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv",
+        "lines": [],
+        "exitCode": 0
+      },
+      "expect": {
+        "argv": ["<root>/bin/HandBrakeCLI", "--preset", "H.265 MKV 1080p30", "-i", "<root>/in.mkv", "-o", "<root>/out.mkv"],
+        "status": 0,
+        "timedOut": false
+      }
+    },
+    {
+      "id": "the-step-s-executable-is-missing",
+      "given": {
+        "op": "encode",
+        "step": { "id": "s1", "kind": "handbrake", "handbrake": { "executable": "<root>/bin/HandBrakeCLI" } },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv"
+      },
+      "expect": {
+        "error": { "code": "tool.notFoundAt", "params": { "tool": "handbrake", "path": "<root>/bin/HandBrakeCLI" } },
+        "started": false
+      }
+    },
+    {
+      "id": "not-installed",
+      "given": {
+        "op": "encode",
+        "located": false,
+        "step": { "id": "s1", "kind": "handbrake" },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv"
+      },
+      "expect": {
+        "error": { "code": "tool.missing", "params": { "tool": "handbrake" } },
+        "started": false
+      }
+    },
+    {
+      "id": "failed",
+      "given": {
+        "op": "encode",
+        "step": { "id": "s1", "kind": "handbrake" },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv",
+        "lines": [{ "stderr": "ERROR: No title found." }],
+        "exitCode": 3
+      },
+      "expect": {
+        "raw": ["ERROR: No title found."],
+        "status": 3,
+        "timedOut": false
+      }
+    },
+    {
+      "id": "timed-out",
+      "given": {
+        "op": "encode",
+        "step": { "id": "s1", "kind": "handbrake", "timeoutSeconds": 5 },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv",
+        "lines": ["Encoding: task 1 of 1, 1.00 %"],
+        "exitCode": 0,
+        "timerFires": true
+      },
+      "expect": {
+        "timer": 5,
+        "status": -1,
+        "timedOut": true
+      }
+    },
+    {
+      "id": "cancelled",
+      "given": {
+        "op": "encode",
+        "step": { "id": "s1", "kind": "handbrake" },
+        "input": "<root>/in.mkv",
+        "output": "<root>/out.mkv",
+        "lines": ["Encoding: task 1 of 1, 1.00 %"],
+        "exitCode": 0,
+        "cancelled": true
+      },
+      "expect": {
+        "error": { "code": "job.cancelled" }
+      }
+    },
+    {
+      "id": "presets",
+      "given": {
+        "op": "presets",
+        "linesFile": "adapters/handbrake-preset-list.txt",
+        "exitCode": 0
+      },
+      "expect": {
+        "argv": ["<handbrake>", "--preset-list"],
+        "count": 89,
+        "first": "Very Fast 2160p60 4K AV1",
+        "last": "CLI Default",
+        "includes": ["H.265 MKV 1080p30", "Fast 1080p30", "HQ 1080p30 Surround"]
+      }
+    },
+    {
+      "id": "presets-when-handbrake-is-missing",
+      "given": {
+        "op": "presets",
+        "located": false
+      },
+      "expect": {
+        "presets": ["H.265 MKV 1080p30", "H.265 MKV 2160p60 4K", "H.264 MKV 1080p30", "H.264 MKV 480p30", "Fast 1080p30", "HQ 1080p30 Surround", "Super HQ 1080p30 Surround", "Fast 2160p60 4K HEVC"],
+        "started": false
+      }
+    },
+    {
+      "id": "presets-when-the-list-fails",
+      "given": {
+        "op": "presets",
+        "lines": [{ "stderr": "Unknown argument --preset-list" }],
+        "exitCode": 1
+      },
+      "expect": {
+        "presets": ["H.265 MKV 1080p30", "H.265 MKV 2160p60 4K", "H.264 MKV 1080p30", "H.264 MKV 480p30", "Fast 1080p30", "HQ 1080p30 Surround", "Super HQ 1080p30 Surround", "Fast 2160p60 4K HEVC"]
+      }
+    }
+  ]
+}
