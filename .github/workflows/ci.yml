@@ -62,6 +62,7 @@ jobs:
         run: |
           dotnet test tests/Bromelia.Foundation.Tests/Bromelia.Foundation.Tests.csproj
           dotnet test tests/Bromelia.Domain.Tests/Bromelia.Domain.Tests.csproj
+          dotnet test tests/Bromelia.Ports.Tests/Bromelia.Ports.Tests.csproj
       # The WinUI app is built with Visual Studio's MSBuild, not `dotnet build`: Windows App SDK 1.6
       # loads its PRI tasks (Microsoft.Build.Packaging.Pri.Tasks.dll) from Visual Studio's
       # MSBuild\Microsoft\VisualStudio\v<version>\AppxPackage folder, which the .NET SDK does not ship.

@@ -11,3 +11,4 @@ bro_test_support_dep = declare_dependency(link_with: bro_test_support, include_d
 
 test('foundation', executable('test-foundation', 'test-foundation.c', dependencies: bro_test_support_dep), env: test_env)
 test('domain', executable('test-domain', 'test-domain.c', dependencies: [bro_test_support_dep, bro_domain_dep]), env: test_env)
+test('ports', executable('test-ports', 'test-ports.c', dependencies: [bro_test_support_dep, bro_ports_dep]), env: test_env)

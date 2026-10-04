@@ -19,6 +19,7 @@ let package = Package(
         .target(name: "BroTestSupport", dependencies: ["BroFoundation"], path: "Tests/BroTestSupport"),
         .testTarget(name: "BroFoundationTests", dependencies: ["BroFoundation", "BroTestSupport"]),
         .testTarget(name: "BroDomainTests", dependencies: ["BroDomain", "BroTestSupport"]),
+        .testTarget(name: "BroPortsTests", dependencies: ["BroPorts", "BroTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

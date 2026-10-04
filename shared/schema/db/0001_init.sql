@@ -281,7 +281,7 @@ CREATE TABLE outbox (
   target_id        TEXT NOT NULL,                    -- notifications.targets[] entry id
   job_id           TEXT,
   title            TEXT NOT NULL CHECK (json_valid(title)),   -- BroMessage
-  body             TEXT NOT NULL CHECK (json_valid(body)),    -- BroMessage
+  body             TEXT NOT NULL CHECK (json_valid(body)),    -- [BroMessage], the body's lines
   status           TEXT NOT NULL,                    -- StatusWord
   created_at       TEXT NOT NULL,
   attempts         INTEGER NOT NULL DEFAULT 0,

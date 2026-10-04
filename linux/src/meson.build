@@ -1,6 +1,7 @@
 # The rebuild's layers (rearchitecture plan §4), one static library each.
 subdir('foundation')
 subdir('domain')
+subdir('ports')
 
 # Today's app.
 core_sources = files(
