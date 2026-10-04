@@ -1,0 +1,106 @@
+{
+  "description": "MenuOcr (plan §10.1), against a scripted launcher: episode numbers from a DVD's menu stills. extractStills(source, cells, dir, cancel) writes each cell's sectors [firstSector, endSector) of the ByteSource to <dir>/menu<i>.mpg, has ffmpeg turn it into a 2160×1440 grey <dir>/menu<i>.png (stall timeout 60 s), removes the .mpg and returns the PNGs ffmpeg made, in order (a still ffmpeg fails on is left out). readNumbers(stills, cancel) runs tesseract on each (--psm 11, text on stdout) and returns MenuNumbers.parse's numbers of all of them, each once, in the order first read (a still tesseract fails on adds nothing). A missing tool: tool.missing {tool}. Cancelled: job.cancelled. The source is VideoTsByteSource over adapters/video-ts.iso (its VIDEO_TS.VOB is 3 sectors). 'writeArgument' is what the scripted tool writes to the file named by that argument when it ends normally; <dir> is a scratch folder; tools are located at /opt/<tool>.",
+  "cases": [
+    {
+      "id": "stills",
+      "given": {
+        "op": "extractStills",
+        "located": ["ffmpeg"],
+        "cells": [["VIDEO_TS.VOB", 0, 2], ["VIDEO_TS.VOB", 2, 3]],
+        "writeArgument": { "index": 11, "text": "png" },
+        "exitCode": 0
+      },
+      "expect": {
+        "argv": [
+          ["/opt/ffmpeg", "-v", "quiet", "-y", "-f", "mpeg", "-i", "<dir>/menu0.mpg", "-frames:v", "1", "-vf", "scale=2160:1440,format=gray", "<dir>/menu0.png"],
+          ["/opt/ffmpeg", "-v", "quiet", "-y", "-f", "mpeg", "-i", "<dir>/menu1.mpg", "-frames:v", "1", "-vf", "scale=2160:1440,format=gray", "<dir>/menu1.png"]
+        ],
+        "stallSeconds": 60,
+        "stills": ["<dir>/menu0.png", "<dir>/menu1.png"],
+        "left": ["menu0.png", "menu1.png"]
+      }
+    },
+    {
+      "id": "a-still-ffmpeg-fails-on",
+      "given": {
+        "op": "extractStills",
+        "located": ["ffmpeg"],
+        "cells": [["VIDEO_TS.VOB", 0, 1]],
+        "exitCode": 1
+      },
+      "expect": {
+        "stills": [],
+        "left": []
+      }
+    },
+    {
+      "id": "no-ffmpeg",
+      "given": {
+        "op": "extractStills",
+        "located": ["tesseract"],
+        "cells": [["VIDEO_TS.VOB", 0, 1]]
+      },
+      "expect": {
+        "error": { "code": "tool.missing", "params": { "tool": "ffmpeg" } },
+        "started": 0
+      }
+    },
+    {
+      "id": "numbers",
+      "given": {
+        "op": "readNumbers",
+        "located": ["tesseract"],
+        "stills": ["<dir>/a.png", "<dir>/b.png"],
+        "lines": ["EPISODE 7", "Episode 5   EPIS0DE 6", "Play all"],
+        "exitCode": 0
+      },
+      "expect": {
+        "argv": [
+          ["/opt/tesseract", "<dir>/a.png", "stdout", "--psm", "11"],
+          ["/opt/tesseract", "<dir>/b.png", "stdout", "--psm", "11"]
+        ],
+        "stallSeconds": 60,
+        "numbers": [7, 5, 6]
+      }
+    },
+    {
+      "id": "a-still-tesseract-fails-on",
+      "given": {
+        "op": "readNumbers",
+        "located": ["tesseract"],
+        "stills": ["<dir>/a.png"],
+        "lines": ["EPISODE 7"],
+        "exitCode": 1
+      },
+      "expect": {
+        "numbers": []
+      }
+    },
+    {
+      "id": "no-tesseract",
+      "given": {
+        "op": "readNumbers",
+        "located": ["ffmpeg"],
+        "stills": ["<dir>/a.png"]
+      },
+      "expect": {
+        "error": { "code": "tool.missing", "params": { "tool": "tesseract" } },
+        "started": 0
+      }
+    },
+    {
+      "id": "cancelled",
+      "given": {
+        "op": "readNumbers",
+        "located": ["tesseract"],
+        "stills": ["<dir>/a.png"],
+        "lines": ["EPISODE 7"],
+        "cancelled": true
+      },
+      "expect": {
+        "error": { "code": "job.cancelled" },
+        "started": 0
+      }
+    }
+  ]
+}
