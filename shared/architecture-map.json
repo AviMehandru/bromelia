@@ -10943,6 +10943,64 @@
           "c": "bro_video_ts_byte_source_label"
         }
       ]
+    },
+    "adapters/menu-ocr": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "Episode numbers from a DVD's menu stills (plan §10.1; shared/fixtures/adapters/menu-ocr.cases.json), today's OcrEpisodeNumbers split in two: ffmpeg turns each still cell (DvdNav.stillCells) of a ByteSource into a 2160×1440 grey PNG, tesseract (--psm 11) reads each, MenuNumbers.parse finds the numbers. A still a tool fails on is skipped; a missing tool is tool.missing.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "MenuOcr",
+          "kind": "class",
+          "doc": "The ffmpeg + tesseract adapter. Holds no state between calls.",
+          "swift": {
+            "name": "MenuOcr",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/MenuOcr.swift"
+          },
+          "cs": {
+            "name": "MenuOcr",
+            "file": "windows/src/Bromelia.Adapters/Tools/MenuOcr.cs"
+          },
+          "c": {
+            "name": "BroMenuOcr",
+            "file": "linux/src/adapters/tools/bro-menu-ocr.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "MenuOcr.extractStills",
+          "params": [
+            "source",
+            "cells",
+            "dir",
+            "cancel"
+          ],
+          "returns": "[String]",
+          "throws": true,
+          "async": true,
+          "doc": "The PNG of each cell ffmpeg could convert, in order.",
+          "swift": "MenuOcr.extractStills(_:cells:dir:cancel:)",
+          "cs": "MenuOcr.ExtractStills",
+          "c": "bro_menu_ocr_extract_stills"
+        },
+        {
+          "name": "MenuOcr.readNumbers",
+          "params": [
+            "stills",
+            "cancel"
+          ],
+          "returns": "[Int]",
+          "throws": true,
+          "async": true,
+          "doc": "The episode numbers on the stills, each once, in the order first read.",
+          "swift": "MenuOcr.readNumbers(_:cancel:)",
+          "cs": "MenuOcr.ReadNumbers",
+          "c": "bro_menu_ocr_read_numbers"
+        }
+      ]
     }
   }
 }
