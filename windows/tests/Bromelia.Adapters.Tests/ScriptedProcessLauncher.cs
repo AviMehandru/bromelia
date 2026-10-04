@@ -15,6 +15,10 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
     public ISet<int> Stderr = new HashSet<int>();
     public int ExitCode;
     public string? WriteFileIn;
+    /// <summary>The name of the file written in <see cref="WriteFileIn"/>.</summary>
+    public string WriteFileName = "title_t00.mkv";
+    /// <summary>After the lines: end as stopped for silence (status -1, signal 15, stalled for the spec's timeout).</summary>
+    public bool Stalls;
     public Action<int>? AfterLine;
     /// <summary>When it ends normally: create this many parts from the -o argument's %03d pattern (mkvmerge --split).</summary>
     public int SplitParts;
@@ -49,17 +53,21 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
         {
             foreach (var text in _owner.Lines)
             {
-                await Task.Yield();
+                // A real hop to the thread pool. Not Task.Yield: that posts to xUnit's synchronization context, whose
+                // few threads the tests block with GetResult (a deadlock on a two-core machine).
+                await Task.Run(() => { }).ConfigureAwait(false);
                 if (_stopped != null) break;
                 Handed++;
                 yield return new OutputLine(_owner.Stderr.Contains(Handed - 1) ? OutputSource.Stderr : OutputSource.Stdout, text, new Instant(0));
                 _owner.AfterLine?.Invoke(Handed);
             }
-            if (_stopped is { } reason)
+            if (_stopped is null && _owner.Stalls)
+                _exit.TrySetResult(new ProcessExit(-1, 15, _spec.StallTimeout ?? new Duration(0)));
+            else if (_stopped is { } reason)
                 _exit.TrySetResult(new ProcessExit(-1, 15, null, false, reason is StopReason.Cancelled or StopReason.Shutdown));
             else
             {
-                if (_owner.WriteFileIn is { } dir) File.WriteAllText(Path.Combine(dir, "title_t00.mkv"), "");
+                if (_owner.WriteFileIn is { } dir) File.WriteAllText(Path.Combine(dir, _owner.WriteFileName), "");
                 if (_owner.SplitParts > 0)
                 {
                     var pattern = _spec.Arguments[_spec.Arguments.ToList().IndexOf("-o") + 1];

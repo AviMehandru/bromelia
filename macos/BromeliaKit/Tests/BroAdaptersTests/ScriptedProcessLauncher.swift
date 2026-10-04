@@ -16,6 +16,10 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
     var stderr: Set<Int> = []
     var exitCode = 0
     var writeFileIn: String?
+    /// The name of the file written in writeFileIn.
+    var writeFileName = "title_t00.mkv"
+    /// After the lines: end as stopped for silence (status -1, signal 15, stalled for the spec's timeout).
+    var stalls = false
     var afterLine: (@Sendable (Int) -> Void)?
     /// When it ends normally: create this many parts from the -o argument's %03d pattern (mkvmerge --split).
     var splitParts = 0
@@ -37,6 +41,8 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             effects.append { FileManager.default.createFile(atPath: path, contents: Data(text.utf8)) }
         }
         let script = Script(lines: lines, stderr: stderr, exitCode: exitCode, writeFileIn: writeFileIn, afterLine: afterLine, effects: effects)
+        script.writeFileName = writeFileName
+        script.stalledFor = stalls ? (spec.stallTimeout ?? Duration(seconds: 0)) : nil
         lock.withLock {
             started.append(spec)
             last = script
@@ -53,6 +59,8 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         private let afterLine: (@Sendable (Int) -> Void)?
         private let effects: [@Sendable () -> Void]
         private var stoppedBy: StopReason?
+        var writeFileName = "title_t00.mkv"
+        var stalledFor: Duration?
         private var handed = 0
         private var result: ProcessExit?
         private var waiters: [CheckedContinuation<ProcessExit, Never>] = []
@@ -83,10 +91,12 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
                 return OutputLine(stream: stream, text: text, at: Instant(unixMilliseconds: 0))
             }
             let exit: ProcessExit
-            if let reason = stoppedBy {
+            if stoppedBy == nil, let stalledFor {
+                exit = ProcessExit(status: -1, signal: 15, stalled: stalledFor)
+            } else if let reason = stoppedBy {
                 exit = ProcessExit(status: -1, signal: 15, cancelled: reason == .cancelled || reason == .shutdown)
             } else {
-                if let dir = writeFileIn { FileManager.default.createFile(atPath: dir + "/title_t00.mkv", contents: Data()) }
+                if let dir = writeFileIn { FileManager.default.createFile(atPath: dir + "/" + writeFileName, contents: Data()) }
                 if result == nil { for e in effects { e() } }
                 exit = ProcessExit(status: exitCode)
             }
