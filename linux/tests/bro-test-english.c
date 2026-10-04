@@ -183,8 +183,10 @@ bro_test_english (const BroJsonValue *message)
 {
   if (!texts)
     texts = bro_test_fixture_json ("../messages/en.json");
-  if (!codes)
-    codes = bro_json_value_ref (bro_json_value_member (bro_test_fixture_json ("../messages/codes.json"), "codes"));
+  if (!codes) {
+    g_autoptr (BroJsonValue) doc = bro_test_fixture_json ("../messages/codes.json");
+    codes = bro_json_value_ref (bro_json_value_member (doc, "codes"));
+  }
   const char *code = bro_json_value_get_string (bro_json_value_member (message, "code"), "");
   const char *text = bro_json_value_get_string (bro_json_value_member (texts, code), code);
   g_autoptr (BroJsonValue) empty = bro_json_value_new_object ();
