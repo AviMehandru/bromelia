@@ -15,9 +15,26 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
     var exitCode = 0
     var writeFileIn: String?
     var afterLine: (@Sendable (Int) -> Void)?
+    /// When it ends normally: create this many parts from the -o argument's %03d pattern (mkvmerge --split).
+    var splitParts = 0
+    /// When it ends normally: write this text to the file named by argument index (mkvextract's output).
+    var writeArgument: (index: Int, text: String)?
 
     func start(_ spec: ProcessSpec) throws(BroError) -> any RunningProcess {
-        let script = Script(lines: lines, exitCode: exitCode, writeFileIn: writeFileIn, afterLine: afterLine)
+        var effects: [@Sendable () -> Void] = []
+        if splitParts > 0, let o = spec.arguments.firstIndex(of: "-o") {
+            let pattern = spec.arguments[o + 1], count = splitParts
+            effects.append {
+                for i in 1...count {
+                    FileManager.default.createFile(atPath: pattern.replacingOccurrences(of: "%03d", with: String(format: "%03d", i)), contents: Data())
+                }
+            }
+        }
+        if let w = writeArgument {
+            let path = spec.arguments[w.index], text = w.text
+            effects.append { FileManager.default.createFile(atPath: path, contents: Data(text.utf8)) }
+        }
+        let script = Script(lines: lines, exitCode: exitCode, writeFileIn: writeFileIn, afterLine: afterLine, effects: effects)
         lock.withLock {
             started.append(spec)
             last = script
@@ -31,13 +48,15 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         private let exitCode: Int
         private let writeFileIn: String?
         private let afterLine: (@Sendable (Int) -> Void)?
+        private let effects: [@Sendable () -> Void]
         private var stoppedBy: StopReason?
         private var handed = 0
         private var result: ProcessExit?
         private var waiters: [CheckedContinuation<ProcessExit, Never>] = []
 
-        init(lines: [String], exitCode: Int, writeFileIn: String?, afterLine: (@Sendable (Int) -> Void)?) {
+        init(lines: [String], exitCode: Int, writeFileIn: String?, afterLine: (@Sendable (Int) -> Void)?, effects: [@Sendable () -> Void] = []) {
             script = lines
+            self.effects = effects
             self.exitCode = exitCode
             self.writeFileIn = writeFileIn
             self.afterLine = afterLine
@@ -64,6 +83,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
                 exit = ProcessExit(status: -1, signal: 15, cancelled: reason == .cancelled || reason == .shutdown)
             } else {
                 if let dir = writeFileIn { FileManager.default.createFile(atPath: dir + "/title_t00.mkv", contents: Data()) }
+                if result == nil { for e in effects { e() } }
                 exit = ProcessExit(status: exitCode)
             }
             let resume = result == nil ? waiters : []

@@ -14,6 +14,7 @@
 #include "bro-beta-key-source.h"
 #include "bro-episode-details.h"
 #include "bro-metadata-client.h"
+#include "bro-mkv-tool-nix.h"
 #include "bro-notification-sender.h"
 #include "bro-sqlite-store.h"
 #ifdef BRO_HAVE_LIBSOUP
@@ -907,6 +908,10 @@ struct _TestScript {
   char *write_file_in;
   int cancel_after;
   BroCancellationToken *cancel;
+  GStrv arguments;      /* the spec's */
+  int split_parts;      /* create this many parts from the -o argument's %03d pattern */
+  int write_index;      /* write write_text to the file named by this argument (-1: none) */
+  char *write_text;
   int handed;
   gboolean stopped;
   BroStopReason reason;
@@ -939,6 +944,24 @@ script_lines (BroRunningProcess *p)
           g_autofree char *f = g_build_filename (self->write_file_in, "title_t00.mkv", NULL);
           g_file_set_contents (f, "", 0, NULL);
         }
+      for (int i = 0; self->split_parts > 0 && self->arguments && self->arguments[i]; i++)
+        if (g_str_equal (self->arguments[i], "-o") && self->arguments[i + 1])
+          {
+            for (int k = 1; k <= self->split_parts; k++)
+              {
+                g_autoptr (GString) part = g_string_new (self->arguments[i + 1]);
+                g_autofree char *number = g_strdup_printf ("%03d", k);
+                g_string_replace (part, "%03d", number, 0);
+                g_file_set_contents (part->str, "", 0, NULL);
+              }
+            self->split_parts = 0;
+            break;
+          }
+      if (self->write_index >= 0 && self->arguments && (int) g_strv_length (self->arguments) > self->write_index)
+        {
+          g_file_set_contents (self->arguments[self->write_index], self->write_text, -1, NULL);
+          self->write_index = -1;
+        }
       self->exit = bro_process_exit_status (self->exit_code);
     }
   return NULL;
@@ -966,12 +989,14 @@ test_script_finalize (GObject *o)
 {
   TestScript *self = TEST_SCRIPT (o);
   g_strfreev (self->lines);
+  g_strfreev (self->arguments);
   g_free (self->write_file_in);
+  g_free (self->write_text);
   G_OBJECT_CLASS (test_script_parent_class)->finalize (o);
 }
 
 static void test_script_class_init (TestScriptClass *k) { G_OBJECT_CLASS (k)->finalize = test_script_finalize; }
-static void test_script_init (TestScript *self) { self->cancel_after = -1; }
+static void test_script_init (TestScript *self) { self->cancel_after = -1; self->write_index = -1; }
 
 static void
 test_script_iface_init (BroRunningProcessInterface *iface)
@@ -991,6 +1016,9 @@ struct _TestScriptedLauncher {
   char *write_file_in;
   int cancel_after;
   BroCancellationToken *cancel;
+  int split_parts;
+  int write_index; /* -1: none */
+  char *write_text;
   GPtrArray *started; /* BroProcessSpec * (copies of what matters) */
   TestScript *last;
 };
@@ -1030,6 +1058,10 @@ launcher_start (BroProcessLauncher *l, const BroProcessSpec *spec, BroBroError *
   script->write_file_in = g_strdup (self->write_file_in);
   script->cancel_after = self->cancel_after;
   script->cancel = self->cancel;
+  script->arguments = g_strdupv (spec->arguments);
+  script->split_parts = self->split_parts;
+  script->write_index = self->write_index;
+  script->write_text = g_strdup (self->write_text);
   g_set_object (&self->last, script);
   return BRO_RUNNING_PROCESS (script);
 }
@@ -1040,6 +1072,7 @@ test_scripted_launcher_finalize (GObject *o)
   TestScriptedLauncher *self = TEST_SCRIPTED_LAUNCHER (o);
   g_strfreev (self->lines);
   g_free (self->write_file_in);
+  g_free (self->write_text);
   g_ptr_array_unref (self->started);
   g_clear_object (&self->last);
   G_OBJECT_CLASS (test_scripted_launcher_parent_class)->finalize (o);
@@ -1052,6 +1085,7 @@ test_scripted_launcher_init (TestScriptedLauncher *self)
 {
   self->started = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_process_spec_free);
   self->cancel_after = -1;
+  self->write_index = -1;
 }
 
 static void test_scripted_launcher_iface_init (BroProcessLauncherInterface *iface) { iface->start = launcher_start; }
@@ -1148,6 +1182,8 @@ struct _TestFixedLocator {
   GObject parent_instance;
   char *path;    /* makemkvcon */
   char *apprise;
+  char *mkvmerge;
+  char *mkvextract;
 };
 
 static void test_fixed_locator_iface_init (BroToolLocatorInterface *iface);
@@ -1163,6 +1199,10 @@ fl_locate (BroToolLocator *l, BroToolKind tool)
     info->path = g_strdup (self->path);
   else if (tool == BRO_TOOL_KIND_APPRISE && self->apprise)
     info->path = g_strdup (self->apprise);
+  else if (tool == BRO_TOOL_KIND_MKVMERGE && self->mkvmerge)
+    info->path = g_strdup (self->mkvmerge);
+  else if (tool == BRO_TOOL_KIND_MKVEXTRACT && self->mkvextract)
+    info->path = g_strdup (self->mkvextract);
   else
     {
       BroJsonValue *params = bro_json_value_new_object ();
@@ -1177,6 +1217,8 @@ test_fixed_locator_finalize (GObject *o)
 {
   g_free (TEST_FIXED_LOCATOR (o)->path);
   g_free (TEST_FIXED_LOCATOR (o)->apprise);
+  g_free (TEST_FIXED_LOCATOR (o)->mkvmerge);
+  g_free (TEST_FIXED_LOCATOR (o)->mkvextract);
   G_OBJECT_CLASS (test_fixed_locator_parent_class)->finalize (o);
 }
 static void test_fixed_locator_class_init (TestFixedLocatorClass *k) { G_OBJECT_CLASS (k)->finalize = test_fixed_locator_finalize; }
@@ -1502,6 +1544,7 @@ test_real_iso (void)
 #include "test-store.inc"
 #include "test-http.inc"
 #include "test-metadata.inc"
+#include "test-mkv.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1613,6 +1656,7 @@ main (int argc, char **argv)
   g_test_add_func ("/http/notification-sender", test_notification_sender);
   g_test_add_func ("/http/beta-key-source", test_beta_key_source);
   g_test_add_func ("/http/metadata-client", test_metadata_client);
+  g_test_add_func ("/mkvtoolnix/cases", test_mkvtoolnix);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

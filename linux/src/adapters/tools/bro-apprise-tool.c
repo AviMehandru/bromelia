@@ -1,6 +1,7 @@
 /* bro-apprise-tool.c */
 #include "bro-apprise-tool.h"
 
+#include "bro-apprise-args.h"
 #include "bro-message-code.h"
 #include <string.h>
 
@@ -32,7 +33,6 @@ bro_apprise_tool_send (BroAppriseTool *self, const char *url, const char *title,
   g_autoptr (BroToolInfo) info = bro_tool_locator_locate (self->locator, BRO_TOOL_KIND_APPRISE);
   g_autoptr (BroProcessSpec) spec = NULL;
   g_autoptr (BroRunningProcess) process = NULL;
-  const char *args[] = { "-t", title, "-b", body, url, NULL };
   BroOutputLine *line;
   BroProcessExit exit;
   guint handler = 0;
@@ -47,7 +47,7 @@ bro_apprise_tool_send (BroAppriseTool *self, const char *url, const char *title,
   spec = bro_process_spec_new ();
   spec->executable = g_strdup (info->path);
   g_strfreev (spec->arguments);
-  spec->arguments = g_strdupv ((char **) args);
+  spec->arguments = bro_apprise_args_build (url, title, body);
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = 120;

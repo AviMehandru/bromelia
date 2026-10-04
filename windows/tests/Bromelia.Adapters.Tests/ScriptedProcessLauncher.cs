@@ -14,23 +14,32 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
     public int ExitCode;
     public string? WriteFileIn;
     public Action<int>? AfterLine;
+    /// <summary>When it ends normally: create this many parts from the -o argument's %03d pattern (mkvmerge --split).</summary>
+    public int SplitParts;
+    /// <summary>When it ends normally: write this text to the file named by argument Index (mkvextract's output).</summary>
+    public (int Index, string Text)? WriteArgument;
     public Script? Last;
 
     public IRunningProcess Start(ProcessSpec spec)
     {
         Started.Add(spec);
-        Last = new Script(this);
+        Last = new Script(this, spec);
         return Last;
     }
 
     internal sealed class Script : IRunningProcess
     {
         readonly ScriptedProcessLauncher _owner;
+        readonly ProcessSpec _spec;
         readonly TaskCompletionSource<ProcessExit> _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
         StopReason? _stopped;
         public int Handed;
 
-        public Script(ScriptedProcessLauncher owner) { _owner = owner; }
+        public Script(ScriptedProcessLauncher owner, ProcessSpec spec)
+        {
+            _owner = owner;
+            _spec = spec;
+        }
 
         public StopReason? StoppedBy => _stopped;
 
@@ -49,6 +58,12 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
             else
             {
                 if (_owner.WriteFileIn is { } dir) File.WriteAllText(Path.Combine(dir, "title_t00.mkv"), "");
+                if (_owner.SplitParts > 0)
+                {
+                    var pattern = _spec.Arguments[_spec.Arguments.ToList().IndexOf("-o") + 1];
+                    for (int i = 1; i <= _owner.SplitParts; i++) File.WriteAllText(pattern.Replace("%03d", i.ToString("D3")), "");
+                }
+                if (_owner.WriteArgument is { } w) File.WriteAllText(_spec.Arguments[w.Index], w.Text);
                 _exit.TrySetResult(new ProcessExit(_owner.ExitCode));
             }
         }

@@ -1,0 +1,264 @@
+{
+  "functions": [
+    "MkvToolNix.probe",
+    "MkvToolNix.remux",
+    "MkvToolNix.split",
+    "MkvToolNix.chapterTimes"
+  ],
+  "description": "MkvToolNix (plan §10.1) on a scripted launcher: given.lines on stdout, then given.exitCode. given.splitParts makes the script create that many parts from the -o argument's %03d pattern; given.writeArgument writes a text to the file named by that argument. mkvmerge is at /opt/mkvmerge and mkvextract at /opt/mkvextract (given.mkvextract null: not found). <root> is an empty temporary folder, also the work folder. Calls: probe(file), remux(arguments), split(chapters, input), chapterTimes(file). mkvmerge's exit status 1 means warnings: the output is still good.",
+  "cases": [
+    {
+      "id": "probe",
+      "from": [
+        "today's RipCheck.probe (mkvmerge -J, exit 0 or 1)"
+      ],
+      "given": {
+        "call": [
+          "probe",
+          "<root>/t.mkv"
+        ],
+        "lines": [
+          "{",
+          "  \"container\": {\"recognized\": true, \"supported\": true, \"properties\": {\"duration\": 7212345000000}},",
+          "  \"tracks\": [{\"id\": 0, \"type\": \"video\"}, {\"id\": 1, \"type\": \"audio\"}, {\"id\": 2, \"type\": \"subtitles\"}],",
+          "  \"chapters\": [{\"num_entries\": 24}]",
+          "}"
+        ],
+        "exitCode": 0
+      },
+      "expect": {
+        "executable": "/opt/mkvmerge",
+        "arguments": [
+          "-J",
+          "<root>/t.mkv"
+        ],
+        "probe": {
+          "durationSeconds": 7212.345,
+          "tracks": 3,
+          "chapterCount": 24
+        }
+      }
+    },
+    {
+      "id": "probe-warnings",
+      "given": {
+        "call": [
+          "probe",
+          "<root>/t.mkv"
+        ],
+        "lines": [
+          "{",
+          "  \"container\": {\"recognized\": true, \"supported\": true, \"properties\": {\"duration\": 7212345000000}},",
+          "  \"tracks\": [{\"id\": 0, \"type\": \"video\"}, {\"id\": 1, \"type\": \"audio\"}, {\"id\": 2, \"type\": \"subtitles\"}],",
+          "  \"chapters\": [{\"num_entries\": 24}]",
+          "}"
+        ],
+        "exitCode": 1
+      },
+      "expect": {
+        "probe": {
+          "tracks": 3
+        }
+      }
+    },
+    {
+      "id": "probe-unreadable",
+      "given": {
+        "call": [
+          "probe",
+          "<root>/t.mkv"
+        ],
+        "lines": [
+          "Error: the file could not be opened"
+        ],
+        "exitCode": 2
+      },
+      "expect": {
+        "probe": null
+      }
+    },
+    {
+      "id": "probe-not-recognised",
+      "given": {
+        "call": [
+          "probe",
+          "<root>/t.mkv"
+        ],
+        "lines": [
+          "{\"container\":{\"recognized\":false}}"
+        ],
+        "exitCode": 0
+      },
+      "expect": {
+        "probe": null
+      }
+    },
+    {
+      "id": "remux",
+      "given": {
+        "call": [
+          "remux",
+          [
+            "-o",
+            "<root>/out.mkv",
+            "--audio-tracks",
+            "1",
+            "<root>/in.mkv"
+          ]
+        ],
+        "lines": [
+          "Progress: 100%"
+        ],
+        "exitCode": 1
+      },
+      "expect": {
+        "executable": "/opt/mkvmerge",
+        "arguments": [
+          "-o",
+          "<root>/out.mkv",
+          "--audio-tracks",
+          "1",
+          "<root>/in.mkv"
+        ],
+        "ok": true
+      }
+    },
+    {
+      "id": "remux-failed",
+      "given": {
+        "call": [
+          "remux",
+          [
+            "-o",
+            "<root>/out.mkv",
+            "<root>/in.mkv"
+          ]
+        ],
+        "lines": [],
+        "exitCode": 2
+      },
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "id": "split",
+      "from": [
+        "today's EpisodeSplitter.split"
+      ],
+      "given": {
+        "call": [
+          "split",
+          [
+            3,
+            6
+          ],
+          "<root>/t.mkv"
+        ],
+        "lines": [],
+        "exitCode": 0,
+        "splitParts": 3
+      },
+      "expect": {
+        "argumentsStart": [
+          "-o"
+        ],
+        "argumentsEnd": [
+          "--split",
+          "chapters:3,6",
+          "<root>/t.mkv"
+        ],
+        "parts": 3,
+        "rule": "the parts are hidden files next to the input (.bromelia-split-…-001.mkv …), in order"
+      }
+    },
+    {
+      "id": "split-failed",
+      "given": {
+        "call": [
+          "split",
+          [
+            3,
+            6
+          ],
+          "<root>/t.mkv"
+        ],
+        "lines": [],
+        "exitCode": 2,
+        "splitParts": 3
+      },
+      "expect": {
+        "parts": null,
+        "leftOver": 0,
+        "rule": "parts of a failed split are removed"
+      }
+    },
+    {
+      "id": "split-too-few-parts",
+      "given": {
+        "call": [
+          "split",
+          [
+            3,
+            6
+          ],
+          "<root>/t.mkv"
+        ],
+        "lines": [],
+        "exitCode": 0,
+        "splitParts": 2
+      },
+      "expect": {
+        "parts": null,
+        "leftOver": 0
+      }
+    },
+    {
+      "id": "chapter-times",
+      "from": [
+        "today's EpisodeSplitter.chapterStarts (mkvextract chapters --simple)"
+      ],
+      "given": {
+        "call": [
+          "chapterTimes",
+          "<root>/t.mkv"
+        ],
+        "lines": [],
+        "exitCode": 0,
+        "writeArgument": {
+          "index": 3,
+          "text": "CHAPTER01=00:00:00.000\nCHAPTER01NAME=One\nCHAPTER02=00:23:36.815\nCHAPTER02NAME=Two\n"
+        }
+      },
+      "expect": {
+        "executable": "/opt/mkvextract",
+        "argumentsStart": [
+          "<root>/t.mkv",
+          "chapters",
+          "--simple"
+        ],
+        "times": [
+          0,
+          1416.815
+        ],
+        "rule": "the chapter file is written in the work folder and removed afterwards"
+      }
+    },
+    {
+      "id": "mkvextract-missing",
+      "given": {
+        "call": [
+          "chapterTimes",
+          "<root>/t.mkv"
+        ],
+        "lines": [],
+        "exitCode": 0,
+        "mkvextract": null
+      },
+      "expect": {
+        "error": "tool.missing",
+        "launched": false
+      }
+    }
+  ]
+}

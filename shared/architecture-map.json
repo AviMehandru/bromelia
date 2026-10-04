@@ -10576,6 +10576,89 @@
           "c": "bro_metadata_client_poster"
         }
       ]
+    },
+    "adapters/mkvtoolnix": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "MKVToolNix (plan §10.1): mkvmerge -J for the rip check, remuxing with Remux's arguments, splitting at chapters (Split), chapter times with mkvextract (SimpleChapters). Exit status 1 is mkvmerge's warning: the output is good. shared/fixtures/adapters/mkvtoolnix.cases.json.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "MkvToolNix",
+          "kind": "class",
+          "doc": "Runs mkvmerge and mkvextract through the ProcessLauncher; tool.missing when the locator can't find them.",
+          "swift": {
+            "name": "MkvToolNix",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/MkvToolNix.swift"
+          },
+          "cs": {
+            "name": "MkvToolNix",
+            "file": "windows/src/Bromelia.Adapters/Tools/MkvToolNix.cs"
+          },
+          "c": {
+            "name": "BroMkvToolNix",
+            "file": "linux/src/adapters/tools/bro-mkv-tool-nix.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "MkvToolNix.probe",
+          "params": [
+            "file",
+            "cancel"
+          ],
+          "returns": "MkvProbe?",
+          "throws": true,
+          "async": true,
+          "doc": "None when mkvmerge can't read the file.",
+          "swift": "MkvToolNix.probe(_:cancel:)",
+          "cs": "MkvToolNix.Probe",
+          "c": "bro_mkv_tool_nix_probe"
+        },
+        {
+          "name": "MkvToolNix.remux",
+          "params": [
+            "arguments",
+            "cancel"
+          ],
+          "returns": "Bool",
+          "throws": true,
+          "async": true,
+          "swift": "MkvToolNix.remux(_:cancel:)",
+          "cs": "MkvToolNix.Remux",
+          "c": "bro_mkv_tool_nix_remux"
+        },
+        {
+          "name": "MkvToolNix.split",
+          "params": [
+            "chapters",
+            "input",
+            "cancel"
+          ],
+          "returns": "[String]?",
+          "throws": true,
+          "async": true,
+          "doc": "The parts in order (hidden files next to the input); none when mkvmerge failed or made another number of parts, which are removed.",
+          "swift": "MkvToolNix.split(_:input:cancel:)",
+          "cs": "MkvToolNix.Split",
+          "c": "bro_mkv_tool_nix_split"
+        },
+        {
+          "name": "MkvToolNix.chapterTimes",
+          "params": [
+            "file",
+            "cancel"
+          ],
+          "returns": "[Duration]?",
+          "throws": true,
+          "async": true,
+          "swift": "MkvToolNix.chapterTimes(_:cancel:)",
+          "cs": "MkvToolNix.ChapterTimes",
+          "c": "bro_mkv_tool_nix_chapter_times"
+        }
+      ]
     }
   }
 }

@@ -25,7 +25,7 @@ public sealed class AppriseTool
     {
         var exe = _locator.Locate(ToolKind.Apprise).Path
                   ?? throw new BroFailure(new BroMessage(MessageCode.NotifyNeedsApprise, Severity.Warning, ("target", JsonValue.Of(Scheme(url)))).ToError());
-        var process = _launcher.Start(new ProcessSpec(exe, new[] { "-t", title, "-b", body, url }, new Dictionary<string, string>(), null,
+        var process = _launcher.Start(new ProcessSpec(exe, AppriseArgs.Build(url, title, body), new Dictionary<string, string>(), null,
             StopPolicy.InterruptFirst, new Duration(120)));
         using var onCancel = cancel.OnCancel(() => process.Stop(StopReason.Cancelled));
         await foreach (var _ in process.Lines().ConfigureAwait(false)) { }

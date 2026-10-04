@@ -24,6 +24,7 @@ bro_adapters_sources = files(
   'tools/bro-makemkv-invocation.c',
   'tools/bro-makemkv-run.c',
   'tools/bro-makemkv-tool.c',
+  'tools/bro-mkv-tool-nix.c',
   'tools/bro-run-sink.c',
   'tools/bro-system-tool-locator.c',
 )

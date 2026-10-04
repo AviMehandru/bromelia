@@ -17,7 +17,7 @@ public final class AppriseTool: Sendable {
         guard let exe = locator.locate(.apprise).path else {
             throw BroMessage(.notifyNeedsApprise, [("target", .string(Self.scheme(url)))], severity: .warning).toError()
         }
-        let process = try launcher.start(ProcessSpec(executable: exe, arguments: ["-t", title, "-b", body, url], environment: [:],
+        let process = try launcher.start(ProcessSpec(executable: exe, arguments: AppriseArgs.build(url, title: title, body: body), environment: [:],
                                                      stopPolicy: .interruptFirst, stallTimeout: Duration(seconds: 120)))
         let remove = cancel.onCancel { process.stop(.cancelled) }
         defer { remove() }
