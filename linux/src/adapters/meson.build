@@ -17,6 +17,7 @@ bro_adapters_sources = files(
   'platform/bro-drive-poller.c',
   'platform/bro-os-drive-state.c',
   'platform/bro-platform-device-monitor.c',
+  'platform/bro-platform-drive-control.c',
   'platform/bro-platform-file-system.c',
   'platform/bro-platform-keystore.c',
   'platform/bro-platform-power-manager.c',

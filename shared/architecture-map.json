@@ -11193,6 +11193,117 @@
           "c": "bro_platform_device_monitor_snapshot"
         }
       ]
+    },
+    "adapters/drive-control": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "DriveControl (plan §10.3; shared/fixtures/adapters/drive-control.cases.json), today's code on each platform. macOS: DiskArbitration eject (diskutil as a fallback), drutil tray close by product name, cddafs / video structure / optical media kind for the content, /dev/rdiskN for raw reads (a drive is its IORegistry path). Windows: IOCTL_STORAGE_EJECT_MEDIA / LOAD_MEDIA, the drive letter's readiness, a video structure or the table of contents, \\\\.\\E: raw reads with IOCTL_DISK_GET_LENGTH_INFO. Linux: the eject tool (eject, eject -t), mountinfo, udev's ID_CDROM_MEDIA_* (blank too), BLKGETSIZE64. A disc image file is read the same way as a drive.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformDriveControl",
+          "kind": "class",
+          "doc": "Trays, mounts, content and raw reads of the system's optical drives.",
+          "swift": {
+            "name": "PlatformDriveControl",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/PlatformDriveControl.swift"
+          },
+          "cs": {
+            "name": "PlatformDriveControl",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/PlatformDriveControl.cs"
+          },
+          "c": {
+            "name": "BroPlatformDriveControl",
+            "file": "linux/src/adapters/platform/bro-platform-drive-control.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformDriveControl.eject",
+          "params": [
+            "device"
+          ],
+          "throws": true,
+          "async": true,
+          "swift": "PlatformDriveControl.eject(_:)",
+          "cs": "PlatformDriveControl.Eject",
+          "c": "bro_platform_drive_control_eject"
+        },
+        {
+          "name": "PlatformDriveControl.closeTray",
+          "params": [
+            "device"
+          ],
+          "throws": true,
+          "async": true,
+          "swift": "PlatformDriveControl.closeTray(_:)",
+          "cs": "PlatformDriveControl.CloseTray",
+          "c": "bro_platform_drive_control_close_tray"
+        },
+        {
+          "name": "PlatformDriveControl.waitForMount",
+          "params": [
+            "device",
+            "timeout",
+            "cancel"
+          ],
+          "returns": "String?",
+          "async": true,
+          "swift": "PlatformDriveControl.waitForMount(_:timeout:cancel:)",
+          "cs": "PlatformDriveControl.WaitForMount",
+          "c": "bro_platform_drive_control_wait_for_mount"
+        },
+        {
+          "name": "PlatformDriveControl.probeContent",
+          "params": [
+            "device"
+          ],
+          "returns": "DiscContent",
+          "swift": "PlatformDriveControl.probeContent(_:)",
+          "cs": "PlatformDriveControl.ProbeContent",
+          "c": "bro_platform_drive_control_probe_content"
+        },
+        {
+          "name": "PlatformDriveControl.openRaw",
+          "params": [
+            "device"
+          ],
+          "returns": "SectorReader",
+          "throws": true,
+          "swift": "PlatformDriveControl.openRaw(_:)",
+          "cs": "PlatformDriveControl.OpenRaw",
+          "c": "bro_platform_drive_control_open_raw"
+        },
+        {
+          "name": "PlatformDriveControl.devicePath",
+          "params": [
+            "device",
+            "windows"
+          ],
+          "returns": "String",
+          "only": [
+            "cs"
+          ],
+          "why": "Windows drive letters (platform-adapters.contract.json#windows-drive-letters).",
+          "cs": "PlatformDriveControl.DevicePath"
+        },
+        {
+          "name": "PlatformDriveControl.drutilIndices",
+          "params": [
+            "lines",
+            "matching"
+          ],
+          "returns": "[Int]",
+          "only": [
+            "swift"
+          ],
+          "why": "macOS's drutil tray close (platform-adapters.contract.json#drutil-match).",
+          "swift": "PlatformDriveControl.drutilIndices(_:matching:)"
+        }
+      ]
     }
   }
 }
