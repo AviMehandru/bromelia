@@ -11045,6 +11045,154 @@
           "c": "bro_data_imager_copy"
         }
       ]
+    },
+    "adapters/drive-poller": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "doc": "The portable half of DeviceMonitor (plan §10.3; shared/fixtures/adapters/os-drive-states.cases.json): OsDriveState.changes turns two snapshots of the optical drives into DeviceEvents, and DrivePoller takes a snapshot every interval (a Clock timer) and reports the changes. Each platform's monitor is a DrivePoller over its own snapshot.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "OsDriveState",
+          "kind": "struct",
+          "fields": [
+            "drive",
+            "media"
+          ],
+          "doc": "An optical drive at one moment (OsDrive) and whether it holds media.",
+          "swift": {
+            "name": "OsDriveState",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/OsDriveState.swift"
+          },
+          "cs": {
+            "name": "OsDriveState",
+            "file": "windows/src/Bromelia.Adapters/Platform/OsDriveState.cs"
+          },
+          "c": {
+            "name": "BroOsDriveState",
+            "file": "linux/src/adapters/platform/bro-os-drive-state.h"
+          }
+        },
+        {
+          "name": "DrivePoller",
+          "kind": "class",
+          "doc": "A DeviceMonitor over a snapshot function and a clock.",
+          "swift": {
+            "name": "DrivePoller",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/DrivePoller.swift"
+          },
+          "cs": {
+            "name": "DrivePoller",
+            "file": "windows/src/Bromelia.Adapters/Platform/DrivePoller.cs"
+          },
+          "c": {
+            "name": "BroDrivePoller",
+            "file": "linux/src/adapters/platform/bro-drive-poller.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "OsDriveState.changes",
+          "params": [
+            "before",
+            "after"
+          ],
+          "returns": "[DeviceEvent]",
+          "doc": "For each drive of after: appeared, or unmounted, media removed, media arrived, mounted; then each drive that is gone: unmounted, media removed, vanished.",
+          "swift": "OsDriveState.changes(_:after:)",
+          "cs": "OsDriveState.Changes",
+          "c": "bro_os_drive_state_changes"
+        },
+        {
+          "name": "DrivePoller.start",
+          "params": [
+            "sink"
+          ],
+          "doc": "A snapshot now (no events for what is there), then one each interval.",
+          "swift": "DrivePoller.start(_:)",
+          "cs": "DrivePoller.Start",
+          "c": "bro_drive_poller_start"
+        },
+        {
+          "name": "DrivePoller.stop",
+          "params": [],
+          "swift": "DrivePoller.stop()",
+          "cs": "DrivePoller.Stop",
+          "c": "bro_drive_poller_stop"
+        },
+        {
+          "name": "DrivePoller.currentDrives",
+          "params": [],
+          "returns": "[OsDrive]",
+          "swift": "DrivePoller.currentDrives()",
+          "cs": "DrivePoller.CurrentDrives",
+          "c": "bro_drive_poller_current_drives"
+        }
+      ]
+    },
+    "adapters/device-monitor": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "DeviceMonitor (plan §10.3): a DrivePoller (2 s) over the system's optical drives. macOS: IOCompactDiscServices in the IORegistry (device: its registry path; identification: Vendor Name + Product Name; media: a BSD disk below it; mount: DiskArbitration). Windows: DriveInfo's CD-ROM letters (ready = media, mounted at the root) and IOCTL_STORAGE_QUERY_PROPERTY's vendor and product. Linux: sysfs sr* (vendor + model), CDROM_DRIVE_STATUS, /proc/self/mountinfo. The identification is the drive's INQUIRY vendor and product, as in MakeMKV's drive list.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformDeviceMonitor",
+          "kind": "class",
+          "doc": "The system's optical drives, polled.",
+          "swift": {
+            "name": "PlatformDeviceMonitor",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/PlatformDeviceMonitor.swift"
+          },
+          "cs": {
+            "name": "PlatformDeviceMonitor",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/PlatformDeviceMonitor.cs"
+          },
+          "c": {
+            "name": "BroPlatformDeviceMonitor",
+            "file": "linux/src/adapters/platform/bro-platform-device-monitor.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformDeviceMonitor.start",
+          "params": [
+            "sink"
+          ],
+          "swift": "PlatformDeviceMonitor.start(_:)",
+          "cs": "PlatformDeviceMonitor.Start",
+          "c": "bro_platform_device_monitor_start"
+        },
+        {
+          "name": "PlatformDeviceMonitor.stop",
+          "params": [],
+          "swift": "PlatformDeviceMonitor.stop()",
+          "cs": "PlatformDeviceMonitor.Stop",
+          "c": "bro_platform_device_monitor_stop"
+        },
+        {
+          "name": "PlatformDeviceMonitor.currentDrives",
+          "params": [],
+          "returns": "[OsDrive]",
+          "swift": "PlatformDeviceMonitor.currentDrives()",
+          "cs": "PlatformDeviceMonitor.CurrentDrives",
+          "c": "bro_platform_device_monitor_current_drives"
+        },
+        {
+          "name": "PlatformDeviceMonitor.snapshot",
+          "params": [],
+          "returns": "[OsDriveState]",
+          "doc": "The optical drives now.",
+          "swift": "PlatformDeviceMonitor.snapshot()",
+          "cs": "PlatformDeviceMonitor.Snapshot",
+          "c": "bro_platform_device_monitor_snapshot"
+        }
+      ]
     }
   }
 }
