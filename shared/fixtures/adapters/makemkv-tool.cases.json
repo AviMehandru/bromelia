@@ -1,0 +1,481 @@
+{
+  "functions": [
+    "MakemkvTool.scanDrives",
+    "MakemkvTool.listing",
+    "MakemkvTool.rip",
+    "MakemkvTool.backup"
+  ],
+  "description": "MakemkvTool against a scripted launcher (plan §26, 'Adapters'), the same on the three platforms. The launcher emits given.transcript (a file in shared/fixtures) or given.lines, one line at a time, as stdout; when the tool stops it, no more lines come and the process ends with status -1, signal 15 (cancelled when the reason was cancelled); otherwise it ends with given.exitCode, after creating title_t00.mkv in the destination when given.writesFile. given.cancelAfterLines cancels the call's token after that many lines. The isolation is a fake that records prepare / firstOutput / release and gives HOME = <work> (<root>/home) and, with given.profileXml, the profile <work>/profile.mmcp.xml. The locator finds makemkvcon at /opt/makemkvcon unless given.makemkvcon is null. Paths: <root> is an empty temporary folder; given.destination and given.existing are relative to it. expect.arguments, environment, workingDirectory, stopPolicy, stallTimeout and transcriptFile are those of the ProcessSpec; status is RunOutcome's (success, errors, failed, cancelled); errorContains is part of its error rendered in English; errorCode its code; error is the code of the failure thrown before anything runs; stopped says whether the tool stopped the process; linesRead how many lines it had read by then.",
+  "cases": [
+    {
+      "id": "scan-drives",
+      "from": [
+        "rearchitecture-plan §10.1 scanDrives (info disc:9999)"
+      ],
+      "given": {
+        "call": "scanDrives",
+        "transcript": "drive-scan.txt",
+        "exitCode": 0
+      },
+      "expect": {
+        "arguments": [
+          "-r",
+          "--cache=1",
+          "info",
+          "disc:9999"
+        ],
+        "environment": {},
+        "workingDirectory": null,
+        "lease": [],
+        "drives": [
+          [
+            0,
+            "inserted",
+            "/dev/rdisk4"
+          ],
+          [
+            1,
+            "emptyClosed",
+            "/dev/rdisk5"
+          ],
+          [
+            2,
+            "emptyOpen",
+            "/dev/rdisk6"
+          ],
+          [
+            3,
+            "loading",
+            "/dev/rdisk7"
+          ],
+          [
+            4,
+            "inserted",
+            "/dev/rdisk8"
+          ],
+          [
+            5,
+            "noDrive",
+            ""
+          ],
+          [
+            6,
+            "noDrive",
+            ""
+          ],
+          [
+            7,
+            "noDrive",
+            ""
+          ]
+        ]
+      }
+    },
+    {
+      "id": "listing",
+      "from": [
+        "rearchitecture-plan §10.1 listing (info)"
+      ],
+      "given": {
+        "call": "listing",
+        "source": {
+          "iso": "/discs/Movie.iso"
+        },
+        "options": {
+          "minLengthSeconds": 120
+        },
+        "profileXml": "<profile/>",
+        "transcript": "info-dvd.txt",
+        "exitCode": 0
+      },
+      "expect": {
+        "arguments": [
+          "-r",
+          "--progress=-same",
+          "--messages=-stdout",
+          "--noscan",
+          "--profile=<work>/profile.mmcp.xml",
+          "--minlength=120",
+          "info",
+          "iso:/discs/Movie.iso"
+        ],
+        "environment": {
+          "HOME": "<work>"
+        },
+        "workingDirectory": "<work>",
+        "stopPolicy": "terminateFirst",
+        "lease": [
+          "prepare",
+          "firstOutput",
+          "release"
+        ],
+        "listing": {
+          "volumeName": "One_Piece_S3_P1_D1",
+          "titles": 3
+        },
+        "status": "success",
+        "version": "MakeMKV v2.0.0 darwin(arm64-release)"
+      }
+    },
+    {
+      "id": "rip-mkv-rip",
+      "from": [
+        "shared/fixtures/rip-outcomes.json"
+      ],
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writesFile": true
+      },
+      "expect": {
+        "status": "success",
+        "errorContains": null,
+        "arguments": [
+          "-r",
+          "--progress=-same",
+          "--messages=-stdout",
+          "--noscan",
+          "mkv",
+          "dev:/dev/rdisk4",
+          "all",
+          "<root>/staging"
+        ],
+        "lease": [
+          "prepare",
+          "firstOutput",
+          "release"
+        ],
+        "debugLog": "/Users/user/MakeMKV_log.txt"
+      }
+    },
+    {
+      "id": "rip-rip-read-errors",
+      "from": [
+        "shared/fixtures/rip-outcomes.json"
+      ],
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "rip-read-errors.txt",
+        "exitCode": 0,
+        "writesFile": true
+      },
+      "expect": {
+        "status": "errors",
+        "errorContains": "read error"
+      }
+    },
+    {
+      "id": "rip-rip-failure",
+      "from": [
+        "shared/fixtures/rip-outcomes.json"
+      ],
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "rip-failure.txt",
+        "exitCode": 0,
+        "writesFile": false
+      },
+      "expect": {
+        "status": "failed",
+        "errorContains": "MEDIUM ERROR"
+      }
+    },
+    {
+      "id": "rip-rip-disk-full",
+      "from": [
+        "shared/fixtures/rip-outcomes.json"
+      ],
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "rip-disk-full.txt",
+        "exitCode": 0,
+        "writesFile": false
+      },
+      "expect": {
+        "status": "failed",
+        "errorContains": "free space",
+        "stopped": true
+      }
+    },
+    {
+      "id": "rip-rip-killed",
+      "from": [
+        "shared/fixtures/rip-outcomes.json"
+      ],
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "rip-killed.txt",
+        "exitCode": 143,
+        "writesFile": true
+      },
+      "expect": {
+        "status": "failed",
+        "errorContains": "exit status 143"
+      }
+    },
+    {
+      "id": "rip-rip-missing-source",
+      "from": [
+        "shared/fixtures/rip-outcomes.json"
+      ],
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "rip-missing-source.txt",
+        "exitCode": 11,
+        "writesFile": false
+      },
+      "expect": {
+        "status": "failed",
+        "errorContains": "does not exist"
+      }
+    },
+    {
+      "id": "rip-rip-missing-title",
+      "from": [
+        "shared/fixtures/rip-outcomes.json"
+      ],
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "rip-missing-title.txt",
+        "exitCode": 12,
+        "writesFile": false
+      },
+      "expect": {
+        "status": "failed",
+        "errorContains": "Input parameter is incorrect"
+      }
+    },
+    {
+      "id": "rip-stall-timeout-and-transcript",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "3",
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writesFile": true,
+        "stallTimeout": 600,
+        "transcriptFile": "jobs/1/makemkv.txt"
+      },
+      "expect": {
+        "stallTimeout": 600,
+        "transcriptFile": "<root>/jobs/1/makemkv.txt",
+        "status": "success"
+      }
+    },
+    {
+      "id": "rip-nothing-produced",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writesFile": false,
+        "existing": [
+          "staging/old.mkv"
+        ]
+      },
+      "expect": {
+        "status": "failed",
+        "rule": "a file that was there before doesn't count as produced"
+      }
+    },
+    {
+      "id": "rip-cancelled",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writesFile": true,
+        "cancelAfterLines": 10
+      },
+      "expect": {
+        "stopped": true,
+        "status": "cancelled",
+        "lease": [
+          "prepare",
+          "firstOutput",
+          "release"
+        ]
+      }
+    },
+    {
+      "id": "backup-arguments",
+      "given": {
+        "call": "backup",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "decrypt": true,
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writesFile": true
+      },
+      "expect": {
+        "arguments": [
+          "-r",
+          "--progress=-same",
+          "--messages=-stdout",
+          "--noscan",
+          "backup",
+          "--decrypt",
+          "disc:0",
+          "<root>/staging"
+        ],
+        "status": "success"
+      }
+    },
+    {
+      "id": "backup-drive-renumbered",
+      "from": [
+        "rearchitecture-plan §10.1 backup (checks DRV lines)"
+      ],
+      "given": {
+        "call": "backup",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "decrypt": false,
+        "destination": "staging",
+        "lines": [
+          "MSG:1005,0,1,\"MakeMKV v2.0.0 darwin(arm64-release) started\",\"%1 started\",\"MakeMKV v2.0.0 darwin(arm64-release)\"",
+          "DRV:0,2,999,12,\"BD-RE ASUS BW-16D1HT 3.10 KL3H4AB1234\",\"OTHER_DISC\",\"/dev/rdisk5\"",
+          "PRGV:0,0,65536",
+          "PRGV:100,0,65536",
+          "PRGV:200,0,65536"
+        ],
+        "exitCode": 0,
+        "writesFile": true
+      },
+      "expect": {
+        "stopped": true,
+        "linesRead": 2,
+        "status": "failed",
+        "errorCode": "drive.renumbered"
+      }
+    },
+    {
+      "id": "backup-needs-a-drive",
+      "given": {
+        "call": "backup",
+        "source": {
+          "iso": "/discs/Movie.iso"
+        },
+        "decrypt": false,
+        "destination": "staging",
+        "lines": []
+      },
+      "expect": {
+        "error": "backup.needsDrive",
+        "launched": false,
+        "lease": []
+      }
+    },
+    {
+      "id": "makemkvcon-missing",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "lines": [],
+        "makemkvcon": null
+      },
+      "expect": {
+        "error": "tool.missing",
+        "launched": false,
+        "lease": []
+      }
+    }
+  ]
+}

@@ -1,8 +1,10 @@
 /* test-adapters.c: the Adapters layer on the real OS. The process cases are those of
  * shared/fixtures/adapters/platform-adapters.contract.json. */
+#include "bro-test-english.h"
 #include "bro-test-fixtures.h"
 
 #include "bro-home-dir-isolation.h"
+#include "bro-makemkv-tool.h"
 #include "bro-platform-file-system.h"
 #include "bro-platform-process-launcher.h"
 #include "bro-platform-tool-paths.h"
@@ -878,6 +880,535 @@ test_tool_paths (void)
   g_assert_cmpuint (g_hash_table_size (n), ==, BRO_TOOL_KIND_APPRISE + 1);
 }
 
+/* ---- the makemkvcon tool, against a scripted launcher ---------------------------------------------- */
+
+/* A process that plays a script: the lines, one per call to lines(); then the exit status, after creating a file in
+ * the destination. A stop ends it at once with status -1 and signal 15. */
+#define TEST_TYPE_SCRIPT (test_script_get_type ())
+G_DECLARE_FINAL_TYPE (TestScript, test_script, TEST, SCRIPT, GObject)
+
+struct _TestScript {
+  GObject parent_instance;
+  GStrv lines;
+  int exit_code;
+  char *write_file_in;
+  int cancel_after;
+  BroCancellationToken *cancel;
+  int handed;
+  gboolean stopped;
+  BroStopReason reason;
+  BroProcessExit exit;
+};
+
+static void test_script_iface_init (BroRunningProcessInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestScript, test_script, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_RUNNING_PROCESS, test_script_iface_init))
+
+static BroOutputLine *
+script_lines (BroRunningProcess *p)
+{
+  TestScript *self = TEST_SCRIPT (p);
+  BroOutputLine *line;
+  if (!self->stopped && self->handed > 0 && self->handed == self->cancel_after && self->cancel)
+    bro_cancellation_token_cancel (self->cancel);
+  if (!self->stopped && self->lines && self->lines[self->handed])
+    {
+      line = bro_output_line_new ();
+      line->stream = BRO_OUTPUT_SOURCE_STDOUT;
+      line->text = g_strdup (self->lines[self->handed++]);
+      return line;
+    }
+  if (self->stopped)
+    self->exit = (BroProcessExit) { -1, 15, -1, FALSE, self->reason == BRO_STOP_REASON_CANCELLED || self->reason == BRO_STOP_REASON_SHUTDOWN };
+  else
+    {
+      if (self->write_file_in)
+        {
+          g_autofree char *f = g_build_filename (self->write_file_in, "title_t00.mkv", NULL);
+          g_file_set_contents (f, "", 0, NULL);
+        }
+      self->exit = bro_process_exit_status (self->exit_code);
+    }
+  return NULL;
+}
+
+static BroProcessExit
+script_wait (BroRunningProcess *p)
+{
+  return TEST_SCRIPT (p)->exit;
+}
+
+static void
+script_stop (BroRunningProcess *p, BroStopReason reason)
+{
+  TestScript *self = TEST_SCRIPT (p);
+  if (!self->stopped)
+    {
+      self->stopped = TRUE;
+      self->reason = reason;
+    }
+}
+
+static void
+test_script_finalize (GObject *o)
+{
+  TestScript *self = TEST_SCRIPT (o);
+  g_strfreev (self->lines);
+  g_free (self->write_file_in);
+  G_OBJECT_CLASS (test_script_parent_class)->finalize (o);
+}
+
+static void test_script_class_init (TestScriptClass *k) { G_OBJECT_CLASS (k)->finalize = test_script_finalize; }
+static void test_script_init (TestScript *self) { self->cancel_after = -1; }
+
+static void
+test_script_iface_init (BroRunningProcessInterface *iface)
+{
+  iface->lines = script_lines;
+  iface->wait = script_wait;
+  iface->stop = script_stop;
+}
+
+#define TEST_TYPE_SCRIPTED_LAUNCHER (test_scripted_launcher_get_type ())
+G_DECLARE_FINAL_TYPE (TestScriptedLauncher, test_scripted_launcher, TEST, SCRIPTED_LAUNCHER, GObject)
+
+struct _TestScriptedLauncher {
+  GObject parent_instance;
+  GStrv lines;
+  int exit_code;
+  char *write_file_in;
+  int cancel_after;
+  BroCancellationToken *cancel;
+  GPtrArray *started; /* BroProcessSpec * (copies of what matters) */
+  TestScript *last;
+};
+
+static void test_scripted_launcher_iface_init (BroProcessLauncherInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestScriptedLauncher, test_scripted_launcher, G_TYPE_OBJECT,
+                         G_IMPLEMENT_INTERFACE (BRO_TYPE_PROCESS_LAUNCHER, test_scripted_launcher_iface_init))
+
+static BroProcessSpec *
+spec_copy (const BroProcessSpec *spec)
+{
+  BroProcessSpec *c = bro_process_spec_new ();
+  GHashTableIter it;
+  gpointer k, v;
+  c->executable = g_strdup (spec->executable);
+  g_strfreev (c->arguments);
+  c->arguments = g_strdupv (spec->arguments);
+  g_hash_table_iter_init (&it, spec->environment);
+  while (g_hash_table_iter_next (&it, &k, &v))
+    g_hash_table_insert (c->environment, g_strdup (k), g_strdup (v));
+  c->working_directory = g_strdup (spec->working_directory);
+  c->stop_policy = spec->stop_policy;
+  c->has_stall_timeout = spec->has_stall_timeout;
+  c->stall_timeout = spec->stall_timeout;
+  c->transcript = g_strdup (spec->transcript);
+  return c;
+}
+
+static BroRunningProcess *
+launcher_start (BroProcessLauncher *l, const BroProcessSpec *spec, BroBroError **error)
+{
+  TestScriptedLauncher *self = TEST_SCRIPTED_LAUNCHER (l);
+  TestScript *script = g_object_new (TEST_TYPE_SCRIPT, NULL);
+  g_ptr_array_add (self->started, spec_copy (spec));
+  script->lines = g_strdupv (self->lines);
+  script->exit_code = self->exit_code;
+  script->write_file_in = g_strdup (self->write_file_in);
+  script->cancel_after = self->cancel_after;
+  script->cancel = self->cancel;
+  g_set_object (&self->last, script);
+  return BRO_RUNNING_PROCESS (script);
+}
+
+static void
+test_scripted_launcher_finalize (GObject *o)
+{
+  TestScriptedLauncher *self = TEST_SCRIPTED_LAUNCHER (o);
+  g_strfreev (self->lines);
+  g_free (self->write_file_in);
+  g_ptr_array_unref (self->started);
+  g_clear_object (&self->last);
+  G_OBJECT_CLASS (test_scripted_launcher_parent_class)->finalize (o);
+}
+
+static void test_scripted_launcher_class_init (TestScriptedLauncherClass *k) { G_OBJECT_CLASS (k)->finalize = test_scripted_launcher_finalize; }
+
+static void
+test_scripted_launcher_init (TestScriptedLauncher *self)
+{
+  self->started = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_process_spec_free);
+  self->cancel_after = -1;
+}
+
+static void test_scripted_launcher_iface_init (BroProcessLauncherInterface *iface) { iface->start = launcher_start; }
+
+/* An isolation that records what happens to its leases. */
+#define TEST_TYPE_RECORDING_ISOLATION (test_recording_isolation_get_type ())
+G_DECLARE_FINAL_TYPE (TestRecordingIsolation, test_recording_isolation, TEST, RECORDING_ISOLATION, GObject)
+
+struct _TestRecordingIsolation {
+  GObject parent_instance;
+  GPtrArray *log;
+};
+
+#define TEST_TYPE_RECORDING_LEASE (test_recording_lease_get_type ())
+G_DECLARE_FINAL_TYPE (TestRecordingLease, test_recording_lease, TEST, RECORDING_LEASE, GObject)
+
+struct _TestRecordingLease {
+  GObject parent_instance;
+  TestRecordingIsolation *owner;
+  char *home;
+  char *profile;
+};
+
+static void test_recording_lease_iface_init (BroIsolationLeaseInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestRecordingLease, test_recording_lease, G_TYPE_OBJECT,
+                         G_IMPLEMENT_INTERFACE (BRO_TYPE_ISOLATION_LEASE, test_recording_lease_iface_init))
+
+static GHashTable *
+rl_environment (BroIsolationLease *l)
+{
+  GHashTable *env = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  g_hash_table_insert (env, g_strdup ("HOME"), g_strdup (TEST_RECORDING_LEASE (l)->home));
+  return env;
+}
+
+static char *rl_profile (BroIsolationLease *l) { return g_strdup (TEST_RECORDING_LEASE (l)->profile); }
+static void rl_first (BroIsolationLease *l) { g_ptr_array_add (TEST_RECORDING_LEASE (l)->owner->log, g_strdup ("firstOutput")); }
+static void rl_release (BroIsolationLease *l) { g_ptr_array_add (TEST_RECORDING_LEASE (l)->owner->log, g_strdup ("release")); }
+
+static void
+test_recording_lease_finalize (GObject *o)
+{
+  TestRecordingLease *self = TEST_RECORDING_LEASE (o);
+  g_object_unref (self->owner);
+  g_free (self->home);
+  g_free (self->profile);
+  G_OBJECT_CLASS (test_recording_lease_parent_class)->finalize (o);
+}
+
+static void test_recording_lease_class_init (TestRecordingLeaseClass *k) { G_OBJECT_CLASS (k)->finalize = test_recording_lease_finalize; }
+static void test_recording_lease_init (TestRecordingLease *self) {}
+
+static void
+test_recording_lease_iface_init (BroIsolationLeaseInterface *iface)
+{
+  iface->environment = rl_environment;
+  iface->profile_path = rl_profile;
+  iface->first_output = rl_first;
+  iface->release = rl_release;
+}
+
+static void test_recording_isolation_iface_init (BroSettingsIsolationInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestRecordingIsolation, test_recording_isolation, G_TYPE_OBJECT,
+                         G_IMPLEMENT_INTERFACE (BRO_TYPE_SETTINGS_ISOLATION, test_recording_isolation_iface_init))
+
+static BroIsolationLease *
+ri_prepare (BroSettingsIsolation *i, const BroMakemkvRunSettings *settings, BroBroError **error)
+{
+  TestRecordingIsolation *self = TEST_RECORDING_ISOLATION (i);
+  TestRecordingLease *lease = g_object_new (TEST_TYPE_RECORDING_LEASE, NULL);
+  g_ptr_array_add (self->log, g_strdup ("prepare"));
+  lease->owner = g_object_ref (self);
+  lease->home = g_strdup (settings->work_directory);
+  lease->profile = settings->profile_xml ? g_strconcat (settings->work_directory, "/profile.mmcp.xml", NULL) : NULL;
+  return BRO_ISOLATION_LEASE (lease);
+}
+
+static void
+test_recording_isolation_finalize (GObject *o)
+{
+  g_ptr_array_unref (TEST_RECORDING_ISOLATION (o)->log);
+  G_OBJECT_CLASS (test_recording_isolation_parent_class)->finalize (o);
+}
+
+static void test_recording_isolation_class_init (TestRecordingIsolationClass *k) { G_OBJECT_CLASS (k)->finalize = test_recording_isolation_finalize; }
+static void test_recording_isolation_init (TestRecordingIsolation *self) { self->log = g_ptr_array_new_with_free_func (g_free); }
+static void test_recording_isolation_iface_init (BroSettingsIsolationInterface *iface) { iface->prepare = ri_prepare; }
+
+/* Finds makemkvcon at path (NULL: nowhere). */
+#define TEST_TYPE_FIXED_LOCATOR (test_fixed_locator_get_type ())
+G_DECLARE_FINAL_TYPE (TestFixedLocator, test_fixed_locator, TEST, FIXED_LOCATOR, GObject)
+
+struct _TestFixedLocator {
+  GObject parent_instance;
+  char *path;
+};
+
+static void test_fixed_locator_iface_init (BroToolLocatorInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestFixedLocator, test_fixed_locator, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_TOOL_LOCATOR, test_fixed_locator_iface_init))
+
+static BroToolInfo *
+fl_locate (BroToolLocator *l, BroToolKind tool)
+{
+  TestFixedLocator *self = TEST_FIXED_LOCATOR (l);
+  BroToolInfo *info = bro_tool_info_new ();
+  info->tool = tool;
+  if (tool == BRO_TOOL_KIND_MAKEMKVCON && self->path)
+    info->path = g_strdup (self->path);
+  else
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "tool", bro_json_value_new_string (bro_tool_kind_to_wire (tool)));
+      info->why = bro_bro_message_new (BRO_MSG_TOOL_MISSING, params, BRO_SEVERITY_WARNING);
+    }
+  return info;
+}
+
+static void test_fixed_locator_finalize (GObject *o) { g_free (TEST_FIXED_LOCATOR (o)->path); G_OBJECT_CLASS (test_fixed_locator_parent_class)->finalize (o); }
+static void test_fixed_locator_class_init (TestFixedLocatorClass *k) { G_OBJECT_CLASS (k)->finalize = test_fixed_locator_finalize; }
+static void test_fixed_locator_init (TestFixedLocator *self) {}
+static void test_fixed_locator_iface_init (BroToolLocatorInterface *iface) { iface->locate = fl_locate; }
+
+#define TEST_TYPE_COUNTING_SINK (test_counting_sink_get_type ())
+G_DECLARE_FINAL_TYPE (TestCountingSink, test_counting_sink, TEST, COUNTING_SINK, GObject)
+
+struct _TestCountingSink {
+  GObject parent_instance;
+  int events;
+};
+
+static void test_counting_sink_iface_init (BroRunSinkInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestCountingSink, test_counting_sink, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_RUN_SINK, test_counting_sink_iface_init))
+static void cs_event (BroRunSink *s, const BroRobotEvent *e) { TEST_COUNTING_SINK (s)->events++; }
+static void test_counting_sink_class_init (TestCountingSinkClass *k) {}
+static void test_counting_sink_init (TestCountingSink *self) {}
+static void test_counting_sink_iface_init (BroRunSinkInterface *iface) { iface->event = cs_event; }
+
+static char *
+shown_text (const char *text)
+{
+  g_autofree char *home = g_strconcat (fs_root, "/home", NULL);
+  g_autoptr (GString) s = g_string_new (text ? text : "");
+  g_string_replace (s, home, "<work>", 0);
+  g_string_replace (s, fs_root, "<root>", 0);
+  return g_string_free (g_steal_pointer (&s), FALSE);
+}
+
+static BroMakemkvSource *
+case_source (BroJsonValue *v)
+{
+  BroJsonValue *d = bro_json_value_member (v, "drive");
+  if (d)
+    return bro_makemkv_source_new (BRO_MAKEMKV_SOURCE_DRIVE, (int) bro_json_value_get_integer (bro_json_value_member (d, "index"), 0),
+                                   bro_json_value_get_string (bro_json_value_member (d, "device"), ""), NULL);
+  if (bro_json_value_member (v, "iso"))
+    return bro_makemkv_source_new (BRO_MAKEMKV_SOURCE_ISO, 0, NULL, bro_json_value_get_string (bro_json_value_member (v, "iso"), ""));
+  return bro_makemkv_source_new (BRO_MAKEMKV_SOURCE_FILE, 0, NULL, bro_json_value_get_string (bro_json_value_member (v, "file"), ""));
+}
+
+static GStrv
+case_lines (BroJsonValue *given)
+{
+  const char *transcript = bro_json_value_get_string (bro_json_value_member (given, "transcript"), NULL);
+  BroJsonValue *lines = bro_json_value_member (given, "lines");
+  GPtrArray *out = g_ptr_array_new ();
+  if (transcript)
+    {
+      g_autofree char *text = bro_test_fixture_text (transcript, NULL);
+      g_auto (GStrv) split = g_strsplit (text, "\n", -1);
+      for (guint i = 0; split[i]; i++)
+        if (*split[i])
+          g_ptr_array_add (out, g_strdup (split[i]));
+    }
+  for (guint i = 0; lines && i < bro_json_value_length (lines); i++)
+    g_ptr_array_add (out, g_strdup (bro_json_value_get_string (bro_json_value_at (lines, i), "")));
+  g_ptr_array_add (out, NULL);
+  return (GStrv) g_ptr_array_free (out, FALSE);
+}
+
+static char *
+joined_strings (BroJsonValue *array)
+{
+  g_autoptr (GPtrArray) parts = g_ptr_array_new ();
+  for (guint i = 0; i < bro_json_value_length (array); i++)
+    g_ptr_array_add (parts, (gpointer) bro_json_value_get_string (bro_json_value_at (array, i), ""));
+  g_ptr_array_add (parts, NULL);
+  return g_strjoinv ("|", (char **) parts->pdata);
+}
+
+static gboolean
+makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  g_autoptr (TestScriptedLauncher) launcher = g_object_new (TEST_TYPE_SCRIPTED_LAUNCHER, NULL);
+  g_autoptr (TestRecordingIsolation) isolation = g_object_new (TEST_TYPE_RECORDING_ISOLATION, NULL);
+  g_autoptr (TestFixedLocator) locator = g_object_new (TEST_TYPE_FIXED_LOCATOR, NULL);
+  g_autoptr (TestCountingSink) sink = g_object_new (TEST_TYPE_COUNTING_SINK, NULL);
+  g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (BroMakemkvTool) tool = NULL;
+  g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
+  g_autoptr (BroMakemkvInvocation) invocation = bro_makemkv_invocation_new ();
+  g_autoptr (BroMakemkvSource) source = NULL;
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (BroMakemkvRun) run_owned = NULL;
+  g_autoptr (BroListingRun) listing = NULL;
+  g_autoptr (GPtrArray) drives = NULL;
+  g_autofree char *destination = NULL;
+  BroMakemkvRun *run = NULL;
+  BroProcessSpec *spec;
+  const char *call = bro_json_value_get_string (bro_json_value_member (given, "call"), "");
+  BroJsonValue *existing = bro_json_value_member (given, "existing");
+  BroJsonValue *mk = bro_json_value_member (given, "makemkvcon");
+  BroJsonValue *v;
+  remove_tree (fs_root);
+  {
+    g_autofree char *home = g_build_filename (fs_root, "home", NULL);
+    g_mkdir_with_parents (home, 0755);
+  }
+  for (guint i = 0; existing && i < bro_json_value_length (existing); i++)
+    {
+      g_autofree char *path = fs_path (bro_json_value_get_string (bro_json_value_at (existing, i), ""));
+      g_autofree char *dir = g_path_get_dirname (path);
+      g_mkdir_with_parents (dir, 0755);
+      g_file_set_contents (path, "", 0, NULL);
+    }
+  if ((v = bro_json_value_member (given, "destination")))
+    {
+      destination = fs_path (bro_json_value_get_string (v, ""));
+      g_mkdir_with_parents (destination, 0755);
+    }
+  launcher->lines = case_lines (given);
+  launcher->exit_code = (int) bro_json_value_get_integer (bro_json_value_member (given, "exitCode"), 0);
+  if (bro_json_value_get_bool (bro_json_value_member (given, "writesFile"), FALSE))
+    launcher->write_file_in = g_strdup (destination);
+  launcher->cancel_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "cancelAfterLines"), -1);
+  launcher->cancel = cancel;
+  locator->path = mk && mk->kind == BRO_JSON_VALUE_NULL ? NULL : g_strdup ("/opt/makemkvcon");
+  tool = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), BRO_FILE_SYSTEM (fs), BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
+  invocation->options.min_length_seconds = (int) bro_json_value_get_integer (bro_json_value_member (bro_json_value_member (given, "options"), "minLengthSeconds"), -1);
+  invocation->settings->profile_xml = g_strdup (bro_json_value_get_string (bro_json_value_member (given, "profileXml"), NULL));
+  invocation->settings->data_dir = g_strdup ("/data");
+  invocation->settings->work_directory = g_build_filename (fs_root, "home", NULL);
+  if ((v = bro_json_value_member (given, "stallTimeout")))
+    {
+      invocation->has_stall_timeout = TRUE;
+      invocation->stall_timeout.seconds = (double) bro_json_value_get_integer (v, 0);
+    }
+  if ((v = bro_json_value_member (given, "transcriptFile")))
+    invocation->transcript = fs_path (bro_json_value_get_string (v, ""));
+  if ((v = bro_json_value_member (given, "source")))
+    source = case_source (v);
+
+  if (g_str_equal (call, "scanDrives"))
+    drives = bro_makemkv_tool_scan_drives (tool, cancel, &error);
+  else if (g_str_equal (call, "listing"))
+    {
+      listing = bro_makemkv_tool_listing (tool, source, invocation, BRO_RUN_SINK (sink), cancel, &error);
+      run = listing ? listing->run : NULL;
+    }
+  else if (g_str_equal (call, "rip"))
+    run = run_owned = bro_makemkv_tool_rip (tool, source, bro_json_value_get_string (bro_json_value_member (given, "title"), ""), destination,
+                                            invocation, BRO_RUN_SINK (sink), cancel, &error);
+  else if (g_str_equal (call, "backup"))
+    run = run_owned = bro_makemkv_tool_backup (tool, source, bro_json_value_get_bool (bro_json_value_member (given, "decrypt"), FALSE), destination,
+                                               invocation, BRO_RUN_SINK (sink), cancel, &error);
+  else
+    return FALSE;
+  bro_test_same_string (failures, id, "error", bro_json_value_get_string (bro_json_value_member (expect, "error"), NULL), error ? error->code : NULL);
+
+  spec = launcher->started->len ? launcher->started->pdata[0] : NULL;
+  if ((v = bro_json_value_member (expect, "launched")) && !bro_json_value_get_bool (v, TRUE) && spec)
+    bro_test_fail (failures, id, "launched");
+  if ((v = bro_json_value_member (expect, "arguments")))
+    {
+      g_autofree char *want = joined_strings (v);
+      g_autofree char *got_raw = spec ? g_strjoinv ("|", spec->arguments) : NULL;
+      g_autofree char *got = shown_text (got_raw);
+      bro_test_same_string (failures, id, "arguments", want, got);
+    }
+  if ((v = bro_json_value_member (expect, "environment")))
+    {
+      g_autoptr (GString) want = g_string_new (NULL);
+      g_autoptr (GString) got = g_string_new (NULL);
+      g_autoptr (GList) keys = spec ? g_list_sort (g_hash_table_get_keys (spec->environment), (GCompareFunc) strcmp) : NULL;
+      for (guint i = 0; i < bro_json_value_length (v); i++)
+        g_string_append_printf (want, "%s=%s;", (char *) v->keys->pdata[i], bro_json_value_get_string (bro_json_value_at (v, i), ""));
+      for (GList *k = keys; k; k = k->next)
+        {
+          g_autofree char *value = shown_text (g_hash_table_lookup (spec->environment, k->data));
+          g_string_append_printf (got, "%s=%s;", (char *) k->data, value);
+        }
+      bro_test_same_string (failures, id, "environment", want->str, got->str);
+    }
+  if ((v = bro_json_value_member (expect, "workingDirectory")))
+    {
+      g_autofree char *got = spec && spec->working_directory ? shown_text (spec->working_directory) : NULL;
+      bro_test_same_string (failures, id, "workingDirectory", bro_json_value_get_string (v, NULL), got);
+    }
+  if ((v = bro_json_value_member (expect, "stopPolicy")))
+    bro_test_same_string (failures, id, "stopPolicy", bro_json_value_get_string (v, ""), spec ? bro_stop_policy_to_wire (spec->stop_policy) : NULL);
+  if ((v = bro_json_value_member (expect, "stallTimeout")) && (!spec || !spec->has_stall_timeout || spec->stall_timeout.seconds != bro_json_value_get_integer (v, 0)))
+    bro_test_fail (failures, id, "stallTimeout");
+  if ((v = bro_json_value_member (expect, "transcriptFile")))
+    {
+      g_autofree char *got = spec ? shown_text (spec->transcript) : NULL;
+      bro_test_same_string (failures, id, "transcriptFile", bro_json_value_get_string (v, ""), got);
+    }
+  if ((v = bro_json_value_member (expect, "lease")))
+    {
+      g_autofree char *want = joined_strings (v);
+      g_autofree char *got = NULL;
+      g_ptr_array_add (isolation->log, NULL);
+      got = g_strjoinv ("|", (char **) isolation->log->pdata);
+      g_ptr_array_remove_index (isolation->log, isolation->log->len - 1);
+      bro_test_same_string (failures, id, "lease", want, got);
+    }
+  if ((v = bro_json_value_member (expect, "stopped")) && bro_json_value_get_bool (v, FALSE) != (launcher->last && launcher->last->stopped))
+    bro_test_fail (failures, id, "stopped");
+  if ((v = bro_json_value_member (expect, "linesRead")) && (!launcher->last || launcher->last->handed != bro_json_value_get_integer (v, -1)))
+    bro_test_fail (failures, id, "linesRead: %d", launcher->last ? launcher->last->handed : -1);
+  if ((v = bro_json_value_member (expect, "drives")))
+    {
+      g_autoptr (GString) want = g_string_new (NULL);
+      g_autoptr (GString) got = g_string_new (NULL);
+      for (guint i = 0; i < bro_json_value_length (v); i++)
+        {
+          BroJsonValue *d = bro_json_value_at (v, i);
+          g_string_append_printf (want, "%" G_GINT64_FORMAT " %s %s;", bro_json_value_get_integer (bro_json_value_at (d, 0), -1),
+                                  bro_json_value_get_string (bro_json_value_at (d, 1), ""), bro_json_value_get_string (bro_json_value_at (d, 2), ""));
+        }
+      for (guint i = 0; drives && i < drives->len; i++)
+        {
+          BroMakemkvDrive *d = drives->pdata[i];
+          g_string_append_printf (got, "%d %s %s;", d->index, bro_drive_state_to_wire (d->state), d->device);
+        }
+      bro_test_same_string (failures, id, "drives", want->str, got->str);
+    }
+  if ((v = bro_json_value_member (expect, "listing")))
+    {
+      bro_test_same_string (failures, id, "volumeName", bro_json_value_get_string (bro_json_value_member (v, "volumeName"), ""),
+                            listing ? listing->listing->volume_name : NULL);
+      if (!listing || (gint64) listing->listing->titles->len != bro_json_value_get_integer (bro_json_value_member (v, "titles"), -1))
+        bro_test_fail (failures, id, "titles");
+    }
+  if ((v = bro_json_value_member (expect, "status")))
+    bro_test_same_string (failures, id, "status", bro_json_value_get_string (v, ""), run ? bro_status_word_to_wire (run->outcome->status) : NULL);
+  if ((v = bro_json_value_member (expect, "errorContains")) && v->kind == BRO_JSON_VALUE_STRING)
+    {
+      g_autoptr (BroJsonValue) json = run && run->outcome->error ? bro_bro_message_to_json (run->outcome->error) : NULL;
+      g_autofree char *text = json ? bro_test_english (json) : NULL;
+      if (!text || !strstr (text, bro_json_value_get_string (v, "")))
+        bro_test_fail (failures, id, "error %s doesn't contain %s", text ? text : "(none)", bro_json_value_get_string (v, ""));
+    }
+  if ((v = bro_json_value_member (expect, "errorCode")))
+    bro_test_same_string (failures, id, "errorCode", bro_json_value_get_string (v, ""),
+                          run && run->outcome->error ? bro_message_code_wire (run->outcome->error->code) : NULL);
+  if ((v = bro_json_value_member (expect, "version")))
+    bro_test_same_string (failures, id, "version", bro_json_value_get_string (v, ""), run ? run->version : NULL);
+  if ((v = bro_json_value_member (expect, "debugLog")))
+    bro_test_same_string (failures, id, "debugLog", bro_json_value_get_string (v, ""), run ? run->outcome->debug_log : NULL);
+  if (run && sink->events == 0)
+    bro_test_fail (failures, id, "the sink heard nothing");
+  return TRUE;
+}
+
+static void
+test_makemkv_tool (void)
+{
+  bro_test_run_cases ("adapters/makemkv-tool.cases.json", makemkv_case);
+}
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -976,6 +1507,7 @@ main (int argc, char **argv)
   g_test_add_func ("/settings-isolation/home", test_home_isolation);
   g_test_add_func ("/tool-locator/cases", test_tool_locator);
   g_test_add_func ("/tool-locator/platform-paths", test_tool_paths);
+  g_test_add_func ("/makemkv-tool/cases", test_makemkv_tool);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);
