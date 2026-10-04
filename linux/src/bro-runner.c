@@ -3642,7 +3642,8 @@ bro_post_step_argv (const BroPostStep *step, GHashTable *values, GPtrArray *file
   g_autoptr (GPtrArray) tokens = bro_split_arguments (step->arguments);
   g_autofree char *exe_r = bro_template_render (step->executable, values, FALSE);
   g_autofree char *exe = expand_home (exe_r);
-  g_autofree char *interp = expand_home (g_strstrip (g_strdup (step->interpreter ? step->interpreter : "")));
+  g_autofree char *interp_raw = g_strstrip (g_strdup (step->interpreter ? step->interpreter : ""));
+  g_autofree char *interp = expand_home (interp_raw);
 
   if (*interp)
     {
