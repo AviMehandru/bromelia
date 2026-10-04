@@ -5,6 +5,7 @@ bro_adapters_inc = include_directories('platform', 'clock')
 bro_adapters_lib = static_library('bro-adapters',
   files(
     'clock/bro-system-clock.c',
+    'platform/bro-platform-file-system.c',
     'platform/bro-platform-process-launcher.c',
   ),
   include_directories: bro_adapters_inc,

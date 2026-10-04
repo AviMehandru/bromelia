@@ -9594,6 +9594,202 @@
           "c": "bro_system_clock_timer"
         }
       ]
+    },
+    "adapters/file-system": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "FileSystem on the real OS (plan §9, §10.3, invariants I2, I3, I5): durable atomic writes (F_FULLFSYNC / FlushFileBuffers / fsync of the file and its folder), never replacing and never creating a missing parent unless asked, uncached reads for hashing, volume information. shared/fixtures/adapters/file-system.cases.json pins its behaviour.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "PlatformFileSystem",
+          "kind": "class",
+          "doc": "The FileSystem port on the real OS.",
+          "swift": {
+            "name": "PlatformFileSystem",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Platform/PlatformFileSystem.swift"
+          },
+          "cs": {
+            "name": "PlatformFileSystem",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/PlatformFileSystem.cs"
+          },
+          "c": {
+            "name": "BroPlatformFileSystem",
+            "file": "linux/src/adapters/platform/bro-platform-file-system.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "PlatformFileSystem.exists",
+          "params": [
+            "path"
+          ],
+          "returns": "Bool",
+          "swift": "PlatformFileSystem.exists(_:)",
+          "cs": "PlatformFileSystem.Exists",
+          "c": "bro_platform_file_system_exists"
+        },
+        {
+          "name": "PlatformFileSystem.stat",
+          "params": [
+            "path"
+          ],
+          "returns": "FileInfo",
+          "throws": true,
+          "swift": "PlatformFileSystem.stat(_:)",
+          "cs": "PlatformFileSystem.Stat",
+          "c": "bro_platform_file_system_stat"
+        },
+        {
+          "name": "PlatformFileSystem.list",
+          "params": [
+            "directory"
+          ],
+          "returns": "[DirectoryEntry]",
+          "throws": true,
+          "swift": "PlatformFileSystem.list(_:)",
+          "cs": "PlatformFileSystem.List",
+          "c": "bro_platform_file_system_list"
+        },
+        {
+          "name": "PlatformFileSystem.read",
+          "params": [
+            "path"
+          ],
+          "returns": "Bytes",
+          "throws": true,
+          "swift": "PlatformFileSystem.read(_:)",
+          "cs": "PlatformFileSystem.Read",
+          "c": "bro_platform_file_system_read"
+        },
+        {
+          "name": "PlatformFileSystem.readRange",
+          "params": [
+            "path",
+            "offset",
+            "length"
+          ],
+          "returns": "Bytes",
+          "throws": true,
+          "swift": "PlatformFileSystem.readRange(_:offset:length:)",
+          "cs": "PlatformFileSystem.ReadRange",
+          "c": "bro_platform_file_system_read_range"
+        },
+        {
+          "name": "PlatformFileSystem.createDirectory",
+          "params": [
+            "path",
+            "parentsMustExist"
+          ],
+          "throws": true,
+          "swift": "PlatformFileSystem.createDirectory(_:parentsMustExist:)",
+          "cs": "PlatformFileSystem.CreateDirectory",
+          "c": "bro_platform_file_system_create_directory"
+        },
+        {
+          "name": "PlatformFileSystem.writeAtomically",
+          "params": [
+            "path",
+            "bytes",
+            "mode"
+          ],
+          "throws": true,
+          "swift": "PlatformFileSystem.writeAtomically(_:bytes:mode:)",
+          "cs": "PlatformFileSystem.WriteAtomically",
+          "c": "bro_platform_file_system_write_atomically"
+        },
+        {
+          "name": "PlatformFileSystem.rename",
+          "params": [
+            "from",
+            "to"
+          ],
+          "throws": true,
+          "swift": "PlatformFileSystem.rename(_:to:)",
+          "cs": "PlatformFileSystem.Rename",
+          "c": "bro_platform_file_system_rename"
+        },
+        {
+          "name": "PlatformFileSystem.moveMerging",
+          "params": [
+            "from",
+            "to",
+            "policy"
+          ],
+          "returns": "[MovedItem]",
+          "throws": true,
+          "swift": "PlatformFileSystem.moveMerging(_:to:policy:)",
+          "cs": "PlatformFileSystem.MoveMerging",
+          "c": "bro_platform_file_system_move_merging"
+        },
+        {
+          "name": "PlatformFileSystem.remove",
+          "params": [
+            "path"
+          ],
+          "throws": true,
+          "swift": "PlatformFileSystem.remove(_:)",
+          "cs": "PlatformFileSystem.Remove",
+          "c": "bro_platform_file_system_remove"
+        },
+        {
+          "name": "PlatformFileSystem.moveToTrash",
+          "params": [
+            "path",
+            "trash"
+          ],
+          "throws": true,
+          "swift": "PlatformFileSystem.moveToTrash(_:trash:)",
+          "cs": "PlatformFileSystem.MoveToTrash",
+          "c": "bro_platform_file_system_move_to_trash"
+        },
+        {
+          "name": "PlatformFileSystem.syncFile",
+          "params": [
+            "path"
+          ],
+          "throws": true,
+          "swift": "PlatformFileSystem.syncFile(_:)",
+          "cs": "PlatformFileSystem.SyncFile",
+          "c": "bro_platform_file_system_sync_file"
+        },
+        {
+          "name": "PlatformFileSystem.syncDirectory",
+          "params": [
+            "path"
+          ],
+          "throws": true,
+          "swift": "PlatformFileSystem.syncDirectory(_:)",
+          "cs": "PlatformFileSystem.SyncDirectory",
+          "c": "bro_platform_file_system_sync_directory"
+        },
+        {
+          "name": "PlatformFileSystem.openForReading",
+          "params": [
+            "path",
+            "bypassCache"
+          ],
+          "returns": "ByteStream",
+          "throws": true,
+          "swift": "PlatformFileSystem.openForReading(_:bypassCache:)",
+          "cs": "PlatformFileSystem.OpenForReading",
+          "c": "bro_platform_file_system_open_for_reading"
+        },
+        {
+          "name": "PlatformFileSystem.volume",
+          "params": [
+            "path"
+          ],
+          "returns": "VolumeInfo",
+          "throws": true,
+          "swift": "PlatformFileSystem.volume(_:)",
+          "cs": "PlatformFileSystem.Volume",
+          "c": "bro_platform_file_system_volume"
+        }
+      ]
     }
   }
 }

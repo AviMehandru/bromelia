@@ -1716,6 +1716,36 @@
       },
       "today": "JobRunner.writeArchive"
     },
+    "fs.notFound": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "today": "new: the FileSystem port (plan §9)"
+    },
+    "fs.alreadyExists": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "today": "new: the FileSystem port never replaces (I5)"
+    },
+    "fs.parentMissing": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "today": "new: the FileSystem port never creates a library root (I2)"
+    },
+    "fs.failed": {
+      "kind": "error",
+      "params": {
+        "operation": "string",
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "new: the FileSystem port; reason is the system's text"
+    },
     "archive.recordWritten": {
       "kind": "log",
       "severity": "info",

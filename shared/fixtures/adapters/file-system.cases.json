@@ -1,0 +1,913 @@
+{
+  "functions": [
+    "PlatformFileSystem.exists",
+    "PlatformFileSystem.stat",
+    "PlatformFileSystem.list",
+    "PlatformFileSystem.read",
+    "PlatformFileSystem.readRange",
+    "PlatformFileSystem.createDirectory",
+    "PlatformFileSystem.writeAtomically",
+    "PlatformFileSystem.rename",
+    "PlatformFileSystem.moveMerging",
+    "PlatformFileSystem.remove",
+    "PlatformFileSystem.moveToTrash",
+    "PlatformFileSystem.syncFile",
+    "PlatformFileSystem.syncDirectory",
+    "PlatformFileSystem.openForReading"
+  ],
+  "description": "What PlatformFileSystem does, identically on the three platforms (plan §9, invariants I2, I3, I5). Each case starts from given.tree in an empty temporary folder ('name/' is a folder, anything else a file with that text), runs given.op with paths relative to that folder, and checks its result or error, then the whole tree (expect.tree, when given; no temporary files may be left). Error paths are absolute: <root> is the folder, written with /. fs.failed is compared by code, operation and path; its reason is the system's text. The parts that differ by OS (F_FULLFSYNC / FlushFileBuffers / fsync, uncached reads, permission bits, volume information) are cases of platform-adapters.contract.json.",
+  "cases": [
+    {
+      "id": "exists-file",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "exists",
+          "a.txt"
+        ]
+      },
+      "expect": {
+        "result": true
+      }
+    },
+    {
+      "id": "exists-folder",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "exists",
+          "sub"
+        ]
+      },
+      "expect": {
+        "result": true
+      }
+    },
+    {
+      "id": "exists-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "exists",
+          "nope"
+        ]
+      },
+      "expect": {
+        "result": false
+      }
+    },
+    {
+      "id": "stat-file",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "stat",
+          "a.txt"
+        ]
+      },
+      "expect": {
+        "result": {
+          "size": 11,
+          "isDirectory": false
+        }
+      }
+    },
+    {
+      "id": "stat-folder",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "stat",
+          "sub"
+        ]
+      },
+      "expect": {
+        "result": {
+          "isDirectory": true
+        }
+      }
+    },
+    {
+      "id": "stat-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "stat",
+          "nope"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.notFound",
+          "params": {
+            "path": "<root>/nope"
+          }
+        }
+      }
+    },
+    {
+      "id": "list",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "list",
+          "."
+        ]
+      },
+      "expect": {
+        "result": [
+          "a.txt",
+          "sub/"
+        ],
+        "rule": "names, folders with a trailing /, sorted by the test"
+      }
+    },
+    {
+      "id": "list-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "list",
+          "nope"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.notFound",
+          "params": {
+            "path": "<root>/nope"
+          }
+        }
+      }
+    },
+    {
+      "id": "read",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "read",
+          "sub/b.txt"
+        ]
+      },
+      "expect": {
+        "result": "b"
+      }
+    },
+    {
+      "id": "read-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "read",
+          "nope"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.notFound",
+          "params": {
+            "path": "<root>/nope"
+          }
+        }
+      }
+    },
+    {
+      "id": "read-range",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "readRange",
+          "a.txt",
+          6,
+          5
+        ]
+      },
+      "expect": {
+        "result": "world"
+      }
+    },
+    {
+      "id": "read-range-past-the-end",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "readRange",
+          "a.txt",
+          6,
+          100
+        ]
+      },
+      "expect": {
+        "result": "world"
+      }
+    },
+    {
+      "id": "read-range-beyond",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "readRange",
+          "a.txt",
+          50,
+          5
+        ]
+      },
+      "expect": {
+        "result": ""
+      }
+    },
+    {
+      "id": "create-directory-with-parents",
+      "given": {
+        "tree": {
+          "lib/": null
+        },
+        "op": [
+          "createDirectory",
+          "lib/Movies/X",
+          false
+        ]
+      },
+      "expect": {
+        "tree": {
+          "lib/": null,
+          "lib/Movies/": null,
+          "lib/Movies/X/": null
+        }
+      }
+    },
+    {
+      "id": "create-directory-exists",
+      "given": {
+        "tree": {
+          "lib/": null
+        },
+        "op": [
+          "createDirectory",
+          "lib",
+          true
+        ]
+      },
+      "expect": {
+        "tree": {
+          "lib/": null
+        }
+      }
+    },
+    {
+      "id": "create-directory-never-creates-library-root",
+      "from": [
+        "rearchitecture-plan §9 createDirectory(parentsMustExist), I2",
+        "platform-adapters.contract.json#file-system-never-creates-library-root"
+      ],
+      "given": {
+        "tree": {},
+        "op": [
+          "createDirectory",
+          "lib/Movies",
+          true
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.parentMissing",
+          "params": {
+            "path": "<root>/lib"
+          }
+        },
+        "tree": {}
+      }
+    },
+    {
+      "id": "create-directory-over-a-file",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "createDirectory",
+          "a.txt",
+          false
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.alreadyExists",
+          "params": {
+            "path": "<root>/a.txt"
+          }
+        },
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "write-atomically-new",
+      "given": {
+        "tree": {
+          "d/": null
+        },
+        "op": [
+          "writeAtomically",
+          "d/r.json",
+          "{}",
+          420
+        ]
+      },
+      "expect": {
+        "tree": {
+          "d/": null,
+          "d/r.json": "{}"
+        },
+        "rule": "no temporary file is left"
+      }
+    },
+    {
+      "id": "write-atomically-replaces",
+      "given": {
+        "tree": {
+          "d/": null,
+          "d/r.json": "old"
+        },
+        "op": [
+          "writeAtomically",
+          "d/r.json",
+          "new",
+          420
+        ]
+      },
+      "expect": {
+        "tree": {
+          "d/": null,
+          "d/r.json": "new"
+        }
+      }
+    },
+    {
+      "id": "write-atomically-parent-missing",
+      "given": {
+        "tree": {},
+        "op": [
+          "writeAtomically",
+          "lib/r.json",
+          "{}",
+          420
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.parentMissing",
+          "params": {
+            "path": "<root>/lib"
+          }
+        },
+        "tree": {},
+        "rule": "never creates folders (an offline library's root isn't recreated)"
+      }
+    },
+    {
+      "id": "rename",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "rename",
+          "a.txt",
+          "c.txt"
+        ]
+      },
+      "expect": {
+        "tree": {
+          "c.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "rename-never-replaces",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "rename",
+          "a.txt",
+          "sub/b.txt"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.alreadyExists",
+          "params": {
+            "path": "<root>/sub/b.txt"
+          }
+        },
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "rename-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "rename",
+          "nope",
+          "c.txt"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.notFound",
+          "params": {
+            "path": "<root>/nope"
+          }
+        },
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "move-merging",
+      "given": {
+        "tree": {
+          "from/": null,
+          "from/a.txt": "a",
+          "from/c.txt": "new c",
+          "from/sub/": null,
+          "from/sub/b.txt": "b",
+          "from/x/": null,
+          "from/x/y.txt": "y",
+          "to/": null,
+          "to/c.txt": "old c",
+          "to/sub/": null,
+          "to/sub/z.txt": "z",
+          "to/x": "a file called x"
+        },
+        "op": [
+          "moveMerging",
+          "from",
+          "to",
+          "neverReplace"
+        ]
+      },
+      "expect": {
+        "result": [
+          [
+            "from/a.txt",
+            "to/a.txt"
+          ],
+          [
+            "from/c.txt",
+            "to/c (2).txt"
+          ],
+          [
+            "from/sub/b.txt",
+            "to/sub/b.txt"
+          ],
+          [
+            "from/x/y.txt",
+            "to/x (2)/y.txt"
+          ]
+        ],
+        "tree": {
+          "from/": null,
+          "to/": null,
+          "to/a.txt": "a",
+          "to/c.txt": "old c",
+          "to/c (2).txt": "new c",
+          "to/sub/": null,
+          "to/sub/b.txt": "b",
+          "to/sub/z.txt": "z",
+          "to/x": "a file called x",
+          "to/x (2)/": null,
+          "to/x (2)/y.txt": "y"
+        },
+        "rule": "every file moved, sorted by source path; a folder merges into a folder; anything else that is taken gets ConflictNamer's name (ignoring ASCII case); emptied source folders go, the source itself stays"
+      }
+    },
+    {
+      "id": "move-merging-ignores-case",
+      "given": {
+        "tree": {
+          "from/": null,
+          "from/A.TXT": "new",
+          "to/": null,
+          "to/a.txt": "old"
+        },
+        "op": [
+          "moveMerging",
+          "from",
+          "to",
+          "neverReplace"
+        ]
+      },
+      "expect": {
+        "result": [
+          [
+            "from/A.TXT",
+            "to/A (2).TXT"
+          ]
+        ],
+        "tree": {
+          "from/": null,
+          "to/": null,
+          "to/a.txt": "old",
+          "to/A (2).TXT": "new"
+        }
+      }
+    },
+    {
+      "id": "move-merging-creates-the-destination",
+      "given": {
+        "tree": {
+          "from/": null,
+          "from/a.txt": "a",
+          "lib/": null
+        },
+        "op": [
+          "moveMerging",
+          "from",
+          "lib/Unit",
+          "neverReplace"
+        ]
+      },
+      "expect": {
+        "result": [
+          [
+            "from/a.txt",
+            "lib/Unit/a.txt"
+          ]
+        ],
+        "tree": {
+          "from/": null,
+          "lib/": null,
+          "lib/Unit/": null,
+          "lib/Unit/a.txt": "a"
+        }
+      }
+    },
+    {
+      "id": "move-merging-destination-parent-missing",
+      "given": {
+        "tree": {
+          "from/": null,
+          "from/a.txt": "a"
+        },
+        "op": [
+          "moveMerging",
+          "from",
+          "lib/Unit",
+          "neverReplace"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.parentMissing",
+          "params": {
+            "path": "<root>/lib"
+          }
+        },
+        "tree": {
+          "from/": null,
+          "from/a.txt": "a"
+        }
+      }
+    },
+    {
+      "id": "remove-file",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "remove",
+          "sub/b.txt"
+        ]
+      },
+      "expect": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null
+        }
+      }
+    },
+    {
+      "id": "remove-empty-folder",
+      "given": {
+        "tree": {
+          "e/": null
+        },
+        "op": [
+          "remove",
+          "e"
+        ]
+      },
+      "expect": {
+        "tree": {}
+      }
+    },
+    {
+      "id": "remove-never-deletes-a-full-folder",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "remove",
+          "sub"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.failed",
+          "params": {
+            "operation": "remove",
+            "path": "<root>/sub"
+          }
+        },
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "remove-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "remove",
+          "nope"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.notFound",
+          "params": {
+            "path": "<root>/nope"
+          }
+        },
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "move-to-trash",
+      "given": {
+        "tree": {
+          "lib/": null,
+          "lib/old/": null,
+          "lib/old/f.mkv": "x"
+        },
+        "op": [
+          "moveToTrash",
+          "lib/old",
+          "lib/.trash"
+        ]
+      },
+      "expect": {
+        "tree": {
+          "lib/": null,
+          "lib/.trash/": null,
+          "lib/.trash/old/": null,
+          "lib/.trash/old/f.mkv": "x"
+        },
+        "rule": "the trash folder is created when its parent exists"
+      }
+    },
+    {
+      "id": "move-to-trash-taken-name",
+      "given": {
+        "tree": {
+          "lib/": null,
+          "lib/f.mkv": "new",
+          "lib/.trash/": null,
+          "lib/.trash/f.mkv": "old"
+        },
+        "op": [
+          "moveToTrash",
+          "lib/f.mkv",
+          "lib/.trash"
+        ]
+      },
+      "expect": {
+        "tree": {
+          "lib/": null,
+          "lib/.trash/": null,
+          "lib/.trash/f.mkv": "old",
+          "lib/.trash/f (2).mkv": "new"
+        }
+      }
+    },
+    {
+      "id": "sync",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "syncFile",
+          "a.txt"
+        ]
+      },
+      "expect": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "sync-folder",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "syncDirectory",
+          "sub"
+        ]
+      },
+      "expect": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        }
+      }
+    },
+    {
+      "id": "sync-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "syncFile",
+          "nope"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.notFound",
+          "params": {
+            "path": "<root>/nope"
+          }
+        }
+      }
+    },
+    {
+      "id": "open-for-reading",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "openForReading",
+          "a.txt",
+          false
+        ]
+      },
+      "expect": {
+        "result": "hello world",
+        "rule": "read in chunks of 4 bytes until empty"
+      }
+    },
+    {
+      "id": "open-for-reading-uncached",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "openForReading",
+          "a.txt",
+          true
+        ]
+      },
+      "expect": {
+        "result": "hello world"
+      }
+    },
+    {
+      "id": "open-for-reading-missing",
+      "given": {
+        "tree": {
+          "a.txt": "hello world",
+          "sub/": null,
+          "sub/b.txt": "b"
+        },
+        "op": [
+          "openForReading",
+          "nope",
+          true
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.notFound",
+          "params": {
+            "path": "<root>/nope"
+          }
+        }
+      }
+    }
+  ]
+}

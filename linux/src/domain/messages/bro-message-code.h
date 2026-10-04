@@ -262,6 +262,10 @@ typedef enum {
   BRO_MSG_ARCHIVE_SOME_NOT_MOVED, /* archive.someNotMoved */
   BRO_MSG_ARCHIVE_CHECKSUMS_WRITTEN, /* archive.checksumsWritten */
   BRO_MSG_ARCHIVE_WRITE_FAILED, /* archive.writeFailed */
+  BRO_MSG_FS_NOT_FOUND, /* fs.notFound */
+  BRO_MSG_FS_ALREADY_EXISTS, /* fs.alreadyExists */
+  BRO_MSG_FS_PARENT_MISSING, /* fs.parentMissing */
+  BRO_MSG_FS_FAILED, /* fs.failed */
   BRO_MSG_ARCHIVE_RECORD_WRITTEN, /* archive.recordWritten */
   BRO_MSG_ARCHIVE_RENAME_FAILED, /* archive.renameFailed */
   BRO_MSG_ARCHIVE_SYNCED, /* archive.synced */

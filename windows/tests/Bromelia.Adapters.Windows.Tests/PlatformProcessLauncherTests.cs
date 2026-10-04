@@ -104,9 +104,14 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         var script = Script("starts-child.cmd",
             "@echo off\nstart /b powershell -NoProfile -Command \"$PID | Out-File -Encoding ascii '" + pidFile + "'; Start-Sleep 60\"\necho started\nping -n 60 127.0.0.1 >nul\n");
         var p = _launcher.Start(Spec(script));
+        string ReadPid()
+        {
+            try { return File.Exists(pidFile) ? File.ReadAllText(pidFile).Trim() : ""; }
+            catch (IOException) { return ""; } // PowerShell still has it open
+        }
         var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (!(File.Exists(pidFile) && File.ReadAllText(pidFile).Trim().Length > 0) && DateTime.UtcNow < deadline) Thread.Sleep(100);
-        var pid = int.Parse(File.ReadAllText(pidFile).Trim());
+        while (ReadPid().Length == 0 && DateTime.UtcNow < deadline) Thread.Sleep(100);
+        var pid = int.Parse(ReadPid());
         p.Stop(StopReason.Cancelled);
         Run(p);
         Thread.Sleep(500);

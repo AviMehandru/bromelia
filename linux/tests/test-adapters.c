@@ -2,11 +2,13 @@
  * shared/fixtures/adapters/platform-adapters.contract.json. */
 #include "bro-test-fixtures.h"
 
+#include "bro-platform-file-system.h"
 #include "bro-platform-process-launcher.h"
 #include "bro-system-clock.h"
 
 #include <errno.h>
 #include <glib/gstdio.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -286,6 +288,370 @@ test_interpreter (void)
   g_assert_cmpstr (lines->pdata[0], ==, "stdout:hello there");
 }
 
+/* ---- the file system ------------------------------------------------------------------------------- */
+
+static char *fs_root;
+
+static char *
+fs_path (const char *relative)
+{
+  return g_str_equal (relative, ".") ? g_strdup (fs_root) : g_build_filename (fs_root, relative, NULL);
+}
+
+static void
+remove_tree (const char *path)
+{
+  GDir *dir = g_dir_open (path, 0, NULL);
+  const char *name;
+  if (dir)
+    {
+      while ((name = g_dir_read_name (dir)) != NULL)
+        {
+          g_autofree char *child = g_build_filename (path, name, NULL);
+          remove_tree (child);
+        }
+      g_dir_close (dir);
+      g_rmdir (path);
+    }
+  else
+    g_unlink (path);
+}
+
+static void
+fs_build (BroJsonValue *tree)
+{
+  remove_tree (fs_root);
+  g_mkdir_with_parents (fs_root, 0755);
+  for (guint i = 0; i < bro_json_value_length (tree); i++)
+    {
+      const char *name = tree->keys->pdata[i];
+      g_autofree char *path = NULL;
+      if (g_str_has_suffix (name, "/"))
+        {
+          g_autofree char *trimmed = g_strndup (name, strlen (name) - 1);
+          path = fs_path (trimmed);
+          g_mkdir_with_parents (path, 0755);
+        }
+      else
+        {
+          path = fs_path (name);
+          g_file_set_contents (path, bro_json_value_get_string (bro_json_value_at (tree, i), ""), -1, NULL);
+        }
+    }
+}
+
+static void
+fs_walk (const char *dir, const char *prefix, GPtrArray *lines)
+{
+  GDir *d = g_dir_open (dir, 0, NULL);
+  const char *name;
+  if (!d)
+    return;
+  while ((name = g_dir_read_name (d)) != NULL)
+    {
+      g_autofree char *full = g_build_filename (dir, name, NULL);
+      g_autofree char *rel = *prefix ? g_strdup_printf ("%s/%s", prefix, name) : g_strdup (name);
+      if (g_file_test (full, G_FILE_TEST_IS_DIR))
+        {
+          g_ptr_array_add (lines, g_strdup_printf ("%s/ = (folder)", rel));
+          fs_walk (full, rel, lines);
+        }
+      else
+        {
+          g_autofree char *text = NULL;
+          g_file_get_contents (full, &text, NULL, NULL);
+          g_ptr_array_add (lines, g_strdup_printf ("%s = %s", rel, text ? text : "?"));
+        }
+    }
+  g_dir_close (d);
+}
+
+/* Sorts by the name before " = ". */
+static int
+compare_tree_lines (gconstpointer a, gconstpointer b)
+{
+  const char *x = *(const char *const *) a, *y = *(const char *const *) b;
+  size_t lx = strstr (x, " = ") - x, ly = strstr (y, " = ") - y;
+  int c = memcmp (x, y, MIN (lx, ly));
+  return c ? c : (lx < ly ? -1 : lx > ly);
+}
+
+static char *
+fs_tree (void)
+{
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  fs_walk (fs_root, "", lines);
+  g_ptr_array_sort (lines, compare_tree_lines);
+  g_ptr_array_add (lines, NULL);
+  return g_strjoinv ("\n", (char **) lines->pdata);
+}
+
+static char *
+fs_expected_tree (BroJsonValue *tree)
+{
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < bro_json_value_length (tree); i++)
+    {
+      BroJsonValue *v = bro_json_value_at (tree, i);
+      g_ptr_array_add (lines, g_strdup_printf ("%s = %s", (char *) tree->keys->pdata[i], bro_json_value_get_string (v, "(folder)")));
+    }
+  g_ptr_array_sort (lines, compare_tree_lines);
+  g_ptr_array_add (lines, NULL);
+  return g_strjoinv ("\n", (char **) lines->pdata);
+}
+
+static BroJsonValue *
+string_of_bytes (GBytes *bytes)
+{
+  gsize n = 0;
+  const char *data = g_bytes_get_data (bytes, &n);
+  g_autofree char *text = g_strndup (data ? data : "", n);
+  g_bytes_unref (bytes);
+  return bro_json_value_new_string (text);
+}
+
+static int
+compare_strings (gconstpointer a, gconstpointer b)
+{
+  return strcmp (*(const char *const *) a, *(const char *const *) b);
+}
+
+/* Runs one operation: its result (NULL when it has none), or NULL with @error set. */
+static BroJsonValue *
+fs_run (BroFileSystem *fs, BroJsonValue *op, BroBroError **error, gboolean *ok)
+{
+  const char *name = bro_json_value_get_string (bro_json_value_at (op, 0), "");
+  g_autofree char *a = bro_json_value_length (op) > 1 && bro_json_value_at (op, 1)->kind == BRO_JSON_VALUE_STRING
+                         ? fs_path (bro_json_value_get_string (bro_json_value_at (op, 1), "")) : NULL;
+  g_autofree char *b = bro_json_value_length (op) > 2 && bro_json_value_at (op, 2)->kind == BRO_JSON_VALUE_STRING
+                         ? fs_path (bro_json_value_get_string (bro_json_value_at (op, 2), "")) : NULL;
+  *ok = TRUE;
+  if (g_str_equal (name, "exists"))
+    return bro_json_value_new_bool (bro_file_system_exists (fs, a));
+  if (g_str_equal (name, "stat"))
+    {
+      g_autoptr (BroFileInfo) info = bro_file_system_stat (fs, a, error);
+      BroJsonValue *v;
+      if (!info)
+        return *ok = FALSE, NULL;
+      v = bro_json_value_new_object ();
+      if (!info->is_directory)
+        bro_json_value_set (v, "size", bro_json_value_new_integer (info->size));
+      bro_json_value_set (v, "isDirectory", bro_json_value_new_bool (info->is_directory));
+      return v;
+    }
+  if (g_str_equal (name, "list"))
+    {
+      g_autoptr (GPtrArray) entries = bro_file_system_list (fs, a, error);
+      g_autoptr (GPtrArray) names = g_ptr_array_new_with_free_func (g_free);
+      BroJsonValue *v;
+      if (!entries)
+        return *ok = FALSE, NULL;
+      for (guint i = 0; i < entries->len; i++)
+        {
+          BroDirectoryEntry *e = entries->pdata[i];
+          g_ptr_array_add (names, g_strconcat (e->name, e->is_directory ? "/" : "", NULL));
+        }
+      g_ptr_array_sort (names, compare_strings);
+      v = bro_json_value_new_array ();
+      for (guint i = 0; i < names->len; i++)
+        bro_json_value_append (v, bro_json_value_new_string (names->pdata[i]));
+      return v;
+    }
+  if (g_str_equal (name, "read"))
+    {
+      GBytes *bytes = bro_file_system_read (fs, a, error);
+      return bytes ? string_of_bytes (bytes) : (*ok = FALSE, NULL);
+    }
+  if (g_str_equal (name, "readRange"))
+    {
+      GBytes *bytes = bro_file_system_read_range (fs, a, bro_json_value_get_integer (bro_json_value_at (op, 2), 0),
+                                                  (int) bro_json_value_get_integer (bro_json_value_at (op, 3), 0), error);
+      return bytes ? string_of_bytes (bytes) : (*ok = FALSE, NULL);
+    }
+  if (g_str_equal (name, "createDirectory"))
+    *ok = bro_file_system_create_directory (fs, a, bro_json_value_get_bool (bro_json_value_at (op, 2), FALSE), error);
+  else if (g_str_equal (name, "writeAtomically"))
+    {
+      const char *text = bro_json_value_get_string (bro_json_value_at (op, 2), "");
+      g_autoptr (GBytes) bytes = g_bytes_new (text, strlen (text));
+      *ok = bro_file_system_write_atomically (fs, a, bytes, (int) bro_json_value_get_integer (bro_json_value_at (op, 3), 0644), error);
+    }
+  else if (g_str_equal (name, "rename"))
+    *ok = bro_file_system_rename (fs, a, b, error);
+  else if (g_str_equal (name, "moveMerging"))
+    {
+      BroMovePolicy policy = BRO_MOVE_POLICY_NEVER_REPLACE;
+      g_autoptr (GPtrArray) moved = NULL;
+      BroJsonValue *v;
+      bro_move_policy_from_wire (bro_json_value_get_string (bro_json_value_at (op, 3), ""), &policy);
+      moved = bro_file_system_move_merging (fs, a, b, policy, error);
+      if (!moved)
+        return *ok = FALSE, NULL;
+      v = bro_json_value_new_array ();
+      for (guint i = 0; i < moved->len; i++)
+        {
+          BroMovedItem *m = moved->pdata[i];
+          BroJsonValue *pair = bro_json_value_new_array ();
+          bro_json_value_append (pair, bro_json_value_new_string (m->from + strlen (fs_root) + 1));
+          bro_json_value_append (pair, bro_json_value_new_string (m->to + strlen (fs_root) + 1));
+          bro_json_value_append (v, pair);
+        }
+      return v;
+    }
+  else if (g_str_equal (name, "remove"))
+    *ok = bro_file_system_remove (fs, a, error);
+  else if (g_str_equal (name, "moveToTrash"))
+    *ok = bro_file_system_move_to_trash (fs, a, b, error);
+  else if (g_str_equal (name, "syncFile"))
+    *ok = bro_file_system_sync_file (fs, a, error);
+  else if (g_str_equal (name, "syncDirectory"))
+    *ok = bro_file_system_sync_directory (fs, a, error);
+  else if (g_str_equal (name, "openForReading"))
+    {
+      g_autoptr (BroByteStream) stream = bro_file_system_open_for_reading (fs, a, bro_json_value_get_bool (bro_json_value_at (op, 2), FALSE), error);
+      GByteArray *all;
+      GBytes *chunk;
+      if (!stream)
+        return *ok = FALSE, NULL;
+      all = g_byte_array_new ();
+      while ((chunk = bro_byte_stream_read (stream, 4, NULL)) != NULL && g_bytes_get_size (chunk) > 0)
+        {
+          gsize n;
+          const guint8 *d = g_bytes_get_data (chunk, &n);
+          g_byte_array_append (all, d, (guint) n);
+          g_bytes_unref (chunk);
+        }
+      if (chunk)
+        g_bytes_unref (chunk);
+      bro_byte_stream_close (stream);
+      return string_of_bytes (g_byte_array_free_to_bytes (all));
+    }
+  return NULL;
+}
+
+static gboolean
+fs_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (BroJsonValue) result = NULL;
+  BroJsonValue *want_error = bro_json_value_member (expect, "error");
+  BroJsonValue *want_result = bro_json_value_member (expect, "result");
+  BroJsonValue *want_tree = bro_json_value_member (expect, "tree");
+  gboolean ok;
+  fs_build (bro_json_value_member (given, "tree"));
+  result = fs_run (BRO_FILE_SYSTEM (fs), bro_json_value_member (given, "op"), &error, &ok);
+  if (want_error)
+    {
+      BroJsonValue *params = bro_json_value_member (want_error, "params");
+      if (ok || !error)
+        {
+          bro_test_fail (failures, id, "no error");
+          return TRUE;
+        }
+      bro_test_same_string (failures, id, "code", bro_json_value_get_string (bro_json_value_member (want_error, "code"), ""), error->code);
+      for (guint i = 0; params && i < bro_json_value_length (params); i++)
+        {
+          const char *key = params->keys->pdata[i];
+          const char *actual = bro_json_value_get_string (bro_json_value_member (error->params, key), "");
+          g_autofree char *shown = g_str_equal (key, "path") && g_str_has_prefix (actual, fs_root)
+                                     ? g_strconcat ("<root>", actual + strlen (fs_root), NULL) : g_strdup (actual);
+          bro_test_same_string (failures, id, key, bro_json_value_get_string (bro_json_value_at (params, i), ""), shown);
+        }
+    }
+  else if (!ok)
+    bro_test_fail (failures, id, "failed: %s", error ? error->code : "?");
+  else if (want_result && want_result->kind == BRO_JSON_VALUE_OBJECT && result && result->kind == BRO_JSON_VALUE_OBJECT)
+    {
+      for (guint i = 0; i < bro_json_value_length (want_result); i++)
+        bro_test_same_json (failures, id, want_result->keys->pdata[i], bro_json_value_at (want_result, i),
+                            bro_json_value_member (result, want_result->keys->pdata[i]));
+    }
+  else if (want_result)
+    bro_test_same_json (failures, id, "result", want_result, result);
+  if (want_tree)
+    {
+      g_autofree char *want = fs_expected_tree (want_tree);
+      g_autofree char *got = fs_tree ();
+      bro_test_same_string (failures, id, "tree", want, got);
+    }
+  return TRUE;
+}
+
+static void
+test_fs_cases (void)
+{
+  bro_test_run_cases ("adapters/file-system.cases.json", fs_case);
+}
+
+/* file-system-durable-write, file-system-read-uncached, and the permission bits. */
+static void
+test_fs_durable_and_uncached (void)
+{
+  g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (BroBroError) error = NULL;
+  g_autofree char *path = NULL;
+  g_autofree guint8 *big = g_malloc ((3 << 20) + 123);
+  g_autoptr (GBytes) bytes = NULL;
+  g_autoptr (BroByteStream) stream = NULL;
+  g_autoptr (GByteArray) all = g_byte_array_new ();
+  GBytes *chunk;
+  struct stat st;
+  GDir *dir;
+  for (gsize i = 0; i < (3 << 20) + 123; i++)
+    big[i] = (guint8) ((i * 2654435761u) >> 13);
+  remove_tree (fs_root);
+  g_mkdir_with_parents (fs_root, 0755);
+  path = g_build_filename (fs_root, "big.bin", NULL);
+  bytes = g_bytes_new_static (big, (3 << 20) + 123);
+  g_assert_true (bro_platform_file_system_write_atomically (fs, path, bytes, 0600, &error));
+  g_assert_true (bro_platform_file_system_sync_file (fs, path, &error));
+  g_assert_true (bro_platform_file_system_sync_directory (fs, fs_root, &error));
+  g_assert_cmpint (stat (path, &st), ==, 0);
+  g_assert_cmpint (st.st_mode & 0777, ==, 0600);
+  stream = bro_platform_file_system_open_for_reading (fs, path, TRUE, &error);
+  g_assert_nonnull (stream);
+  while ((chunk = bro_byte_stream_read (stream, 100000, &error)) != NULL && g_bytes_get_size (chunk) > 0)
+    {
+      gsize n;
+      const guint8 *d = g_bytes_get_data (chunk, &n);
+      g_byte_array_append (all, d, (guint) n);
+      g_bytes_unref (chunk);
+    }
+  g_clear_pointer (&chunk, g_bytes_unref);
+  bro_byte_stream_close (stream);
+  g_assert_cmpuint (all->len, ==, (3 << 20) + 123);
+  g_assert_true (memcmp (all->data, big, all->len) == 0);
+  dir = g_dir_open (fs_root, 0, NULL);
+  g_assert_cmpstr (g_dir_read_name (dir), ==, "big.bin");
+  g_assert_null (g_dir_read_name (dir));
+  g_dir_close (dir);
+}
+
+static void
+test_fs_volume (void)
+{
+  g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (BroBroError) error = NULL;
+  g_autofree char *missing = g_build_filename (fs_root, "not", "yet", "there", NULL);
+  g_autoptr (BroVolumeInfo) v = NULL;
+  g_autoptr (BroVolumeInfo) w = NULL;
+  g_mkdir_with_parents (fs_root, 0755);
+  v = bro_platform_file_system_volume (fs, missing, &error);
+  w = bro_platform_file_system_volume (fs, fs_root, &error);
+  g_assert_nonnull (v);
+  g_assert_cmpuint (strlen (v->id), ==, 16);
+  g_assert_cmpint (v->free_bytes, >, 0);
+  g_assert_cmpstr (v->fs_type, !=, "");
+  g_assert_cmpstr (v->id, ==, w->id);
+#ifdef __APPLE__
+  g_assert_cmpstr (v->fs_type, ==, "apfs");
+#else
+  g_assert_cmpstr (v->fs_type, !=, "unknown");
+#endif
+}
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -363,6 +729,11 @@ main (int argc, char **argv)
   g_autofree char *cleanup = NULL;
   g_test_init (&argc, &argv, NULL);
   scratch = g_dir_make_tmp ("bromelia-adapters-XXXXXX", NULL);
+  {
+    char *real = realpath (scratch, NULL); /* macOS: /var → /private/var, so error paths match */
+    fs_root = g_build_filename (real, "fs", NULL);
+    free (real);
+  }
   g_test_add_func ("/process/stall-stops", test_stall_stops);
   g_test_add_func ("/process/busy-not-stopped", test_busy_not_stopped);
   g_test_add_func ("/process/cancel-escalates", test_cancel_escalates);
@@ -373,6 +744,9 @@ main (int argc, char **argv)
   g_test_add_func ("/process/streams", test_streams);
   g_test_add_func ("/process/could-not-start", test_could_not_start);
   g_test_add_func ("/process/interpreter", test_interpreter);
+  g_test_add_func ("/file-system/cases", test_fs_cases);
+  g_test_add_func ("/file-system/durable-and-uncached", test_fs_durable_and_uncached);
+  g_test_add_func ("/file-system/volume", test_fs_volume);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);
@@ -380,5 +754,6 @@ main (int argc, char **argv)
   cleanup = g_strdup_printf ("rm -rf '%s'", scratch);
   g_spawn_command_line_sync (cleanup, NULL, NULL, NULL, NULL);
   g_free (scratch);
+  g_free (fs_root);
   return status;
 }
