@@ -1,0 +1,116 @@
+{
+  "description": "DataImager (plan §10.1): copy(device, destIso, sink, cancel) copies every sector of DriveControl.openRaw(device) to destIso, 512 sectors (1 MiB) at a time, and returns the bytes copied. It writes a hidden file next to destIso ('.<name>.part-…'), flushes it, and renames it to destIso only when every sector was read: a failed or cancelled copy leaves nothing behind. A chunk that can't be read is read again sector by sector, so the error names the first byte that can't be read: other.readError {offset, reason (the reader's)}. destIso already there: fs.alreadyExists {path}, before anything is read. Cancelled: job.cancelled. Progress after each chunk: ProgressValue(current = total = sectors done × 10000 / all sectors, max 10000). The fake disc: 'sectors' sectors, byte i of the disc is (i / 2048 + i) mod 256; 'unreadable' sectors fail; 'cancelAfterChunks' cancels after that many chunks are written; 'openFails' makes openRaw fail with drive.notFound. 'left' lists the destination folder afterwards.",
+  "cases": [
+    {
+      "id": "copy",
+      "given": {
+        "sectors": 1100
+      },
+      "expect": {
+        "bytes": 2252800,
+        "progress": [
+          [
+            4654,
+            4654
+          ],
+          [
+            9309,
+            9309
+          ],
+          [
+            10000,
+            10000
+          ]
+        ],
+        "imageMatches": true,
+        "left": [
+          "disc.iso"
+        ],
+        "closed": true
+      }
+    },
+    {
+      "id": "one-chunk",
+      "given": {
+        "sectors": 512
+      },
+      "expect": {
+        "bytes": 1048576,
+        "progress": [
+          [
+            10000,
+            10000
+          ]
+        ],
+        "imageMatches": true,
+        "left": [
+          "disc.iso"
+        ]
+      }
+    },
+    {
+      "id": "a-read-error",
+      "given": {
+        "sectors": 1100,
+        "unreadable": [
+          600,
+          601
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "other.readError",
+          "params": {
+            "offset": 1228800,
+            "reason": "I/O error"
+          }
+        },
+        "left": [],
+        "closed": true
+      }
+    },
+    {
+      "id": "the-destination-exists",
+      "given": {
+        "sectors": 10,
+        "existing": true
+      },
+      "expect": {
+        "error": {
+          "code": "fs.alreadyExists"
+        },
+        "reads": 0,
+        "left": [
+          "disc.iso"
+        ]
+      }
+    },
+    {
+      "id": "cancelled",
+      "given": {
+        "sectors": 1100,
+        "cancelAfterChunks": 1
+      },
+      "expect": {
+        "error": {
+          "code": "job.cancelled"
+        },
+        "left": [],
+        "closed": true
+      }
+    },
+    {
+      "id": "no-such-drive",
+      "given": {
+        "sectors": 10,
+        "openFails": true
+      },
+      "expect": {
+        "error": {
+          "code": "drive.notFound"
+        },
+        "left": []
+      }
+    }
+  ]
+}
