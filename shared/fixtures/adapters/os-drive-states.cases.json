@@ -1,0 +1,296 @@
+{
+  "description": "OsDriveState.changes(before, after) and DrivePoller (plan §10.3, DeviceMonitor): a drive state is an OsDrive {device, identification, mountPath?} and whether it holds media. changes lists the DeviceEvents between two snapshots: first, for each drive of 'after' in its order: driveAppeared (a new device), then for a known one unmounted (its mount went or changed) and mediaRemoved (media went), then mediaArrived (media came, or a new drive holds some) and mounted (a new or changed mount); then, for each drive of 'before' that is gone in its order: unmounted, mediaRemoved (when it had them), driveVanished. An identification change alone is no event. DrivePoller(snapshot, clock, interval) takes a snapshot when started (no events for what is already there), then one each interval (a clock timer), reporting changes to the sink; currentDrives is a fresh snapshot; stop cancels the timer. Events are written 'kind device' (mounted adds the path; driveAppeared adds the identification).",
+  "cases": [
+    {
+      "id": "a-drive-appears",
+      "given": {
+        "before": [],
+        "after": [
+          {
+            "device": "/dev/sr0",
+            "identification": "HL-DT-ST BD-RE WH16NS60",
+            "media": false
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "driveAppeared /dev/sr0 HL-DT-ST BD-RE WH16NS60"
+        ]
+      }
+    },
+    {
+      "id": "a-drive-appears-with-a-mounted-disc",
+      "given": {
+        "before": [],
+        "after": [
+          {
+            "device": "/dev/sr0",
+            "identification": "DRIVE",
+            "media": true,
+            "mountPath": "/media/user/MOVIE"
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "driveAppeared /dev/sr0 DRIVE",
+          "mediaArrived /dev/sr0",
+          "mounted /dev/sr0 /media/user/MOVIE"
+        ]
+      }
+    },
+    {
+      "id": "a-disc-goes-in",
+      "given": {
+        "before": [
+          {
+            "device": "E:",
+            "identification": "DRIVE",
+            "media": false
+          }
+        ],
+        "after": [
+          {
+            "device": "E:",
+            "identification": "DRIVE",
+            "media": true
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "mediaArrived E:"
+        ]
+      }
+    },
+    {
+      "id": "and-is-mounted-later",
+      "given": {
+        "before": [
+          {
+            "device": "E:",
+            "identification": "DRIVE",
+            "media": true
+          }
+        ],
+        "after": [
+          {
+            "device": "E:",
+            "identification": "DRIVE",
+            "media": true,
+            "mountPath": "E:\\"
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "mounted E: E:\\"
+        ]
+      }
+    },
+    {
+      "id": "a-disc-comes-out",
+      "given": {
+        "before": [
+          {
+            "device": "/dev/sr0",
+            "identification": "DRIVE",
+            "media": true,
+            "mountPath": "/media/x"
+          }
+        ],
+        "after": [
+          {
+            "device": "/dev/sr0",
+            "identification": "DRIVE",
+            "media": false
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "unmounted /dev/sr0",
+          "mediaRemoved /dev/sr0"
+        ]
+      }
+    },
+    {
+      "id": "swapped-between-two-looks",
+      "given": {
+        "before": [
+          {
+            "device": "/dev/sr0",
+            "identification": "DRIVE",
+            "media": true,
+            "mountPath": "/media/A"
+          }
+        ],
+        "after": [
+          {
+            "device": "/dev/sr0",
+            "identification": "DRIVE",
+            "media": true,
+            "mountPath": "/media/B"
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "unmounted /dev/sr0",
+          "mounted /dev/sr0 /media/B"
+        ]
+      }
+    },
+    {
+      "id": "a-drive-goes-away-with-its-disc",
+      "given": {
+        "before": [
+          {
+            "device": "/dev/sr0",
+            "identification": "DRIVE",
+            "media": true,
+            "mountPath": "/media/x"
+          },
+          {
+            "device": "/dev/sr1",
+            "identification": "DRIVE",
+            "media": false
+          }
+        ],
+        "after": [
+          {
+            "device": "/dev/sr1",
+            "identification": "DRIVE",
+            "media": false
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "unmounted /dev/sr0",
+          "mediaRemoved /dev/sr0",
+          "driveVanished /dev/sr0"
+        ]
+      }
+    },
+    {
+      "id": "nothing-changed",
+      "given": {
+        "before": [
+          {
+            "device": "/dev/sr0",
+            "identification": "A",
+            "media": false
+          },
+          {
+            "device": "/dev/sr1",
+            "identification": "DRIVE",
+            "media": true
+          }
+        ],
+        "after": [
+          {
+            "device": "/dev/sr1",
+            "identification": "DRIVE",
+            "media": true
+          },
+          {
+            "device": "/dev/sr0",
+            "identification": "A renamed",
+            "media": false
+          }
+        ]
+      },
+      "expect": {
+        "events": []
+      }
+    },
+    {
+      "id": "several-at-once",
+      "given": {
+        "before": [
+          {
+            "device": "D:",
+            "identification": "DRIVE",
+            "media": false
+          },
+          {
+            "device": "E:",
+            "identification": "DRIVE",
+            "media": true
+          }
+        ],
+        "after": [
+          {
+            "device": "E:",
+            "identification": "DRIVE",
+            "media": false
+          },
+          {
+            "device": "F:",
+            "identification": "DRIVE",
+            "media": true
+          },
+          {
+            "device": "D:",
+            "identification": "DRIVE",
+            "media": true
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          "mediaRemoved E:",
+          "driveAppeared F: DRIVE",
+          "mediaArrived F:",
+          "mediaArrived D:"
+        ]
+      }
+    },
+    {
+      "id": "poller",
+      "given": {
+        "snapshots": [
+          [
+            {
+              "device": "/dev/sr0",
+              "identification": "DRIVE",
+              "media": false
+            }
+          ],
+          [
+            {
+              "device": "/dev/sr0",
+              "identification": "DRIVE",
+              "media": true
+            }
+          ],
+          [
+            {
+              "device": "/dev/sr0",
+              "identification": "DRIVE",
+              "media": true
+            }
+          ],
+          []
+        ],
+        "interval": 2
+      },
+      "expect": {
+        "timer": 2,
+        "afterTicks": [
+          [
+            "mediaArrived /dev/sr0"
+          ],
+          [],
+          [
+            "mediaRemoved /dev/sr0",
+            "driveVanished /dev/sr0"
+          ]
+        ],
+        "stopped": true
+      }
+    }
+  ]
+}
