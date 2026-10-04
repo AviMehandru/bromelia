@@ -67,11 +67,12 @@ is_uhd (BroDiscInfo *info)
         {
           BroTrack *tr = t->tracks->pdata[j];
           const char *size = bro_track_attr (tr, BRO_ATTR_VIDEO_SIZE);
-          g_autofree char *codec = NULL;
+          g_autofree char *joined = NULL, *codec = NULL;
           if (bro_track_kind (tr) != BRO_TRACK_VIDEO)
             continue;
-          codec = g_ascii_strup (g_strconcat (bro_track_attr (tr, BRO_ATTR_CODEC_ID) ? bro_track_attr (tr, BRO_ATTR_CODEC_ID) : "", " ",
-                                              bro_track_attr (tr, BRO_ATTR_CODEC_SHORT) ? bro_track_attr (tr, BRO_ATTR_CODEC_SHORT) : "", NULL), -1);
+          joined = g_strconcat (bro_track_attr (tr, BRO_ATTR_CODEC_ID) ? bro_track_attr (tr, BRO_ATTR_CODEC_ID) : "", " ",
+                                bro_track_attr (tr, BRO_ATTR_CODEC_SHORT) ? bro_track_attr (tr, BRO_ATTR_CODEC_SHORT) : "", NULL);
+          codec = g_ascii_strup (joined, -1);
           if ((size && (strstr (size, "2160") || strstr (size, "3840"))) || strstr (codec, "HEVC") || strstr (codec, "MPEGH"))
             return TRUE;
         }

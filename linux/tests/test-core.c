@@ -1159,6 +1159,14 @@ fake_new (const char *listing_text, const char *mkv)
   return fake_new_full (listing_text, mkv, NULL);
 }
 
+/* fake_new, freeing @listing_text (a listing () result). */
+static Fake *
+fake_new_listing (char *listing_text, const char *mkv)
+{
+  g_autofree char *owned = listing_text;
+  return fake_new_full (owned, mkv, NULL);
+}
+
 static char *
 fake_calls (Fake *f)
 {
@@ -1372,7 +1380,7 @@ test_safety_failed_title (void)
 static void
 test_safety_failure_without_files (void)
 {
-  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), "cat <<'EOF'\n" FAILED_SAVE "\nEOF");
+  Fake *f = fake_new_listing (listing ("SAMPLE_MOVIE", "0:00:10,1"), "cat <<'EOF'\n" FAILED_SAVE "\nEOF");
   g_autoptr (BroRunResult) res = run_fake (f, "0", NULL, NULL, FALSE);
   g_autoptr (GPtrArray) root = names_in (f->root, TRUE);
   g_assert_cmpint (res->status, ==, BRO_JOB_FAILED);
@@ -1385,7 +1393,7 @@ static void
 test_safety_shared_folder (void)
 {
   g_autofree char *m = writes_file (FAILED_SAVE);
-  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), m);
+  Fake *f = fake_new_listing (listing ("SAMPLE_MOVIE", "0:00:10,1"), m);
   g_autofree char *other = g_build_filename (f->root, "other.mkv", NULL);
   g_autoptr (BroRunResult) res = NULL;
   g_autoptr (GPtrArray) root = NULL;
@@ -1457,7 +1465,7 @@ static void
 test_safety_different_disc (void)
 {
   g_autofree char *m = writes_file (SAVED), *other = listing ("OTHER_DISC", "0:00:10,1");
-  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), m);
+  Fake *f = fake_new_listing (listing ("SAMPLE_MOVIE", "0:00:10,1"), m);
   g_autoptr (BroDiscInfo) opened = bro_disc_info_from_output (other);
   g_autoptr (BroRunResult) res = run_fake (f, "0", opened, NULL, FALSE);
   g_autofree char *calls = fake_calls (f);
@@ -1473,7 +1481,7 @@ static void
 test_safety_title_numbers (void)
 {
   g_autofree char *m = writes_file (SAVED), *old = listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2");
-  Fake *f = fake_new (listing ("SAMPLE_MOVIE", "0:00:05,9;0:00:10,1;0:00:20,2"), m);
+  Fake *f = fake_new_listing (listing ("SAMPLE_MOVIE", "0:00:05,9;0:00:10,1;0:00:20,2"), m);
   g_autoptr (BroDiscInfo) opened = bro_disc_info_from_output (old);
   g_autoptr (BroRunResult) res = run_fake (f, "1", opened, NULL, FALSE);
   g_autofree char *calls = fake_calls (f);
@@ -1485,7 +1493,7 @@ test_safety_title_numbers (void)
 
   {
     g_autofree char *m2 = writes_file (SAVED);
-    Fake *f2 = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1"), m2);
+    Fake *f2 = fake_new_listing (listing ("SAMPLE_MOVIE", "0:00:10,1"), m2);
     g_autoptr (BroRunResult) res2 = run_fake (f2, "1", opened, NULL, FALSE);
     g_autofree char *calls2 = fake_calls (f2);
     g_assert_cmpint (res2->status, ==, BRO_JOB_FAILED);
@@ -1526,7 +1534,7 @@ test_safety_checks_rips (void)
   short_file = make_sample (ffmpeg, 3);
   m = g_strdup_printf ("if [ \"$title\" = \"0\" ]; then cp '%s' \"$dest/title_t00.mkv\"; else cp '%s' \"$dest/title_t01.mkv\"; fi\n"
                        "cat <<'EOF'\n%s\nEOF", good, short_file, SAVED);
-  f = fake_new (listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2;0:00:30,3"), m);
+  f = fake_new_listing (listing ("SAMPLE_MOVIE", "0:00:10,1;0:00:20,2;0:00:30,3"), m);
   {
     g_autoptr (BroRunResult) res = run_fake (f, "0,1", NULL, mkvmerge, FALSE);
     g_autoptr (GPtrArray) root = names_in (f->root, FALSE);
@@ -3066,6 +3074,7 @@ test_web_tls (void)
   g_autoptr (BroState) st = bro_state_new (NULL);
   g_autofree char *openssl = g_find_program_in_path ("openssl");
   g_autofree char *dir = NULL, *cert = NULL, *key = NULL;
+  g_autoptr (GMainContext) context = NULL;
   BroWebUIConfig c = { TRUE, (char *) "127.0.0.1", g_random_int_range (52000, 58000), (char *) "", (char *) "", (char *) "" };
   int status = -1;
   c.tls_certificate = (char *) "/nonexistent/cert.pem";
@@ -3087,6 +3096,10 @@ test_web_tls (void)
     g_assert_true (bro_process_run (argv, NULL, NULL, 60, NULL, NULL, NULL, &status, NULL, NULL, NULL));
     g_assert_cmpint (status, ==, 0);
   }
+  /* The server gets a main context of its own: stopping closes the listening socket while GLib's cancelled accept
+   * source is still attached, and GLib 2.90 on macOS warns when it next polls that closed descriptor. */
+  context = g_main_context_new ();
+  g_main_context_push_thread_default (context);
   c.tls_certificate = cert;
   c.tls_key = (char *) "/nonexistent/key.pem";
   bro_web_server_apply (st->web, &c);
@@ -3097,6 +3110,7 @@ test_web_tls (void)
   g_assert_null (bro_web_server_last_error (st->web));
   g_assert_true (bro_web_server_running (st->web));
   bro_web_server_stop (st->web);
+  g_main_context_pop_thread_default (context);
   rm_rf (dir);
 }
 
