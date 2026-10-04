@@ -1,0 +1,175 @@
+{
+  "description": "CdRipper (plan §10.1), against a scripted launcher: rip(device, dest, command, stallMinutes, sink, cancel) runs CdRipperArgs.build's command (the profile's audio CD command, else cyanrip, else abcde: never on Windows, it is a shell script) in dest (stop: interruptFirst, stall timeout: stallMinutes) and returns the visible items it saved in dest, as paths, sorted. cyanrip and abcde, also when a custom command names them bare, come from the locator; any other program goes to the launcher as written (it searches PATH). Every output line goes to the sink as Raw. No command: other.audioNeedsRipper {platform}. Cancelled: job.cancelled. Stalled: process.stalled {tool, minutes}. Exit status not 0: process.failed {tool, status}. Nothing saved: process.savedNothing {tool}. {tool} is the command's program as written. 'located' lists the tools the locator finds (at /opt/<tool>); 'saves' is a file the script writes in dest when it ends normally; 'stalls' ends the script as stopped for silence. 'windows' replaces expect on Windows.",
+  "cases": [
+    {
+      "id": "cyanrip",
+      "given": {
+        "located": ["cyanrip"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": ["cyanrip 0.9.3", { "stderr": "Ripping track 1" }],
+        "saves": "01 - Track.flac"
+      },
+      "expect": {
+        "argv": ["/opt/cyanrip", "-d", "/dev/sr0", "-o", "flac"],
+        "workingDirectory": "<root>/Album",
+        "stallSeconds": 600,
+        "raw": ["cyanrip 0.9.3", "Ripping track 1"],
+        "files": ["<root>/Album/01 - Track.flac"]
+      }
+    },
+    {
+      "id": "cyanrip-before-abcde",
+      "given": {
+        "located": ["cyanrip", "abcde"],
+        "device": "/dev/sr1",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": [],
+        "saves": "a.flac"
+      },
+      "expect": {
+        "argv": ["/opt/cyanrip", "-d", "/dev/sr1", "-o", "flac"],
+        "files": ["<root>/Album/a.flac"]
+      }
+    },
+    {
+      "id": "abcde-when-there-is-no-cyanrip",
+      "given": {
+        "located": ["abcde"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": [],
+        "saves": "a.flac"
+      },
+      "expect": {
+        "argv": ["/opt/abcde", "-d", "/dev/sr0", "-o", "flac", "-N"],
+        "files": ["<root>/Album/a.flac"]
+      },
+      "windows": {
+        "error": { "code": "other.audioNeedsRipper", "params": { "platform": "windows" } },
+        "started": false
+      }
+    },
+    {
+      "id": "a-custom-command",
+      "given": {
+        "located": ["cyanrip"],
+        "command": "my-ripper --drive {device} --format \"flac 24\"",
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 0,
+        "lines": [],
+        "saves": "a.flac"
+      },
+      "expect": {
+        "argv": ["my-ripper", "--drive", "/dev/sr0", "--format", "flac 24"],
+        "stallSeconds": null,
+        "files": ["<root>/Album/a.flac"]
+      }
+    },
+    {
+      "id": "a-custom-command-naming-cyanrip",
+      "given": {
+        "located": ["cyanrip"],
+        "command": "cyanrip -d {device} -o opus",
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": [],
+        "saves": "a.opus"
+      },
+      "expect": {
+        "argv": ["/opt/cyanrip", "-d", "/dev/sr0", "-o", "opus"],
+        "files": ["<root>/Album/a.opus"]
+      }
+    },
+    {
+      "id": "no-ripper",
+      "given": {
+        "located": [],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10
+      },
+      "expect": {
+        "error": { "code": "other.audioNeedsRipper" },
+        "started": false
+      }
+    },
+    {
+      "id": "failed",
+      "given": {
+        "located": ["cyanrip"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": [{ "stderr": "Unable to open device" }],
+        "exitCode": 2
+      },
+      "expect": {
+        "error": { "code": "process.failed", "params": { "tool": "cyanrip", "status": 2 } },
+        "raw": ["Unable to open device"]
+      }
+    },
+    {
+      "id": "saved-nothing",
+      "given": {
+        "located": ["cyanrip"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": [],
+        "exitCode": 0
+      },
+      "expect": {
+        "error": { "code": "process.savedNothing", "params": { "tool": "cyanrip" } }
+      }
+    },
+    {
+      "id": "hidden-files-are-not-saved-items",
+      "given": {
+        "located": ["cyanrip"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": [],
+        "saves": ".cyanrip.log"
+      },
+      "expect": {
+        "error": { "code": "process.savedNothing", "params": { "tool": "cyanrip" } }
+      }
+    },
+    {
+      "id": "stalled",
+      "given": {
+        "located": ["cyanrip"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": ["cyanrip 0.9.3"],
+        "stalls": true
+      },
+      "expect": {
+        "error": { "code": "process.stalled", "params": { "tool": "cyanrip", "minutes": 10 } }
+      }
+    },
+    {
+      "id": "cancelled",
+      "given": {
+        "located": ["cyanrip"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": ["cyanrip 0.9.3"],
+        "cancelled": true
+      },
+      "expect": {
+        "error": { "code": "job.cancelled" },
+        "started": false
+      }
+    }
+  ]
+}

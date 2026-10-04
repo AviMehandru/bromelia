@@ -22,6 +22,7 @@
 #include "bro-platform-power-manager.h"
 #include "bro-platform-keystore.h"
 #include "bro-hand-brake.h"
+#include "bro-cd-ripper.h"
 #endif
 #include <gio/gio.h>
 #include "bro-system-tool-locator.h"
@@ -908,6 +909,9 @@ struct _TestScript {
   GObject parent_instance;
   GStrv lines;
   GArray *stderr_at; /* int: the indexes of the lines that come on stderr (nullable) */
+  char *write_file_name; /* the file written in write_file_in (NULL: title_t00.mkv) */
+  gboolean stalls;       /* after the lines: end as stopped for silence */
+  double stall_seconds;  /* the spec's */
   int exit_code;
   char *write_file_in;
   int cancel_after;
@@ -942,13 +946,15 @@ script_lines (BroRunningProcess *p)
       line->text = g_strdup (self->lines[self->handed++]);
       return line;
     }
-  if (self->stopped)
+  if (!self->stopped && self->stalls)
+    self->exit = (BroProcessExit) { -1, 15, self->stall_seconds, FALSE, FALSE };
+  else if (self->stopped)
     self->exit = (BroProcessExit) { -1, 15, -1, FALSE, self->reason == BRO_STOP_REASON_CANCELLED || self->reason == BRO_STOP_REASON_SHUTDOWN };
   else
     {
       if (self->write_file_in)
         {
-          g_autofree char *f = g_build_filename (self->write_file_in, "title_t00.mkv", NULL);
+          g_autofree char *f = g_build_filename (self->write_file_in, self->write_file_name ? self->write_file_name : "title_t00.mkv", NULL);
           g_file_set_contents (f, "", 0, NULL);
         }
       for (int i = 0; self->split_parts > 0 && self->arguments && self->arguments[i]; i++)
@@ -997,6 +1003,7 @@ test_script_finalize (GObject *o)
   TestScript *self = TEST_SCRIPT (o);
   g_strfreev (self->lines);
   g_clear_pointer (&self->stderr_at, g_array_unref);
+  g_free (self->write_file_name);
   g_strfreev (self->arguments);
   g_free (self->write_file_in);
   g_free (self->write_text);
@@ -1021,6 +1028,8 @@ struct _TestScriptedLauncher {
   GObject parent_instance;
   GStrv lines;
   GArray *stderr_at; /* int (nullable) */
+  char *write_file_name;
+  gboolean stalls;
   int exit_code;
   char *write_file_in;
   int cancel_after;
@@ -1064,6 +1073,9 @@ launcher_start (BroProcessLauncher *l, const BroProcessSpec *spec, BroBroError *
   g_ptr_array_add (self->started, spec_copy (spec));
   script->lines = g_strdupv (self->lines);
   script->stderr_at = self->stderr_at ? g_array_ref (self->stderr_at) : NULL;
+  script->write_file_name = g_strdup (self->write_file_name);
+  script->stalls = self->stalls;
+  script->stall_seconds = spec->has_stall_timeout ? spec->stall_timeout.seconds : 0;
   script->exit_code = self->exit_code;
   script->write_file_in = g_strdup (self->write_file_in);
   script->cancel_after = self->cancel_after;
@@ -1082,6 +1094,7 @@ test_scripted_launcher_finalize (GObject *o)
   TestScriptedLauncher *self = TEST_SCRIPTED_LAUNCHER (o);
   g_strfreev (self->lines);
   g_clear_pointer (&self->stderr_at, g_array_unref);
+  g_free (self->write_file_name);
   g_free (self->write_file_in);
   g_free (self->write_text);
   g_ptr_array_unref (self->started);
@@ -1563,6 +1576,7 @@ test_real_iso (void)
 #include "test-power.inc"
 #include "test-keystore.inc"
 #include "test-handbrake.inc"
+#include "test-cd-ripper.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1677,6 +1691,7 @@ main (int argc, char **argv)
   g_test_add_func ("/mkvtoolnix/cases", test_mkvtoolnix);
   g_test_add_func ("/handbrake/cases", test_handbrake);
   g_test_add_func ("/handbrake/real", test_handbrake_real);
+  g_test_add_func ("/cd-ripper/cases", test_cd_ripper);
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
   g_test_add_func ("/keystore/files", test_keystore_files);

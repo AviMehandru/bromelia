@@ -10849,6 +10849,52 @@
           "c": "bro_hand_brake_encode"
         }
       ]
+    },
+    "adapters/cd-ripper": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "Audio CDs (plan §10.1; shared/fixtures/adapters/cd-ripper.cases.json): CdRipperArgs.build's command (the profile's audio CD command, else cyanrip, else abcde: not on Windows) in the destination, every output line to the sink as Raw; cyanrip and abcde come from the locator, any other program goes to the launcher as written. The visible items saved, or other.audioNeedsRipper, job.cancelled, process.stalled, process.failed, process.savedNothing.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "CdRipper",
+          "kind": "class",
+          "doc": "The audio CD adapter. Holds no state between calls.",
+          "swift": {
+            "name": "CdRipper",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/CdRipper.swift"
+          },
+          "cs": {
+            "name": "CdRipper",
+            "file": "windows/src/Bromelia.Adapters/Tools/CdRipper.cs"
+          },
+          "c": {
+            "name": "BroCdRipper",
+            "file": "linux/src/adapters/tools/bro-cd-ripper.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "CdRipper.rip",
+          "params": [
+            "device",
+            "dest",
+            "command",
+            "stallMinutes",
+            "sink",
+            "cancel"
+          ],
+          "returns": "[String]",
+          "throws": true,
+          "async": true,
+          "doc": "The visible items saved in dest, as paths, sorted.",
+          "swift": "CdRipper.rip(_:dest:command:stallMinutes:sink:cancel:)",
+          "cs": "CdRipper.Rip",
+          "c": "bro_cd_ripper_rip"
+        }
+      ]
     }
   }
 }
