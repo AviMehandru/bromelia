@@ -33,6 +33,7 @@ bro_adapters_sources = files(
   'tools/bro-mkv-tool-nix.c',
   'tools/bro-run-sink.c',
   'tools/bro-system-tool-locator.c',
+  'tools/bro-video-ts-byte-source.c',
 )
 
 bro_adapters_deps = [bro_ports_dep, gio_dep, gio_unix_dep, sqlite_dep]

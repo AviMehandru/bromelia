@@ -1,0 +1,260 @@
+{
+  "description": "VideoTsByteSource (plan §10.1, the Domain ByteSource over a disc): open(path) takes an ISO 9660 / UDF bridge image (or a disc device, read the same way), a VIDEO_TS folder, or the folder that contains one, and answers None for anything else (a folder without VIDEO_TS/VIDEO_TS.IFO, a file that isn't an image, a missing path). label: the image's volume name, or the name of the folder that contains VIDEO_TS. files: VIDEO_TS's files, upper case, sorted by name, with their sizes. read(file, offset, length): fewer bytes at the end of the file (never the next file's), none past it or for a file VIDEO_TS doesn't have. Paths are relative to shared/fixtures. adapters/video-ts.iso holds dvd-play-all's IFOs, a 3-sector VIDEO_TS.VOB whose byte i is i mod 251, and README.TXT at its root (made with hdiutil makehybrid -iso -udf). sameAnalysisAs: DvdNav.analyse finds the same titles (numbers and chapter counts) and jumps over both.",
+  "cases": [
+    {
+      "id": "iso-image",
+      "given": {
+        "open": "adapters/video-ts.iso"
+      },
+      "expect": {
+        "label": "BROMELIA_TEST",
+        "files": [
+          [
+            "VIDEO_TS.IFO",
+            20480
+          ],
+          [
+            "VIDEO_TS.VOB",
+            6144
+          ],
+          [
+            "VTS_01_0.IFO",
+            18432
+          ],
+          [
+            "VTS_02_0.IFO",
+            18432
+          ],
+          [
+            "VTS_03_0.IFO",
+            18432
+          ],
+          [
+            "VTS_04_0.IFO",
+            18432
+          ],
+          [
+            "VTS_05_0.IFO",
+            20480
+          ],
+          [
+            "VTS_06_0.IFO",
+            114688
+          ],
+          [
+            "VTS_07_0.IFO",
+            20480
+          ],
+          [
+            "VTS_08_0.IFO",
+            20480
+          ],
+          [
+            "VTS_09_0.IFO",
+            20480
+          ],
+          [
+            "VTS_10_0.IFO",
+            20480
+          ]
+        ],
+        "reads": [
+          {
+            "file": "VIDEO_TS.IFO",
+            "offset": 0,
+            "length": 12,
+            "text": "DVDVIDEO-VMG"
+          },
+          {
+            "file": "VIDEO_TS.VOB",
+            "offset": 2046,
+            "length": 4,
+            "hex": "26272829"
+          },
+          {
+            "file": "VIDEO_TS.VOB",
+            "offset": 6142,
+            "length": 10,
+            "hex": "7677"
+          },
+          {
+            "file": "VIDEO_TS.VOB",
+            "offset": 6144,
+            "length": 10,
+            "hex": ""
+          },
+          {
+            "file": "NOPE.IFO",
+            "offset": 0,
+            "length": 10,
+            "hex": ""
+          },
+          {
+            "file": "README.TXT",
+            "offset": 0,
+            "length": 10,
+            "hex": ""
+          }
+        ],
+        "sameAnalysisAs": "dvd-play-all"
+      }
+    },
+    {
+      "id": "the-folder-that-contains-video-ts",
+      "given": {
+        "open": "dvd-play-all"
+      },
+      "expect": {
+        "label": "dvd-play-all",
+        "files": [
+          [
+            "VIDEO_TS.IFO",
+            20480
+          ],
+          [
+            "VTS_01_0.IFO",
+            18432
+          ],
+          [
+            "VTS_02_0.IFO",
+            18432
+          ],
+          [
+            "VTS_03_0.IFO",
+            18432
+          ],
+          [
+            "VTS_04_0.IFO",
+            18432
+          ],
+          [
+            "VTS_05_0.IFO",
+            20480
+          ],
+          [
+            "VTS_06_0.IFO",
+            114688
+          ],
+          [
+            "VTS_07_0.IFO",
+            20480
+          ],
+          [
+            "VTS_08_0.IFO",
+            20480
+          ],
+          [
+            "VTS_09_0.IFO",
+            20480
+          ],
+          [
+            "VTS_10_0.IFO",
+            20480
+          ]
+        ],
+        "reads": [
+          {
+            "file": "VIDEO_TS.IFO",
+            "offset": 0,
+            "length": 12,
+            "text": "DVDVIDEO-VMG"
+          },
+          {
+            "file": "VTS_06_0.IFO",
+            "offset": 114680,
+            "length": 100,
+            "count": 8
+          },
+          {
+            "file": "VIDEO_TS.VOB",
+            "offset": 0,
+            "length": 10,
+            "hex": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "the-video-ts-folder-itself",
+      "given": {
+        "open": "dvd-play-all/VIDEO_TS"
+      },
+      "expect": {
+        "label": "dvd-play-all",
+        "files": [
+          [
+            "VIDEO_TS.IFO",
+            20480
+          ],
+          [
+            "VTS_01_0.IFO",
+            18432
+          ],
+          [
+            "VTS_02_0.IFO",
+            18432
+          ],
+          [
+            "VTS_03_0.IFO",
+            18432
+          ],
+          [
+            "VTS_04_0.IFO",
+            18432
+          ],
+          [
+            "VTS_05_0.IFO",
+            20480
+          ],
+          [
+            "VTS_06_0.IFO",
+            114688
+          ],
+          [
+            "VTS_07_0.IFO",
+            20480
+          ],
+          [
+            "VTS_08_0.IFO",
+            20480
+          ],
+          [
+            "VTS_09_0.IFO",
+            20480
+          ],
+          [
+            "VTS_10_0.IFO",
+            20480
+          ]
+        ]
+      }
+    },
+    {
+      "id": "a-folder-without-video-ts",
+      "given": {
+        "open": "adapters"
+      },
+      "expect": {
+        "opens": false
+      }
+    },
+    {
+      "id": "a-file-that-is-not-an-image",
+      "given": {
+        "open": "adapters/handbrake.cases.json"
+      },
+      "expect": {
+        "opens": false
+      }
+    },
+    {
+      "id": "a-missing-path",
+      "given": {
+        "open": "adapters/nothing-here.iso"
+      },
+      "expect": {
+        "opens": false
+      }
+    }
+  ]
+}
