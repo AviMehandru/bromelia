@@ -10477,6 +10477,105 @@
           "c": "bro_beta_key_source_current_key"
         }
       ]
+    },
+    "adapters/metadata-client": {
+      "layer": "adapters",
+      "folder": "Http",
+      "cFolder": "http",
+      "doc": "Online lookup (plan §10.2): Domain's TMDb and OMDb requests and parsers over the HttpClient, answers kept in the LookupCacheRepository for 7 days. shared/fixtures/adapters/metadata-client.cases.json replays recorded answers.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "MetadataClient",
+          "kind": "class",
+          "doc": "One provider (tmdb or omdb) with its key and language. metadata.http for a status other than 200; http.failed passed on; metadata.idUnsupported for an id the provider can't take.",
+          "swift": {
+            "name": "MetadataClient",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Http/MetadataClient.swift"
+          },
+          "cs": {
+            "name": "MetadataClient",
+            "file": "windows/src/Bromelia.Adapters/Http/MetadataClient.cs"
+          },
+          "c": {
+            "name": "BroMetadataClient",
+            "file": "linux/src/adapters/http/bro-metadata-client.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "MetadataClient.search",
+          "params": [
+            "name",
+            "kind",
+            "year",
+            "cancel"
+          ],
+          "returns": "[Candidate]",
+          "throws": true,
+          "async": true,
+          "doc": "Ranked (Ranking.rank); a year that finds nothing is dropped; OMDb's best result is read again for its plot.",
+          "swift": "MetadataClient.search(_:kind:year:cancel:)",
+          "cs": "MetadataClient.Search",
+          "c": "bro_metadata_client_search"
+        },
+        {
+          "name": "MetadataClient.lookup",
+          "params": [
+            "id",
+            "kind",
+            "cancel"
+          ],
+          "returns": "Candidate?",
+          "throws": true,
+          "async": true,
+          "swift": "MetadataClient.lookup(_:kind:cancel:)",
+          "cs": "MetadataClient.Lookup",
+          "c": "bro_metadata_client_lookup"
+        },
+        {
+          "name": "MetadataClient.season",
+          "params": [
+            "match",
+            "season",
+            "cancel"
+          ],
+          "returns": "[Int: EpisodeDetails]",
+          "throws": true,
+          "async": true,
+          "swift": "MetadataClient.season(_:season:cancel:)",
+          "cs": "MetadataClient.Season",
+          "c": "bro_metadata_client_season"
+        },
+        {
+          "name": "MetadataClient.absoluteEpisodes",
+          "params": [
+            "match",
+            "cancel"
+          ],
+          "returns": "[Int: EpisodeDetails]",
+          "throws": true,
+          "async": true,
+          "doc": "TMDb's absolute episode order (an episode group of type 2); empty when there is none or the provider is OMDb.",
+          "swift": "MetadataClient.absoluteEpisodes(_:cancel:)",
+          "cs": "MetadataClient.AbsoluteEpisodes",
+          "c": "bro_metadata_client_absolute_episodes"
+        },
+        {
+          "name": "MetadataClient.poster",
+          "params": [
+            "url",
+            "destination",
+            "cancel"
+          ],
+          "throws": true,
+          "async": true,
+          "swift": "MetadataClient.poster(_:destination:cancel:)",
+          "cs": "MetadataClient.Poster",
+          "c": "bro_metadata_client_poster"
+        }
+      ]
     }
   }
 }

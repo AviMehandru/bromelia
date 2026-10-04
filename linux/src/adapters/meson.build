@@ -10,6 +10,7 @@ bro_adapters_inc = include_directories('platform', 'clock', 'http', 'store', 'to
 bro_adapters_sources = files(
   'clock/bro-system-clock.c',
   'http/bro-beta-key-source.c',
+  'http/bro-metadata-client.c',
   'http/bro-notification-sender.c',
   'platform/bro-platform-file-system.c',
   'platform/bro-platform-process-launcher.c',

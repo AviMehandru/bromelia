@@ -12,6 +12,8 @@
 #include "bro-apprise-tool.h"
 #include "bro-beta-key-page.h"
 #include "bro-beta-key-source.h"
+#include "bro-episode-details.h"
+#include "bro-metadata-client.h"
 #include "bro-notification-sender.h"
 #include "bro-sqlite-store.h"
 #ifdef BRO_HAVE_LIBSOUP
@@ -1499,6 +1501,7 @@ test_real_iso (void)
 
 #include "test-store.inc"
 #include "test-http.inc"
+#include "test-metadata.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1609,6 +1612,7 @@ main (int argc, char **argv)
   g_test_add_func ("/http/client", test_http_client);
   g_test_add_func ("/http/notification-sender", test_notification_sender);
   g_test_add_func ("/http/beta-key-source", test_beta_key_source);
+  g_test_add_func ("/http/metadata-client", test_metadata_client);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

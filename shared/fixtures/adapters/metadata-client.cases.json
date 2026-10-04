@@ -1,0 +1,390 @@
+{
+  "functions": [
+    "MetadataClient.search",
+    "MetadataClient.lookup",
+    "MetadataClient.season",
+    "MetadataClient.absoluteEpisodes",
+    "MetadataClient.poster"
+  ],
+  "description": "MetadataClient (plan §10.2) against a fake HttpClient: each request goes to the first of given.answers whose match is part of its URL (a recorded file of shared/fixtures, a text, a status, or no answer with a reason), with the key 0123456789abcdef0123456789abcdef, language en-US, a real SqliteStore's lookup cache and a clock stopped at 2026-10-04T12:00:00.000Z. given.calls are made in order on one client: search(name, kind, year), lookup(choice, kind) (choice as Candidate.choice writes it: movie/603, tv/1668, tt…), season(choice of a TV match, season), absoluteEpisodes(choice of a TV match), poster(url, file in an empty temporary folder). expect.results lists, per search or lookup, the leading candidates (only the fields given); expect.episodes, per season call, the count and some titles; requests counts the HTTP requests sent.",
+  "cases": [
+    {
+      "id": "search-tv",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "search",
+            "One Piece",
+            "tv",
+            null
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/search/tv",
+            "file": "scenario-http/tmdb-search-tv-one-piece.json"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          [
+            {
+              "title": "One Piece",
+              "year": 1999,
+              "tmdbId": 37854
+            }
+          ]
+        ],
+        "requests": 1
+      }
+    },
+    {
+      "id": "search-year-falls-back",
+      "from": [
+        "today's MetadataLookup.search: a year that finds nothing is dropped"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "search",
+            "One Piece",
+            "tv",
+            1900
+          ]
+        ],
+        "answers": [
+          {
+            "match": "first_air_date_year=1900",
+            "text": "{\"results\":[]}"
+          },
+          {
+            "match": "/search/tv",
+            "file": "scenario-http/tmdb-search-tv-one-piece.json"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          [
+            {
+              "title": "One Piece",
+              "tmdbId": 37854
+            }
+          ]
+        ],
+        "requests": 2,
+        "lastRequestLacks": "first_air_date_year"
+      }
+    },
+    {
+      "id": "answers-are-cached",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "search",
+            "One Piece",
+            "tv",
+            null
+          ],
+          [
+            "search",
+            "One Piece",
+            "tv",
+            null
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/search/tv",
+            "file": "scenario-http/tmdb-search-tv-one-piece.json"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          [
+            {
+              "tmdbId": 37854
+            }
+          ],
+          [
+            {
+              "tmdbId": 37854
+            }
+          ]
+        ],
+        "requests": 1,
+        "cacheKeyLacks": "0123456789abcdef0123456789abcdef",
+        "rule": "a 200 answer is kept in the lookup cache for 7 days, keyed by provider and the request without the key"
+      }
+    },
+    {
+      "id": "lookup-tmdb-movie",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "lookup",
+            "movie/603",
+            "movie"
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/movie/603",
+            "file": "lookup/tmdb-movie.json"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          [
+            {
+              "title": "The Matrix",
+              "tmdbId": 603
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "lookup-imdb-through-find",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "lookup",
+            "tt0108778",
+            "tv"
+          ]
+        ],
+        "answers": [
+          {
+            "match": "external_source=imdb_id",
+            "file": "lookup/tmdb-find.json"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          [
+            {
+              "title": "Friends",
+              "tmdbId": 1668
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "omdb-cant-take-tmdb-ids",
+      "given": {
+        "provider": "omdb",
+        "calls": [
+          [
+            "lookup",
+            "movie/603",
+            "movie"
+          ]
+        ],
+        "answers": []
+      },
+      "expect": {
+        "error": {
+          "code": "metadata.idUnsupported",
+          "params": {
+            "provider": "OMDb",
+            "id": "movie/603",
+            "omdb": true
+          }
+        },
+        "requests": 0
+      }
+    },
+    {
+      "id": "omdb-best-read-again",
+      "from": [
+        "today's MetadataLookup.search: OMDb's best result is read again for its plot"
+      ],
+      "given": {
+        "provider": "omdb",
+        "calls": [
+          [
+            "search",
+            "Dune",
+            "movie",
+            null
+          ]
+        ],
+        "answers": [
+          {
+            "match": "s=Dune",
+            "file": "lookup/omdb-search.json"
+          },
+          {
+            "match": "i=tt",
+            "file": "lookup/omdb-title.json"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          [
+            {
+              "overviewStarts": "Follows the personal"
+            }
+          ]
+        ],
+        "requests": 2
+      }
+    },
+    {
+      "id": "season",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "season",
+            "tv/37854",
+            2
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/tv/37854/season/2",
+            "file": "scenario-http/tmdb-season-one-piece-2.json"
+          }
+        ]
+      },
+      "expect": {
+        "episodes": [
+          {
+            "count": 8,
+            "1": "Season 2 episode 1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "absolute-episodes",
+      "from": [
+        "owner decision 2026-10-03 (metadata.absoluteEpisodes)"
+      ],
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "absoluteEpisodes",
+            "tv/37854"
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/tv/37854/episode_groups",
+            "file": "scenario-http/tmdb-episode-groups-one-piece.json"
+          },
+          {
+            "match": "/tv/episode_group/5b1e8e1f0e0a2631c9000002",
+            "file": "scenario-http/tmdb-episode-group-absolute.json"
+          }
+        ]
+      },
+      "expect": {
+        "episodes": [
+          {
+            "138": "Absolute episode 138 (fixture)",
+            "139": "Absolute episode 139 (fixture)"
+          }
+        ],
+        "requests": 2
+      }
+    },
+    {
+      "id": "http-status",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "search",
+            "One Piece",
+            "tv",
+            null
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/search/tv",
+            "status": 401,
+            "text": "no"
+          }
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "metadata.http",
+          "params": {
+            "provider": "TMDb",
+            "status": 401
+          }
+        }
+      }
+    },
+    {
+      "id": "no-answer",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "search",
+            "One Piece",
+            "tv",
+            null
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/search/tv",
+            "reason": "offline"
+          }
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "http.failed",
+          "params": {
+            "reason": "offline"
+          }
+        }
+      }
+    },
+    {
+      "id": "poster",
+      "given": {
+        "provider": "tmdb",
+        "calls": [
+          [
+            "poster",
+            "https://image.tmdb.org/t/p/original/x.jpg",
+            "poster.jpg"
+          ]
+        ],
+        "answers": [
+          {
+            "match": "/x.jpg",
+            "text": "JPEGDATA"
+          }
+        ]
+      },
+      "expect": {
+        "file": {
+          "poster.jpg": "JPEGDATA"
+        },
+        "rule": "written atomically (FileSystem.writeAtomically); posters aren't cached"
+      }
+    }
+  ]
+}
