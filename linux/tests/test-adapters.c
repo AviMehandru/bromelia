@@ -29,6 +29,7 @@
 #include "bro-data-imager.h"
 #include "bro-drive-poller.h"
 #include "bro-platform-device-monitor.h"
+#include "bro-platform-drive-control.h"
 #endif
 #include <gio/gio.h>
 #include "bro-system-tool-locator.h"
@@ -1587,6 +1588,7 @@ test_real_iso (void)
 #include "test-menu-ocr.inc"
 #include "test-data-imager.inc"
 #include "test-drives.inc"
+#include "test-drive-control.inc"
 
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
@@ -1709,6 +1711,8 @@ main (int argc, char **argv)
   g_test_add_func ("/data-imager/cases", test_data_imager);
   g_test_add_func ("/drives/states", test_drive_states);
   g_test_add_func ("/drives/platform", test_platform_device_monitor);
+  g_test_add_func ("/drive-control/cases", test_drive_control);
+  g_test_add_func ("/drive-control/empty-drives", test_drive_control_empty_drives);
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
   g_test_add_func ("/keystore/files", test_keystore_files);

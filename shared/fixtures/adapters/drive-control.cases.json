@@ -1,0 +1,66 @@
+{
+  "description": "PlatformDriveControl (plan §10.3), the parts that need no disc: openRaw over a disc image file (a drive's raw device is read the same way, in whole 2048-byte sectors): sectorCount is its size / 2048; read(sector, count) gives fewer bytes at the end and none past it; a path that isn't there: fs.notFound {path}. probeContent of something that isn't a drive: unknown. waitForMount of something that isn't a drive: none, at once (within 5 s whatever the timeout). eject and closeTray need a drive with a disc (owner check); on the test VMs' empty virtual drives probeContent is unknown and waitForMount none.",
+  "cases": [
+    {
+      "id": "raw-reads-of-an-image",
+      "given": {
+        "openRaw": "adapters/video-ts.iso"
+      },
+      "expect": {
+        "sectorCount": 704,
+        "reads": [
+          {
+            "sector": 16,
+            "count": 1,
+            "length": 2048,
+            "startsHex": "01434430303101"
+          },
+          {
+            "sector": 2,
+            "count": 3,
+            "length": 6144
+          },
+          {
+            "sector": 700,
+            "count": 10,
+            "length": 8192
+          },
+          {
+            "sector": 704,
+            "count": 1,
+            "length": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "raw-read-of-a-missing-path",
+      "given": {
+        "openRaw": "adapters/nothing-here.iso"
+      },
+      "expect": {
+        "error": "fs.notFound"
+      }
+    },
+    {
+      "id": "an-image-has-no-content-to-probe",
+      "given": {
+        "probeContent": "adapters/video-ts.iso"
+      },
+      "expect": {
+        "content": "unknown"
+      }
+    },
+    {
+      "id": "an-image-is-never-mounted",
+      "given": {
+        "waitForMount": "adapters/video-ts.iso",
+        "timeout": 30
+      },
+      "expect": {
+        "mount": null,
+        "within": 5
+      }
+    }
+  ]
+}
