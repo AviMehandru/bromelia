@@ -84,6 +84,7 @@ typedef enum {
   BRO_MSG_MAKEMKV_REGISTER_OK, /* makemkv.register.ok */
   BRO_MSG_MAKEMKV_REGISTER_FAILED, /* makemkv.register.failed */
   BRO_MSG_MAKEMKV_DRIVE_SCAN_FAILED, /* makemkv.driveScanFailed */
+  BRO_MSG_MAKEMKV_REGISTRY_FAILED, /* makemkv.registryFailed */
   BRO_MSG_MAKEMKV_TITLE_PROGRESS, /* makemkv.titleProgress */
   BRO_MSG_DISC_OP_READING, /* disc.op.reading */
   BRO_MSG_DISC_READING_AGAIN, /* disc.readingAgain */

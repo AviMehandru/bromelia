@@ -1,0 +1,90 @@
+{
+  "functions": [
+    "HomeDirIsolation.prepare"
+  ],
+  "description": "What HomeDirIsolation writes for one makemkvcon run (plan §10.3; macOS and Linux in production, all three in tests). Paths are relative to an empty temporary folder, <root> in the expectations; given.before are files already there. expect.files lists every file under workDirectory afterwards; modes are POSIX permission bits (checked where the OS has them). The lease's firstOutput and release change nothing: the files stay with the job.",
+  "cases": [
+    {
+      "id": "home-macos",
+      "from": [
+        "macos MakeMKVFileTests.environmentIsolatesSettings",
+        "platform-adapters.contract.json#settings-isolation-home"
+      ],
+      "given": {
+        "layout": "macos",
+        "settings": {
+          "dvd_MinimumTitleLength": "30",
+          "app_Key": "T-abc"
+        },
+        "profileXml": null,
+        "workDirectory": "home"
+      },
+      "expect": {
+        "environment": {
+          "HOME": "<root>/home"
+        },
+        "profilePath": null,
+        "files": {
+          "home/Library/MakeMKV/settings.conf": "#\n# MakeMKV settings file. Written by Bromelia for one makemkvcon run.\n# Changes made here are overwritten before every job.\n#\n\napp_Key = \"T-abc\"\ndvd_MinimumTitleLength = \"30\"\n"
+        },
+        "modes": {
+          "home/Library/MakeMKV/settings.conf": 384
+        }
+      }
+    },
+    {
+      "id": "home-linux-with-profile",
+      "from": [
+        "linux /makemkv/environment",
+        "windows FileFormatTests.EnvironmentBuildsArguments"
+      ],
+      "given": {
+        "layout": "linux",
+        "settings": {
+          "app_DataDir": "/data/MakeMKV"
+        },
+        "profileXml": "<profile/>",
+        "workDirectory": "jobs/1/home"
+      },
+      "expect": {
+        "environment": {
+          "HOME": "<root>/jobs/1/home"
+        },
+        "profilePath": "<root>/jobs/1/home/profile.mmcp.xml",
+        "files": {
+          "jobs/1/home/.MakeMKV/settings.conf": "#\n# MakeMKV settings file. Written by Bromelia for one makemkvcon run.\n# Changes made here are overwritten before every job.\n#\n\napp_DataDir = \"/data/MakeMKV\"\n",
+          "jobs/1/home/profile.mmcp.xml": "<profile/>"
+        },
+        "modes": {
+          "jobs/1/home/.MakeMKV/settings.conf": 384
+        }
+      }
+    },
+    {
+      "id": "home-rewritten-each-run",
+      "given": {
+        "layout": "linux",
+        "settings": {
+          "a": "2"
+        },
+        "profileXml": null,
+        "workDirectory": "home",
+        "before": {
+          "home/.MakeMKV/settings.conf": "old",
+          "home/profile.mmcp.xml": "old profile"
+        }
+      },
+      "expect": {
+        "environment": {
+          "HOME": "<root>/home"
+        },
+        "profilePath": null,
+        "files": {
+          "home/.MakeMKV/settings.conf": "#\n# MakeMKV settings file. Written by Bromelia for one makemkvcon run.\n# Changes made here are overwritten before every job.\n#\n\na = \"2\"\n",
+          "home/profile.mmcp.xml": "old profile"
+        },
+        "rule": "settings.conf is replaced atomically; a profile file left from an earlier run isn't passed (profilePath is none)"
+      }
+    }
+  ]
+}

@@ -76,6 +76,7 @@
   "makemkv.register.ok": "Key registered. {text}",
   "makemkv.register.failed": "Registration failed: {text}",
   "makemkv.driveScanFailed": "Drive scan failed: {reason}",
+  "makemkv.registryFailed": "Could not apply MakeMKV's settings in the registry: {reason}",
   "makemkv.titleProgress": "— {name}",
   "disc.op.reading": "Reading disc information",
   "disc.readingAgain": "Reading the disc listing again to check that the disc hasn't changed since it was opened",

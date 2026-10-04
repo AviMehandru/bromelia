@@ -17,5 +17,6 @@ bro_makemkv_run_settings_free (BroMakemkvRunSettings *x)
   g_clear_pointer (&x->settings, g_hash_table_unref);
   g_free (x->profile_xml);
   g_free (x->data_dir);
+  g_free (x->work_directory);
   g_free (x);
 }

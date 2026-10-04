@@ -2,6 +2,7 @@
  * shared/fixtures/adapters/platform-adapters.contract.json. */
 #include "bro-test-fixtures.h"
 
+#include "bro-home-dir-isolation.h"
 #include "bro-platform-file-system.h"
 #include "bro-platform-process-launcher.h"
 #include "bro-system-clock.h"
@@ -652,6 +653,111 @@ test_fs_volume (void)
 #endif
 }
 
+/* ---- settings isolation (HOME) --------------------------------------------------------------------- */
+
+static char *
+shown_path (const char *path)
+{
+  return path ? g_strconcat ("<root>", path + strlen (fs_root), NULL) : g_strdup ("(none)");
+}
+
+static void
+list_files (const char *dir, GPtrArray *out)
+{
+  GDir *d = g_dir_open (dir, 0, NULL);
+  const char *name;
+  if (!d)
+    return;
+  while ((name = g_dir_read_name (d)) != NULL)
+    {
+      g_autofree char *full = g_build_filename (dir, name, NULL);
+      if (g_file_test (full, G_FILE_TEST_IS_DIR))
+        list_files (full, out);
+      else
+        g_ptr_array_add (out, g_strdup (full + strlen (fs_root) + 1));
+    }
+  g_dir_close (d);
+}
+
+static gboolean
+isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (BroHomeDirIsolation) iso = NULL;
+  g_autoptr (BroMakemkvRunSettings) run = bro_makemkv_run_settings_new ();
+  g_autoptr (BroIsolationLease) lease = NULL;
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (GHashTable) env = NULL;
+  g_autoptr (GPtrArray) files = g_ptr_array_new_with_free_func (g_free);
+  g_autofree char *profile = NULL;
+  g_autofree char *shown = NULL;
+  BroJsonValue *before = bro_json_value_member (given, "before");
+  BroJsonValue *settings = bro_json_value_member (given, "settings");
+  BroJsonValue *want_env = bro_json_value_member (expect, "environment");
+  BroJsonValue *want_files = bro_json_value_member (expect, "files");
+  BroJsonValue *modes = bro_json_value_member (expect, "modes");
+  BroJsonValue *xml = bro_json_value_member (given, "profileXml");
+  BroHomeLayout layout = BRO_HOME_LAYOUT_LINUX;
+  remove_tree (fs_root);
+  g_mkdir_with_parents (fs_root, 0755);
+  for (guint i = 0; before && i < bro_json_value_length (before); i++)
+    {
+      g_autofree char *path = fs_path (before->keys->pdata[i]);
+      g_autofree char *dir = g_path_get_dirname (path);
+      g_mkdir_with_parents (dir, 0755);
+      g_file_set_contents (path, bro_json_value_get_string (bro_json_value_at (before, i), ""), -1, NULL);
+    }
+  bro_home_layout_from_wire (bro_json_value_get_string (bro_json_value_member (given, "layout"), ""), &layout);
+  for (guint i = 0; i < bro_json_value_length (settings); i++)
+    g_hash_table_insert (run->settings, g_strdup (settings->keys->pdata[i]), g_strdup (bro_json_value_get_string (bro_json_value_at (settings, i), "")));
+  run->profile_xml = g_strdup (bro_json_value_get_string (xml, NULL));
+  run->data_dir = g_strdup ("/unused");
+  run->work_directory = fs_path (bro_json_value_get_string (bro_json_value_member (given, "workDirectory"), ""));
+  iso = bro_home_dir_isolation_new (BRO_FILE_SYSTEM (fs), layout);
+  lease = bro_settings_isolation_prepare (BRO_SETTINGS_ISOLATION (iso), run, &error);
+  if (!lease)
+    {
+      bro_test_fail (failures, id, "prepare failed: %s", error ? error->code : "?");
+      return TRUE;
+    }
+  bro_isolation_lease_first_output (lease);
+  bro_isolation_lease_release (lease);
+  env = bro_isolation_lease_environment (lease);
+  for (guint i = 0; i < bro_json_value_length (want_env); i++)
+    {
+      g_autofree char *got = shown_path (g_hash_table_lookup (env, want_env->keys->pdata[i]));
+      bro_test_same_string (failures, id, want_env->keys->pdata[i], bro_json_value_get_string (bro_json_value_at (want_env, i), ""), got);
+    }
+  profile = bro_isolation_lease_profile_path (lease);
+  shown = shown_path (profile);
+  bro_test_same_string (failures, id, "profilePath", bro_json_value_get_string (bro_json_value_member (expect, "profilePath"), "(none)"), shown);
+  list_files (run->work_directory, files);
+  g_ptr_array_sort (files, compare_strings);
+  if (files->len != bro_json_value_length (want_files))
+    bro_test_fail (failures, id, "%u files, expected %u", files->len, bro_json_value_length (want_files));
+  for (guint i = 0; i < bro_json_value_length (want_files); i++)
+    {
+      g_autofree char *path = fs_path (want_files->keys->pdata[i]);
+      g_autofree char *text = NULL;
+      g_file_get_contents (path, &text, NULL, NULL);
+      bro_test_same_string (failures, id, want_files->keys->pdata[i], bro_json_value_get_string (bro_json_value_at (want_files, i), ""), text);
+    }
+  for (guint i = 0; modes && i < bro_json_value_length (modes); i++)
+    {
+      g_autofree char *path = fs_path (modes->keys->pdata[i]);
+      struct stat st;
+      if (stat (path, &st) != 0 || (gint64) (st.st_mode & 0777) != bro_json_value_get_integer (bro_json_value_at (modes, i), -1))
+        bro_test_fail (failures, id, "mode of %s", (char *) modes->keys->pdata[i]);
+    }
+  return TRUE;
+}
+
+static void
+test_home_isolation (void)
+{
+  bro_test_run_cases ("adapters/settings-isolation.cases.json", isolation_case);
+}
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -747,6 +853,7 @@ main (int argc, char **argv)
   g_test_add_func ("/file-system/cases", test_fs_cases);
   g_test_add_func ("/file-system/durable-and-uncached", test_fs_durable_and_uncached);
   g_test_add_func ("/file-system/volume", test_fs_volume);
+  g_test_add_func ("/settings-isolation/home", test_home_isolation);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

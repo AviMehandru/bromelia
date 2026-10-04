@@ -7821,7 +7821,8 @@
           "fields": [
             "settings",
             "profileXml",
-            "dataDir"
+            "dataDir",
+            "workDirectory"
           ],
           "swift": {
             "name": "MakemkvRunSettings",
@@ -7835,7 +7836,7 @@
             "name": "BroMakemkvRunSettings",
             "file": "linux/src/ports/bro-makemkv-run-settings.h"
           },
-          "doc": "One makemkvcon run's settings: settings.conf (SettingsLayers.merge), the generated profile (ProfileXml.render; none: no profile file) and the user's MakeMKV data folder."
+          "doc": "One makemkvcon run's settings: settings.conf (SettingsLayers.merge), the generated profile (ProfileXml.render; none: no profile file), the user's MakeMKV data folder, and the run's own folder (the job's home/: HOME, the profile file)."
         },
         {
           "name": "IsolationLease",
@@ -9788,6 +9789,177 @@
           "swift": "PlatformFileSystem.volume(_:)",
           "cs": "PlatformFileSystem.Volume",
           "c": "bro_platform_file_system_volume"
+        }
+      ]
+    },
+    "adapters/home-dir-isolation": {
+      "layer": "adapters",
+      "folder": "Tools",
+      "cFolder": "tools",
+      "doc": "SettingsIsolation for macOS and Linux (plan §10.3): each makemkvcon run gets HOME set to the job's home folder, holding its own settings.conf (and the generated profile). Portable: all three build it; Windows uses the registry swap in production.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "HomeDirIsolation",
+          "kind": "class",
+          "doc": "Writes <work>/<layout's folder>/settings.conf (0600) and <work>/profile.mmcp.xml, and sets HOME to <work>.",
+          "swift": {
+            "name": "HomeDirIsolation",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/HomeDirIsolation.swift"
+          },
+          "cs": {
+            "name": "HomeDirIsolation",
+            "file": "windows/src/Bromelia.Adapters/Tools/HomeDirIsolation.cs"
+          },
+          "c": {
+            "name": "BroHomeDirIsolation",
+            "file": "linux/src/adapters/tools/bro-home-dir-isolation.h"
+          }
+        },
+        {
+          "name": "HomeLayout",
+          "kind": "enum",
+          "cases": [
+            "macos",
+            "linux"
+          ],
+          "doc": "Where makemkvcon reads settings.conf under HOME: Library/MakeMKV (macOS) or .MakeMKV (Linux).",
+          "swift": {
+            "name": "HomeLayout",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/HomeLayout.swift",
+            "cases": [
+              ".macos",
+              ".linux"
+            ]
+          },
+          "cs": {
+            "name": "HomeLayout",
+            "file": "windows/src/Bromelia.Adapters/Tools/HomeLayout.cs",
+            "cases": [
+              "Macos",
+              "Linux"
+            ]
+          },
+          "c": {
+            "name": "BroHomeLayout",
+            "file": "linux/src/adapters/tools/bro-home-layout.h",
+            "cases": [
+              "BRO_HOME_LAYOUT_MACOS",
+              "BRO_HOME_LAYOUT_LINUX"
+            ]
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "HomeDirIsolation.prepare",
+          "params": [
+            "settings"
+          ],
+          "returns": "IsolationLease",
+          "throws": true,
+          "swift": "HomeDirIsolation.prepare(_:)",
+          "cs": "HomeDirIsolation.Prepare",
+          "c": "bro_home_dir_isolation_prepare"
+        }
+      ]
+    },
+    "adapters/registry-swap-isolation": {
+      "layer": "adapters",
+      "folder": "Platform",
+      "cFolder": "platform",
+      "csRoot": "windows/src/Bromelia.Adapters.Windows",
+      "doc": "SettingsIsolation on Windows (plan §10.3): makemkvcon reads HKCU\\Software\\MakeMKV, so each launch writes the run's values there (clearing the other catalogue keys) and restores the user's values on the first output line, the exit or after 15 s; launches are serialised.",
+      "phase": 2,
+      "types": [
+        {
+          "name": "RegistrySwapIsolation",
+          "kind": "class",
+          "only": [
+            "cs"
+          ],
+          "why": "Only Windows' makemkvcon reads its settings from the registry.",
+          "doc": "One launch at a time: prepare waits for the previous lease to give the registry back.",
+          "cs": {
+            "name": "RegistrySwapIsolation",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/RegistrySwapIsolation.cs"
+          }
+        },
+        {
+          "name": "MakemkvRegistry",
+          "kind": "protocol",
+          "only": [
+            "cs"
+          ],
+          "why": "The registry, behind an interface so the swap is tested against a fake (plan §26).",
+          "doc": "The values of HKCU\\Software\\MakeMKV.",
+          "cs": {
+            "name": "IMakemkvRegistry",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/IMakemkvRegistry.cs"
+          }
+        },
+        {
+          "name": "CurrentUserMakemkvRegistry",
+          "kind": "class",
+          "only": [
+            "cs"
+          ],
+          "why": "The real HKCU\\Software\\MakeMKV.",
+          "doc": "MakemkvRegistry on HKCU\\Software\\MakeMKV, string values.",
+          "cs": {
+            "name": "CurrentUserMakemkvRegistry",
+            "file": "windows/src/Bromelia.Adapters.Windows/Platform/CurrentUserMakemkvRegistry.cs"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "RegistrySwapIsolation.prepare",
+          "params": [
+            "settings"
+          ],
+          "returns": "IsolationLease",
+          "throws": true,
+          "only": [
+            "cs"
+          ],
+          "why": "Windows only.",
+          "cs": "RegistrySwapIsolation.Prepare"
+        },
+        {
+          "name": "MakemkvRegistry.get",
+          "params": [
+            "name"
+          ],
+          "returns": "String?",
+          "only": [
+            "cs"
+          ],
+          "why": "Windows only.",
+          "cs": "MakemkvRegistry.Get"
+        },
+        {
+          "name": "MakemkvRegistry.set",
+          "params": [
+            "name",
+            "value"
+          ],
+          "only": [
+            "cs"
+          ],
+          "why": "Windows only.",
+          "cs": "MakemkvRegistry.Set"
+        },
+        {
+          "name": "MakemkvRegistry.remove",
+          "params": [
+            "name"
+          ],
+          "only": [
+            "cs"
+          ],
+          "why": "Windows only.",
+          "cs": "MakemkvRegistry.Remove"
         }
       ]
     }

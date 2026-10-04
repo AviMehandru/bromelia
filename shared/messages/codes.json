@@ -446,6 +446,13 @@
       },
       "today": "AppModel.rescan"
     },
+    "makemkv.registryFailed": {
+      "kind": "error",
+      "params": {
+        "reason": "string"
+      },
+      "today": "MakeMKVEnvironment.RunAsync (Windows): RegistrySettings.Apply / Restore"
+    },
     "makemkv.titleProgress": {
       "kind": "log",
       "severity": "info",
