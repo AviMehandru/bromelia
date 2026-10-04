@@ -1713,6 +1713,7 @@ main (int argc, char **argv)
   g_test_add_func ("/drives/platform", test_platform_device_monitor);
   g_test_add_func ("/drive-control/cases", test_drive_control);
   g_test_add_func ("/drive-control/empty-drives", test_drive_control_empty_drives);
+  g_test_add_func ("/drive-control/real-drive", test_real_drive);
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
   g_test_add_func ("/keystore/files", test_keystore_files);

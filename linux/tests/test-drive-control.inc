@@ -90,3 +90,72 @@ test_drive_control_empty_drives (void)
       g_test_message ("%s: empty, unknown, not mounted", s->drive->device);
     }
 }
+
+/* A real optical drive holding a disc, only when BROMELIA_TEST_DRIVE names its content (video, data, audio; 1 means
+ * video; connect the drive or an image to the VM first): the drive list, the content probe, raw reads, VIDEO_TS for a
+ * video disc; with BROMELIA_TEST_DRIVE_EJECT also eject (and close tray) with the monitor watching. */
+static void
+test_real_drive (void)
+{
+  g_autoptr (BroSystemClock) clock = bro_system_clock_new ();
+  g_autoptr (BroPlatformProcessLauncher) launcher = bro_platform_process_launcher_new ();
+  g_autoptr (BroPlatformDriveControl) drives = bro_platform_drive_control_new (BRO_PROCESS_LAUNCHER (launcher), BRO_CLOCK (clock));
+  g_autoptr (BroPlatformDeviceMonitor) monitor = bro_platform_device_monitor_new (BRO_CLOCK (clock), 0.5);
+  g_autoptr (GPtrArray) states = NULL;
+  g_autoptr (BroSectorReader) reader = NULL;
+  g_autoptr (GBytes) descriptors = NULL;
+  g_autoptr (BroVideoTsByteSource) source = NULL;
+  g_autoptr (GPtrArray) events = g_ptr_array_new_with_free_func (g_free);
+  g_autofree char *mount = NULL;
+  BroOsDriveState *state = NULL;
+  BroNavAnalysis *analysis;
+  const guint8 *d;
+  const char *expected = g_strcmp0 (g_getenv ("BROMELIA_TEST_DRIVE"), "1") == 0 ? "video" : g_getenv ("BROMELIA_TEST_DRIVE");
+  if (!expected || !*expected)
+    {
+      g_test_skip ("set BROMELIA_TEST_DRIVE with a video DVD in a drive");
+      return;
+    }
+  states = bro_platform_device_monitor_snapshot (monitor);
+  for (guint i = 0; i < states->len; i++)
+    {
+      BroOsDriveState *s = states->pdata[i];
+      g_test_message ("drive: %s | %s | media %d | mounted at %s", s->drive->device, s->drive->identification, s->media, s->drive->mount_path);
+      if (s->media && !state)
+        state = s;
+    }
+  g_assert_nonnull (state);
+  mount = bro_platform_drive_control_wait_for_mount (drives, state->drive->device, (BroDuration) { 60 }, NULL);
+  g_assert_nonnull (mount);
+  g_assert_cmpstr (bro_disc_content_to_wire (bro_platform_drive_control_probe_content (drives, state->drive->device)), ==, expected);
+  reader = bro_platform_drive_control_open_raw (drives, state->drive->device, NULL);
+  g_assert_nonnull (reader);
+  g_assert_cmpint (bro_sector_reader_sector_count (reader, NULL), >, 1000000);
+  descriptors = bro_sector_reader_read (reader, 16, 3, NULL);
+  g_assert_cmpuint (g_bytes_get_size (descriptors), ==, 3 * 2048);
+  d = g_bytes_get_data (descriptors, NULL);
+  g_assert_true (memcmp (d + 1, "CD001", 5) == 0 || memcmp (d + 2048 + 1, "BEA01", 5) == 0 || memcmp (d + 4096 + 1, "BEA01", 5) == 0);
+  bro_sector_reader_close (reader);
+  if (g_str_equal (expected, "video"))
+    {
+      source = bro_video_ts_byte_source_open (mount);
+      g_assert_nonnull (source);
+      analysis = bro_dvd_nav_analyse ((BroByteSource *) source);
+      g_assert_nonnull (analysis);
+      g_test_message ("VIDEO_TS: %u titles", analysis->titles->len);
+      bro_nav_analysis_free (analysis);
+    }
+  if (g_getenv ("BROMELIA_TEST_DRIVE_EJECT"))
+    {
+      g_autoptr (BroBroError) error = NULL;
+      g_autofree char *removed = g_strdup_printf ("mediaRemoved %s", state->drive->device);
+      bro_platform_device_monitor_start (monitor, collect, events, NULL);
+      g_assert_true (bro_platform_drive_control_eject (drives, state->drive->device, &error));
+      for (int i = 0; i < 40 && !g_ptr_array_find_with_equal_func (events, removed, g_str_equal, NULL); i++)
+        g_usleep (G_USEC_PER_SEC / 4);
+      bro_platform_device_monitor_stop (monitor);
+      g_assert_true (g_ptr_array_find_with_equal_func (events, removed, g_str_equal, NULL));
+      if (!bro_platform_drive_control_close_tray (drives, state->drive->device, &error))
+        g_test_message ("close tray: %s (a slim drive's tray has no motor)", error->code);
+    }
+}

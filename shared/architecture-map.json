@@ -11137,7 +11137,7 @@
       "folder": "Platform",
       "cFolder": "platform",
       "csRoot": "windows/src/Bromelia.Adapters.Windows",
-      "doc": "DeviceMonitor (plan §10.3): a DrivePoller (2 s) over the system's optical drives. macOS: IOCompactDiscServices in the IORegistry (device: its registry path; identification: Vendor Name + Product Name; media: a BSD disk below it; mount: DiskArbitration). Windows: DriveInfo's CD-ROM letters (ready = media, mounted at the root) and IOCTL_STORAGE_QUERY_PROPERTY's vendor and product. Linux: sysfs sr* (vendor + model), CDROM_DRIVE_STATUS, /proc/self/mountinfo. The identification is the drive's INQUIRY vendor and product, as in MakeMKV's drive list.",
+      "doc": "DeviceMonitor (plan §10.3): a DrivePoller (2 s) over the system's optical drives. macOS: IOCDBlockStorageDevice (the CD, DVD and Blu-ray drive services) in the IORegistry (device: its registry path; identification: Vendor Name + Product Name; media: a BSD disk below it; mount: DiskArbitration). Windows: DriveInfo's CD-ROM letters (ready = media, mounted at the root) and IOCTL_STORAGE_QUERY_PROPERTY's vendor and product. Linux: sysfs sr* (vendor + model), CDROM_DRIVE_STATUS, /proc/self/mountinfo. The identification is the drive's INQUIRY vendor and product, as in MakeMKV's drive list.",
       "phase": 2,
       "types": [
         {
