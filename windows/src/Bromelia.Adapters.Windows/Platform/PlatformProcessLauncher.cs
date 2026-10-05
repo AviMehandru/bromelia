@@ -16,13 +16,19 @@ using Bromelia.Ports;
 namespace Bromelia.Adapters.Windows;
 
 /// <summary>Starts processes in a Job Object and watches them (plan §10.3): stalls, stopping, abandonment 30 s after
-/// the kill, output read for at most 5 s after exit, a transcript of every line.
+/// the kill, output read for 5 s after exit (longer only while lines wait for a reader that is still taking them), a
+/// transcript of every line. Lines are cut at 64 KiB
+/// (<see cref="LineSplitter"/>) and at most <see cref="QueuedLines"/> wait to be read: then the reading waits too, so the
+/// tool waits to write (nothing is lost) and that wait doesn't count as silence.
 ///
 /// Windows has no signals, so both stop policies end the whole job at once (TerminateJobObject); the exit status is
 /// then -1. The job also has KILL_ON_JOB_CLOSE until the process has ended, so a crashed engine leaves no tools
 /// behind. A process the tool leaves running after a normal exit is left alone, as on macOS and Linux.</summary>
 public sealed class PlatformProcessLauncher : IProcessLauncher
 {
+    /// <summary>How many lines may wait to be read before the reading waits.</summary>
+    public const int QueuedLines = 10000;
+
     public IRunningProcess Start(ProcessSpec spec) => Running.Start(spec);
 
     /// <summary>The program and arguments actually run: the spec's interpreter first, else one chosen from the
@@ -53,7 +59,15 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         readonly Process _process;
         readonly IntPtr _job;
         readonly ProcessSpec _spec;
-        readonly Channel<OutputLine> _lines = Channel.CreateUnbounded<OutputLine>(new UnboundedChannelOptions { SingleReader = true });
+        readonly Channel<OutputLine> _lines = Channel.CreateBounded<OutputLine>(new BoundedChannelOptions(QueuedLines)
+        {
+            SingleReader = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+        /// <summary>Pumps waiting for room in <see cref="_lines"/>: the tool isn't silent, nobody is reading.</summary>
+        int _waitingForRoom;
+        /// <summary>When the reader last took a line.</summary>
+        long _lastTaken = Environment.TickCount64;
         readonly object _gate = new();
         readonly TaskCompletionSource _killed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         readonly Transcript? _transcript;
@@ -69,7 +83,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _process = process;
             _job = job;
             _transcript = transcript;
-            var pumps = new[] { Pump(process.StandardOutput, OutputSource.Stdout), Pump(process.StandardError, OutputSource.Stderr) };
+            var pumps = new[] { Pump(process.StandardOutput.BaseStream, OutputSource.Stdout), Pump(process.StandardError.BaseStream, OutputSource.Stderr) };
             if (spec.StallTimeout is not null) _watchdog = new Timer(_ => Watch(), null, Tick, Tick);
             _exit = Finish(pumps);
         }
@@ -127,7 +141,14 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             }
         }
 
-        public IAsyncEnumerable<OutputLine> Lines() => _lines.Reader.ReadAllAsync();
+        public async IAsyncEnumerable<OutputLine> Lines()
+        {
+            await foreach (var line in _lines.Reader.ReadAllAsync().ConfigureAwait(false))
+            {
+                Interlocked.Exchange(ref _lastTaken, Environment.TickCount64);
+                yield return line;
+            }
+        }
 
         public Task<ProcessExit> Wait() => _exit;
 
@@ -146,6 +167,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         void Watch()
         {
             var limit = _spec.StallTimeout!.Value;
+            if (Volatile.Read(ref _waitingForRoom) > 0) return;
             var quiet = (Environment.TickCount64 - Interlocked.Read(ref _lastOutput)) / 1000.0;
             if (quiet < limit.Seconds) return;
             lock (_gate)
@@ -170,15 +192,33 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _killed.TrySetResult();
         }
 
-        async Task Pump(StreamReader reader, OutputSource source)
+        async Task Pump(Stream stream, OutputSource source)
         {
-            string? line;
-            while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
+            var splitter = new LineSplitter();
+            var buffer = new byte[65536];
+            int n;
+            while ((n = await stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
             {
                 Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
-                if (line.Length == 0) continue;
-                _transcript?.Write(line);
-                _lines.Writer.TryWrite(new OutputLine(source, line, Now()));
+                foreach (var line in splitter.Feed(buffer.AsSpan(0, n))) await Emit(line, source).ConfigureAwait(false);
+            }
+            if (splitter.Finish() is { } last) await Emit(last, source).ConfigureAwait(false);
+        }
+
+        /// <summary>Into the transcript, then the queue; when the queue is full this waits for room (a line after the
+        /// end is dropped).</summary>
+        async Task Emit(string line, OutputSource source)
+        {
+            _transcript?.Write(line);
+            var item = new OutputLine(source, line, Now());
+            if (_lines.Writer.TryWrite(item)) return;
+            Interlocked.Increment(ref _waitingForRoom);
+            try { await _lines.Writer.WriteAsync(item).ConfigureAwait(false); }
+            catch (ChannelClosedException) { }
+            finally
+            {
+                Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
+                Interlocked.Decrement(ref _waitingForRoom);
             }
         }
 
@@ -187,8 +227,16 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             var exited = _process.WaitForExitAsync();
             var abandon = _killed.Task.ContinueWith(_ => Task.Delay(TimeSpan.FromSeconds(30)), TaskScheduler.Default).Unwrap();
             var abandoned = await Task.WhenAny(exited, abandon).ConfigureAwait(false) != exited;
-            // Output normally ends with the process. A child it left behind may keep the pipes open: don't wait long.
-            if (!abandoned) await Task.WhenAny(Task.WhenAll(pumps), Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
+            // Output normally ends with the process. A child it left behind may keep the pipes open: stop reading 5 s after
+            // the exit, unless lines are still waiting for a reader that keeps taking them (its backlog isn't dropped).
+            if (!abandoned)
+            {
+                var exitedAt = Environment.TickCount64;
+                var all = Task.WhenAll(pumps);
+                bool Reading() => Environment.TickCount64 - exitedAt < 5000
+                                  || (Volatile.Read(ref _waitingForRoom) > 0 && Environment.TickCount64 - Interlocked.Read(ref _lastTaken) < 5000);
+                while (!all.IsCompleted && Reading()) await Task.WhenAny(all, Task.Delay(Tick)).ConfigureAwait(false);
+            }
             _watchdog?.Dispose();
             _watchdog = null;
             _lines.Writer.TryComplete();

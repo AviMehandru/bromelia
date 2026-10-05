@@ -113,6 +113,47 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         Assert.DoesNotContain("\nlate\n", text);
     }
 
+    [Fact] // long-line-is-cut
+    public void ALongLineIsCut()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var script = Script("long.ps1", "[Console]::Out.Write('a' * 200000); [Console]::Out.WriteLine(); 'next'\n");
+        var (lines, exit) = Run(_launcher.Start(Spec(script)));
+        Assert.Equal(0, exit.Status);
+        Assert.Equal(new[] { new string('a', 65536) + " [cut]", "next" }, lines.Select(l => l.Text));
+    }
+
+    [Fact] // a-slow-reader-holds-the-tool
+    public void ASlowReaderHoldsTheTool()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var marker = Path.Combine(_dir, "done.txt");
+        var script = Script("many.ps1", "1..50000 | % { [Console]::Out.WriteLine($_) }; Set-Content -Path '" + marker + "' -Value done\n");
+        var p = _launcher.Start(Spec(script) with { StallTimeout = new Duration(2) });
+        Thread.Sleep(TimeSpan.FromSeconds(3));
+        Assert.False(File.Exists(marker)); // waiting to write: at most 10000 lines (and the pipe) wait to be read
+        var (lines, exit) = Run(p);
+        Assert.Equal(Enumerable.Range(1, 50000).Select(i => i.ToString()), lines.Select(l => l.Text));
+        Assert.Null(exit.Stalled);
+        Assert.True(File.Exists(marker));
+    }
+
+    [Fact] // a-slow-reader-gets-everything
+    public async Task ASlowReaderGetsEverything()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var script = Script("burst.ps1", "1..30000 | % { [Console]::Out.WriteLine($_) }\n");
+        var p = _launcher.Start(Spec(script));
+        var lines = new List<string>();
+        await foreach (var l in p.Lines())
+        {
+            lines.Add(l.Text);
+            if (lines.Count % 100 == 0) await Task.Delay(25);
+        }
+        await p.Wait();
+        Assert.Equal(Enumerable.Range(1, 30000).Select(i => i.ToString()), lines);
+    }
+
     [Fact] // process-group
     public void StopEndsTheWholeJob()
     {

@@ -19,8 +19,58 @@
 #define BRO_TYPE_SPAWNED_PROCESS (bro_spawned_process_get_type ())
 G_DECLARE_FINAL_TYPE (BroSpawnedProcess, bro_spawned_process, BRO, SPAWNED_PROCESS, GObject)
 
-/* Marks the end of the line queue. */
-static char end_of_lines;
+/* ---- output bytes into lines ---- */
+
+#define MAX_LINE_BYTES 65536
+#define CUT_MARK " [cut]"
+
+/* Splits output as every launcher does: at \n, \r or \r\n, empty lines dropped, UTF-8 with bad bytes replaced. A line
+ * is cut after MAX_LINE_BYTES bytes and ends with CUT_MARK; the rest of it, up to the next line break, is dropped, so a
+ * tool writing binary can't grow memory without limit. */
+typedef struct {
+  GByteArray *pending;
+  gboolean discarding;
+} LineSplitter;
+
+static char *
+splitter_take (LineSplitter *s, gboolean cut)
+{
+  g_autofree char *text = g_utf8_make_valid ((const char *) s->pending->data, s->pending->len);
+  g_byte_array_set_size (s->pending, 0);
+  return cut ? g_strconcat (text, CUT_MARK, NULL) : g_steal_pointer (&text);
+}
+
+/* Appends the lines @bytes completes to @lines (char *). */
+static void
+splitter_feed (LineSplitter *s, const guint8 *bytes, gsize n, GPtrArray *lines)
+{
+  for (gsize i = 0; i < n; i++)
+    {
+      if (bytes[i] == '\n' || bytes[i] == '\r')
+        {
+          if (!s->discarding && s->pending->len > 0)
+            g_ptr_array_add (lines, splitter_take (s, FALSE));
+          g_byte_array_set_size (s->pending, 0);
+          s->discarding = FALSE;
+        }
+      else if (!s->discarding)
+        {
+          g_byte_array_append (s->pending, bytes + i, 1);
+          if (s->pending->len == MAX_LINE_BYTES)
+            {
+              g_ptr_array_add (lines, splitter_take (s, TRUE));
+              s->discarding = TRUE;
+            }
+        }
+    }
+}
+
+/* The last line, when the output didn't end with a line break; NULL otherwise. */
+static char *
+splitter_finish (LineSplitter *s)
+{
+  return !s->discarding && s->pending->len > 0 ? splitter_take (s, FALSE) : NULL;
+}
 
 struct _BroSpawnedProcess {
   GObject parent_instance;
@@ -28,13 +78,16 @@ struct _BroSpawnedProcess {
   BroStopPolicy stop_policy;
   gboolean has_stall_timeout;
   double stall_seconds;
-  GAsyncQueue *lines; /* BroOutputLine *, then &end_of_lines */
   GCancellable *read_cancel;
   GMutex lock;
   GCond cond;
   /* Guarded by lock: */
   int transcript; /* fd, or -1: finish closes it while a reader may still be running, and the number may then belong to
                    * any file the engine opens */
+  GQueue lines;          /* BroOutputLine *, waiting to be read */
+  gboolean ended;        /* no more lines: the reader gets what is queued, then NULL */
+  int waiting_for_room;  /* readers waiting for the queue: the tool isn't silent, nobody is reading */
+  gint64 last_taken;     /* monotonic µs: when the reader last took a line */
   gint64 last_output; /* monotonic µs */
   int readers_left;
   gboolean exited;
@@ -96,13 +149,18 @@ static BroOutputLine *
 bro_spawned_process_lines (BroRunningProcess *process)
 {
   BroSpawnedProcess *self = BRO_SPAWNED_PROCESS (process);
-  gpointer item = g_async_queue_pop (self->lines);
-  if (item == &end_of_lines)
+  BroOutputLine *line;
+  g_mutex_lock (&self->lock);
+  while (g_queue_is_empty (&self->lines) && !self->ended)
+    g_cond_wait (&self->cond, &self->lock);
+  line = g_queue_pop_head (&self->lines);
+  if (line)
     {
-      g_async_queue_push (self->lines, &end_of_lines); /* every later call ends too */
-      return NULL;
+      self->last_taken = g_get_monotonic_time ();
+      g_cond_broadcast (&self->cond); /* room for a waiting reader */
     }
-  return item;
+  g_mutex_unlock (&self->lock);
+  return line;
 }
 
 static BroProcessExit
@@ -167,33 +225,64 @@ typedef struct {
   BroOutputSource source;
 } Reader;
 
+/* With the lock held: into the transcript, then the queue; when the queue is full, waits for room (a line after the end
+ * is dropped). Takes @text. */
+static void
+emit (BroSpawnedProcess *self, BroOutputSource source, char *text)
+{
+  BroOutputLine *out;
+  gboolean waited = FALSE;
+  transcript_write (self->transcript, text);
+  while (g_queue_get_length (&self->lines) >= BRO_QUEUED_LINES && !self->ended)
+    {
+      self->waiting_for_room++;
+      g_cond_wait (&self->cond, &self->lock);
+      self->waiting_for_room--;
+      waited = TRUE;
+    }
+  if (waited)
+    self->last_output = g_get_monotonic_time ();
+  if (self->ended)
+    {
+      g_free (text);
+      return;
+    }
+  out = bro_output_line_new ();
+  out->stream = source;
+  out->text = text;
+  out->at = now_instant ();
+  g_queue_push_tail (&self->lines, out);
+  g_cond_broadcast (&self->cond);
+}
+
 static gpointer
 reader_thread (gpointer data)
 {
   Reader *r = data;
   BroSpawnedProcess *self = r->self;
   g_autoptr (GInputStream) raw = g_unix_input_stream_new (r->fd, TRUE);
-  g_autoptr (GDataInputStream) in = g_data_input_stream_new (raw);
-  char *line;
-  g_data_input_stream_set_newline_type (in, G_DATA_STREAM_NEWLINE_TYPE_ANY);
-  while ((line = g_data_input_stream_read_line (in, NULL, self->read_cancel, NULL)) != NULL)
+  g_autoptr (GPtrArray) lines = g_ptr_array_new ();
+  LineSplitter splitter = { g_byte_array_new (), FALSE };
+  guint8 buffer[65536];
+  gssize n;
+  char *last;
+  while ((n = g_input_stream_read (raw, buffer, sizeof buffer, self->read_cancel, NULL)) > 0)
     {
-      g_autofree char *valid = g_utf8_make_valid (line, -1);
-      g_free (line);
+      splitter_feed (&splitter, buffer, (gsize) n, lines);
       g_mutex_lock (&self->lock);
       self->last_output = g_get_monotonic_time ();
-      if (*valid)
-        transcript_write (self->transcript, valid);
+      for (guint i = 0; i < lines->len; i++)
+        emit (self, r->source, lines->pdata[i]);
       g_mutex_unlock (&self->lock);
-      if (*valid)
-        {
-          BroOutputLine *out = bro_output_line_new ();
-          out->stream = r->source;
-          out->text = g_steal_pointer (&valid);
-          out->at = now_instant ();
-          g_async_queue_push (self->lines, out);
-        }
+      g_ptr_array_set_size (lines, 0);
     }
+  if ((last = splitter_finish (&splitter)) != NULL)
+    {
+      g_mutex_lock (&self->lock);
+      emit (self, r->source, last);
+      g_mutex_unlock (&self->lock);
+    }
+  g_byte_array_unref (splitter.pending);
   g_mutex_lock (&self->lock);
   self->readers_left--;
   g_cond_broadcast (&self->cond);
@@ -235,7 +324,7 @@ finish (BroSpawnedProcess *self, BroProcessExit exit)
   self->result = exit;
   self->finished = TRUE;
   g_cancellable_cancel (self->read_cancel);
-  g_async_queue_push (self->lines, &end_of_lines);
+  self->ended = TRUE; /* the reader gets what is queued, then NULL; readers waiting for room drop their lines */
   if (exit.abandoned)
     g_string_append (ending, "abandoned");
   else if (exit.signal)
@@ -264,7 +353,7 @@ watchdog_thread (gpointer data)
       gint64 now = g_get_monotonic_time ();
       gboolean cancelled = self->stopping && (self->reason == BRO_STOP_REASON_CANCELLED || self->reason == BRO_STOP_REASON_SHUTDOWN);
       if (self->has_stall_timeout && !self->stopping && !self->exited
-          && now - self->last_output >= (gint64) (self->stall_seconds * G_USEC_PER_SEC))
+          && self->waiting_for_room == 0 && now - self->last_output >= (gint64) (self->stall_seconds * G_USEC_PER_SEC))
         {
           self->stalled = (double) ((now - self->last_output) / 1000) / 1000.0;
           begin_stop (self, BRO_STOP_REASON_STALLED);
@@ -275,8 +364,12 @@ watchdog_thread (gpointer data)
           finish (self, (BroProcessExit) { -1, 0, self->stalled, TRUE, cancelled });
           break;
         }
-      /* Output normally ends with the process; a child it left behind may keep a pipe open. */
-      if (self->exited && (self->readers_left == 0 || now - self->exited_at >= 5 * G_USEC_PER_SEC))
+      /* Output normally ends with the process; a child it left behind may keep a pipe open: stop reading 5 s after the
+       * exit, unless lines are still waiting for a reader that keeps taking them. */
+      if (self->exited
+          && (self->readers_left == 0
+              || (now - self->exited_at >= 5 * G_USEC_PER_SEC
+                  && !(self->waiting_for_room > 0 && now - self->last_taken < 5 * G_USEC_PER_SEC))))
         {
           BroProcessExit exit = { -1, 0, self->stalled, FALSE, cancelled };
           if (WIFEXITED (self->wait_status))
@@ -298,10 +391,8 @@ bro_spawned_process_finalize (GObject *object)
 {
   BroSpawnedProcess *self = BRO_SPAWNED_PROCESS (object);
   gpointer item;
-  while ((item = g_async_queue_try_pop (self->lines)) != NULL)
-    if (item != &end_of_lines)
-      bro_output_line_free (item);
-  g_async_queue_unref (self->lines);
+  while ((item = g_queue_pop_head (&self->lines)) != NULL)
+    bro_output_line_free (item);
   g_clear_object (&self->read_cancel);
   if (self->transcript >= 0)
     close (self->transcript);
@@ -321,7 +412,8 @@ bro_spawned_process_init (BroSpawnedProcess *self)
 {
   g_mutex_init (&self->lock);
   g_cond_init (&self->cond);
-  self->lines = g_async_queue_new ();
+  g_queue_init (&self->lines);
+  self->last_taken = g_get_monotonic_time ();
   self->transcript = -1;
   self->stalled = -1;
   self->read_cancel = g_cancellable_new ();

@@ -5,12 +5,18 @@ import Darwin
 import Foundation
 
 /// Starts processes with posix_spawn in their own process group and watches them (plan §10.3): stalls, stop
-/// escalation (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for at most 5 s after exit, a
-/// transcript of every line. Foundation's Process isn't used: it can't start a process group.
+/// escalation (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (longer only
+/// while lines wait for a reader that is still taking them), a transcript of every line. Lines are cut at 64 KiB
+/// (LineSplitter) and at most `queuedLines` wait to be read: then the reading waits too, so the tool waits to write
+/// (nothing is lost) and that wait doesn't count as silence. Foundation's Process isn't used: it can't start a process
+/// group.
 ///
 /// Signals go to the whole group. Once a stopped process has ended, whatever is left of its group is killed (a
 /// background child of a shell ignores SIGINT). A process left running after a normal exit is left alone.
 public final class PlatformProcessLauncher: ProcessLauncher {
+    /// How many lines may wait to be read before the reading waits.
+    public static let queuedLines = 10000
+
     public init() {}
 
     public func start(_ spec: ProcessSpec) throws(BroError) -> any RunningProcess {
@@ -38,10 +44,14 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
     private let pid: pid_t
     private let spec: ProcessSpec
     private let transcript: Transcript?
-    private let stream: AsyncStream<OutputLine>
-    private let continuation: AsyncStream<OutputLine>.Continuation
     private let cond = NSCondition()
     // Guarded by cond:
+    private var queue: [OutputLine] = []
+    private var queueHead = 0
+    private var lineWaiters: [CheckedContinuation<OutputLine?, Never>] = []
+    private var ended = false        // no more lines: the reader gets what is queued, then nil
+    private var waitingForRoom = 0   // readers waiting for the queue: the tool isn't silent, nobody is reading
+    private var lastTaken: Double    // when the reader last took a line
     private var lastOutput: Double
     private var readersLeft = 2
     private var stopReading = false
@@ -59,8 +69,8 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         self.pid = pid
         self.spec = spec
         self.transcript = transcript
-        (stream, continuation) = AsyncStream<OutputLine>.makeStream(bufferingPolicy: .unbounded)
         lastOutput = Self.clock()
+        lastTaken = lastOutput
     }
 
     static func clock() -> Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1e9 }
@@ -155,7 +165,60 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         Thread.detachNewThread { [self] in watch() }
     }
 
-    func lines() -> AsyncStream<OutputLine> { stream }
+    func lines() -> AsyncStream<OutputLine> { AsyncStream(unfolding: { [self] in await nextLine() }) }
+
+    /// The next queued line; waits for one; nil once the process has ended and the queue is empty.
+    private func nextLine() async -> OutputLine? {
+        await withCheckedContinuation { (c: CheckedContinuation<OutputLine?, Never>) in
+            cond.lock()
+            if queueHead < queue.count {
+                let line = queue[queueHead]
+                queueHead += 1
+                if queueHead >= 4096 && queueHead * 2 >= queue.count {
+                    queue.removeFirst(queueHead)
+                    queueHead = 0
+                }
+                lastTaken = Self.clock()
+                cond.broadcast()   // room for a waiting reader
+                cond.unlock()
+                c.resume(returning: line)
+            } else if ended {
+                cond.unlock()
+                c.resume(returning: nil)
+            } else {
+                lineWaiters.append(c)
+                cond.unlock()
+            }
+        }
+    }
+
+    /// Queues a line (into the transcript first); when the queue is full, waits for room. A line after the end is
+    /// dropped.
+    private func emit(_ line: OutputLine) {
+        transcript?.write(line.text)
+        cond.lock()
+        var waited = false
+        while queue.count - queueHead >= PlatformProcessLauncher.queuedLines && !ended {
+            waitingForRoom += 1
+            cond.wait()
+            waitingForRoom -= 1
+            waited = true
+        }
+        if waited { lastOutput = Self.clock() }
+        if ended {
+            cond.unlock()
+            return
+        }
+        if !lineWaiters.isEmpty {
+            let waiter = lineWaiters.removeFirst()
+            lastTaken = Self.clock()
+            cond.unlock()
+            waiter.resume(returning: line)
+            return
+        }
+        queue.append(line)
+        cond.unlock()
+    }
 
     func wait() async -> ProcessExit {
         await withCheckedContinuation { (c: CheckedContinuation<ProcessExit, Never>) in
@@ -198,15 +261,9 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
     }
 
     private func read(_ fd: Int32, _ source: OutputSource) {
-        var pending: [UInt8] = []
+        var splitter = LineSplitter()
         var buffer = [UInt8](repeating: 0, count: 65536)
         var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        func emit(_ bytes: ArraySlice<UInt8>) {
-            guard !bytes.isEmpty else { return }
-            let text = String(decoding: bytes, as: UTF8.self)
-            transcript?.write(text)
-            continuation.yield(OutputLine(stream: source, text: text, at: Self.now()))
-        }
         loop: while true {
             cond.lock()
             let quit = stopReading
@@ -220,15 +277,9 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
             cond.lock()
             lastOutput = Self.clock()
             cond.unlock()
-            pending.append(contentsOf: buffer[0..<n])
-            var start = 0
-            for i in 0..<pending.count where pending[i] == 0x0A || pending[i] == 0x0D {
-                emit(pending[start..<i])
-                start = i + 1
-            }
-            pending.removeFirst(start)
+            for text in splitter.feed(buffer[0..<n]) { emit(OutputLine(stream: source, text: text, at: Self.now())) }
         }
-        emit(pending[...])
+        if let last = splitter.finish() { emit(OutputLine(stream: source, text: last, at: Self.now())) }
         close(fd)
         cond.lock()
         readersLeft -= 1
@@ -241,7 +292,7 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         defer { cond.unlock() }
         while result == nil {
             let now = Self.clock()
-            if let limit = spec.stallTimeout, reason == nil, waitStatus == nil, now - lastOutput >= limit.seconds {
+            if let limit = spec.stallTimeout, reason == nil, waitStatus == nil, waitingForRoom == 0, now - lastOutput >= limit.seconds {
                 stalled = Duration(seconds: ((now - lastOutput) * 1000).rounded() / 1000)
                 beginStop(.stalled)
             }
@@ -252,8 +303,10 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
                 break
             }
             if let exitedAt, let status = waitStatus {
-                // Output normally ends with the process; a child it left behind may keep a pipe open.
-                if readersLeft == 0 || now - exitedAt >= 5 {
+                // Output normally ends with the process; a child it left behind may keep a pipe open: stop reading 5 s
+                // after the exit, unless lines are still waiting for a reader that keeps taking them.
+                let backlog = waitingForRoom > 0 && now - lastTaken < 5
+                if readersLeft == 0 || (now - exitedAt >= 5 && !backlog) {
                     stopReading = true
                     let exited = (status & 0x7f) == 0
                     finish(exited ? ProcessExit(status: Int((status >> 8) & 0xff), stalled: stalled, cancelled: cancelled)
@@ -270,7 +323,11 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
     /// With cond held.
     private func finish(_ exit: ProcessExit) {
         result = exit
-        continuation.finish()
+        ended = true
+        let readers = queueHead < queue.count ? [] : lineWaiters
+        if queueHead >= queue.count { lineWaiters = [] }
+        cond.broadcast()   // readers waiting for room drop their lines
+        for c in readers { c.resume(returning: nil) }
         if let transcript {
             var ending = exit.abandoned ? "abandoned" : exit.signal.map { "signal \($0)" } ?? "exit status \(exit.status)"
             if exit.stalled != nil { ending += ", stalled" }
@@ -308,4 +365,37 @@ private final class Transcript: @unchecked Sendable {
             fd = -1
         }
     }
+}
+
+/// Output bytes into lines, as every launcher splits them: at \n, \r or \r\n, empty lines dropped, UTF-8 with bad bytes
+/// replaced. A line is cut after `maxBytes` bytes and ends with " [cut]"; the rest of it, up to the next line break, is
+/// dropped, so a tool writing binary can't grow memory without limit.
+struct LineSplitter {
+    static let maxBytes = 65536
+    static let cutMark = " [cut]"
+    private var pending: [UInt8] = []
+    private var discarding = false
+
+    /// The lines `bytes` completes.
+    mutating func feed(_ bytes: ArraySlice<UInt8>) -> [String] {
+        var lines: [String] = []
+        for b in bytes {
+            if b == 0x0A || b == 0x0D {
+                if !discarding && !pending.isEmpty { lines.append(String(decoding: pending, as: UTF8.self)) }
+                pending.removeAll(keepingCapacity: true)
+                discarding = false
+            } else if !discarding {
+                pending.append(b)
+                if pending.count == Self.maxBytes {
+                    lines.append(String(decoding: pending, as: UTF8.self) + Self.cutMark)
+                    pending.removeAll(keepingCapacity: true)
+                    discarding = true
+                }
+            }
+        }
+        return lines
+    }
+
+    /// The last line, when the output didn't end with a line break.
+    func finish() -> String? { !discarding && !pending.isEmpty ? String(decoding: pending, as: UTF8.self) : nil }
 }
