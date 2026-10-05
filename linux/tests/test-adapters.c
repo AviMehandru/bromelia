@@ -1503,6 +1503,9 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     }
   if ((v = bro_json_value_member (expect, "stopped")) && bro_json_value_get_bool (v, FALSE) != (launcher->last && launcher->last->stopped))
     bro_test_fail (failures, id, "stopped");
+  if ((v = bro_json_value_member (expect, "stopReason")))
+    bro_test_same_string (failures, id, "stopReason", bro_json_value_get_string (v, ""),
+                          launcher->last && launcher->last->stopped ? bro_stop_reason_to_wire (launcher->last->reason) : NULL);
   if ((v = bro_json_value_member (expect, "linesRead")) && (!launcher->last || launcher->last->handed != bro_json_value_get_integer (v, -1)))
     bro_test_fail (failures, id, "linesRead: %d", launcher->last ? launcher->last->handed : -1);
   if ((v = bro_json_value_member (expect, "drives")))

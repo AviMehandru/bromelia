@@ -77,12 +77,13 @@ public sealed class MenuOcr
     async Task<(ProcessExit Exit, List<string> Lines)> Run(string exe, IReadOnlyList<string> arguments, CancellationToken cancel)
     {
         if (cancel.IsCancelled) throw Cancelled();
-        var process = _launcher.Start(new ProcessSpec(exe, arguments, new Dictionary<string, string>(), null, StopPolicy.InterruptFirst, Stall));
-        using var onCancel = cancel.OnCancel(() => process.Stop(StopReason.Cancelled));
         var lines = new List<string>();
-        await foreach (var line in process.Lines().ConfigureAwait(false))
-            if (line.Stream == OutputSource.Stdout) lines.Add(line.Text);
-        var exit = await process.Wait().ConfigureAwait(false);
+        var exit = await ToolRun.Run(_launcher, new ProcessSpec(exe, arguments, new Dictionary<string, string>(), null, StopPolicy.InterruptFirst, Stall),
+            cancel, line =>
+            {
+                if (line.Stream == OutputSource.Stdout) lines.Add(line.Text);
+                return null;
+            }).ConfigureAwait(false);
         if (exit.Cancelled) throw Cancelled();
         return (exit, lines);
     }

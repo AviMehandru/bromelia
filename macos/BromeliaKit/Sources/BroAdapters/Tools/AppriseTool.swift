@@ -17,12 +17,9 @@ public final class AppriseTool: Sendable {
         guard let exe = locator.locate(.apprise).path else {
             throw BroMessage(.notifyNeedsApprise, [("target", .string(Self.scheme(url)))], severity: .warning).toError()
         }
-        let process = try launcher.start(ProcessSpec(executable: exe, arguments: AppriseArgs.build(url, title: title, body: body), environment: [:],
-                                                     stopPolicy: .interruptFirst, stallTimeout: Duration(seconds: 120)))
-        let remove = cancel.onCancel { process.stop(.cancelled) }
-        defer { remove() }
-        for await _ in process.lines() {}
-        let exit = await process.wait()
+        let exit = try await ToolRun.run(launcher, ProcessSpec(executable: exe, arguments: AppriseArgs.build(url, title: title, body: body),
+                                                               environment: [:], stopPolicy: .interruptFirst, stallTimeout: Duration(seconds: 120)),
+                                         cancel: cancel) { _ in nil }
         if exit.cancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         if exit.status != 0 { throw BroMessage(.notifyAppriseFailed, [("status", .integer(Int64(exit.status)))], severity: .warning).toError() }
     }

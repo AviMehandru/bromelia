@@ -3,6 +3,7 @@
 
 #include "bro-apprise-args.h"
 #include "bro-message-code.h"
+#include "bro-tool-run.h"
 #include <string.h>
 
 struct _BroAppriseTool {
@@ -20,22 +21,13 @@ _bro_apprise_tool_scheme (const char *url)
   return sep && sep > url ? g_strndup (url, (gsize) (sep - url)) : g_strdup (url);
 }
 
-static void
-stop_process (gpointer process, gpointer unused)
-{
-  bro_running_process_stop (process, BRO_STOP_REASON_CANCELLED);
-}
-
 gboolean
 bro_apprise_tool_send (BroAppriseTool *self, const char *url, const char *title, const char *body, BroCancellationToken *cancel,
                        BroBroError **error)
 {
   g_autoptr (BroToolInfo) info = bro_tool_locator_locate (self->locator, BRO_TOOL_KIND_APPRISE);
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
-  BroOutputLine *line;
   BroProcessExit exit;
-  guint handler = 0;
   if (!info->path)
     {
       g_autofree char *scheme = _bro_apprise_tool_scheme (url);
@@ -51,16 +43,8 @@ bro_apprise_tool_send (BroAppriseTool *self, const char *url, const char *title,
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = 120;
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, NULL, NULL, &exit, error))
     return FALSE;
-  if (cancel)
-    handler = bro_cancellation_token_on_cancel (cancel, stop_process, process, NULL);
-  while ((line = bro_running_process_lines (process)) != NULL)
-    bro_output_line_free (line);
-  exit = bro_running_process_wait (process);
-  if (handler)
-    bro_cancellation_token_disconnect (cancel, handler);
   if (exit.cancelled)
     {
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);

@@ -1,7 +1,9 @@
 import BroDomain
 import BroFoundation
 
-/// A started process. stop escalates (INT →) TERM → KILL, 5 s apart, and abandons the process 30 s after KILL.
+/// A started process. stop escalates (INT →) TERM → KILL, 5 s apart, and abandons the process 30 s after KILL. An
+/// abandoned process (ProcessExit.abandoned) may still be running and writing: whatever it was writing to (a staging
+/// folder, an image) must be quarantined, never reused or removed.
 public protocol RunningProcess: Sendable {
     /// Its output lines, in order, until it closes its output.
     func lines() -> AsyncStream<OutputLine>

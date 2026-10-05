@@ -3,6 +3,7 @@
 
 #include "bro-hand-brake-args.h"
 #include "bro-message-code.h"
+#include "bro-tool-run.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,10 +23,27 @@ struct _BroHandBrake {
 
 G_DEFINE_FINAL_TYPE (BroHandBrake, bro_hand_brake, G_TYPE_OBJECT)
 
-static void
-stop_process (gpointer process, gpointer unused)
+typedef struct {
+  GStrvBuilder *names;
+  guint count;
+  gboolean in_category;
+} PresetList;
+
+/* --preset-list: the names indented by four spaces under a category (a line at column 0 ending in /). */
+static gboolean
+preset_line (const BroOutputLine *line, gpointer data, BroStopReason *reason)
 {
-  bro_running_process_stop (process, BRO_STOP_REASON_CANCELLED);
+  PresetList *list = data;
+  const char *text = line->text;
+  if (text[0] != ' ')
+    list->in_category = g_str_has_suffix (text, "/"); /* a category, or anything else at column 0 */
+  else if (list->in_category && g_str_has_prefix (text, "    ") && text[4] && text[4] != ' ')
+    {
+      g_autofree char *name = g_strchomp (g_strdup (text + 4));
+      g_strv_builder_add (list->names, name);
+      list->count++;
+    }
+  return FALSE;
 }
 
 static gboolean
@@ -40,13 +58,10 @@ bro_hand_brake_presets (BroHandBrake *self, BroCancellationToken *cancel, BroBro
 {
   g_autoptr (BroToolInfo) info = bro_tool_locator_locate (self->locator, BRO_TOOL_KIND_HANDBRAKE);
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
   g_autoptr (GStrvBuilder) names = g_strv_builder_new ();
   g_auto (GStrv) found = NULL;
   const char *args[] = { "--preset-list", NULL };
-  gboolean in_category = FALSE;
-  guint handler = 0, count = 0;
-  BroOutputLine *line;
+  PresetList list = { names, 0, FALSE };
   BroProcessExit exit;
   if (!info->path)
     return g_strdupv ((char **) bro_hand_brake_built_in_presets);
@@ -59,31 +74,12 @@ bro_hand_brake_presets (BroHandBrake *self, BroCancellationToken *cancel, BroBro
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = 60;
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, preset_line, &list, &exit, error))
     return NULL;
-  if (cancel)
-    handler = bro_cancellation_token_on_cancel (cancel, stop_process, process, NULL);
-  while ((line = bro_running_process_lines (process)) != NULL)
-    {
-      const char *text = line->text;
-      if (text[0] != ' ')
-        in_category = g_str_has_suffix (text, "/"); /* a category, or anything else at column 0 */
-      else if (in_category && g_str_has_prefix (text, "    ") && text[4] && text[4] != ' ')
-        {
-          g_autofree char *name = g_strchomp (g_strdup (text + 4));
-          g_strv_builder_add (names, name);
-          count++;
-        }
-      bro_output_line_free (line);
-    }
-  exit = bro_running_process_wait (process);
-  if (handler)
-    bro_cancellation_token_disconnect (cancel, handler);
   if (exit.cancelled)
     return cancelled (error), NULL;
   found = g_strv_builder_end (names);
-  if (exit.status != 0 || count == 0)
+  if (exit.status != 0 || list.count == 0)
     return g_strdupv ((char **) bro_hand_brake_built_in_presets);
   return g_steal_pointer (&found);
 }
@@ -186,18 +182,60 @@ executable (BroHandBrake *self, const BroStepDefinition *step, BroBroError **err
   return NULL;
 }
 
+/* An encode in progress: progress and kept lines go to the sink; the step's timeout stops the process. */
+typedef struct {
+  BroHandBrake *self;
+  const BroStepDefinition *step;
+  BroRunSink *sink;
+  BroProgressFilter filter;
+  Deadline *deadline;   /* nullable */
+  BroTimerHandle *timer; /* nullable */
+} Encode;
+
+static void
+encode_started (BroRunningProcess *process, gpointer data)
+{
+  Encode *e = data;
+  BroTimerSchedule at;
+  if (e->step->timeout_seconds <= 0)
+    return;
+  at = (BroTimerSchedule) { BRO_TIMER_SCHEDULE_AT, { bro_clock_now (e->self->clock).unix_milliseconds + (gint64) e->step->timeout_seconds * 1000 },
+                            { 0 } };
+  e->deadline = g_atomic_rc_box_new0 (Deadline);
+  e->deadline->process = g_object_ref (process);
+  e->timer = bro_clock_timer (e->self->clock, &at, deadline_reached, g_atomic_rc_box_acquire (e->deadline), deadline_release);
+}
+
+static gboolean
+encode_line (const BroOutputLine *line, gpointer data, BroStopReason *reason)
+{
+  Encode *e = data;
+  int current, total;
+  if (progress_of (line->text, &current, &total))
+    {
+      g_autoptr (BroRobotEvent) event = bro_robot_event_new (BRO_ROBOT_EVENT_PROGRESS_VALUE);
+      event->current = current;
+      event->total = total;
+      event->max = PROGRESS_MAX;
+      bro_run_sink_event (e->sink, event);
+    }
+  if (bro_hand_brake_args_keep_line (&e->filter, line->text))
+    {
+      g_autoptr (BroRobotEvent) event = bro_robot_event_new (BRO_ROBOT_EVENT_RAW);
+      event->text = g_strdup (line->text);
+      bro_run_sink_event (e->sink, event);
+    }
+  return FALSE;
+}
+
 gboolean
 bro_hand_brake_encode (BroHandBrake *self, const BroStepDefinition *step, const char *input, const char *output, BroRunSink *sink,
                        BroCancellationToken *cancel, BroHandBrakeRun *run, BroBroError **error)
 {
   g_autofree char *exe = executable (self, step, error);
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
-  g_autoptr (BroTimerHandle) timer = NULL;
-  Deadline *deadline = NULL;
-  BroProgressFilter filter = { 0 };
-  BroOutputLine *line;
-  guint handler = 0;
+  Encode e = { self, step, sink, { 0 }, NULL, NULL };
+  gboolean ran;
   if (!exe)
     return FALSE;
   if (cancel && bro_cancellation_token_is_cancelled (cancel))
@@ -208,45 +246,17 @@ bro_hand_brake_encode (BroHandBrake *self, const BroStepDefinition *step, const 
   spec->arguments = bro_hand_brake_args_build (step, input, output, self->home);
   spec->working_directory = g_path_get_dirname (output);
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
+  ran = bro_tool_run (self->launcher, spec, cancel, encode_started, encode_line, &e, &run->exit, error);
+  run->timed_out = e.deadline && g_atomic_int_get (&e.deadline->timed_out);
+  if (e.timer)
+    {
+      bro_timer_handle_cancel (e.timer);
+      g_object_unref (e.timer);
+    }
+  if (e.deadline)
+    deadline_release (e.deadline);
+  if (!ran)
     return FALSE;
-  if (cancel)
-    handler = bro_cancellation_token_on_cancel (cancel, stop_process, process, NULL);
-  if (step->timeout_seconds > 0)
-    {
-      BroTimerSchedule at = { BRO_TIMER_SCHEDULE_AT, { bro_clock_now (self->clock).unix_milliseconds + (gint64) step->timeout_seconds * 1000 }, { 0 } };
-      deadline = g_atomic_rc_box_new0 (Deadline);
-      deadline->process = g_object_ref (process);
-      timer = bro_clock_timer (self->clock, &at, deadline_reached, g_atomic_rc_box_acquire (deadline), deadline_release);
-    }
-  while ((line = bro_running_process_lines (process)) != NULL)
-    {
-      int current, total;
-      if (progress_of (line->text, &current, &total))
-        {
-          g_autoptr (BroRobotEvent) event = bro_robot_event_new (BRO_ROBOT_EVENT_PROGRESS_VALUE);
-          event->current = current;
-          event->total = total;
-          event->max = PROGRESS_MAX;
-          bro_run_sink_event (sink, event);
-        }
-      if (bro_hand_brake_args_keep_line (&filter, line->text))
-        {
-          g_autoptr (BroRobotEvent) event = bro_robot_event_new (BRO_ROBOT_EVENT_RAW);
-          event->text = g_strdup (line->text);
-          bro_run_sink_event (sink, event);
-        }
-      bro_output_line_free (line);
-    }
-  run->exit = bro_running_process_wait (process);
-  run->timed_out = deadline && g_atomic_int_get (&deadline->timed_out);
-  if (timer)
-    bro_timer_handle_cancel (timer);
-  if (deadline)
-    deadline_release (deadline);
-  if (handler)
-    bro_cancellation_token_disconnect (cancel, handler);
   if (run->exit.cancelled)
     return cancelled (error);
   return TRUE;

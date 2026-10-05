@@ -103,6 +103,7 @@ public sealed class MakemkvToolTests : IDisposable
             if (expect["transcriptFile"] is { } tfile) Assert.Equal(tfile.AsString, Shown(spec!.Transcript!));
             if (expect["lease"] is { } lease) Assert.Equal(lease.AsArray!.Select(x => x.AsString), isolation.Log);
             if (expect["stopped"] is { } stopped) Assert.Equal(stopped.AsBool, launcher.Last!.StoppedBy != null);
+            if (expect["stopReason"]?.AsString is { } why) Assert.Equal(why, EnumWire.Name(launcher.Last!.StoppedBy!.Value));
             if (expect["linesRead"] is { } read) Assert.Equal(read.AsInteger, launcher.Last!.Handed);
             if (expect["drives"] is { } want)
                 Assert.Equal(want.AsArray!.Select(d => $"{d.AsArray![0].AsInteger} {d.AsArray![1].AsString} {d.AsArray![2].AsString}"),
@@ -121,5 +122,34 @@ public sealed class MakemkvToolTests : IDisposable
             if (run != null) Assert.True(sink.Events > 0);
             return true;
         });
+    }
+
+    sealed class ThrowingSink : IRunSink
+    {
+        int _events;
+        public void Event(RobotEvent e)
+        {
+            if (++_events == 3) throw new InvalidOperationException("the sink failed");
+        }
+    }
+
+    /// <summary>An exception while a line is handled (here the sink's) stops makemkvcon and waits for it before it goes
+    /// on: the drive isn't left to a process nobody reads.</summary>
+    [Fact]
+    public void AnExceptionWhileReadingStopsTheTool()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "home"));
+        var launcher = new ScriptedProcessLauncher { Lines = Text("mkv-rip.txt").Split('\n').Where(l => l.Length > 0).ToList() };
+        var isolation = new RecordingIsolation();
+        var tool = new MakemkvTool(launcher, new DiskFileSystem(), isolation, new FixedLocator("/opt/makemkvcon"));
+        var invocation = new MakemkvInvocation(new MakemkvRunSettings(new Dictionary<string, string>(), null, "/data", Path.Combine(_root, "home")),
+            new MakemkvOptions(), null, null);
+        var e = Assert.Throws<InvalidOperationException>(() =>
+            tool.Rip(new MakemkvSource.Drive(0, "/dev/rdisk4"), "all", Path.Combine(_root, "staging"), invocation, new ThrowingSink(), new CancellationToken())
+                .GetAwaiter().GetResult());
+        Assert.Equal("the sink failed", e.Message);
+        Assert.Equal(StopReason.Policy, launcher.Last!.StoppedBy);
+        Assert.True(launcher.Last.Wait().IsCompleted);
+        Assert.Equal(new[] { "prepare", "firstOutput", "release" }, isolation.Log);
     }
 }

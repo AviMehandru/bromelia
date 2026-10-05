@@ -112,7 +112,8 @@
       "expect": {
         "abandoned": true,
         "within": 36,
-        "note": "Not reproducible in a test (a process stuck in the kernel); covered by reading the code."
+        "note": "Not reproducible in a test (a process stuck in the kernel); covered by reading the code.",
+        "rule": "An abandoned process may still be running and writing: whatever it was writing to (a staging folder, an image) must be quarantined, never reused or removed."
       }
     },
     {
@@ -221,7 +222,7 @@
       "expect": {
         "exit": "status n, no signal",
         "signal": "status -1, signal n (macOS, Linux)",
-        "cancelled": "cancelled true for StopReason cancelled and shutdown",
+        "cancelled": "cancelled true for StopReason cancelled and shutdown, never for policy (the engine's own decision: MakeMKV's space warning, a renumbered drive), stalled or timedOut",
         "stalled": "stalled = the silence that stopped it",
         "abandoned": "status -1, abandoned true"
       }

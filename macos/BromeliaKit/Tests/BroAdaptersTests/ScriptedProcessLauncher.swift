@@ -129,8 +129,18 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             }
         }
 
+        /// As a real process: it ends when stopped, whether or not anyone reads the rest of its lines.
         func stop(_ reason: StopReason) {
-            lock.withLock { if stoppedBy == nil { stoppedBy = reason } }
+            lock.lock()
+            if stoppedBy == nil { stoppedBy = reason }
+            let exit = ProcessExit(status: -1, signal: 15, cancelled: stoppedBy == .cancelled || stoppedBy == .shutdown)
+            let resume = result == nil ? waiters : []
+            if result == nil {
+                result = exit
+                waiters = []
+            }
+            lock.unlock()
+            for c in resume { c.resume(returning: exit) }
         }
     }
 }

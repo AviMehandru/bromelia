@@ -26,7 +26,7 @@ public final class MakemkvTool: Sendable {
     public func scanDrives(_ cancel: CancellationToken) async throws(BroError) -> [MakemkvDrive] {
         let spec = ProcessSpec(executable: try executable(), arguments: MakemkvArgs.scanDrives(), environment: [:], stopPolicy: .terminateFirst)
         var drives: [MakemkvDrive] = []
-        _ = await feed(try launcher.start(spec), cancel: cancel) { e in
+        _ = try await feed(spec, cancel: cancel) { e in
             if let d = MakemkvDrive.from(e) { drives.append(d) }
             return nil
         }
@@ -80,7 +80,7 @@ public final class MakemkvTool: Sendable {
                                stallTimeout: invocation.stallTimeout, transcript: invocation.transcript)
         var accumulator = start
         var first = true
-        let exit = await feed(try launcher.start(spec), cancel: cancel) { e in
+        let exit = try await feed(spec, cancel: cancel) { e in
             if first {
                 first = false
                 lease.firstOutput()
@@ -88,27 +88,16 @@ public final class MakemkvTool: Sendable {
             accumulator.feed(e)
             also?(e)
             sink.event(e)
-            return accumulator.stopReason == nil ? nil : .cancelled
+            return accumulator.stopReason == nil ? nil : .policy
         }
         let newNames = try destination.map { (d: String) throws(BroError) in try self.newNames(d, before: before ?? []) } ?? []
         return MakemkvRun(outcome: RunOutcome.classify(accumulator, exit: exit, product: product, newNames: newNames),
                           notice: accumulator.problem, libreDrive: accumulator.libreDrive, version: accumulator.makemkvVersion)
     }
 
-    /// Reads the process line by line; `handle` returns a reason to stop it (acted on once). Cancelling stops it too.
-    private func feed(_ process: any RunningProcess, cancel: CancellationToken,
-                      _ handle: (RobotEvent) -> StopReason?) async -> ProcessExit {
-        let removeHandler = cancel.onCancel { process.stop(.cancelled) }
-        defer { removeHandler() }
-        var stopped = false
-        for await line in process.lines() {
-            let e = Robot.parseLine(line.text) ?? .raw(text: line.text)
-            if let reason = handle(e), !stopped {
-                stopped = true
-                process.stop(reason)
-            }
-        }
-        return await process.wait()
+    /// Feeds the process's lines as robot events; `handle` returns a reason to stop it.
+    private func feed(_ spec: ProcessSpec, cancel: CancellationToken, _ handle: (RobotEvent) -> StopReason?) async throws(BroError) -> ProcessExit {
+        try await ToolRun.run(launcher, spec, cancel: cancel) { line in handle(Robot.parseLine(line.text) ?? .raw(text: line.text)) }
     }
 
     /// The names in the destination before the run: none when it isn't there yet.

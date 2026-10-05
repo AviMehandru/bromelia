@@ -8,6 +8,7 @@ static const char *const names[] = {
   "stalled",
   "timedOut",
   "shutdown",
+  "policy",
 };
 
 const char *

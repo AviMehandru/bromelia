@@ -141,6 +141,10 @@
       {
         "symbol": "bro_process_exit_status",
         "why": "A ProcessExit with only an exit status (Swift and C# use default arguments)."
+      },
+      {
+        "symbol": "bro_tool_run",
+        "why": "How every tool adapter runs its process (Swift and C#: an internal ToolRun the map doesn't list); a C helper needs a header, so its name is public."
       }
     ]
   },
@@ -6801,7 +6805,8 @@
             "cancelled",
             "stalled",
             "timedOut",
-            "shutdown"
+            "shutdown",
+            "policy"
           ],
           "swift": {
             "name": "StopReason",
@@ -6810,7 +6815,8 @@
               ".cancelled",
               ".stalled",
               ".timedOut",
-              ".shutdown"
+              ".shutdown",
+              ".policy"
             ]
           },
           "cs": {
@@ -6820,7 +6826,8 @@
               "Cancelled",
               "Stalled",
               "TimedOut",
-              "Shutdown"
+              "Shutdown",
+              "Policy"
             ]
           },
           "c": {
@@ -6830,10 +6837,11 @@
               "BRO_STOP_REASON_CANCELLED",
               "BRO_STOP_REASON_STALLED",
               "BRO_STOP_REASON_TIMED_OUT",
-              "BRO_STOP_REASON_SHUTDOWN"
+              "BRO_STOP_REASON_SHUTDOWN",
+              "BRO_STOP_REASON_POLICY"
             ]
           },
-          "doc": "Why a process is stopped."
+          "doc": "Why a process is stopped. Only cancelled and shutdown make its exit cancelled; policy is the engine's own decision (MakeMKV's space warning, a renumbered drive, an error while reading the output)."
         },
         {
           "name": "OutputSource",

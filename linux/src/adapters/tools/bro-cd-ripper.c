@@ -3,6 +3,7 @@
 
 #include "bro-cd-ripper-args.h"
 #include "bro-message-code.h"
+#include "bro-tool-run.h"
 #include <string.h>
 
 struct _BroCdRipper {
@@ -14,10 +15,14 @@ struct _BroCdRipper {
 
 G_DEFINE_FINAL_TYPE (BroCdRipper, bro_cd_ripper, G_TYPE_OBJECT)
 
-static void
-stop_process (gpointer process, gpointer unused)
+/* Each line goes to the sink as it is. */
+static gboolean
+raw_line (const BroOutputLine *output, gpointer sink, BroStopReason *reason)
 {
-  bro_running_process_stop (process, BRO_STOP_REASON_CANCELLED);
+  g_autoptr (BroRobotEvent) event = bro_robot_event_new (BRO_ROBOT_EVENT_RAW);
+  event->text = g_strdup (output->text);
+  bro_run_sink_event (sink, event);
+  return FALSE;
 }
 
 /* @code with {tool} and, when @key is set, {@key: @value}. */
@@ -47,13 +52,11 @@ bro_cd_ripper_rip (BroCdRipper *self, const char *device, const char *dest, cons
   g_autoptr (BroJsonValue) other_discs = bro_json_value_new_object ();
   g_autoptr (BroCommandLine) line = NULL;
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
   g_autoptr (GPtrArray) entries = NULL;
   g_autoptr (GPtrArray) saved = NULL;
   const char *exe = NULL;
-  BroOutputLine *output;
   BroProcessExit exit;
-  guint handler = 0, n = 0;
+  guint n = 0;
   GStrv result = NULL;
 
   for (guint i = 0; i < G_N_ELEMENTS (kinds); i++)
@@ -90,21 +93,8 @@ bro_cd_ripper_rip (BroCdRipper *self, const char *device, const char *dest, cons
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = stall_minutes > 0;
   spec->stall_timeout.seconds = stall_minutes * 60.0;
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, raw_line, sink, &exit, error))
     goto out;
-  if (cancel)
-    handler = bro_cancellation_token_on_cancel (cancel, stop_process, process, NULL);
-  while ((output = bro_running_process_lines (process)) != NULL)
-    {
-      g_autoptr (BroRobotEvent) event = bro_robot_event_new (BRO_ROBOT_EVENT_RAW);
-      event->text = g_strdup (output->text);
-      bro_run_sink_event (sink, event);
-      bro_output_line_free (output);
-    }
-  exit = bro_running_process_wait (process);
-  if (handler)
-    bro_cancellation_token_disconnect (cancel, handler);
   if (exit.cancelled)
     bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
   else if (exit.stalled_seconds >= 0)

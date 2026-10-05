@@ -4,6 +4,7 @@
 #include "bro-message-code.h"
 #include "bro-simple-chapters.h"
 #include "bro-split.h"
+#include "bro-tool-run.h"
 #include <string.h>
 
 struct _BroMkvToolNix {
@@ -16,10 +17,13 @@ struct _BroMkvToolNix {
 
 G_DEFINE_FINAL_TYPE (BroMkvToolNix, bro_mkv_tool_nix, G_TYPE_OBJECT)
 
-static void
-stop_process (gpointer process, gpointer unused)
+/* Keeps the stdout lines (when @lines isn't NULL). */
+static gboolean
+keep_stdout (const BroOutputLine *line, gpointer lines, BroStopReason *reason)
 {
-  bro_running_process_stop (process, BRO_STOP_REASON_CANCELLED);
+  if (lines && line->stream == BRO_OUTPUT_SOURCE_STDOUT)
+    g_ptr_array_add (lines, g_strdup (line->text));
+  return FALSE;
 }
 
 /* Runs @tool; its stdout lines go to @lines (when not NULL). FALSE and @error set when it can't run or was
@@ -30,9 +34,6 @@ run (BroMkvToolNix *self, BroToolKind tool, const char *const *arguments, double
 {
   g_autoptr (BroToolInfo) info = bro_tool_locator_locate (self->locator, tool);
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
-  BroOutputLine *line;
-  guint handler = 0;
   if (!info->path)
     {
       if (error)
@@ -60,20 +61,8 @@ run (BroMkvToolNix *self, BroToolKind tool, const char *const *arguments, double
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = stall;
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, keep_stdout, lines, exit, error))
     return FALSE;
-  if (cancel)
-    handler = bro_cancellation_token_on_cancel (cancel, stop_process, process, NULL);
-  while ((line = bro_running_process_lines (process)) != NULL)
-    {
-      if (lines && line->stream == BRO_OUTPUT_SOURCE_STDOUT)
-        g_ptr_array_add (lines, g_strdup (line->text));
-      bro_output_line_free (line);
-    }
-  *exit = bro_running_process_wait (process);
-  if (handler)
-    bro_cancellation_token_disconnect (cancel, handler);
   if (exit->cancelled)
     {
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
