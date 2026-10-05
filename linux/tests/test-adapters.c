@@ -1831,6 +1831,7 @@ main (int argc, char **argv)
   g_test_add_func ("/store/cases", test_store_cases);
   g_test_add_func ("/store/round-trips", test_store_round_trips);
   g_test_add_func ("/store/transaction", test_store_transaction);
+  g_test_add_func ("/store/reentered-and-too-new", test_store_reentered_and_too_new);
   g_test_add_func ("/store/schema", test_store_schema);
   g_test_add_func ("/http/client", test_http_client);
   g_test_add_func ("/http/notification-sender", test_notification_sender);

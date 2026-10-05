@@ -258,6 +258,49 @@ public sealed class SqliteStoreTests : IDisposable
         Assert.Equal(JsonValue.Of(2L), await store.Kv().Get("b"));
     }
 
+    /// <summary>Inside a transaction the outer store would wait for ever for the lock the transaction holds: it fails at
+    /// once instead (store.reentered), and the transaction rolls back.</summary>
+    [Fact]
+    public async Task TheOuterStoreInsideATransactionFails()
+    {
+        var store = NewStore();
+        var inside = store.Transaction(async tx =>
+        {
+            await tx.Kv().Set("a", JsonValue.Of(1L));
+            await store.Kv().Get("a");
+            return 0;
+        });
+        Assert.Same(inside, await Task.WhenAny(inside, Task.Delay(TimeSpan.FromSeconds(10))));
+        var e = await Assert.ThrowsAsync<BroFailure>(() => inside);
+        Assert.Equal("store.reentered", e.Error.Code);
+        var nested = await Assert.ThrowsAsync<BroFailure>(() => store.Transaction(tx => store.Transaction(_ => Task.FromResult(0))));
+        Assert.Equal("store.reentered", nested.Error.Code);
+        Assert.Null(await store.Kv().Get("a"));
+        // Other flows still wait their turn, as before.
+        var both = await Task.WhenAll(store.Transaction(async tx => { await tx.Kv().Set("b", JsonValue.Of(2L)); return 1; }),
+            Task.Run(async () => { await store.Kv().Set("c", JsonValue.Of(3L)); return 2; }));
+        Assert.Equal(new[] { 1, 2 }, both);
+    }
+
+    /// <summary>A database from a newer Bromelia isn't migrated as if it were current.</summary>
+    [Fact]
+    public async Task ANewerDatabaseIsRefused()
+    {
+        NewStore("newer").Close();
+        using (var db = new SqliteConnection($"Data Source={Path.Combine(_dir, "newer.sqlite")};Pooling=False"))
+        {
+            db.Open();
+            using var c = db.CreateCommand();
+            c.CommandText = "PRAGMA user_version = 99";
+            c.ExecuteNonQuery();
+        }
+        var store = SqliteStore.Open(Path.Combine(_dir, "newer.sqlite"), new FixedClock());
+        _open.Add(store);
+        var e = await Assert.ThrowsAsync<BroFailure>(() => store.Migrate());
+        Assert.Equal("store.tooNew", e.Error.Code);
+        Assert.Equal(99, e.Error.Params["version"]!.AsInteger);
+    }
+
     [Fact]
     public async Task TheSchemaIsTheSharedOneAndMigratingTwiceChangesNothing()
     {

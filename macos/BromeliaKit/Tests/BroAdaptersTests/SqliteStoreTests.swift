@@ -302,6 +302,54 @@ final class RawDb {
         #expect(try await s.kv().get("b") == .integer(2))
     }
 
+    /// Inside a transaction the outer store would wait for ever for the lock the transaction holds: it fails at once
+    /// instead (store.reentered), and the transaction rolls back.
+    @Test func theOuterStoreInsideATransactionFails() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let s = try await store("reenter")
+        defer { s.close() }
+        do {
+            _ = try await s.transaction { (tx) throws(BroError) -> Int in
+                try await tx.kv().set("a", value: .integer(1))
+                _ = try await s.kv().get("a")
+                return 0
+            }
+            Issue.record("no error")
+        } catch {
+            #expect(error.code == "store.reentered")
+        }
+        do {
+            _ = try await s.transaction { (_) throws(BroError) -> Int in try await s.transaction { (_) throws(BroError) in 0 } }
+            Issue.record("no error")
+        } catch {
+            #expect(error.code == "store.reentered")
+        }
+        #expect(try await s.kv().get("a") == nil)
+        // Other tasks still wait their turn, as before.
+        async let a = s.transaction { (tx) throws(BroError) -> Int in
+            try await tx.kv().set("b", value: .integer(2))
+            return 1
+        }
+        async let b: Void = s.kv().set("c", value: .integer(3))
+        #expect(try await a == 1)
+        try await b
+    }
+
+    /// A database from a newer Bromelia isn't migrated as if it were current.
+    @Test func aNewerDatabaseIsRefused() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try await store("newer").close()
+        RawDb(dir + "/newer.sqlite").exec("PRAGMA user_version = 99")
+        let s = try SqliteStore.open(dir + "/newer.sqlite", clock: FixedClock())
+        defer { s.close() }
+        do {
+            try await s.migrate()
+            Issue.record("no error")
+        } catch {
+            #expect(error.code == "store.tooNew")
+        }
+    }
+
     @Test func theSchemaIsTheSharedOneAndMigratingTwiceChangesNothing() async throws {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let s = try await store("schema")
