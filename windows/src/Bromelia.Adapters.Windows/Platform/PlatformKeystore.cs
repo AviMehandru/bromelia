@@ -11,8 +11,10 @@ namespace Bromelia.Adapters.Windows;
 
 /// <summary>Keystore on Windows (plan §10.3): generic credentials in Credential Manager, target "&lt;service&gt;:&lt;name&gt;",
 /// the value as UTF-8. When Credential Manager can't be used at all (no logon session: a service account, an SSH key
-/// logon), the secrets are files &lt;fallbackDir&gt;/&lt;name&gt; instead; that is decided once, at the first call. Names are
-/// SecretRef names (keystore.cases.json); anything else fails with keystore.failed.</summary>
+/// logon), the secrets are files &lt;fallbackDir&gt;/&lt;name&gt; instead; that is decided once, at the first call. The folder
+/// is owner-only (Windows' 0700: the current user and SYSTEM, nothing inherited), since a service's data folder may be
+/// readable by every user; files written there inherit that. Names are SecretRef names (keystore.cases.json); anything
+/// else fails with keystore.failed.</summary>
 public sealed class PlatformKeystore : IKeystore
 {
     const uint CRED_TYPE_GENERIC = 1;
@@ -138,11 +140,11 @@ public sealed class PlatformKeystore : IKeystore
         var temp = Path.Combine(_fallbackDir, $".{name}.{Guid.NewGuid():N}.tmp");
         try
         {
-            Directory.CreateDirectory(_fallbackDir);
+            OwnerOnly.Folder(_fallbackDir); // before the secret is written, so the new file inherits it
             File.WriteAllBytes(temp, Encoding.UTF8.GetBytes(value));
             File.Move(temp, FilePath(name), overwrite: true);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.AccessControl.PrivilegeNotHeldException)
         {
             try { File.Delete(temp); } catch (IOException) { }
             throw Failed(name, e.Message);
