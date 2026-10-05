@@ -13,7 +13,9 @@ namespace Bromelia.Adapters;
 /// (MakemkvArgs), starts it (ProcessLauncher; TERM first, since makemkvcon ignores INT), feeds every line to
 /// Robot.parseLine, the RunAccumulator and the sink, gives the settings back on the first line, stops it when the
 /// accumulator says so (MakeMKV's space warning, a renumbered drive) or when cancelled, and classifies the run with
-/// the files it produced. Holds no state between calls.</summary>
+/// the names that are new in the destination (RunOutcome.Products picks what counts). A destination that can't be
+/// listed before or after the run fails the call: every name in it would otherwise look new, or none. Holds no state
+/// between calls.</summary>
 public sealed class MakemkvTool
 {
     readonly IProcessLauncher _launcher;
@@ -45,13 +47,15 @@ public sealed class MakemkvTool
     public async Task<ListingRun> Listing(MakemkvSource source, MakemkvInvocation invocation, IRunSink sink, CancellationToken cancel)
     {
         var builder = new ListingBuilder();
-        var run = await Isolated(invocation, options => MakemkvArgs.Info(source, options), new RunAccumulator(), null, sink, cancel, builder.Feed).ConfigureAwait(false);
+        var run = await Isolated(invocation, options => MakemkvArgs.Info(source, options), new RunAccumulator(), RunProduct.Nothing, null, sink, cancel,
+            builder.Feed).ConfigureAwait(false);
         return new ListingRun(builder.Build(), run);
     }
 
     /// <param name="title">A title index or "all".</param>
     public Task<MakemkvRun> Rip(MakemkvSource source, string title, string destination, MakemkvInvocation invocation, IRunSink sink, CancellationToken cancel) =>
-        Isolated(invocation, options => MakemkvArgs.Mkv(source, title, destination, options), new RunAccumulator(readsData: true), destination, sink, cancel, null);
+        Isolated(invocation, options => MakemkvArgs.Mkv(source, title, destination, options), new RunAccumulator(readsData: true), RunProduct.Titles,
+            destination, sink, cancel, null);
 
     /// <summary>disc:N only (backup.needsDrive otherwise). Stops at once when a DRV line shows the index now names
     /// another device.</summary>
@@ -60,7 +64,7 @@ public sealed class MakemkvTool
         MakemkvArgs.Backup(source, decrypt, destination, invocation.Options); // backup.needsDrive before anything runs
         var drive = (MakemkvSource.Drive)source;
         return Isolated(invocation, options => MakemkvArgs.Backup(source, decrypt, destination, options),
-            new RunAccumulator(readsData: true, expectedIndex: drive.Index, expectedDevice: drive.Device), destination, sink, cancel, null);
+            new RunAccumulator(readsData: true, expectedIndex: drive.Index, expectedDevice: drive.Device), RunProduct.Backup, destination, sink, cancel, null);
     }
 
     string Executable()
@@ -71,11 +75,11 @@ public sealed class MakemkvTool
     }
 
     async Task<MakemkvRun> Isolated(MakemkvInvocation invocation, Func<MakemkvOptions, List<string>> arguments, RunAccumulator accumulator,
-        string? destination, IRunSink sink, CancellationToken cancel, Action<RobotEvent>? also)
+        RunProduct product, string? destination, IRunSink sink, CancellationToken cancel, Action<RobotEvent>? also)
     {
         if (cancel.IsCancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
         var exe = Executable();
-        var before = destination is null ? null : Names(destination);
+        var before = destination is null ? null : NamesBefore(destination);
         var lease = _isolation.Prepare(invocation.Settings);
         try
         {
@@ -95,8 +99,7 @@ public sealed class MakemkvTool
                 sink.Event(e);
                 return accumulator.StopReason is null ? null : StopReason.Cancelled;
             }).ConfigureAwait(false);
-            int produced = destination is null ? 1 : Names(destination).Count(n => before is null || !before.Contains(n));
-            var outcome = RunOutcome.Classify(accumulator, exit, produced);
+            var outcome = RunOutcome.Classify(accumulator, exit, product, destination is null ? Array.Empty<string>() : NewNames(destination, before!));
             return new MakemkvRun(outcome, accumulator.Problem, accumulator.LibreDrive, accumulator.MakemkvVersion);
         }
         finally
@@ -124,9 +127,19 @@ public sealed class MakemkvTool
         return await process.Wait().ConfigureAwait(false);
     }
 
-    HashSet<string> Names(string folder)
+    /// <summary>The names in the destination before the run: none when it isn't there yet.</summary>
+    HashSet<string> NamesBefore(string destination)
     {
-        try { return _fs.List(folder).Select(e => e.Name).ToHashSet(StringComparer.Ordinal); }
-        catch (BroFailure) { return new HashSet<string>(StringComparer.Ordinal); }
+        try { return _fs.List(destination).Select(e => e.Name).ToHashSet(StringComparer.Ordinal); }
+        catch (BroFailure f) when (f.Error.Code == MessageCode.Wire(MessageCode.FsNotFound)) { return new HashSet<string>(StringComparer.Ordinal); }
+    }
+
+    /// <summary>The names in the destination that weren't there before; the destination's own name when the run made it
+    /// a file (a backup to an .iso image).</summary>
+    IReadOnlyList<string> NewNames(string destination, HashSet<string> before)
+    {
+        if (!_fs.Exists(destination)) return Array.Empty<string>();
+        if (!_fs.Stat(destination).IsDirectory) return new[] { System.IO.Path.GetFileName(destination) };
+        return _fs.List(destination).Select(e => e.Name).Where(n => !before.Contains(n)).ToList();
     }
 }

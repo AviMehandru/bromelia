@@ -446,6 +446,18 @@
       },
       "today": "AppModel.rescan"
     },
+    "makemkv.noSummary": {
+      "kind": "error",
+      "today": "new: RunOutcome.classify (a rip needs MakeMKV's saved / failed summary, 5036 / 5037 / 5004)"
+    },
+    "makemkv.savedMismatch": {
+      "kind": "error",
+      "params": {
+        "saved": "int",
+        "produced": "int"
+      },
+      "today": "new: RunOutcome.classify (the titles MakeMKV saved must be the new MKV files)"
+    },
     "makemkv.registryFailed": {
       "kind": "error",
       "params": {

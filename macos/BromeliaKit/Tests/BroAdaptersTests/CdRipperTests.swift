@@ -38,7 +38,7 @@ import Testing
                 launcher.stalls = given["stalls"]?.bool == true
                 if let saves = given["saves"]?.string {
                     launcher.writeFileIn = dest
-                    launcher.writeFileName = saves
+                    launcher.writeFileNames = [saves]
                 }
                 var tools: [ToolKind: String] = [:]
                 for t in given["located"]?.array ?? [] { tools[ToolKind(rawValue: t.string!)!] = "/opt/" + t.string! }

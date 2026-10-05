@@ -5,7 +5,7 @@
     "MakemkvTool.rip",
     "MakemkvTool.backup"
   ],
-  "description": "MakemkvTool against a scripted launcher (plan §26, 'Adapters'), the same on the three platforms. The launcher emits given.transcript (a file in shared/fixtures) or given.lines, one line at a time, as stdout; when the tool stops it, no more lines come and the process ends with status -1, signal 15 (cancelled when the reason was cancelled); otherwise it ends with given.exitCode, after creating title_t00.mkv in the destination when given.writesFile. given.cancelAfterLines cancels the call's token after that many lines. The isolation is a fake that records prepare / firstOutput / release and gives HOME = <work> (<root>/home) and, with given.profileXml, the profile <work>/profile.mmcp.xml. The locator finds makemkvcon at /opt/makemkvcon unless given.makemkvcon is null. Paths: <root> is an empty temporary folder; given.destination and given.existing are relative to it. expect.arguments, environment, workingDirectory, stopPolicy, stallTimeout and transcriptFile are those of the ProcessSpec; status is RunOutcome's (success, errors, failed, cancelled); errorContains is part of its error rendered in English; errorCode its code; error is the code of the failure thrown before anything runs; stopped says whether the tool stopped the process; linesRead how many lines it had read by then.",
+  "description": "MakemkvTool against a scripted launcher (plan §26, 'Adapters'), the same on the three platforms. The launcher emits given.transcript (a file in shared/fixtures) or given.lines, one line at a time, as stdout; when the tool stops it, no more lines come and the process ends with status -1, signal 15 (cancelled when the reason was cancelled); otherwise it ends with given.exitCode, after creating the files given.writes in the destination (a name with / makes its folders; \"\" makes the destination itself a file). given.cancelAfterLines cancels the call's token after that many lines. The isolation is a fake that records prepare / firstOutput / release and gives HOME = <work> (<root>/home) and, with given.profileXml, the profile <work>/profile.mmcp.xml. The locator finds makemkvcon at /opt/makemkvcon unless given.makemkvcon is null. Paths: <root> is an empty temporary folder; given.destination and given.existing are relative to it. The destination folder is created first unless given.destinationExists is false. The run's produced files are the names new in the destination that RunOutcome.products counts; a destination that can't be listed fails the call. expect.arguments, environment, workingDirectory, stopPolicy, stallTimeout and transcriptFile are those of the ProcessSpec; status is RunOutcome's (success, errors, failed, cancelled); errorContains is part of its error rendered in English; errorCode its code; produced the outcome's produced names; error is the code of the failure thrown before anything runs; stopped says whether the tool stopped the process; linesRead how many lines it had read by then.",
   "cases": [
     {
       "id": "scan-drives",
@@ -134,7 +134,9 @@
         "destination": "staging",
         "transcript": "mkv-rip.txt",
         "exitCode": 0,
-        "writesFile": true
+        "writes": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "status": "success",
@@ -154,7 +156,10 @@
           "firstOutput",
           "release"
         ],
-        "debugLog": "/Users/user/MakeMKV_log.txt"
+        "debugLog": "/Users/user/MakeMKV_log.txt",
+        "produced": [
+          "title_t00.mkv"
+        ]
       }
     },
     {
@@ -174,7 +179,9 @@
         "destination": "staging",
         "transcript": "rip-read-errors.txt",
         "exitCode": 0,
-        "writesFile": true
+        "writes": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "status": "errors",
@@ -198,7 +205,7 @@
         "destination": "staging",
         "transcript": "rip-failure.txt",
         "exitCode": 0,
-        "writesFile": false
+        "writes": []
       },
       "expect": {
         "status": "failed",
@@ -222,7 +229,7 @@
         "destination": "staging",
         "transcript": "rip-disk-full.txt",
         "exitCode": 0,
-        "writesFile": false
+        "writes": []
       },
       "expect": {
         "status": "failed",
@@ -247,7 +254,9 @@
         "destination": "staging",
         "transcript": "rip-killed.txt",
         "exitCode": 143,
-        "writesFile": true
+        "writes": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "status": "failed",
@@ -271,7 +280,7 @@
         "destination": "staging",
         "transcript": "rip-missing-source.txt",
         "exitCode": 11,
-        "writesFile": false
+        "writes": []
       },
       "expect": {
         "status": "failed",
@@ -295,7 +304,7 @@
         "destination": "staging",
         "transcript": "rip-missing-title.txt",
         "exitCode": 12,
-        "writesFile": false
+        "writes": []
       },
       "expect": {
         "status": "failed",
@@ -316,9 +325,11 @@
         "destination": "staging",
         "transcript": "mkv-rip.txt",
         "exitCode": 0,
-        "writesFile": true,
         "stallTimeout": 600,
-        "transcriptFile": "jobs/1/makemkv.txt"
+        "transcriptFile": "jobs/1/makemkv.txt",
+        "writes": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "stallTimeout": 600,
@@ -340,14 +351,140 @@
         "destination": "staging",
         "transcript": "mkv-rip.txt",
         "exitCode": 0,
-        "writesFile": false,
         "existing": [
           "staging/old.mkv"
-        ]
+        ],
+        "writes": []
       },
       "expect": {
         "status": "failed",
         "rule": "a file that was there before doesn't count as produced"
+      }
+    },
+    {
+      "id": "rip-a-stray-file-is-not-a-title",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writes": [
+          ".DS_Store"
+        ]
+      },
+      "expect": {
+        "status": "failed",
+        "errorCode": "process.savedNothing",
+        "produced": [],
+        "rule": "a file Finder (or anything else) writes isn't an MKV the run produced"
+      }
+    },
+    {
+      "id": "rip-without-makemkvs-summary",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "rip-killed.txt",
+        "exitCode": 0,
+        "writes": [
+          "title_t00.mkv"
+        ]
+      },
+      "expect": {
+        "status": "failed",
+        "errorCode": "makemkv.noSummary"
+      }
+    },
+    {
+      "id": "rip-more-files-than-titles-saved",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writes": [
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ]
+      },
+      "expect": {
+        "status": "failed",
+        "errorCode": "makemkv.savedMismatch"
+      }
+    },
+    {
+      "id": "rip-destination-cant-be-listed",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "destinationExists": false,
+        "existing": [
+          "staging"
+        ],
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writes": []
+      },
+      "expect": {
+        "error": "fs.failed",
+        "launched": false,
+        "lease": [],
+        "rule": "a destination that is a file can't be listed: nothing runs, rather than every name looking new"
+      }
+    },
+    {
+      "id": "rip-into-a-new-folder",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging/new",
+        "destinationExists": false,
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writes": [
+          "title_t00.mkv"
+        ]
+      },
+      "expect": {
+        "status": "success",
+        "produced": [
+          "title_t00.mkv"
+        ],
+        "rule": "a destination that isn't there yet has no names before the run"
       }
     },
     {
@@ -364,8 +501,10 @@
         "destination": "staging",
         "transcript": "mkv-rip.txt",
         "exitCode": 0,
-        "writesFile": true,
-        "cancelAfterLines": 10
+        "cancelAfterLines": 10,
+        "writes": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "stopped": true,
@@ -391,7 +530,10 @@
         "destination": "staging",
         "transcript": "mkv-rip.txt",
         "exitCode": 0,
-        "writesFile": true
+        "writes": [
+          "BDMV/index.bdmv",
+          "CERTIFICATE/id.bdmv"
+        ]
       },
       "expect": {
         "arguments": [
@@ -404,7 +546,69 @@
           "disc:0",
           "<root>/staging"
         ],
-        "status": "success"
+        "status": "success",
+        "produced": [
+          "BDMV"
+        ]
+      }
+    },
+    {
+      "id": "backup-without-a-disc-structure",
+      "given": {
+        "call": "backup",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "decrypt": false,
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writes": [
+          ".DS_Store"
+        ]
+      },
+      "expect": {
+        "status": "failed",
+        "errorCode": "process.savedNothing",
+        "produced": []
+      }
+    },
+    {
+      "id": "backup-to-an-image",
+      "given": {
+        "call": "backup",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "decrypt": false,
+        "destination": "staging/Movie.iso",
+        "destinationExists": false,
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writes": [
+          ""
+        ]
+      },
+      "expect": {
+        "arguments": [
+          "-r",
+          "--progress=-same",
+          "--messages=-stdout",
+          "--noscan",
+          "backup",
+          "disc:0",
+          "<root>/staging/Movie.iso"
+        ],
+        "status": "success",
+        "produced": [
+          "Movie.iso"
+        ]
       }
     },
     {
@@ -430,7 +634,9 @@
           "PRGV:200,0,65536"
         ],
         "exitCode": 0,
-        "writesFile": true
+        "writes": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "stopped": true,

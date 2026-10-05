@@ -107,15 +107,58 @@ bro_makemkv_tool_scan_drives (BroMakemkvTool *self, BroCancellationToken *cancel
   return drives;
 }
 
-/* The names in @folder (empty when it can't be listed). */
+/* The names in the destination before the run: none when it isn't there yet. NULL and @error set when it can't be
+ * listed: every name in it would otherwise look new. */
 static GHashTable *
-names (BroMakemkvTool *self, const char *folder)
+names_before (BroMakemkvTool *self, const char *destination, BroBroError **error)
 {
-  GHashTable *set = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-  g_autoptr (GPtrArray) entries = bro_file_system_list (self->fs, folder, NULL);
+  g_autoptr (BroBroError) failure = NULL;
+  g_autoptr (GPtrArray) entries = bro_file_system_list (self->fs, destination, &failure);
+  GHashTable *set;
+  if (!entries && (!failure || g_strcmp0 (failure->code, bro_message_code_wire (BRO_MSG_FS_NOT_FOUND)) != 0))
+    {
+      if (error)
+        *error = g_steal_pointer (&failure);
+      return NULL;
+    }
+  set = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   for (guint i = 0; entries && i < entries->len; i++)
     g_hash_table_add (set, g_strdup (((BroDirectoryEntry *) entries->pdata[i])->name));
   return set;
+}
+
+/* The names (char *) in the destination that weren't there before; the destination's own name when the run made it a
+ * file (a backup to an .iso image). NULL and @error set when it can't be listed. */
+static GPtrArray *
+new_names (BroMakemkvTool *self, const char *destination, GHashTable *before, BroBroError **error)
+{
+  g_autoptr (BroFileInfo) info = NULL;
+  g_autoptr (GPtrArray) entries = NULL;
+  GPtrArray *out;
+  if (!bro_file_system_exists (self->fs, destination))
+    return g_ptr_array_new_with_free_func (g_free);
+  info = bro_file_system_stat (self->fs, destination, error);
+  if (!info)
+    return NULL;
+  out = g_ptr_array_new_with_free_func (g_free);
+  if (!info->is_directory)
+    {
+      g_ptr_array_add (out, g_path_get_basename (destination));
+      return out;
+    }
+  entries = bro_file_system_list (self->fs, destination, error);
+  if (!entries)
+    {
+      g_ptr_array_unref (out);
+      return NULL;
+    }
+  for (guint i = 0; i < entries->len; i++)
+    {
+      const char *name = ((BroDirectoryEntry *) entries->pdata[i])->name;
+      if (!g_hash_table_contains (before, name))
+        g_ptr_array_add (out, g_strdup (name));
+    }
+  return out;
 }
 
 typedef struct {
@@ -146,12 +189,13 @@ on_event (const BroRobotEvent *event, gpointer data)
 typedef enum { CALL_INFO, CALL_MKV, CALL_BACKUP } Call;
 
 static BroMakemkvRun *
-isolated (BroMakemkvTool *self, Call call, const BroMakemkvSource *source, const char *title, gboolean decrypt, const char *destination,
+isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakemkvSource *source, const char *title, gboolean decrypt, const char *destination,
           const BroMakemkvInvocation *invocation, BroRunAccumulator *accumulator, BroListingBuilder *builder, BroRunSink *sink,
           BroCancellationToken *cancel, BroBroError **error)
 {
   g_autofree char *exe = NULL;
   g_autoptr (GHashTable) before = NULL;
+  g_autoptr (GPtrArray) produced = NULL;
   g_autoptr (BroIsolationLease) lease = NULL;
   g_autoptr (BroProcessSpec) spec = NULL;
   g_autoptr (BroRunningProcess) process = NULL;
@@ -160,7 +204,6 @@ isolated (BroMakemkvTool *self, Call call, const BroMakemkvSource *source, const
   BroMakemkvRun *run;
   BroProcessExit exit;
   RunState st = { 0 };
-  int produced = 1;
   if (cancel && bro_cancellation_token_is_cancelled (cancel))
     {
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
@@ -169,8 +212,8 @@ isolated (BroMakemkvTool *self, Call call, const BroMakemkvSource *source, const
   exe = executable (self, error);
   if (!exe)
     return NULL;
-  if (destination)
-    before = names (self, destination);
+  if (destination && !(before = names_before (self, destination, error)))
+    return NULL;
   lease = bro_settings_isolation_prepare (self->isolation, invocation->settings, error);
   if (!lease)
     return NULL;
@@ -202,19 +245,11 @@ isolated (BroMakemkvTool *self, Call call, const BroMakemkvSource *source, const
   st = (RunState) { lease, TRUE, accumulator, builder, sink };
   exit = feed (process, cancel, on_event, &st);
   bro_isolation_lease_release (lease);
-  if (destination)
-    {
-      g_autoptr (GHashTable) after = names (self, destination);
-      GHashTableIter it;
-      gpointer key;
-      produced = 0;
-      g_hash_table_iter_init (&it, after);
-      while (g_hash_table_iter_next (&it, &key, NULL))
-        if (!g_hash_table_contains (before, key))
-          produced++;
-    }
+  produced = destination ? new_names (self, destination, before, error) : g_ptr_array_new_with_free_func (g_free);
+  if (!produced)
+    return NULL;
   run = bro_makemkv_run_new ();
-  run->outcome = bro_run_outcome_classify (accumulator, &exit, produced);
+  run->outcome = bro_run_outcome_classify (accumulator, &exit, product, produced);
   run->notice = accumulator->problem ? bro_makemkv_notice_copy (accumulator->problem) : NULL;
   run->libre_drive = g_strdup (accumulator->libre_drive);
   run->version = g_strdup (accumulator->makemkv_version);
@@ -227,7 +262,7 @@ bro_makemkv_tool_listing (BroMakemkvTool *self, const BroMakemkvSource *source, 
 {
   BroRunAccumulator *accumulator = bro_run_accumulator_new (FALSE, -1, NULL);
   BroListingBuilder *builder = bro_listing_builder_new ();
-  BroMakemkvRun *run = isolated (self, CALL_INFO, source, NULL, FALSE, NULL, invocation, accumulator, builder, sink, cancel, error);
+  BroMakemkvRun *run = isolated (self, CALL_INFO, BRO_RUN_PRODUCT_NOTHING, source, NULL, FALSE, NULL, invocation, accumulator, builder, sink, cancel, error);
   BroListingRun *result = NULL;
   if (run)
     {
@@ -245,7 +280,7 @@ bro_makemkv_tool_rip (BroMakemkvTool *self, const BroMakemkvSource *source, cons
                       const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel, BroBroError **error)
 {
   BroRunAccumulator *accumulator = bro_run_accumulator_new (TRUE, -1, NULL);
-  BroMakemkvRun *run = isolated (self, CALL_MKV, source, title, FALSE, destination, invocation, accumulator, NULL, sink, cancel, error);
+  BroMakemkvRun *run = isolated (self, CALL_MKV, BRO_RUN_PRODUCT_TITLES, source, title, FALSE, destination, invocation, accumulator, NULL, sink, cancel, error);
   bro_run_accumulator_free (accumulator);
   return run;
 }
@@ -260,7 +295,7 @@ bro_makemkv_tool_backup (BroMakemkvTool *self, const BroMakemkvSource *source, g
   if (!check)
     return NULL; /* backup.needsDrive, before anything runs */
   accumulator = bro_run_accumulator_new (TRUE, source->index, source->device);
-  run = isolated (self, CALL_BACKUP, source, NULL, decrypt, destination, invocation, accumulator, NULL, sink, cancel, error);
+  run = isolated (self, CALL_BACKUP, BRO_RUN_PRODUCT_BACKUP, source, NULL, decrypt, destination, invocation, accumulator, NULL, sink, cancel, error);
   bro_run_accumulator_free (accumulator);
   return run;
 }

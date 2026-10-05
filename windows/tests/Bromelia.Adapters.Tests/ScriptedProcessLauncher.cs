@@ -5,7 +5,7 @@ using Bromelia.Ports;
 namespace Bromelia.Adapters.Tests;
 
 /// <summary>A launcher that plays a script instead of running anything (plan §17's test kit): the lines, one at a time
-/// as they are asked for; then the exit status, after creating a file in the destination. A stop ends it at once with
+/// as they are asked for; then the exit status, after creating files in the destination. A stop ends it at once with
 /// status -1 and signal 15. It records every spec it was given.</summary>
 internal sealed class ScriptedProcessLauncher : IProcessLauncher
 {
@@ -15,8 +15,9 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
     public ISet<int> Stderr = new HashSet<int>();
     public int ExitCode;
     public string? WriteFileIn;
-    /// <summary>The name of the file written in <see cref="WriteFileIn"/>.</summary>
-    public string WriteFileName = "title_t00.mkv";
+    /// <summary>The files written in <see cref="WriteFileIn"/>: a name with / makes its folders; "" writes
+    /// <see cref="WriteFileIn"/> itself as a file.</summary>
+    public IReadOnlyList<string> WriteFileNames = new[] { "title_t00.mkv" };
     /// <summary>After the lines: end as stopped for silence (status -1, signal 15, stalled for the spec's timeout).</summary>
     public bool Stalls;
     public Action<int>? AfterLine;
@@ -67,7 +68,13 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
                 _exit.TrySetResult(new ProcessExit(-1, 15, null, false, reason is StopReason.Cancelled or StopReason.Shutdown));
             else
             {
-                if (_owner.WriteFileIn is { } dir) File.WriteAllText(Path.Combine(dir, _owner.WriteFileName), "");
+                if (_owner.WriteFileIn is { } dir)
+                    foreach (var name in _owner.WriteFileNames)
+                    {
+                        var path = name.Length == 0 ? dir : Path.Combine(dir, name);
+                        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                        File.WriteAllText(path, "");
+                    }
                 if (_owner.SplitParts > 0)
                 {
                     var pattern = _spec.Arguments[_spec.Arguments.ToList().IndexOf("-o") + 1];

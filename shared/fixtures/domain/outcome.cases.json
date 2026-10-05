@@ -3,7 +3,7 @@
     "RunOutcome.classify",
     "JobOutcome.decide"
   ],
-  "description": "RunOutcome.classify: what one makemkvcon run said (exit 0 when a title fails, so the saved / failed counts 5036, 5037, 5004 and the produced files decide). JobOutcome.decide: the job's outcome from its steps' results, cancellation and policy, one pure function.",
+  "description": "RunOutcome.classify: what one makemkvcon run said (exit 0 when a title fails, so the saved / failed counts 5036, 5037, 5004 and the files it produced decide). given.product is what the run should leave (nothing for a listing, titles for a rip, backup); given.newNames are the names in the destination that weren't there before; expect.produced, when present, is RunOutcome.produced (the new names that count: MKV files that aren't hidden for titles, BDMV / VIDEO_TS / HVDVD_TS or an .iso for a backup); expect.errorCode, when present, is the error's code. JobOutcome.decide: the job's outcome from its steps' results, cancellation and policy, one pure function.",
   "cases": [
     {
       "id": "run-mkv-rip",
@@ -16,7 +16,10 @@
       "given": {
         "fixture": "mkv-rip.txt",
         "exitCode": 0,
-        "producedFiles": 1
+        "product": "titles",
+        "newNames": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "statusWord": "success",
@@ -36,7 +39,10 @@
       "given": {
         "fixture": "rip-read-errors.txt",
         "exitCode": 0,
-        "producedFiles": 1
+        "product": "titles",
+        "newNames": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "statusWord": "errors",
@@ -56,7 +62,8 @@
       "given": {
         "fixture": "rip-failure.txt",
         "exitCode": 0,
-        "producedFiles": 0
+        "product": "titles",
+        "newNames": []
       },
       "expect": {
         "statusWord": "failed",
@@ -76,7 +83,8 @@
       "given": {
         "fixture": "rip-disk-full.txt",
         "exitCode": 0,
-        "producedFiles": 0
+        "product": "titles",
+        "newNames": []
       },
       "expect": {
         "statusWord": "failed",
@@ -96,7 +104,10 @@
       "given": {
         "fixture": "rip-killed.txt",
         "exitCode": 143,
-        "producedFiles": 1
+        "product": "titles",
+        "newNames": [
+          "title_t00.mkv"
+        ]
       },
       "expect": {
         "statusWord": "failed",
@@ -116,7 +127,8 @@
       "given": {
         "fixture": "rip-missing-source.txt",
         "exitCode": 11,
-        "producedFiles": 0
+        "product": "titles",
+        "newNames": []
       },
       "expect": {
         "statusWord": "failed",
@@ -136,13 +148,172 @@
       "given": {
         "fixture": "rip-missing-title.txt",
         "exitCode": 12,
-        "producedFiles": 0
+        "product": "titles",
+        "newNames": []
       },
       "expect": {
         "statusWord": "failed",
         "failed": true,
         "readErrors": false,
         "errorContains": "Input parameter is incorrect"
+      }
+    },
+    {
+      "id": "run-stray-file-is-not-a-title",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "titles",
+        "newNames": [
+          ".DS_Store",
+          "Thumbs.db",
+          "title_t00.mkv.part"
+        ]
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "makemkvcon saved nothing",
+        "errorCode": "process.savedNothing",
+        "produced": []
+      }
+    },
+    {
+      "id": "run-hidden-and-other-files-ignored",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "titles",
+        "newNames": [
+          ".DS_Store",
+          "title_t00.mkv",
+          "._title_t00.mkv"
+        ]
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": [
+          "title_t00.mkv"
+        ]
+      }
+    },
+    {
+      "id": "run-no-summary",
+      "given": {
+        "fixture": "rip-killed.txt",
+        "exitCode": 0,
+        "product": "titles",
+        "newNames": [
+          "title_t00.mkv"
+        ]
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "didn't say how many titles",
+        "errorCode": "makemkv.noSummary"
+      }
+    },
+    {
+      "id": "run-saved-mismatch",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "titles",
+        "newNames": [
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ]
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "MakeMKV saved 1 title, but 2 new MKV files are in the folder",
+        "errorCode": "makemkv.savedMismatch"
+      }
+    },
+    {
+      "id": "run-listing-produces-nothing",
+      "given": {
+        "fixture": "info-dvd.txt",
+        "exitCode": 0,
+        "product": "nothing",
+        "newNames": []
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": []
+      }
+    },
+    {
+      "id": "run-backup-folder",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "backup",
+        "newNames": [
+          "BDMV",
+          "CERTIFICATE",
+          ".DS_Store"
+        ]
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": [
+          "BDMV"
+        ]
+      }
+    },
+    {
+      "id": "run-backup-image",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "backup",
+        "newNames": [
+          "Movie.iso"
+        ]
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": [
+          "Movie.iso"
+        ]
+      }
+    },
+    {
+      "id": "run-backup-without-a-disc-structure",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "backup",
+        "newNames": [
+          ".DS_Store",
+          "title_t00.mkv"
+        ]
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "makemkvcon saved nothing",
+        "errorCode": "process.savedNothing",
+        "produced": []
       }
     },
     {

@@ -76,6 +76,8 @@
   "makemkv.register.ok": "Key registered. {text}",
   "makemkv.register.failed": "Registration failed: {text}",
   "makemkv.driveScanFailed": "Drive scan failed: {reason}",
+  "makemkv.noSummary": "MakeMKV didn't say how many titles it saved",
+  "makemkv.savedMismatch": "MakeMKV saved {saved, plural, one {# title} other {# titles}}, but {produced, plural, one {# new MKV file is} other {# new MKV files are}} in the folder",
   "makemkv.registryFailed": "Could not apply MakeMKV's settings in the registry: {reason}",
   "makemkv.titleProgress": "— {name}",
   "disc.op.reading": "Reading disc information",

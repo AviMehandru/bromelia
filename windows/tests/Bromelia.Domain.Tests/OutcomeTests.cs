@@ -39,7 +39,8 @@ public class OutcomeTests
         if (given["fixture"] is { } fixture)
         {
             var acc = RobotTests.Accumulate(fixture.AsString!, readsData: true);
-            var run = RunOutcome.Classify(acc, new ProcessExit((int)given["exitCode"]!.AsInteger!), (int)given["producedFiles"]!.AsInteger!);
+            var run = RunOutcome.Classify(acc, new ProcessExit((int)given["exitCode"]!.AsInteger!), EnumWire.Parse<RunProduct>(given["product"]!.AsString)!.Value,
+                given["newNames"]!.AsArray!.Select(n => n.AsString!).ToList());
             Same(expect["statusWord"]!.AsString, EnumWire.Name(run.Status), "status word");
             Same(expect["failed"]!.AsBool, run.Status == StatusWord.Failed, "failed");
             Same(expect["readErrors"]!.AsBool, run.Status == StatusWord.Errors, "read errors");
@@ -49,6 +50,8 @@ public class OutcomeTests
                 if (text is null || !text.Contains(part)) throw new Xunit.Sdk.XunitException($"error \"{text}\" doesn't contain \"{part}\"");
             }
             else Same(null, text, "error");
+            if (expect["errorCode"]?.AsString is { } code) Same(code, run.Error is { } c ? MessageCode.Wire(c.Code) : null, "error code");
+            if (expect["produced"] is { } produced) Same(string.Join(",", produced.AsArray!.Select(n => n.AsString)), string.Join(",", run.Produced), "produced");
             return true;
         }
         if (given["steps"] is { } steps)
@@ -66,10 +69,10 @@ public class OutcomeTests
     public void StalledAndCancelledRuns()
     {
         var acc = new RunAccumulator(readsData: true);
-        var stalled = RunOutcome.Classify(acc, new ProcessExit(-1, 9, new Duration(600), Abandoned: true), 0);
+        var stalled = RunOutcome.Classify(acc, new ProcessExit(-1, 9, new Duration(600), Abandoned: true), RunProduct.Titles, Array.Empty<string>());
         Assert.Equal(StatusWord.Failed, stalled.Status);
         Assert.Equal("makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry.",
             English.Render(stalled.Error!.ToJson()));
-        Assert.Equal(StatusWord.Cancelled, RunOutcome.Classify(acc, new ProcessExit(143, 15, Cancelled: true), 1).Status);
+        Assert.Equal(StatusWord.Cancelled, RunOutcome.Classify(acc, new ProcessExit(143, 15, Cancelled: true), RunProduct.Titles, new[] { "title_t00.mkv" }).Status);
     }
 }

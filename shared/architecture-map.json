@@ -4307,7 +4307,8 @@
             "spaceWarning",
             "readErrors",
             "driveMismatch",
-            "debugLog"
+            "debugLog",
+            "produced"
           ],
           "swift": {
             "name": "RunOutcome",
@@ -4320,6 +4321,43 @@
           "c": {
             "name": "BroRunOutcome",
             "file": "linux/src/domain/outcome/bro-run-outcome.h"
+          }
+        },
+        {
+          "name": "RunProduct",
+          "kind": "enum",
+          "doc": "What a makemkvcon run should leave in its destination: nothing (a listing), titles (MKV files of a rip) or a backup (a disc structure or an ISO image).",
+          "cases": [
+            "nothing",
+            "titles",
+            "backup"
+          ],
+          "swift": {
+            "name": "RunProduct",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Outcome/RunProduct.swift",
+            "cases": [
+              ".nothing",
+              ".titles",
+              ".backup"
+            ]
+          },
+          "cs": {
+            "name": "RunProduct",
+            "file": "windows/src/Bromelia.Domain/Outcome/RunProduct.cs",
+            "cases": [
+              "Nothing",
+              "Titles",
+              "Backup"
+            ]
+          },
+          "c": {
+            "name": "BroRunProduct",
+            "file": "linux/src/domain/outcome/bro-run-product.h",
+            "cases": [
+              "BRO_RUN_PRODUCT_NOTHING",
+              "BRO_RUN_PRODUCT_TITLES",
+              "BRO_RUN_PRODUCT_BACKUP"
+            ]
           }
         },
         {
@@ -4422,12 +4460,24 @@
           "params": [
             "accumulator",
             "exit",
-            "producedFiles"
+            "product",
+            "newNames"
           ],
           "returns": "RunOutcome",
-          "swift": "RunOutcome.classify(_:exit:producedFiles:)",
+          "swift": "RunOutcome.classify(_:exit:product:newNames:)",
           "cs": "RunOutcome.Classify",
           "c": "bro_run_outcome_classify"
+        },
+        {
+          "name": "RunOutcome.products",
+          "params": [
+            "product",
+            "newNames"
+          ],
+          "returns": "[String]",
+          "swift": "RunOutcome.products(_:newNames:)",
+          "cs": "RunOutcome.Products",
+          "c": "bro_run_outcome_products"
         },
         {
           "name": "JobOutcome.decide",
