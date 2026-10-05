@@ -483,6 +483,31 @@ compare_strings (gconstpointer a, gconstpointer b)
   return strcmp (*(const char *const *) a, *(const char *const *) b);
 }
 
+/* What moveMerging's on_moved heard in the current case, as [from, to] pairs relative to fs_root, in order. */
+static BroJsonValue *fs_heard;
+
+static BroJsonValue *
+fs_pair (const BroMovedItem *m)
+{
+  BroJsonValue *pair = bro_json_value_new_array ();
+  bro_json_value_append (pair, bro_json_value_new_string (m->from + strlen (fs_root) + 1));
+  bro_json_value_append (pair, bro_json_value_new_string (m->to + strlen (fs_root) + 1));
+  return pair;
+}
+
+static void
+fs_hear (const BroMovedItem *item, gpointer heard)
+{
+  bro_json_value_append (heard, fs_pair (item));
+}
+
+static int
+compare_pairs (gconstpointer a, gconstpointer b)
+{
+  return strcmp (bro_json_value_get_string (bro_json_value_at (*(BroJsonValue *const *) a, 0), ""),
+                 bro_json_value_get_string (bro_json_value_at (*(BroJsonValue *const *) b, 0), ""));
+}
+
 /* Runs one operation: its result (NULL when it has none), or NULL with @error set. */
 static BroJsonValue *
 fs_run (BroFileSystem *fs, BroJsonValue *op, BroBroError **error, gboolean *ok)
@@ -552,18 +577,19 @@ fs_run (BroFileSystem *fs, BroJsonValue *op, BroBroError **error, gboolean *ok)
       g_autoptr (GPtrArray) moved = NULL;
       BroJsonValue *v;
       bro_move_policy_from_wire (bro_json_value_get_string (bro_json_value_at (op, 3), ""), &policy);
-      moved = bro_file_system_move_merging (fs, a, b, policy, error);
+      moved = bro_file_system_move_merging (fs, a, b, policy, fs_hear, fs_heard, error);
       if (!moved)
         return *ok = FALSE, NULL;
       v = bro_json_value_new_array ();
       for (guint i = 0; i < moved->len; i++)
-        {
-          BroMovedItem *m = moved->pdata[i];
-          BroJsonValue *pair = bro_json_value_new_array ();
-          bro_json_value_append (pair, bro_json_value_new_string (m->from + strlen (fs_root) + 1));
-          bro_json_value_append (pair, bro_json_value_new_string (m->to + strlen (fs_root) + 1));
-          bro_json_value_append (v, pair);
-        }
+        bro_json_value_append (v, fs_pair (moved->pdata[i]));
+      {
+        /* Everything heard is the result: the same items, sorted by source. */
+        g_autofree char *text = bro_json_value_to_text (fs_heard);
+        g_autoptr (BroJsonValue) heard = bro_json_value_parse (text, -1);
+        g_ptr_array_sort (heard->items, compare_pairs);
+        g_assert_true (bro_json_value_equal (heard, v));
+      }
       return v;
     }
   else if (g_str_equal (name, "remove"))
@@ -606,9 +632,27 @@ fs_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *f
   BroJsonValue *want_error = bro_json_value_member (expect, "error");
   BroJsonValue *want_result = bro_json_value_member (expect, "result");
   BroJsonValue *want_tree = bro_json_value_member (expect, "tree");
+  g_autoptr (BroJsonValue) heard = bro_json_value_new_array ();
+  g_autofree char *locked = NULL;
   gboolean ok;
+  const char *lock = bro_json_value_get_string (bro_json_value_member (given, "locked"), NULL);
+  if (lock && geteuid () == 0)
+    {
+      g_test_message ("%s: skipped as root, which a read-only folder doesn't stop", id);
+      return TRUE;
+    }
   fs_build (bro_json_value_member (given, "tree"));
+  fs_heard = heard;
+  if (lock)
+    {
+      g_autofree char *file = g_build_filename (fs_root, lock, NULL);
+      locked = g_path_get_dirname (file);
+      g_chmod (locked, 0555); /* nothing can be moved out of it */
+    }
   result = fs_run (BRO_FILE_SYSTEM (fs), bro_json_value_member (given, "op"), &error, &ok);
+  if (locked)
+    g_chmod (locked, 0755);
+  fs_heard = NULL;
   if (want_error)
     {
       BroJsonValue *params = bro_json_value_member (want_error, "params");
@@ -617,6 +661,8 @@ fs_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *f
           bro_test_fail (failures, id, "no error");
           return TRUE;
         }
+      if (bro_json_value_member (expect, "movedBeforeTheError"))
+        bro_test_same_json (failures, id, "movedBeforeTheError", bro_json_value_member (expect, "movedBeforeTheError"), heard);
       bro_test_same_string (failures, id, "code", bro_json_value_get_string (bro_json_value_member (want_error, "code"), ""), error->code);
       for (guint i = 0; params && i < bro_json_value_length (params); i++)
         {

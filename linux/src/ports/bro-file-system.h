@@ -26,7 +26,8 @@ struct _BroFileSystemInterface {
   gboolean (*create_directory) (BroFileSystem *self, const char *path, gboolean parents_must_exist, BroBroError **error);
   gboolean (*write_atomically) (BroFileSystem *self, const char *path, GBytes *bytes, int mode, BroBroError **error);
   gboolean (*rename) (BroFileSystem *self, const char *from, const char *to, BroBroError **error);
-  GPtrArray *(*move_merging) (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroBroError **error);
+  GPtrArray *(*move_merging) (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroMovedFunc on_moved,
+                              gpointer data, BroBroError **error);
   gboolean (*remove) (BroFileSystem *self, const char *path, BroBroError **error);
   gboolean (*move_to_trash) (BroFileSystem *self, const char *path, const char *trash, BroBroError **error);
   gboolean (*sync_file) (BroFileSystem *self, const char *path, BroBroError **error);
@@ -59,8 +60,10 @@ gboolean bro_file_system_write_atomically (BroFileSystem *self, const char *path
 /* FALSE and @error set on failure. */
 gboolean bro_file_system_rename (BroFileSystem *self, const char *from, const char *to, BroBroError **error);
 
-/* Moves a folder's contents into another, merging folders. */
-GPtrArray *bro_file_system_move_merging (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroBroError **error);
+/* Moves a folder's contents into another, merging folders. @on_moved (nullable) hears of each item as soon as it has
+ * moved, so a failure part-way (NULL and @error set) still says what moved. */
+GPtrArray *bro_file_system_move_merging (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroMovedFunc on_moved,
+                                         gpointer data, BroBroError **error);
 
 /* Removes a file or an empty folder. FALSE and @error set on failure. */
 gboolean bro_file_system_remove (BroFileSystem *self, const char *path, BroBroError **error);

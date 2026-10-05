@@ -15,7 +15,7 @@
     "PlatformFileSystem.syncDirectory",
     "PlatformFileSystem.openForReading"
   ],
-  "description": "What PlatformFileSystem does, identically on the three platforms (plan §9, invariants I2, I3, I5). Each case starts from given.tree in an empty temporary folder ('name/' is a folder, anything else a file with that text), runs given.op with paths relative to that folder, and checks its result or error, then the whole tree (expect.tree, when given; no temporary files may be left). Error paths are absolute: <root> is the folder, written with /. fs.failed is compared by code, operation and path; its reason is the system's text. The parts that differ by OS (F_FULLFSYNC / FlushFileBuffers / fsync, uncached reads, permission bits, volume information) are cases of platform-adapters.contract.json.",
+  "description": "What PlatformFileSystem does, identically on the three platforms (plan §9, invariants I2, I3, I5). Each case starts from given.tree in an empty temporary folder ('name/' is a folder, anything else a file with that text), runs given.op with paths relative to that folder, and checks its result or error, then the whole tree (expect.tree, when given; no temporary files may be left). Error paths are absolute: <root> is the folder, written with /. fs.failed is compared by code, operation and path; its reason is the system's text. The parts that differ by OS (F_FULLFSYNC / FlushFileBuffers / fsync, uncached reads, permission bits, volume information) are cases of platform-adapters.contract.json. moveMerging reports each item to its onMoved callback as soon as it has moved: the reported items are its result (in the order they moved), and when it fails part-way, expect.movedBeforeTheError lists what was reported before the error. given.locked names a file that can't be moved out of its folder during the operation (macOS, Linux: the folder is made read-only, so a run as root, which ignores that, skips the case; Windows: the file is held open without delete sharing).",
   "cases": [
     {
       "id": "exists-file",
@@ -645,6 +645,50 @@
           "from/": null,
           "from/a.txt": "a"
         }
+      }
+    },
+    {
+      "id": "move-merging-fails-halfway",
+      "given": {
+        "tree": {
+          "from/": null,
+          "from/a.txt": "a",
+          "from/locked/": null,
+          "from/locked/b.txt": "b",
+          "to/": null,
+          "to/locked/": null
+        },
+        "locked": "from/locked/b.txt",
+        "op": [
+          "moveMerging",
+          "from",
+          "to",
+          "neverReplace"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "fs.failed",
+          "params": {
+            "operation": "rename",
+            "path": "<root>/from/locked/b.txt"
+          }
+        },
+        "movedBeforeTheError": [
+          [
+            "from/a.txt",
+            "to/a.txt"
+          ]
+        ],
+        "tree": {
+          "from/": null,
+          "from/locked/": null,
+          "from/locked/b.txt": "b",
+          "to/": null,
+          "to/a.txt": "a",
+          "to/locked/": null
+        },
+        "rule": "the items moved before a failure are reported, so the commit can finish or roll back"
       }
     },
     {

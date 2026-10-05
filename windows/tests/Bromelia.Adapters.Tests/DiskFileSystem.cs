@@ -32,7 +32,8 @@ internal sealed class DiskFileSystem : IFileSystem
     }
 
     public void Rename(string from, string to) => File.Move(from, to);
-    public IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy) => throw new NotSupportedException();
+    public IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy, Action<MovedItem>? onMoved = null) =>
+        throw new NotSupportedException();
     public void Remove(string path) => File.Delete(path);
     public void MoveToTrash(string path, string trash) => throw new NotSupportedException();
     public void SyncFile(string path) { }
