@@ -37,6 +37,7 @@
 #include "bro-system-clock.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
 #include <signal.h>
@@ -195,6 +196,42 @@ test_output_drained (void)
   g_assert_cmpuint (lines->len, ==, 1);
   g_assert_cmpstr (lines->pdata[0], ==, "stdout:done");
   g_assert_cmpfloat (since (t0), <, 8);
+}
+
+/* late-output-goes-nowhere: a child left behind prints after the launcher has finished. The line reaches neither the
+ * closed transcript nor the files opened since, one of which gets the transcript's descriptor number. (A reader that is
+ * cancelled while it holds a line is the narrow case the lock covers; it can't be timed from here.) */
+static void
+test_late_output (void)
+{
+  g_autofree char *transcript = g_build_filename (scratch, "late.txt", NULL);
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/sh", "-c", "(sleep 6; echo late) & echo early", NULL);
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroRunningProcess) p = NULL;
+  g_autofree char *text = NULL;
+  int fds[20];
+  spec->transcript = g_strdup (transcript);
+  p = start (spec);
+  run (p, lines);
+  for (int i = 0; i < 20; i++)
+    {
+      g_autofree char *name = g_strdup_printf ("%s/opened-%d", scratch, i);
+      fds[i] = open (name, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    }
+  g_usleep (2 * G_USEC_PER_SEC);
+  for (int i = 0; i < 20; i++)
+    {
+      g_autofree char *name = g_strdup_printf ("%s/opened-%d", scratch, i);
+      g_autofree char *got = NULL;
+      close (fds[i]);
+      g_assert_true (g_file_get_contents (name, &got, NULL, NULL));
+      g_assert_cmpstr (got, ==, "");
+    }
+  g_assert_cmpuint (lines->len, ==, 1);
+  g_assert_cmpstr (lines->pdata[0], ==, "stdout:early");
+  g_assert_true (g_file_get_contents (transcript, &text, NULL, NULL));
+  g_assert_nonnull (strstr (text, "\nearly\n"));
+  g_assert_null (strstr (text, "\nlate\n"));
 }
 
 static void
@@ -1728,6 +1765,7 @@ main (int argc, char **argv)
   g_test_add_func ("/process/cancel-escalates", test_cancel_escalates);
   g_test_add_func ("/process/terminate-first", test_terminate_first);
   g_test_add_func ("/process/output-drained", test_output_drained);
+  g_test_add_func ("/process/late-output", test_late_output);
   g_test_add_func ("/process/process-group", test_process_group);
   g_test_add_func ("/process/transcript", test_transcript);
   g_test_add_func ("/process/streams", test_streams);

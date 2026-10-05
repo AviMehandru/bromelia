@@ -96,6 +96,23 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(9), watch.Elapsed.ToString());
     }
 
+    [Fact] // late-output-goes-nowhere
+    public void LateOutputGoesNowhere()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var script = Script("late.cmd", "@echo off\nstart /b cmd /c \"ping -n 7 127.0.0.1 >nul & echo late\"\necho early\n");
+        var transcript = Path.Combine(_dir, "late.txt");
+        var (lines, _) = Run(_launcher.Start(Spec(script) with { Transcript = transcript }));
+        var opened = Enumerable.Range(0, 20).Select(i => new FileStream(Path.Combine(_dir, $"opened-{i}"), FileMode.Create, FileAccess.Write, FileShare.Read)).ToList();
+        Thread.Sleep(TimeSpan.FromSeconds(3));
+        opened.ForEach(f => f.Dispose());
+        for (int i = 0; i < 20; i++) Assert.Equal("", File.ReadAllText(Path.Combine(_dir, $"opened-{i}")));
+        Assert.Equal(new[] { "early" }, lines.Select(l => l.Text));
+        var text = File.ReadAllText(transcript);
+        Assert.Contains("\nearly\n", text);
+        Assert.DoesNotContain("\nlate\n", text);
+    }
+
     [Fact] // process-group
     public void StopEndsTheWholeJob()
     {
