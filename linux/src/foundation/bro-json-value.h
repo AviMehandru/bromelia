@@ -55,7 +55,8 @@ BroJsonValue *bro_json_value_at (const BroJsonValue *value, guint index);
 gboolean bro_json_value_equal (const BroJsonValue *a, const BroJsonValue *b);
 
 /* Strict JSON (RFC 8259) in UTF-8; @length -1 when NUL-terminated. NULL when the text isn't JSON. A repeated
- * key keeps its first position and its last value. */
+ * key keeps its first position and its last value. An integer outside the 64-bit range isn't accepted: as a double it
+ * would lose digits. */
 BroJsonValue *bro_json_value_parse (const char *text, gssize length);
 
 /* UTF-8 JSON with two-space indentation, keys in the order given and a final newline: the same bytes as
