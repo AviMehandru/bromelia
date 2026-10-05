@@ -264,6 +264,7 @@
   "fs.alreadyExists": "{path} already exists",
   "fs.parentMissing": "{path} doesn't exist, so nothing was created in it",
   "fs.failed": "Could not {operation} {path}: {reason}",
+  "fs.notSynced": "{path} is complete, but its folder could not be flushed to disk: {reason}",
   "store.failed": "The database failed ({operation}): {reason}",
   "keystore.failed": "Couldn't use the secret “{name}”: {reason}",
   "archive.recordWritten": "Wrote the archive record {file}",

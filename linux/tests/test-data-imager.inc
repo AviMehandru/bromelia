@@ -105,19 +105,86 @@ static void test_fake_drive_control_class_init (TestFakeDriveControlClass *k) { 
 static void test_fake_drive_control_init (TestFakeDriveControl *self) {}
 static void test_fake_drive_control_iface_init (BroDriveControlInterface *iface) { iface->open_raw = fdc_open_raw; }
 
+/* The real file system, except that folder syncs fail, as on a share that refuses them. */
+#define TEST_TYPE_SYNC_FAILING_FS (test_sync_failing_fs_get_type ())
+G_DECLARE_FINAL_TYPE (TestSyncFailingFs, test_sync_failing_fs, TEST, SYNC_FAILING_FS, GObject)
+struct _TestSyncFailingFs {
+  GObject parent_instance;
+  BroFileSystem *real;
+};
+static void test_sync_failing_fs_iface_init (BroFileSystemInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestSyncFailingFs, test_sync_failing_fs, G_TYPE_OBJECT,
+                         G_IMPLEMENT_INTERFACE (BRO_TYPE_FILE_SYSTEM, test_sync_failing_fs_iface_init))
+#define REAL(s) (TEST_SYNC_FAILING_FS (s)->real)
+static gboolean sf_exists (BroFileSystem *s, const char *p) { return bro_file_system_exists (REAL (s), p); }
+static BroFileInfo *sf_stat (BroFileSystem *s, const char *p, BroBroError **e) { return bro_file_system_stat (REAL (s), p, e); }
+static GPtrArray *sf_list (BroFileSystem *s, const char *p, BroBroError **e) { return bro_file_system_list (REAL (s), p, e); }
+static GBytes *sf_read (BroFileSystem *s, const char *p, BroBroError **e) { return bro_file_system_read (REAL (s), p, e); }
+static GBytes *sf_read_range (BroFileSystem *s, const char *p, gint64 o, int n, BroBroError **e) { return bro_file_system_read_range (REAL (s), p, o, n, e); }
+static gboolean sf_create_directory (BroFileSystem *s, const char *p, gboolean m, BroBroError **e) { return bro_file_system_create_directory (REAL (s), p, m, e); }
+static gboolean sf_write_atomically (BroFileSystem *s, const char *p, GBytes *b, int m, BroBroError **e) { return bro_file_system_write_atomically (REAL (s), p, b, m, e); }
+static gboolean sf_rename (BroFileSystem *s, const char *f, const char *t, BroBroError **e) { return bro_file_system_rename (REAL (s), f, t, e); }
+static GPtrArray *
+sf_move_merging (BroFileSystem *s, const char *f, const char *t, BroMovePolicy p, BroMovedFunc on_moved, gpointer data, BroBroError **e)
+{
+  return bro_file_system_move_merging (REAL (s), f, t, p, on_moved, data, e);
+}
+static gboolean sf_remove (BroFileSystem *s, const char *p, BroBroError **e) { return bro_file_system_remove (REAL (s), p, e); }
+static gboolean sf_move_to_trash (BroFileSystem *s, const char *p, const char *t, BroBroError **e) { return bro_file_system_move_to_trash (REAL (s), p, t, e); }
+static gboolean sf_sync_file (BroFileSystem *s, const char *p, BroBroError **e) { return bro_file_system_sync_file (REAL (s), p, e); }
+static BroByteStream *sf_open (BroFileSystem *s, const char *p, gboolean b, BroBroError **e) { return bro_file_system_open_for_reading (REAL (s), p, b, e); }
+static BroVolumeInfo *sf_volume (BroFileSystem *s, const char *p, BroBroError **e) { return bro_file_system_volume (REAL (s), p, e); }
+#undef REAL
+
+static gboolean
+sf_sync_directory (BroFileSystem *s, const char *path, BroBroError **error)
+{
+  BroJsonValue *params = bro_json_value_new_object ();
+  bro_json_value_set (params, "operation", bro_json_value_new_string ("sync"));
+  bro_json_value_set (params, "path", bro_json_value_new_string (path));
+  bro_json_value_set (params, "reason", bro_json_value_new_string ("Invalid argument"));
+  bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_FS_FAILED), params);
+  return FALSE;
+}
+
+static void test_sync_failing_fs_finalize (GObject *o) { g_clear_object (&TEST_SYNC_FAILING_FS (o)->real); G_OBJECT_CLASS (test_sync_failing_fs_parent_class)->finalize (o); }
+static void test_sync_failing_fs_class_init (TestSyncFailingFsClass *k) { G_OBJECT_CLASS (k)->finalize = test_sync_failing_fs_finalize; }
+static void test_sync_failing_fs_init (TestSyncFailingFs *self) { self->real = BRO_FILE_SYSTEM (bro_platform_file_system_new ()); }
+
+static void
+test_sync_failing_fs_iface_init (BroFileSystemInterface *iface)
+{
+  iface->exists = sf_exists;
+  iface->stat = sf_stat;
+  iface->list = sf_list;
+  iface->read = sf_read;
+  iface->read_range = sf_read_range;
+  iface->create_directory = sf_create_directory;
+  iface->write_atomically = sf_write_atomically;
+  iface->rename = sf_rename;
+  iface->move_merging = sf_move_merging;
+  iface->remove = sf_remove;
+  iface->move_to_trash = sf_move_to_trash;
+  iface->sync_file = sf_sync_file;
+  iface->sync_directory = sf_sync_directory;
+  iface->open_for_reading = sf_open;
+  iface->volume = sf_volume;
+}
+
 static gboolean
 data_imager_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
 {
   g_autoptr (TestFakeDriveControl) drives = g_object_new (TEST_TYPE_FAKE_DRIVE_CONTROL, NULL);
   g_autoptr (TestFakeDisc) disc = g_object_new (TEST_TYPE_FAKE_DISC, NULL);
   g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (TestSyncFailingFs) sync_failing = g_object_new (TEST_TYPE_SYNC_FAILING_FS, NULL);
   g_autoptr (TestRecordingSink) sink = g_object_new (TEST_TYPE_RECORDING_SINK, NULL);
   g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
   g_autoptr (BroDataImager) imager = NULL;
   g_autoptr (BroBroError) error = NULL;
   g_autofree char *dir = g_build_filename (fs_root, "image", NULL), *dest = NULL;
   BroJsonValue *want_error = bro_json_value_member (expect, "error"), *v;
-  gint64 bytes;
+  g_autoptr (BroDataImageCopy) copy = NULL;
   remove_tree (fs_root);
   g_mkdir_with_parents (dir, 0755);
   dest = g_build_filename (dir, "disc.iso", NULL);
@@ -132,17 +199,24 @@ data_imager_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   disc->cancel = cancel;
   if (!bro_json_value_get_bool (bro_json_value_member (given, "openFails"), FALSE))
     drives->disc = g_object_ref (disc);
-  imager = bro_data_imager_new (BRO_DRIVE_CONTROL (drives), BRO_FILE_SYSTEM (fs));
-  bytes = bro_data_imager_copy (imager, "/dev/sr0", dest, BRO_RUN_SINK (sink), cancel, &error);
-  if (bytes >= 0)
+  if (bro_json_value_get_bool (bro_json_value_member (given, "syncFails"), FALSE))
+    imager = bro_data_imager_new (BRO_DRIVE_CONTROL (drives), BRO_FILE_SYSTEM (sync_failing));
+  else
+    imager = bro_data_imager_new (BRO_DRIVE_CONTROL (drives), BRO_FILE_SYSTEM (fs));
+  copy = bro_data_imager_copy (imager, "/dev/sr0", dest, BRO_RUN_SINK (sink), cancel, &error);
+  if (copy)
     {
       if (want_error)
         bro_test_fail (failures, id, "expected an error");
-      if (bytes != bro_json_value_get_integer (bro_json_value_member (expect, "bytes"), -1))
-        bro_test_fail (failures, id, "bytes %" G_GINT64_FORMAT, bytes);
+      if (copy->bytes != bro_json_value_get_integer (bro_json_value_member (expect, "bytes"), -1))
+        bro_test_fail (failures, id, "bytes %" G_GINT64_FORMAT, copy->bytes);
+      bro_test_same_string (failures, id, "warning", bro_json_value_get_string (bro_json_value_member (expect, "warning"), NULL),
+                            copy->warning ? bro_message_code_wire (copy->warning->code) : NULL);
+      if (copy->warning)
+        bro_test_same_string (failures, id, "warning path", dest, bro_json_value_get_string (bro_json_value_member (copy->warning->params, "path"), NULL));
     }
   else if (!error)
-    bro_test_fail (failures, id, "-1 without an error");
+    bro_test_fail (failures, id, "NULL without an error");
   if (error)
     {
       bro_test_same_string (failures, id, "error", bro_json_value_get_string (bro_json_value_member (want_error, "code"), NULL), error->code);

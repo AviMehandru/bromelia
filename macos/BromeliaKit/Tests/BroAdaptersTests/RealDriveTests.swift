@@ -103,8 +103,10 @@ import Testing
         let control = PlatformDriveControl(launcher: PlatformProcessLauncher(), clock: SystemClock())
         let events = Events()
         let started = Date()
-        let bytes = try await DataImager(drives: control, fs: PlatformFileSystem()).copy(state.drive.device, destIso: dir + "/disc.iso", sink: events,
-                                                                                          cancel: CancellationToken())
+        let copy = try await DataImager(drives: control, fs: PlatformFileSystem()).copy(state.drive.device, destIso: dir + "/disc.iso", sink: events,
+                                                                                         cancel: CancellationToken())
+        let bytes = copy.bytes
+        #expect(copy.warning == nil)
         let seconds = Date().timeIntervalSince(started)
         print("imaged \(bytes) bytes in \(Int(seconds)) s (\(Int(Double(bytes) / seconds / 1_000_000)) MB/s)")
         #expect(try FileManager.default.contentsOfDirectory(atPath: dir) == ["disc.iso"])

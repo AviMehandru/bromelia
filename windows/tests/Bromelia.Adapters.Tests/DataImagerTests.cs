@@ -84,9 +84,12 @@ public sealed class DataImagerTests : IDisposable
             var sink = new RecordingSink();
             try
             {
-                var bytes = new DataImager(drives, new DiskFileSystem()).Copy("/dev/sr0", dest, sink, cancel).GetAwaiter().GetResult();
+                var fs = new DiskFileSystem { SyncDirectoryFails = given["syncFails"]?.AsBool == true };
+                var copy = new DataImager(drives, fs).Copy("/dev/sr0", dest, sink, cancel).GetAwaiter().GetResult();
                 Assert.True(expect["error"] == null, "expected " + expect["error"]);
-                Assert.Equal(expect["bytes"]!.AsInteger, bytes);
+                Assert.Equal(expect["bytes"]!.AsInteger, copy.Bytes);
+                Assert.Equal(expect["warning"]?.AsString, copy.Warning is { } w ? MessageCode.Wire(w.Code) : null);
+                if (copy.Warning is { } warning) Assert.Equal(dest, warning.ToJson()["params"]!["path"]!.AsString);
             }
             catch (BroFailure f)
             {

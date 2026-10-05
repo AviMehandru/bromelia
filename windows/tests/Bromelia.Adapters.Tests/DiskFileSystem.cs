@@ -37,7 +37,15 @@ internal sealed class DiskFileSystem : IFileSystem
     public void Remove(string path) => File.Delete(path);
     public void MoveToTrash(string path, string trash) => throw new NotSupportedException();
     public void SyncFile(string path) { }
-    public void SyncDirectory(string path) { }
+    /// <summary>Folder syncs fail, as on a share that refuses them.</summary>
+    public bool SyncDirectoryFails;
+    public void SyncDirectory(string path)
+    {
+        if (SyncDirectoryFails)
+            throw new Bromelia.Foundation.BroFailure(new Bromelia.Domain.BroMessage(Bromelia.Domain.MessageCode.FsFailed, Bromelia.Domain.Severity.Error,
+                ("operation", Bromelia.Foundation.JsonValue.Of("sync")), ("path", Bromelia.Foundation.JsonValue.Of(path)),
+                ("reason", Bromelia.Foundation.JsonValue.Of("Invalid function."))).ToError());
+    }
     public IByteStream OpenForReading(string path, bool bypassCache) => throw new NotSupportedException();
     public VolumeInfo Volume(string path) => throw new NotSupportedException();
 }

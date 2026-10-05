@@ -1788,6 +1788,15 @@
       },
       "today": "new: the FileSystem port; reason is the system's text"
     },
+    "fs.notSynced": {
+      "kind": "error",
+      "severity": "warning",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "new: DataImager (the image is complete; only flushing its folder failed, which some network shares refuse)"
+    },
     "store.failed": {
       "kind": "error",
       "params": {

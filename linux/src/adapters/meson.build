@@ -27,6 +27,7 @@ bro_adapters_sources = files(
   'store/bro-sqlite-store.c',
   'tools/bro-apprise-tool.c',
   'tools/bro-cd-ripper.c',
+  'tools/bro-data-image-copy.c',
   'tools/bro-data-imager.c',
   'tools/bro-hand-brake.c',
   'tools/bro-home-dir-isolation.c',

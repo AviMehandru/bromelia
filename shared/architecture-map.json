@@ -11085,6 +11085,27 @@
             "name": "BroDataImager",
             "file": "linux/src/adapters/tools/bro-data-imager.h"
           }
+        },
+        {
+          "name": "DataImageCopy",
+          "kind": "struct",
+          "fields": [
+            "bytes",
+            "warning"
+          ],
+          "doc": "What a copy made: the bytes copied, and a warning when the image is complete but its folder couldn't be flushed (fs.notSynced).",
+          "swift": {
+            "name": "DataImageCopy",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/DataImageCopy.swift"
+          },
+          "cs": {
+            "name": "DataImageCopy",
+            "file": "windows/src/Bromelia.Adapters/Tools/DataImageCopy.cs"
+          },
+          "c": {
+            "name": "BroDataImageCopy",
+            "file": "linux/src/adapters/tools/bro-data-image-copy.h"
+          }
         }
       ],
       "functions": [
@@ -11096,7 +11117,7 @@
             "sink",
             "cancel"
           ],
-          "returns": "Int64",
+          "returns": "DataImageCopy",
           "throws": true,
           "async": true,
           "doc": "The bytes copied.",

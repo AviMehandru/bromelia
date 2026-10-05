@@ -55,6 +55,31 @@ final class FakeDriveControl: DriveControl, @unchecked Sendable {
     }
 }
 
+/// The real file system, except that folder syncs fail, as on a share that refuses them.
+final class SyncFailingFileSystem: FileSystem, @unchecked Sendable {
+    private let real = PlatformFileSystem()
+    func exists(_ path: String) -> Bool { real.exists(path) }
+    func stat(_ path: String) throws(BroError) -> FileInfo { try real.stat(path) }
+    func list(_ directory: String) throws(BroError) -> [DirectoryEntry] { try real.list(directory) }
+    func read(_ path: String) throws(BroError) -> [UInt8] { try real.read(path) }
+    func readRange(_ path: String, offset: Int64, length: Int) throws(BroError) -> [UInt8] { try real.readRange(path, offset: offset, length: length) }
+    func createDirectory(_ path: String, parentsMustExist: Bool) throws(BroError) { try real.createDirectory(path, parentsMustExist: parentsMustExist) }
+    func writeAtomically(_ path: String, bytes: [UInt8], mode: Int) throws(BroError) { try real.writeAtomically(path, bytes: bytes, mode: mode) }
+    func rename(_ from: String, to: String) throws(BroError) { try real.rename(from, to: to) }
+    func moveMerging(_ from: String, to: String, policy: MovePolicy, onMoved: (MovedItem) -> Void) throws(BroError) -> [MovedItem] {
+        try real.moveMerging(from, to: to, policy: policy, onMoved: onMoved)
+    }
+    func remove(_ path: String) throws(BroError) { try real.remove(path) }
+    func moveToTrash(_ path: String, trash: String) throws(BroError) { try real.moveToTrash(path, trash: trash) }
+    func syncFile(_ path: String) throws(BroError) { try real.syncFile(path) }
+    func syncDirectory(_ path: String) throws(BroError) {
+        throw BroMessage(.fsFailed, [("operation", .string("sync")), ("path", .string(path)), ("reason", .string("Operation not supported"))],
+                         severity: .error).toError()
+    }
+    func openForReading(_ path: String, bypassCache: Bool) throws(BroError) -> any ByteStream { try real.openForReading(path, bypassCache: bypassCache) }
+    func volume(_ path: String) throws(BroError) -> VolumeInfo { try real.volume(path) }
+}
+
 /// shared/fixtures/adapters/data-imager.cases.json.
 @Suite(.serialized) struct DataImagerTests {
     let dir = (Fixtures.temporaryDirectory as NSString).appendingPathComponent("bromelia-image-\(UUID().uuidString)")
@@ -80,9 +105,12 @@ final class FakeDriveControl: DriveControl, @unchecked Sendable {
                 drives.disc = given["openFails"]?.bool == true ? nil : disc
                 let sink = RecordingSink()
                 do {
-                    let bytes = try await DataImager(drives: drives, fs: PlatformFileSystem()).copy("/dev/sr0", destIso: dest, sink: sink, cancel: cancel)
+                    let fs: any FileSystem = given["syncFails"]?.bool == true ? SyncFailingFileSystem() : PlatformFileSystem()
+                    let copy = try await DataImager(drives: drives, fs: fs).copy("/dev/sr0", destIso: dest, sink: sink, cancel: cancel)
                     try Fixtures.check(expect["error"] == nil, "expected \(expect["error"]!)")
-                    try Fixtures.same(expect["bytes"]?.int, bytes, "bytes")
+                    try Fixtures.same(expect["bytes"]?.int, copy.bytes, "bytes")
+                    try Fixtures.same(expect["warning"]?.string, copy.warning?.code.rawValue, "warning")
+                    if let w = copy.warning { try Fixtures.same(JsonValue.string(dest), JsonValue.object(w.params)["path"] ?? .null, "warning path") }
                 } catch let error as BroError {
                     try Fixtures.same(expect["error"]?["code"]?.string, error.code, "error")
                     for (k, v) in expect["error"]?["params"]?.members ?? [] { try Fixtures.same(v, JsonValue.object(error.params)[k] ?? .null, k) }

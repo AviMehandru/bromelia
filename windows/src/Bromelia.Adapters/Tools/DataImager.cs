@@ -11,7 +11,8 @@ namespace Bromelia.Adapters;
 /// <summary>Data discs to ISO images (plan §10.1; shared/fixtures/adapters/data-imager.cases.json): every sector of
 /// DriveControl.OpenRaw, 1 MiB at a time, into a hidden file that becomes the image only once every sector was read.
 /// A read error names the first byte that can't be read (other.readError); a disc with no sectors is other.emptyDisc,
-/// never an empty image.</summary>
+/// never an empty image. Once the image has its name it is complete: a folder sync that fails after that (some network
+/// shares refuse one) is a warning on the result, fs.notSynced, not an error a retry would trip over.</summary>
 public sealed class DataImager
 {
     const int Sector = 2048;
@@ -28,8 +29,8 @@ public sealed class DataImager
     }
 
     /// <summary>Copies the disc in <paramref name="device"/> to <paramref name="destIso"/> (which mustn't exist; its folder
-    /// must) and returns the bytes copied.</summary>
-    public Task<long> Copy(string device, string destIso, IRunSink sink, CancellationToken cancel) => Task.Run(() =>
+    /// must).</summary>
+    public Task<DataImageCopy> Copy(string device, string destIso, IRunSink sink, CancellationToken cancel) => Task.Run(() =>
     {
         if (_fs.Exists(destIso))
             throw new BroFailure(new BroMessage(MessageCode.FsAlreadyExists, Severity.Error, ("path", JsonValue.Of(destIso))).ToError());
@@ -58,9 +59,15 @@ public sealed class DataImager
             }
             if (cancel.IsCancelled) throw Cancelled();
             _fs.Rename(part, destIso);
-            _fs.SyncDirectory(folder);
             done = true;
-            return copied * Sector;
+            BroMessage? warning = null;
+            try { _fs.SyncDirectory(folder); }
+            catch (BroFailure f)
+            {
+                warning = new BroMessage(MessageCode.FsNotSynced, Severity.Warning, ("path", JsonValue.Of(destIso)),
+                    ("reason", f.Error.Params["reason"] ?? JsonValue.Of(f.Error.Code)));
+            }
+            return new DataImageCopy(copied * Sector, warning);
         }
         finally
         {
