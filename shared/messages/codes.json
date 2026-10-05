@@ -465,6 +465,13 @@
       },
       "today": "MakeMKVEnvironment.RunAsync (Windows): RegistrySettings.Apply / Restore"
     },
+    "makemkv.registryNotRestored": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "today": "new: RegistrySwapIsolation (the user's values are kept in a snapshot file until they are back)"
+    },
     "makemkv.titleProgress": {
       "kind": "log",
       "severity": "info",
