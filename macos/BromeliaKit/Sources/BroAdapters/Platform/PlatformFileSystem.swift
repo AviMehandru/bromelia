@@ -137,7 +137,7 @@ public final class PlatformFileSystem: FileSystem {
         return Darwin.rename(from, to)
     }
 
-    public func moveMerging(_ from: String, to: String, policy: MovePolicy) throws(BroError) -> [MovedItem] {
+    public func moveMerging(_ from: String, to: String, policy: MovePolicy, onMoved: (MovedItem) -> Void) throws(BroError) -> [MovedItem] {
         guard isDirectory(from) else {
             if exists(from) { throw failed("move", from, "it isn't a folder") }
             throw fsError(.fsNotFound, from)
@@ -148,29 +148,32 @@ public final class PlatformFileSystem: FileSystem {
             throw fsError(.fsAlreadyExists, to)
         }
         var moved: [MovedItem] = []
-        try merge(from, into: to, &moved)
+        try merge(from, into: to) { item in
+            moved.append(item)
+            onMoved(item)
+        }
         return moved.sorted { Array($0.from.utf8).lexicographicallyPrecedes(Array($1.from.utf8)) }
     }
 
     /// Each entry of source in turn: a folder merges into a folder of the same name (ignoring ASCII case); anything
     /// else moves under ConflictNamer's name. Emptied source folders go.
-    private func merge(_ source: String, into target: String, _ moved: inout [MovedItem]) throws(BroError) {
+    private func merge(_ source: String, into target: String, _ moved: (MovedItem) -> Void) throws(BroError) {
         let entries = try list(source).sorted { Array($0.name.utf8).lexicographicallyPrecedes(Array($1.name.utf8)) }
         for e in entries {
             let src = source + "/" + e.name
             let existing = try list(target)
             let same = existing.first { asciiLower($0.name) == asciiLower(e.name) }
             if e.isDirectory, let same, same.isDirectory {
-                try merge(src, into: target + "/" + same.name, &moved)
+                try merge(src, into: target + "/" + same.name, moved)
                 try remove(src)
                 continue
             }
             let dst = target + "/" + ConflictNamer.next(e.name, existing: existing.map(\.name), isFolder: e.isDirectory)
             try rename(src, to: dst)
             if e.isDirectory {
-                for file in try files(under: dst) { moved.append(MovedItem(from: src + file, to: dst + file)) }
+                for file in try files(under: dst) { moved(MovedItem(from: src + file, to: dst + file)) }
             } else {
-                moved.append(MovedItem(from: src, to: dst))
+                moved(MovedItem(from: src, to: dst))
             }
         }
     }

@@ -103,19 +103,23 @@ public sealed class PlatformFileSystem : IFileSystem
         }
     }
 
-    public IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy)
+    public IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy, Action<MovedItem>? onMoved = null)
     {
         if (!Directory.Exists(from)) throw File.Exists(from) ? Failed("move", from, "it isn't a folder") : NotFound(from);
         if (!Exists(to)) CreateDirectory(to, parentsMustExist: true);
         else if (!Directory.Exists(to)) throw AlreadyExists(to);
         var moved = new List<MovedItem>();
-        Merge(from, to, moved);
+        Merge(from, to, item =>
+        {
+            moved.Add(item);
+            onMoved?.Invoke(item);
+        });
         return moved.OrderBy(m => m.From, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>Each entry of <paramref name="source"/> in turn: a folder merges into a folder of the same name
     /// (ignoring ASCII case); anything else moves under ConflictNamer's name. Emptied source folders go.</summary>
-    void Merge(string source, string target, List<MovedItem> moved)
+    void Merge(string source, string target, Action<MovedItem> moved)
     {
         foreach (var e in List(source).OrderBy(e => e.Name, StringComparer.Ordinal))
         {
@@ -131,10 +135,10 @@ public sealed class PlatformFileSystem : IFileSystem
             var dst = Path.Combine(target, ConflictNamer.Next(e.Name, existing.Select(x => x.Name).ToList(), e.IsDirectory));
             Rename(src, dst);
             if (!e.IsDirectory)
-                moved.Add(new MovedItem(src, dst));
+                moved(new MovedItem(src, dst));
             else
                 foreach (var file in Directory.EnumerateFiles(dst, "*", SearchOption.AllDirectories))
-                    moved.Add(new MovedItem(Path.Combine(src, Path.GetRelativePath(dst, file)), file));
+                    moved(new MovedItem(Path.Combine(src, Path.GetRelativePath(dst, file)), file));
         }
     }
 

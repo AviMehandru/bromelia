@@ -7144,9 +7144,10 @@
           "params": [
             "from",
             "to",
-            "policy"
+            "policy",
+            "onMoved"
           ],
-          "swift": "FileSystem.moveMerging(_:to:policy:)",
+          "swift": "FileSystem.moveMerging(_:to:policy:onMoved:)",
           "cs": "FileSystem.MoveMerging",
           "c": "bro_file_system_move_merging"
         },
@@ -9787,11 +9788,12 @@
           "params": [
             "from",
             "to",
-            "policy"
+            "policy",
+            "onMoved"
           ],
           "returns": "[MovedItem]",
           "throws": true,
-          "swift": "PlatformFileSystem.moveMerging(_:to:policy:)",
+          "swift": "PlatformFileSystem.moveMerging(_:to:policy:onMoved:)",
           "cs": "PlatformFileSystem.MoveMerging",
           "c": "bro_platform_file_system_move_merging"
         },

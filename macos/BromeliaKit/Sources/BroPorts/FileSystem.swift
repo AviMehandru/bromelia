@@ -24,8 +24,9 @@ public protocol FileSystem: Sendable {
 
     func rename(_ from: String, to: String) throws(BroError)
 
-    /// Moves a folder's contents into another, merging folders.
-    func moveMerging(_ from: String, to: String, policy: MovePolicy) throws(BroError) -> [MovedItem]
+    /// Moves a folder's contents into another, merging folders. `onMoved` hears of each item as soon as it has moved,
+    /// so a failure part-way (thrown) still says what moved.
+    func moveMerging(_ from: String, to: String, policy: MovePolicy, onMoved: (MovedItem) -> Void) throws(BroError) -> [MovedItem]
 
     /// Removes a file or an empty folder.
     func remove(_ path: String) throws(BroError)
@@ -42,4 +43,11 @@ public protocol FileSystem: Sendable {
     func openForReading(_ path: String, bypassCache: Bool) throws(BroError) -> any ByteStream
 
     func volume(_ path: String) throws(BroError) -> VolumeInfo
+}
+
+extension FileSystem {
+    /// moveMerging without hearing of each item.
+    public func moveMerging(_ from: String, to: String, policy: MovePolicy) throws(BroError) -> [MovedItem] {
+        try moveMerging(from, to: to, policy: policy, onMoved: { _ in })
+    }
 }

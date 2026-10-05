@@ -65,10 +65,11 @@ bro_file_system_rename (BroFileSystem *self, const char *from, const char *to, B
 }
 
 GPtrArray *
-bro_file_system_move_merging (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroBroError **error)
+bro_file_system_move_merging (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroMovedFunc on_moved,
+                              gpointer data, BroBroError **error)
 {
   g_return_val_if_fail (BRO_IS_FILE_SYSTEM (self), NULL);
-  return BRO_FILE_SYSTEM_GET_IFACE (self)->move_merging (self, from, to, policy, error);
+  return BRO_FILE_SYSTEM_GET_IFACE (self)->move_merging (self, from, to, policy, on_moved, data, error);
 }
 
 gboolean

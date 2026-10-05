@@ -57,7 +57,8 @@ struct PlatformFileSystemTests {
         case "writeAtomically": try fs.writeAtomically(p(s(1)), bytes: Array(s(2).utf8), mode: Int(op[3].int!))
         case "rename": try fs.rename(p(s(1)), to: p(s(2)))
         case "moveMerging":
-            return .array(try fs.moveMerging(p(s(1)), to: p(s(2)), policy: MovePolicy(rawValue: s(3))!).map { .array([.string(rel($0.from)), .string(rel($0.to))]) })
+            let result = try fs.moveMerging(p(s(1)), to: p(s(2)), policy: MovePolicy(rawValue: s(3))!) { reported.items.append($0) }
+            return .array(result.map(pair))
         case "remove": try fs.remove(p(s(1)))
         case "moveToTrash": try fs.moveToTrash(p(s(1)), trash: p(s(2)))
         case "syncFile": try fs.syncFile(p(s(1)))
@@ -77,16 +78,28 @@ struct PlatformFileSystemTests {
         return .null
     }
 
+    func pair(_ m: MovedItem) -> JsonValue { .array([.string(rel(m.from)), .string(rel(m.to))]) }
+
+    /// What moveMerging's onMoved heard, in order.
+    final class Reported: @unchecked Sendable { var items: [MovedItem] = [] }
+    let reported = Reported()
+
     @Test func theSharedCasesPass() throws {
         defer { try? FileManager.default.removeItem(atPath: root) }
         let failures = try Fixtures.runCases("adapters/file-system.cases.json") { _, given, expect in
             try build(given["tree"]!)
+            reported.items = []
             let op = given["op"]!.array!
+            // A read-only folder: nothing can be moved out of it.
+            let locked = given["locked"]?.string.map { (p($0) as NSString).deletingLastPathComponent }
+            if let locked { chmod(locked, 0o555) }
+            defer { if let locked { chmod(locked, 0o755) } }
             if let error = expect["error"] {
                 do {
                     _ = try run(op)
                     throw FixtureError("no error; expected \(error)")
                 } catch let e as BroError {
+                    if let before = expect["movedBeforeTheError"] { try Fixtures.same(before, .array(reported.items.map(pair)), "movedBeforeTheError") }
                     try Fixtures.same(error["code"]!.string!, e.code, "code")
                     for (key, value) in error["params"]?.members ?? [] {
                         var actual = JsonValue.object(e.params)[key]?.string ?? ""
@@ -96,6 +109,10 @@ struct PlatformFileSystemTests {
                 }
             } else {
                 let result = try run(op)
+                if op.first?.string == "moveMerging" {
+                    let heard = reported.items.sorted { Array($0.from.utf8).lexicographicallyPrecedes(Array($1.from.utf8)) }
+                    try Fixtures.same(result, .array(heard.map(pair)), "reported")
+                }
                 if let want = expect["result"] {
                     if let members = want.members, let got = result.members {
                         for (k, v) in members { try Fixtures.same(v, got.first { $0.key == k }?.value ?? .null, k) }

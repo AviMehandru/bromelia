@@ -529,19 +529,28 @@ files_under (BroPlatformFileSystem *self, const char *dir, const char *prefix, G
   return TRUE;
 }
 
+/* What moveMerging has moved so far, and who hears of each item. */
+typedef struct {
+  GPtrArray *items; /* BroMovedItem * */
+  BroMovedFunc on_moved;
+  gpointer data;
+} Moves;
+
 static void
-add_moved (GPtrArray *moved, const char *from, const char *to)
+add_moved (Moves *moved, const char *from, const char *to)
 {
   BroMovedItem *item = bro_moved_item_new ();
   item->from = g_strdup (from);
   item->to = g_strdup (to);
-  g_ptr_array_add (moved, item);
+  g_ptr_array_add (moved->items, item);
+  if (moved->on_moved)
+    moved->on_moved (item, moved->data);
 }
 
 /* Each entry of @source in turn: a folder merges into a folder of the same name (ignoring ASCII case); anything else
  * moves under ConflictNamer's name. Emptied source folders go. */
 static gboolean
-merge (BroPlatformFileSystem *self, const char *source, const char *target, GPtrArray *moved, BroBroError **error)
+merge (BroPlatformFileSystem *self, const char *source, const char *target, Moves *moved, BroBroError **error)
 {
   g_autoptr (GPtrArray) entries = bro_platform_file_system_list (self, source, error);
   if (!entries)
@@ -599,9 +608,9 @@ compare_moved (gconstpointer a, gconstpointer b)
 
 GPtrArray *
 bro_platform_file_system_move_merging (BroPlatformFileSystem *self, const char *from, const char *to, BroMovePolicy policy,
-                                       BroBroError **error)
+                                       BroMovedFunc on_moved, gpointer data, BroBroError **error)
 {
-  GPtrArray *moved;
+  Moves moved;
   if (!is_directory (from))
     {
       if (exists (from))
@@ -620,14 +629,14 @@ bro_platform_file_system_move_merging (BroPlatformFileSystem *self, const char *
       set_path_error (error, BRO_MSG_FS_ALREADY_EXISTS, to);
       return NULL;
     }
-  moved = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_moved_item_free);
-  if (!merge (self, from, to, moved, error))
+  moved = (Moves) { g_ptr_array_new_with_free_func ((GDestroyNotify) bro_moved_item_free), on_moved, data };
+  if (!merge (self, from, to, &moved, error))
     {
-      g_ptr_array_unref (moved);
+      g_ptr_array_unref (moved.items);
       return NULL;
     }
-  g_ptr_array_sort (moved, compare_moved);
-  return moved;
+  g_ptr_array_sort (moved.items, compare_moved);
+  return moved.items;
 }
 
 gboolean
@@ -805,9 +814,10 @@ rename_vfunc (BroFileSystem *self, const char *from, const char *to, BroBroError
 }
 
 static GPtrArray *
-move_merging_vfunc (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroBroError **error)
+move_merging_vfunc (BroFileSystem *self, const char *from, const char *to, BroMovePolicy policy, BroMovedFunc on_moved, gpointer data,
+                    BroBroError **error)
 {
-  return bro_platform_file_system_move_merging (BRO_PLATFORM_FILE_SYSTEM (self), from, to, policy, error);
+  return bro_platform_file_system_move_merging (BRO_PLATFORM_FILE_SYSTEM (self), from, to, policy, on_moved, data, error);
 }
 
 static gboolean

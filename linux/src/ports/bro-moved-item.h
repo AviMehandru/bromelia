@@ -16,4 +16,7 @@ void bro_moved_item_free (BroMovedItem *value);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroMovedItem, bro_moved_item_free)
 
+/* Hears of an item moveMerging has just moved. */
+typedef void (*BroMovedFunc) (const BroMovedItem *item, gpointer data);
+
 G_END_DECLS

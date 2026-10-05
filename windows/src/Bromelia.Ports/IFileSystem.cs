@@ -32,8 +32,9 @@ public interface IFileSystem
 
     void Rename(string from, string to);
 
-    /// <summary>Moves a folder's contents into another, merging folders.</summary>
-    IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy);
+    /// <summary>Moves a folder's contents into another, merging folders. <paramref name="onMoved"/> hears of each item
+    /// as soon as it has moved, so a failure part-way (thrown) still says what moved.</summary>
+    IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy, Action<MovedItem>? onMoved = null);
 
     /// <summary>Removes a file or an empty folder.</summary>
     void Remove(string path);

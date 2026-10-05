@@ -27,9 +27,9 @@ gboolean bro_platform_file_system_create_directory (BroPlatformFileSystem *self,
 gboolean bro_platform_file_system_write_atomically (BroPlatformFileSystem *self, const char *path, GBytes *bytes, int mode,
                                                     BroBroError **error);
 gboolean bro_platform_file_system_rename (BroPlatformFileSystem *self, const char *from, const char *to, BroBroError **error);
-/* BroMovedItem *, sorted by source path. */
+/* BroMovedItem *, sorted by source path; @on_moved (nullable) hears of each as soon as it has moved. */
 GPtrArray *bro_platform_file_system_move_merging (BroPlatformFileSystem *self, const char *from, const char *to,
-                                                  BroMovePolicy policy, BroBroError **error);
+                                                  BroMovePolicy policy, BroMovedFunc on_moved, gpointer data, BroBroError **error);
 gboolean bro_platform_file_system_remove (BroPlatformFileSystem *self, const char *path, BroBroError **error);
 gboolean bro_platform_file_system_move_to_trash (BroPlatformFileSystem *self, const char *path, const char *trash,
                                                  BroBroError **error);

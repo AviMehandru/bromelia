@@ -25,6 +25,11 @@ public sealed class PlatformFileSystemTests : IDisposable
 
     string Rel(string path) => Path.GetRelativePath(_root, path).Replace('\\', '/');
 
+    JsonValue Pair(MovedItem m) => JsonValue.Of(new[] { JsonValue.Of(Rel(m.From)), JsonValue.Of(Rel(m.To)) });
+
+    /// <summary>What moveMerging's onMoved heard, in order.</summary>
+    readonly List<MovedItem> _reported = new();
+
     void Build(JsonValue tree)
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, true);
@@ -61,8 +66,9 @@ public sealed class PlatformFileSystemTests : IDisposable
             case "writeAtomically": _fs.WriteAtomically(P(S(1)), Encoding.UTF8.GetBytes(S(2)), (int)op[3].AsInteger!.Value); return JsonValue.Null.Instance;
             case "rename": _fs.Rename(P(S(1)), P(S(2))); return JsonValue.Null.Instance;
             case "moveMerging":
-                return JsonValue.Of(_fs.MoveMerging(P(S(1)), P(S(2)), EnumWire.Parse<MovePolicy>(S(3))!.Value)
-                    .Select(m => JsonValue.Of(new[] { JsonValue.Of(Rel(m.From)), JsonValue.Of(Rel(m.To)) })));
+                var result = _fs.MoveMerging(P(S(1)), P(S(2)), EnumWire.Parse<MovePolicy>(S(3))!.Value, _reported.Add);
+                Assert.Equal(result.OrderBy(m => m.From, StringComparer.Ordinal), _reported.OrderBy(m => m.From, StringComparer.Ordinal));
+                return JsonValue.Of(result.Select(Pair));
             case "remove": _fs.Remove(P(S(1))); return JsonValue.Null.Instance;
             case "moveToTrash": _fs.MoveToTrash(P(S(1)), P(S(2))); return JsonValue.Null.Instance;
             case "syncFile": _fs.SyncFile(P(S(1))); return JsonValue.Null.Instance;
@@ -84,10 +90,14 @@ public sealed class PlatformFileSystemTests : IDisposable
         RunCases("adapters/file-system.cases.json", (id, given, expect) =>
         {
             Build(given["tree"]!);
+            _reported.Clear();
             var op = given["op"]!.AsArray!.ToArray();
+            // A file held open without delete sharing can't be moved.
+            using var locked = given["locked"]?.AsString is { } l ? new FileStream(P(l), FileMode.Open, FileAccess.Read, FileShare.Read) : null;
             if (expect["error"] is { } error)
             {
                 var e = Assert.Throws<BroFailure>(() => Run(op));
+                if (expect["movedBeforeTheError"] is { } before) Assert.Equal(before, JsonValue.Of(_reported.Select(Pair)));
                 Assert.Equal(error["code"]!.AsString, e.Error.Code);
                 foreach (var (key, value) in error["params"]!.AsObject!.Select(m => (m.Key, m.Value)))
                 {
