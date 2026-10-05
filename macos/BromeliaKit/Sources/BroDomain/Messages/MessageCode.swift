@@ -267,6 +267,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case fsAlreadyExists = "fs.alreadyExists"
     case fsParentMissing = "fs.parentMissing"
     case fsFailed = "fs.failed"
+    case fsNotSynced = "fs.notSynced"
     case storeFailed = "store.failed"
     case keystoreFailed = "keystore.failed"
     case archiveRecordWritten = "archive.recordWritten"

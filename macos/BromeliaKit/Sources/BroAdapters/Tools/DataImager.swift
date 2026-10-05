@@ -6,7 +6,8 @@ import Foundation
 /// Data discs to ISO images (plan §10.1; shared/fixtures/adapters/data-imager.cases.json): every sector of
 /// DriveControl.openRaw, 1 MiB at a time, into a hidden file that becomes the image only once every sector was read.
 /// A read error names the first byte that can't be read (other.readError); a disc with no sectors is other.emptyDisc, never
-/// an empty image.
+/// an empty image. Once the image has its name it is complete: a folder sync that fails after that (some network shares
+/// refuse one) is a warning on the result, fs.notSynced, not an error a retry would trip over.
 public final class DataImager: Sendable {
     private static let sector = 2048, chunk = 512, max = 10000
     private let drives: any DriveControl
@@ -17,10 +18,10 @@ public final class DataImager: Sendable {
         self.fs = fs
     }
 
-    /// Copies the disc in `device` to `destIso` (which mustn't exist; its folder must) and returns the bytes copied. The
-    /// copy runs on a thread of its own.
-    public func copy(_ device: String, destIso: String, sink: any RunSink, cancel: CancellationToken) async throws(BroError) -> Int64 {
-        let result: Result<Int64, BroError> = await withCheckedContinuation { c in
+    /// Copies the disc in `device` to `destIso` (which mustn't exist; its folder must). The copy runs on a thread of its
+    /// own.
+    public func copy(_ device: String, destIso: String, sink: any RunSink, cancel: CancellationToken) async throws(BroError) -> DataImageCopy {
+        let result: Result<DataImageCopy, BroError> = await withCheckedContinuation { c in
             Thread.detachNewThread { [self] in
                 do throws(BroError) { c.resume(returning: .success(try copyNow(device, destIso, sink, cancel))) } catch { c.resume(returning: .failure(error)) }
             }
@@ -28,7 +29,7 @@ public final class DataImager: Sendable {
         return try result.get()
     }
 
-    private func copyNow(_ device: String, _ destIso: String, _ sink: any RunSink, _ cancel: CancellationToken) throws(BroError) -> Int64 {
+    private func copyNow(_ device: String, _ destIso: String, _ sink: any RunSink, _ cancel: CancellationToken) throws(BroError) -> DataImageCopy {
         if fs.exists(destIso) { throw BroMessage(.fsAlreadyExists, [("path", .string(destIso))], severity: .error).toError() }
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         let reader = try drives.openRaw(device)
@@ -65,9 +66,13 @@ public final class DataImager: Sendable {
         try fs.syncFile(part)
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         try fs.rename(part, to: destIso)
-        try fs.syncDirectory(folder)
         done = true
-        return copied * Int64(Self.sector)
+        var warning: BroMessage?
+        do throws(BroError) { try fs.syncDirectory(folder) } catch {
+            warning = BroMessage(.fsNotSynced, [("path", .string(destIso)), ("reason", JsonValue.object(error.params)["reason"] ?? .string(error.code))],
+                                 severity: .warning)
+        }
+        return DataImageCopy(bytes: copied * Int64(Self.sector), warning: warning)
     }
 
     /// A chunk; when it can't be read whole, its sectors one by one, so the error names the first bad byte (a short read

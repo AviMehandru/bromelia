@@ -74,30 +74,31 @@ read_chunk (BroSectorReader *reader, gint64 sector, int count, BroBroError **err
   return g_byte_array_free_to_bytes (data);
 }
 
-gint64
+BroDataImageCopy *
 bro_data_imager_copy (BroDataImager *self, const char *device, const char *dest_iso, BroRunSink *sink, BroCancellationToken *cancel,
                       BroBroError **error)
 {
   g_autoptr (BroSectorReader) reader = NULL;
   g_autofree char *folder = g_path_get_dirname (dest_iso), *name = g_path_get_basename (dest_iso), *uuid = g_uuid_string_random ();
   g_autofree char *part_name = NULL, *part = NULL;
-  gint64 total, copied = 0, result = -1;
+  gint64 total, copied = 0;
+  BroDataImageCopy *result = NULL;
   int fd = -1;
   if (bro_file_system_exists (self->fs, dest_iso))
     {
       BroJsonValue *params = bro_json_value_new_object ();
       bro_json_value_set (params, "path", bro_json_value_new_string (dest_iso));
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_FS_ALREADY_EXISTS), params);
-      return -1;
+      return NULL;
     }
   if (cancel && bro_cancellation_token_is_cancelled (cancel))
     {
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
-      return -1;
+      return NULL;
     }
   reader = bro_drive_control_open_raw (self->drives, device, error);
   if (!reader)
-    return -1;
+    return NULL;
   uuid[8] = '\0';
   part_name = g_strdup_printf (".%s.part-%s", name, uuid);
   part = g_build_filename (folder, part_name, NULL);
@@ -162,14 +163,26 @@ bro_data_imager_copy (BroDataImager *self, const char *device, const char *dest_
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
       goto out;
     }
-  if (!bro_file_system_rename (self->fs, part, dest_iso, error) || !bro_file_system_sync_directory (self->fs, folder, error))
+  if (!bro_file_system_rename (self->fs, part, dest_iso, error))
     goto out;
-  result = copied * SECTOR;
+  result = g_new0 (BroDataImageCopy, 1);
+  result->bytes = copied * SECTOR;
+  {
+    g_autoptr (BroBroError) unsynced = NULL;
+    if (!bro_file_system_sync_directory (self->fs, folder, &unsynced))
+      {
+        BroJsonValue *params = bro_json_value_new_object ();
+        BroJsonValue *reason = unsynced ? bro_json_value_member (unsynced->params, "reason") : NULL;
+        bro_json_value_set (params, "path", bro_json_value_new_string (dest_iso));
+        bro_json_value_set (params, "reason", bro_json_value_new_string (bro_json_value_get_string (reason, unsynced ? unsynced->code : "?")));
+        result->warning = bro_bro_message_new (BRO_MSG_FS_NOT_SYNCED, params, BRO_SEVERITY_WARNING);
+      }
+  }
 out:
   if (fd >= 0)
     close (fd);
   bro_sector_reader_close (reader);
-  if (result < 0)
+  if (!result)
     g_unlink (part);
   return result;
 }

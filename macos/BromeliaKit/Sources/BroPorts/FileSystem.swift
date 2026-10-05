@@ -19,7 +19,8 @@ public protocol FileSystem: Sendable {
     /// Creates a folder (and, unless parentsMustExist, its parents). Never creates a library root (plan §22).
     func createDirectory(_ path: String, parentsMustExist: Bool) throws(BroError)
 
-    /// A temporary file, fsync, rename over path, fsync of the folder; mode is the POSIX permission bits.
+    /// A temporary file, fsync, rename over path, fsync of the folder; mode is the POSIX permission bits. A folder sync
+    /// that fails fails the call although the new content is in place: a retry replaces it, so it is safe.
     func writeAtomically(_ path: String, bytes: [UInt8], mode: Int) throws(BroError)
 
     func rename(_ from: String, to: String) throws(BroError)

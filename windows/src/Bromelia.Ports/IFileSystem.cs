@@ -27,7 +27,8 @@ public interface IFileSystem
     void CreateDirectory(string path, bool parentsMustExist);
 
     /// <summary>A temporary file, fsync, rename over path, fsync of the folder; mode is the POSIX permission
-    /// bits.</summary>
+    /// bits. A folder sync that fails fails the call although the new content is in place: a retry replaces it, so
+    /// it is safe.</summary>
     void WriteAtomically(string path, byte[] bytes, int mode);
 
     void Rename(string from, string to);

@@ -54,7 +54,8 @@ GBytes *bro_file_system_read_range (BroFileSystem *self, const char *path, gint6
 gboolean bro_file_system_create_directory (BroFileSystem *self, const char *path, gboolean parents_must_exist, BroBroError **error);
 
 /* A temporary file, fsync, rename over path, fsync of the folder; mode is the POSIX permission bits. FALSE and @error
- * set on failure. */
+ * set on failure. A folder sync that fails fails the call although the new content is in place: a retry replaces it, so
+ * it is safe. */
 gboolean bro_file_system_write_atomically (BroFileSystem *self, const char *path, GBytes *bytes, int mode, BroBroError **error);
 
 /* FALSE and @error set on failure. */
