@@ -133,7 +133,8 @@
         "lines": [
           "done"
         ],
-        "exitCode": 0
+        "exitCode": 0,
+        "rule": "The 5 s count from the last progress (see a-slow-reader-gets-everything)."
       }
     },
     {
@@ -162,6 +163,52 @@
         ],
         "openedFilesEmpty": true,
         "rule": "a line read after the process has ended (a child left behind kept the pipe open past 5 s) is dropped: it never reaches the transcript, which is closed, nor a file that reuses the transcript's descriptor; the transcript is written under the launcher's lock, so a reader still holding a line when the process ends can't write either"
+      }
+    },
+    {
+      "id": "long-line-is-cut",
+      "from": [
+        "a tool writing binary with no line breaks grew the launcher's memory without limit"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "head -c 200000 /dev/zero | tr '\\\\0' a; echo; echo next"
+        ],
+        "windows": "powershell: [Console]::Out.Write('a' * 200000); [Console]::Out.WriteLine(); 'next'"
+      },
+      "expect": {
+        "lines": [
+          "65536 × a, then ' [cut]'",
+          "next"
+        ],
+        "rule": "a line is cut after 65536 bytes and ends with ' [cut]'; the rest of it, up to the next line break, is dropped"
+      }
+    },
+    {
+      "id": "a-slow-reader-holds-the-tool",
+      "given": {
+        "command": "50000 numbered lines, then a marker file",
+        "stallTimeout": 2,
+        "then": "read nothing for 3 s, then everything"
+      },
+      "expect": {
+        "markerAfter3s": false,
+        "lines": "all 50000, in order",
+        "stalled": false,
+        "rule": "at most 10000 lines wait to be read; then the reading waits, so the tool waits to write: nothing is lost, memory stays bounded, and waiting for the reader isn't silence"
+      }
+    },
+    {
+      "id": "a-slow-reader-gets-everything",
+      "given": {
+        "command": "30000 numbered lines, then exit at once",
+        "then": "read them slowly: about 7 s in all"
+      },
+      "expect": {
+        "lines": "all 30000, in order",
+        "rule": "the launcher keeps reading for 5 s after an exit, and longer while lines wait for a reader that is still taking them: a slow reader loses nothing; a child left holding the pipe still doesn't hold up the end (output-drained)"
       }
     },
     {

@@ -234,6 +234,69 @@ test_late_output (void)
   g_assert_null (strstr (text, "\nlate\n"));
 }
 
+/* long-line-is-cut: a line is cut after 65536 bytes and ends with " [cut]"; the rest of it is dropped. */
+static void
+test_long_line (void)
+{
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/sh", "-c", "head -c 200000 /dev/zero | tr '\\0' a; echo; echo next", NULL);
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroRunningProcess) p = start (spec);
+  g_autofree char *as = g_strnfill (65536, 'a');
+  g_autofree char *want = g_strconcat ("stdout:", as, " [cut]", NULL);
+  BroProcessExit exit = run (p, lines);
+  g_assert_cmpint (exit.status, ==, 0);
+  g_assert_cmpuint (lines->len, ==, 2);
+  g_assert_cmpstr (lines->pdata[0], ==, want);
+  g_assert_cmpstr (lines->pdata[1], ==, "stdout:next");
+}
+
+/* a-slow-reader-holds-the-tool: at most BRO_QUEUED_LINES lines wait to be read; then the tool waits to write, nothing
+ * is lost, and the wait isn't silence. */
+static void
+test_slow_reader_holds_the_tool (void)
+{
+  g_autofree char *marker = g_build_filename (scratch, "done", NULL);
+  g_autofree char *script = g_strdup_printf ("seq 1 50000; touch '%s'", marker);
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/sh", "-c", script, NULL);
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroRunningProcess) p = NULL;
+  BroProcessExit exit;
+  spec->has_stall_timeout = TRUE;
+  spec->stall_timeout.seconds = 2;
+  p = start (spec);
+  g_usleep (3 * G_USEC_PER_SEC);
+  g_assert_false (g_file_test (marker, G_FILE_TEST_EXISTS));
+  exit = run (p, lines);
+  g_assert_cmpuint (lines->len, ==, 50000);
+  for (guint i = 0; i < lines->len; i++)
+    {
+      g_autofree char *want = g_strdup_printf ("stdout:%u", i + 1);
+      g_assert_cmpstr (lines->pdata[i], ==, want);
+    }
+  g_assert_cmpfloat (exit.stalled_seconds, <, 0);
+  g_assert_true (g_file_test (marker, G_FILE_TEST_EXISTS));
+}
+
+/* a-slow-reader-gets-everything */
+static void
+test_slow_reader_gets_everything (void)
+{
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/sh", "-c", "seq 1 30000", NULL);
+  g_autoptr (BroRunningProcess) p = start (spec);
+  BroOutputLine *line;
+  guint n = 0;
+  while ((line = bro_running_process_lines (p)) != NULL)
+    {
+      g_autofree char *want = g_strdup_printf ("%u", ++n);
+      g_assert_cmpstr (line->text, ==, want);
+      bro_output_line_free (line);
+      if (n % 100 == 0)
+        g_usleep (G_USEC_PER_SEC / 40);
+    }
+  bro_running_process_wait (p);
+  g_assert_cmpuint (n, ==, 30000);
+}
+
 static void
 test_process_group (void)
 {
@@ -1815,6 +1878,9 @@ main (int argc, char **argv)
   g_test_add_func ("/process/terminate-first", test_terminate_first);
   g_test_add_func ("/process/output-drained", test_output_drained);
   g_test_add_func ("/process/late-output", test_late_output);
+  g_test_add_func ("/process/long-line", test_long_line);
+  g_test_add_func ("/process/slow-reader-holds-the-tool", test_slow_reader_holds_the_tool);
+  g_test_add_func ("/process/slow-reader-gets-everything", test_slow_reader_gets_everything);
   g_test_add_func ("/process/process-group", test_process_group);
   g_test_add_func ("/process/transcript", test_transcript);
   g_test_add_func ("/process/streams", test_streams);

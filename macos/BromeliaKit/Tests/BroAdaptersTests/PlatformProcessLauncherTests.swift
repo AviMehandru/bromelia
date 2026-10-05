@@ -107,6 +107,37 @@ import Testing
         #expect(text.contains("\nearly\n") && !text.contains("\nlate\n"))
     }
 
+    /// long-line-is-cut
+    @Test func aLongLineIsCut() async throws {
+        let (lines, exit) = await run(try launcher.start(spec("/bin/sh", "-c", "head -c 200000 /dev/zero | tr '\\0' a; echo; echo next")))
+        #expect(exit.status == 0)
+        #expect(lines.map(\.text) == [String(repeating: "a", count: 65536) + " [cut]", "next"])
+    }
+
+    /// a-slow-reader-holds-the-tool
+    @Test func aSlowReaderHoldsTheTool() async throws {
+        let marker = dir + "/done"
+        let p = try launcher.start(spec("/bin/sh", "-c", "seq 1 50000; touch '\(marker)'", stall: 2))
+        try await Task.sleep(nanoseconds: 3_000_000_000)
+        #expect(!FileManager.default.fileExists(atPath: marker))   // waiting to write: at most 10000 lines (and the pipe) wait
+        let (lines, exit) = await run(p)
+        #expect(lines.map(\.text) == (1...50000).map(String.init))
+        #expect(exit.stalled == nil)
+        #expect(FileManager.default.fileExists(atPath: marker))
+    }
+
+    /// a-slow-reader-gets-everything
+    @Test func aSlowReaderGetsEverything() async throws {
+        let p = try launcher.start(spec("/bin/sh", "-c", "seq 1 30000"))
+        var lines: [String] = []
+        for await line in p.lines() {
+            lines.append(line.text)
+            if lines.count % 100 == 0 { try await Task.sleep(nanoseconds: 25_000_000) }
+        }
+        _ = await p.wait()
+        #expect(lines == (1...30000).map(String.init))
+    }
+
     /// process-group
     @Test func stopEndsTheWholeGroup() async throws {
         let pidFile = dir + "/child.pid"
