@@ -51,14 +51,15 @@ struct MakemkvToolTests {
                                                     withIntermediateDirectories: true)
         }
         let writes = (given["writes"]?.array ?? []).map { $0.string! }
-        let cancel = CancellationToken()
+        let cancelSource = CancellationSource()
+        let cancel = cancelSource.token
         let launcher = ScriptedProcessLauncher()
         launcher.lines = try lines(given)
         launcher.exitCode = Int(given["exitCode"]?.int ?? 0)
         launcher.writeFileIn = writes.isEmpty ? nil : destination
         launcher.writeFileNames = writes
         launcher.transcriptFails = given["transcriptFails"]?.bool == true
-        if let after = given["cancelAfterLines"]?.int { launcher.afterLine = { n in if n == Int(after) { cancel.cancel() } } }
+        if let after = given["cancelAfterLines"]?.int { launcher.afterLine = { n in if n == Int(after) { cancelSource.cancel() } } }
         let isolation = RecordingIsolation()
         let makemkvcon: String? = given["makemkvcon"]?.isNull == true ? nil : "/opt/makemkvcon"
         let tool = MakemkvTool(launcher: launcher, fs: PlatformFileSystem(), isolation: isolation, locator: FixedLocator(makemkvcon: makemkvcon))
@@ -135,7 +136,7 @@ struct MakemkvToolTests {
         let task = Task<MakemkvRun?, Never> {
             try? await Task.sleep(nanoseconds: 50_000_000)
             return try? await tool.rip(.drive(index: 0, device: "/dev/rdisk4"), title: "all", destination: root + "/staging", invocation: invocation,
-                                       sink: RecordingSink(), cancel: CancellationToken())
+                                       sink: RecordingSink(), cancel: CancellationSource().token)
         }
         box.task = task
         _ = await task.value

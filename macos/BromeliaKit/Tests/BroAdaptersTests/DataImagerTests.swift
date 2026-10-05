@@ -95,12 +95,13 @@ final class SyncFailingFileSystem: FileSystem, @unchecked Sendable {
                 try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
                 let dest = dir + "/disc.iso"
                 if given["existing"]?.bool == true { FileManager.default.createFile(atPath: dest, contents: Data("already here".utf8)) }
-                let cancel = CancellationToken()
+                let cancelSource = CancellationSource()
+                let cancel = cancelSource.token
                 let disc = FakeDisc()
                 disc.sectors = given["sectors"]!.int!
                 disc.sizeFails = given["sizeFails"]?.bool == true
                 disc.unreadable = Set((given["unreadable"]?.array ?? []).map { $0.int! })
-                if let after = given["cancelAfterChunks"]?.int { disc.afterRead = { n in if n == Int(after) { cancel.cancel() } } }
+                if let after = given["cancelAfterChunks"]?.int { disc.afterRead = { n in if n == Int(after) { cancelSource.cancel() } } }
                 let drives = FakeDriveControl()
                 drives.disc = given["openFails"]?.bool == true ? nil : disc
                 let sink = RecordingSink()

@@ -145,6 +145,10 @@
       {
         "symbol": "bro_tool_run",
         "why": "How every tool adapter runs its process (Swift and C#: an internal ToolRun the map doesn't list); a C helper needs a header, so its name is public."
+      },
+      {
+        "symbol": "bro_cancellation_source_token",
+        "why": "The source's token (a property in Swift and C#: CancellationSource.token)."
       }
     ]
   },
@@ -243,7 +247,7 @@
         {
           "name": "CancellationToken",
           "kind": "class",
-          "doc": "Wraps Task cancellation / CancellationToken / GCancellable.",
+          "doc": "Wraps Task cancellation / CancellationToken / GCancellable: the side that is told (it can't cancel; its CancellationSource does).",
           "swift": {
             "name": "CancellationToken",
             "file": "macos/BromeliaKit/Sources/BroFoundation/CancellationToken.swift"
@@ -255,6 +259,26 @@
           "c": {
             "name": "BroCancellationToken",
             "file": "linux/src/foundation/bro-cancellation-token.h"
+          }
+        },
+        {
+          "name": "CancellationSource",
+          "kind": "class",
+          "fields": [
+            "token"
+          ],
+          "doc": "What cancels a CancellationToken: the job keeps the source and hands out its token. A linked source follows its parent until it is closed, which removes its handler from the parent.",
+          "swift": {
+            "name": "CancellationSource",
+            "file": "macos/BromeliaKit/Sources/BroFoundation/CancellationSource.swift"
+          },
+          "cs": {
+            "name": "CancellationSource",
+            "file": "windows/src/Bromelia.Foundation/CancellationSource.cs"
+          },
+          "c": {
+            "name": "BroCancellationSource",
+            "file": "linux/src/foundation/bro-cancellation-source.h"
           }
         },
         {
@@ -403,15 +427,6 @@
           "c": "bro_json_value_encode_canonical"
         },
         {
-          "name": "CancellationToken.cancel",
-          "params": [],
-          "returns": "",
-          "doc": "Cancels the token and runs its handlers once.",
-          "swift": "CancellationToken.cancel()",
-          "cs": "CancellationToken.Cancel",
-          "c": "bro_cancellation_token_cancel"
-        },
-        {
           "name": "CancellationToken.onCancel",
           "params": [
             "handler"
@@ -423,15 +438,33 @@
           "c": "bro_cancellation_token_on_cancel"
         },
         {
-          "name": "CancellationToken.child",
+          "name": "CancellationSource.cancel",
+          "params": [],
+          "returns": "",
+          "doc": "Cancels the token and runs its handlers once.",
+          "swift": "CancellationSource.cancel()",
+          "cs": "CancellationSource.Cancel",
+          "c": "bro_cancellation_source_cancel"
+        },
+        {
+          "name": "CancellationSource.linked",
           "params": [
-            "of:parent"
+            "to:parent"
           ],
-          "returns": "CancellationToken",
-          "doc": "A token cancelled with its parent, or on its own.",
-          "swift": "CancellationToken.child(of:)",
-          "cs": "CancellationToken.Child",
-          "c": "bro_cancellation_token_child"
+          "returns": "CancellationSource",
+          "doc": "A source cancelled with its parent, or on its own.",
+          "swift": "CancellationSource.linked(to:)",
+          "cs": "CancellationSource.Linked",
+          "c": "bro_cancellation_source_linked"
+        },
+        {
+          "name": "CancellationSource.close",
+          "params": [],
+          "returns": "",
+          "doc": "No longer follows the parent; removes its handler there.",
+          "swift": "CancellationSource.close()",
+          "cs": "CancellationSource.Close",
+          "c": "bro_cancellation_source_close"
         }
       ]
     },

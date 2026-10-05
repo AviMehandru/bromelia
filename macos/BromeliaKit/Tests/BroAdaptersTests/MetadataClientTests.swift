@@ -57,7 +57,8 @@ final class RoutedHttp: HttpClient, @unchecked Sendable {
                                     key: "0123456789abcdef0123456789abcdef", language: "en-US")
         var results: [[Candidate]] = []
         var episodes: [[Int: EpisodeDetails]] = []
-        let cancel = CancellationToken()
+        let cancelSource = CancellationSource()
+        let cancel = cancelSource.token
         do {
             for call in given["calls"]?.array ?? [] {
                 let c = call.array!

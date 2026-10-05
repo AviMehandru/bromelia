@@ -1,7 +1,8 @@
 import os
 
-/// Cancellation that crosses layers (plan §6). Thread-safe; handlers run once, on the thread that cancels (or
-/// straight away when registered after cancellation).
+/// Cancellation that crosses layers (plan §6): the side that is told. It can't cancel anything itself; its
+/// CancellationSource does. Thread-safe; handlers run once, on the thread that cancels (or straight away when
+/// registered after cancellation).
 public final class CancellationToken: Sendable {
     private struct State {
         var cancelled = false
@@ -10,18 +11,12 @@ public final class CancellationToken: Sendable {
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    public init() {}
-
-    /// A token that is cancelled when `parent` is, or when it is cancelled itself.
-    public static func child(of parent: CancellationToken) -> CancellationToken {
-        let child = CancellationToken()
-        _ = parent.onCancel { [weak child] in child?.cancel() }
-        return child
-    }
+    init() {}
 
     public var isCancelled: Bool { state.withLock { $0.cancelled } }
 
-    public func cancel() {
+    /// Its source's cancel.
+    func fire() {
         let handlers = state.withLock { s -> [@Sendable () -> Void] in
             if s.cancelled { return [] }
             s.cancelled = true

@@ -59,7 +59,8 @@ public sealed class MetadataClientTests : IDisposable
                 "0123456789abcdef0123456789abcdef", "en-US");
             var results = new List<IReadOnlyList<Candidate>>();
             var episodes = new List<IReadOnlyDictionary<int, EpisodeDetails>>();
-            var cancel = new CancellationToken();
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
             try
             {
                 foreach (var call in given["calls"]!.AsArray!)

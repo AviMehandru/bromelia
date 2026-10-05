@@ -21,7 +21,8 @@ menu_ocr_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   g_autoptr (TestScriptedLauncher) launcher = g_object_new (TEST_TYPE_SCRIPTED_LAUNCHER, NULL);
   g_autoptr (TestMapLocator) locator = g_object_new (TEST_TYPE_MAP_LOCATOR, NULL);
   g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
-  g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
+  g_autoptr (BroCancellationSource) cancel_source = bro_cancellation_source_new ();
+  BroCancellationToken *cancel = bro_cancellation_source_token (cancel_source);
   g_autoptr (BroMenuOcr) ocr = NULL;
   g_autoptr (BroBroError) error = NULL;
   g_autoptr (GStrvBuilder) lines = g_strv_builder_new ();
@@ -46,7 +47,7 @@ menu_ocr_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
       g_hash_table_insert (locator->paths, GINT_TO_POINTER (kind), g_strconcat ("/opt/", name, NULL));
     }
   if (bro_json_value_get_bool (bro_json_value_member (given, "cancelled"), FALSE))
-    bro_cancellation_token_cancel (cancel);
+    bro_cancellation_source_cancel (cancel_source);
   ocr = bro_menu_ocr_new (BRO_PROCESS_LAUNCHER (launcher), BRO_TOOL_LOCATOR (locator), BRO_FILE_SYSTEM (fs));
 
   if (g_str_equal (bro_json_value_get_string (bro_json_value_member (given, "op"), ""), "extractStills"))

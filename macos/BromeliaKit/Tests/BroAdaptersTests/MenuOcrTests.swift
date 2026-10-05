@@ -28,8 +28,9 @@ import Testing
                 var tools: [ToolKind: String] = [:]
                 for t in given["located"]?.array ?? [] { tools[ToolKind(rawValue: t.string!)!] = "/opt/" + t.string! }
                 let ocr = MenuOcr(launcher: launcher, locator: MapLocator(paths: tools), fs: PlatformFileSystem())
-                let cancel = CancellationToken()
-                if given["cancelled"]?.bool == true { cancel.cancel() }
+                let cancelSource = CancellationSource()
+                let cancel = cancelSource.token
+                if given["cancelled"]?.bool == true { cancelSource.cancel() }
                 do {
                     if given["op"]?.string == "extractStills" {
                         let source = VideoTsByteSource.open(Fixtures.url("adapters/video-ts.iso").path)!

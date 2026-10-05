@@ -76,10 +76,11 @@ public sealed class DataImagerTests : IDisposable
             Directory.CreateDirectory(_dir);
             var dest = Path.Combine(_dir, "disc.iso");
             if (given["existing"]?.AsBool == true) File.WriteAllText(dest, "already here");
-            var cancel = new CancellationToken();
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
             var disc = new FakeDisc { Sectors = given["sectors"]!.AsInteger!.Value, SizeFails = given["sizeFails"]?.AsBool == true };
             foreach (var s in given["unreadable"]?.AsArray ?? Array.Empty<JsonValue>()) disc.Unreadable.Add(s.AsInteger!.Value);
-            if (given["cancelAfterChunks"]?.AsInteger is { } after) disc.AfterRead = n => { if (n == after) cancel.Cancel(); };
+            if (given["cancelAfterChunks"]?.AsInteger is { } after) disc.AfterRead = n => { if (n == after) cancelSource.Cancel(); };
             var drives = new FakeDriveControl { Disc = given["openFails"]?.AsBool == true ? null : disc };
             var sink = new RecordingSink();
             try

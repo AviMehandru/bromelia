@@ -43,8 +43,9 @@ import Testing
                 var tools: [ToolKind: String] = [:]
                 for t in given["located"]?.array ?? [] { tools[ToolKind(rawValue: t.string!)!] = "/opt/" + t.string! }
                 let ripper = CdRipper(launcher: launcher, locator: MapLocator(paths: tools), fs: PlatformFileSystem())
-                let cancel = CancellationToken()
-                if given["cancelled"]?.bool == true { cancel.cancel() }
+                let cancelSource = CancellationSource()
+                let cancel = cancelSource.token
+                if given["cancelled"]?.bool == true { cancelSource.cancel() }
                 let sink = RecordingSink()
                 do {
                     let files = try await ripper.rip(given["device"]!.string!, dest: dest, command: given["command"]?.string,

@@ -1,6 +1,6 @@
 /* test-foundation.c: Foundation against shared/fixtures/foundation. */
 #include "bro-bro-error.h"
-#include "bro-cancellation-token.h"
+#include "bro-cancellation-source.h"
 #include "bro-duration.h"
 #include "bro-id.h"
 #include "bro-instant.h"
@@ -74,15 +74,33 @@ count_call (gpointer data, gpointer token)
 static void
 test_cancellation_runs_handlers_once (void)
 {
-  g_autoptr (BroCancellationToken) token = bro_cancellation_token_new ();
-  g_autoptr (BroCancellationToken) child = bro_cancellation_token_child (token);
+  g_autoptr (BroCancellationSource) parent = bro_cancellation_source_new ();
+  g_autoptr (BroCancellationSource) child = bro_cancellation_source_linked (bro_cancellation_source_token (parent));
   int calls = 0;
-  bro_cancellation_token_on_cancel (child, count_call, &calls, NULL);
-  g_assert_false (bro_cancellation_token_is_cancelled (child));
-  bro_cancellation_token_cancel (token);
-  bro_cancellation_token_cancel (token);
-  g_assert_true (bro_cancellation_token_is_cancelled (child));
+  bro_cancellation_token_on_cancel (bro_cancellation_source_token (child), count_call, &calls, NULL);
+  g_assert_false (bro_cancellation_token_is_cancelled (bro_cancellation_source_token (child)));
+  bro_cancellation_source_cancel (parent);
+  bro_cancellation_source_cancel (parent);
+  g_assert_true (bro_cancellation_token_is_cancelled (bro_cancellation_source_token (child)));
   g_assert_cmpint (calls, ==, 1);
+}
+
+/* A closed (or freed) linked source no longer follows its parent, and the parent no longer holds its token: a parent
+ * that lives long doesn't keep one per child. */
+static void
+test_closed_linked_source_lets_go (void)
+{
+  g_autoptr (BroCancellationSource) parent = bro_cancellation_source_new ();
+  g_autoptr (BroCancellationSource) child = bro_cancellation_source_linked (bro_cancellation_source_token (parent));
+  g_autoptr (BroCancellationSource) late = NULL;
+  BroCancellationToken *token = bro_cancellation_token_ref (bro_cancellation_source_token (child));
+  bro_cancellation_source_free (bro_cancellation_source_linked (bro_cancellation_source_token (parent)));
+  bro_cancellation_source_close (child);
+  bro_cancellation_source_cancel (parent);
+  g_assert_false (bro_cancellation_token_is_cancelled (token));
+  bro_cancellation_token_unref (token);
+  late = bro_cancellation_source_linked (bro_cancellation_source_token (parent));
+  g_assert_true (bro_cancellation_token_is_cancelled (bro_cancellation_source_token (late)));
 }
 
 int
@@ -92,5 +110,6 @@ main (int argc, char **argv)
   g_test_add_func ("/foundation/cases", test_foundation_cases);
   g_test_add_func ("/foundation/json-equality", test_json_values_compare_by_content);
   g_test_add_func ("/foundation/cancellation", test_cancellation_runs_handlers_once);
+  g_test_add_func ("/foundation/closed-linked-source", test_closed_linked_source_lets_go);
   return g_test_run ();
 }

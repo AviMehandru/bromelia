@@ -37,7 +37,8 @@ public sealed class MkvToolNixTests : IDisposable
             if (given["mkvextract"] is not { IsNull: true }) tools[ToolKind.Mkvextract] = "/opt/mkvextract";
             var mkv = new MkvToolNix(launcher, new DiskFileSystem(), new MapLocator(tools), _root);
             var call = given["call"]!.AsArray!;
-            var cancel = new CancellationToken();
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
             try
             {
                 switch (call[0].AsString)

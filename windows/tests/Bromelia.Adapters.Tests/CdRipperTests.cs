@@ -48,8 +48,9 @@ public sealed class CdRipperTests : IDisposable
             }
             var tools = given["located"]!.AsArray!.ToDictionary(t => EnumWire.Parse<ToolKind>(t.AsString)!.Value, t => "/opt/" + t.AsString);
             var ripper = new CdRipper(launcher, new MapLocator(tools), new DiskFileSystem());
-            var cancel = new CancellationToken();
-            if (given["cancelled"]?.AsBool == true) cancel.Cancel();
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
+            if (given["cancelled"]?.AsBool == true) cancelSource.Cancel();
             var sink = new RecordingSink();
             try
             {

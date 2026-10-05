@@ -51,7 +51,8 @@ public sealed class MakemkvToolTests : IDisposable
             var destination = given["destination"]?.AsString is { } dest ? Path.Combine(_root, dest) : null;
             if (destination != null) Directory.CreateDirectory(given["destinationExists"]?.AsBool == false ? Path.GetDirectoryName(destination)! : destination);
             var writes = (given["writes"]?.AsArray ?? new List<JsonValue>()).Select(w => w.AsString!).ToList();
-            var cancel = new CancellationToken();
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
             var launcher = new ScriptedProcessLauncher
             {
                 Lines = Lines(given),
@@ -60,7 +61,7 @@ public sealed class MakemkvToolTests : IDisposable
                 WriteFileNames = writes,
                 TranscriptFails = given["transcriptFails"]?.AsBool == true,
             };
-            if (given["cancelAfterLines"]?.AsInteger is { } after) launcher.AfterLine = n => { if (n == after) cancel.Cancel(); };
+            if (given["cancelAfterLines"]?.AsInteger is { } after) launcher.AfterLine = n => { if (n == after) cancelSource.Cancel(); };
             var isolation = new RecordingIsolation();
             var makemkvcon = given["makemkvcon"] is { IsNull: true } ? null : "/opt/makemkvcon";
             var tool = new MakemkvTool(launcher, new DiskFileSystem(), isolation, new FixedLocator(makemkvcon));
@@ -148,7 +149,7 @@ public sealed class MakemkvToolTests : IDisposable
         var invocation = new MakemkvInvocation(new MakemkvRunSettings(new Dictionary<string, string>(), null, "/data", Path.Combine(_root, "home")),
             new MakemkvOptions(), null, null);
         var e = Assert.Throws<InvalidOperationException>(() =>
-            tool.Rip(new MakemkvSource.Drive(0, "/dev/rdisk4"), "all", Path.Combine(_root, "staging"), invocation, new ThrowingSink(), new CancellationToken())
+            tool.Rip(new MakemkvSource.Drive(0, "/dev/rdisk4"), "all", Path.Combine(_root, "staging"), invocation, new ThrowingSink(), new CancellationSource().Token)
                 .GetAwaiter().GetResult());
         Assert.Equal("the sink failed", e.Message);
         Assert.Equal(StopReason.Policy, launcher.Last!.StoppedBy);

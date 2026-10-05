@@ -15,7 +15,7 @@ struct _TestFakeDisc {
   gint64 sectors;
   GHashTable *unreadable; /* gint64 sector + 1 as a pointer */
   int cancel_after;       /* reads; 0: never */
-  BroCancellationToken *cancel;
+  BroCancellationSource *cancel;
   int reads;
   gboolean closed;
   gboolean size_fails;
@@ -45,7 +45,7 @@ fd_read (BroSectorReader *r, gint64 sector, int count, BroBroError **error)
     data[i] = fake_disc_at (sector * 2048 + i);
   self->reads++;
   if (self->cancel_after && self->reads == self->cancel_after)
-    bro_cancellation_token_cancel (self->cancel);
+    bro_cancellation_source_cancel (self->cancel);
   return g_bytes_new_take (data, (gsize) n);
 }
 
@@ -179,7 +179,8 @@ data_imager_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
   g_autoptr (TestSyncFailingFs) sync_failing = g_object_new (TEST_TYPE_SYNC_FAILING_FS, NULL);
   g_autoptr (TestRecordingSink) sink = g_object_new (TEST_TYPE_RECORDING_SINK, NULL);
-  g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
+  g_autoptr (BroCancellationSource) cancel_source = bro_cancellation_source_new ();
+  BroCancellationToken *cancel = bro_cancellation_source_token (cancel_source);
   g_autoptr (BroDataImager) imager = NULL;
   g_autoptr (BroBroError) error = NULL;
   g_autofree char *dir = g_build_filename (fs_root, "image", NULL), *dest = NULL;
@@ -196,7 +197,7 @@ data_imager_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
     g_hash_table_add (disc->unreadable,
                       GSIZE_TO_POINTER ((gsize) bro_json_value_get_integer (bro_json_value_at (bro_json_value_member (given, "unreadable"), i), 0) + 1));
   disc->cancel_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "cancelAfterChunks"), 0);
-  disc->cancel = cancel;
+  disc->cancel = cancel_source;
   if (!bro_json_value_get_bool (bro_json_value_member (given, "openFails"), FALSE))
     drives->disc = g_object_ref (disc);
   if (bro_json_value_get_bool (bro_json_value_member (given, "syncFails"), FALSE))

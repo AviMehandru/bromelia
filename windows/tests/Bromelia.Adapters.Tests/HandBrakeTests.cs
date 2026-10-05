@@ -80,8 +80,9 @@ public sealed class HandBrakeTests : IDisposable
             if (given["located"]?.AsBool != false) tools[ToolKind.Handbrake] = "/opt/HandBrakeCLI";
             var clock = new FiringClock { Fire = given["timerFires"]?.AsBool == true };
             var handbrake = new HandBrake(launcher, new MapLocator(tools), clock, _home);
-            var cancel = new CancellationToken();
-            if (given["cancelled"]?.AsBool == true) cancel.Cancel();
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
+            if (given["cancelled"]?.AsBool == true) cancelSource.Cancel();
             var sink = new RecordingSink();
             try
             {

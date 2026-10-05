@@ -33,7 +33,7 @@ public sealed class RealDriveTests
         var state = Drive();
         Assert.False(string.IsNullOrEmpty(state.Drive.Identification));
         var control = new PlatformDriveControl(new SystemClock());
-        var mount = control.WaitForMount(state.Drive.Device, new Duration(30), new CancellationToken()).GetAwaiter().GetResult();
+        var mount = control.WaitForMount(state.Drive.Device, new Duration(30), new CancellationSource().Token).GetAwaiter().GetResult();
         Assert.Equal(state.Drive.MountPath, mount);
         Assert.Equal(Expected, EnumWire.Name(control.ProbeContent(state.Drive.Device)));
 

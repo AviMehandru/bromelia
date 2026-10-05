@@ -110,7 +110,7 @@ static gpointer
 cancel_after (gpointer data)
 {
   g_usleep (G_USEC_PER_SEC * 3 / 10);
-  bro_cancellation_token_cancel (data);
+  bro_cancellation_source_cancel (data);
   return NULL;
 }
 
@@ -122,7 +122,8 @@ http_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
   g_autoptr (BroHttpRequestSpec) request = NULL;
   g_autoptr (BroHttpResponse) response = NULL;
   g_autoptr (BroBroError) error = NULL;
-  g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
+  g_autoptr (BroCancellationSource) cancel_source = bro_cancellation_source_new ();
+  BroCancellationToken *cancel = bro_cancellation_source_token (cancel_source);
   BroJsonValue *headers = bro_json_value_member (given, "headers");
   const char *body = bro_json_value_get_string (bro_json_value_member (given, "body"), NULL);
   BroJsonValue *v;
@@ -136,7 +137,7 @@ http_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
   if (body)
     request->body = g_bytes_new (body, strlen (body));
   if (bro_json_value_member (given, "cancelAfter"))
-    canceller = g_thread_new ("cancel", cancel_after, cancel);
+    canceller = g_thread_new ("cancel", cancel_after, cancel_source);
   response = bro_http_client_send (BRO_HTTP_CLIENT (client), request, cancel, &error);
   if (canceller)
     g_thread_join (canceller);

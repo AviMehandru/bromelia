@@ -47,7 +47,7 @@ struct PlatformDriveControlTests {
                 } else {
                     let start = Date()
                     let mount = await drives.waitForMount(Fixtures.url(given["waitForMount"]!.string!).path, timeout: Duration(seconds: given["timeout"]!.double!),
-                                                          cancel: CancellationToken())
+                                                          cancel: CancellationSource().token)
                     try Fixtures.check(mount == nil, "mounted at \(mount!)")
                     try Fixtures.check(Date().timeIntervalSince(start) < expect["within"]!.double!, "within")
                 }

@@ -84,8 +84,9 @@ final class RecordingSink: RunSink, @unchecked Sendable {
                 let clock = FiringClock()
                 clock.fire = given["timerFires"]?.bool == true
                 let handbrake = HandBrake(launcher: launcher, locator: MapLocator(paths: tools), clock: clock, home: home)
-                let cancel = CancellationToken()
-                if given["cancelled"]?.bool == true { cancel.cancel() }
+                let cancelSource = CancellationSource()
+                let cancel = cancelSource.token
+                if given["cancelled"]?.bool == true { cancelSource.cancel() }
                 let sink = RecordingSink()
                 do {
                     if given["op"]?.string == "presets" {

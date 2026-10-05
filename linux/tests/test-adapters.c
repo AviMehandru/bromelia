@@ -2,6 +2,7 @@
  * shared/fixtures/adapters/platform-adapters.contract.json. */
 #include "bro-test-english.h"
 #include "bro-test-fixtures.h"
+#include "bro-cancellation-source.h"
 
 #include "bro-fingerprint.h"
 #include "bro-home-dir-isolation.h"
@@ -1094,7 +1095,7 @@ struct _TestScript {
   int exit_code;
   char *write_file_in;
   int cancel_after;
-  BroCancellationToken *cancel;
+  BroCancellationSource *cancel;
   GStrv arguments;      /* the spec's */
   int split_parts;      /* create this many parts from the -o argument's %03d pattern */
   int write_index;      /* write write_text to the file named by this argument (-1: none) */
@@ -1115,7 +1116,7 @@ script_lines (BroRunningProcess *p)
   TestScript *self = TEST_SCRIPT (p);
   BroOutputLine *line;
   if (!self->stopped && self->handed > 0 && self->handed == self->cancel_after && self->cancel)
-    bro_cancellation_token_cancel (self->cancel);
+    bro_cancellation_source_cancel (self->cancel);
   if (!self->stopped && self->lines && self->lines[self->handed])
     {
       line = bro_output_line_new ();
@@ -1231,7 +1232,7 @@ struct _TestScriptedLauncher {
   int exit_code;
   char *write_file_in;
   int cancel_after;
-  BroCancellationToken *cancel;
+  BroCancellationSource *cancel;
   int split_parts;
   int write_index; /* -1: none */
   char *write_text;
@@ -1529,7 +1530,8 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
   g_autoptr (TestCountingSink) sink = g_object_new (TEST_TYPE_COUNTING_SINK, NULL);
   g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
   g_autoptr (BroMakemkvTool) tool = NULL;
-  g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
+  g_autoptr (BroCancellationSource) cancel_source = bro_cancellation_source_new ();
+  BroCancellationToken *cancel = bro_cancellation_source_token (cancel_source);
   g_autoptr (BroMakemkvInvocation) invocation = bro_makemkv_invocation_new ();
   g_autoptr (BroMakemkvSource) source = NULL;
   g_autoptr (BroBroError) error = NULL;
@@ -1573,7 +1575,7 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     }
   launcher->cancel_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "cancelAfterLines"), -1);
   launcher->transcript_fails = bro_json_value_get_bool (bro_json_value_member (given, "transcriptFails"), FALSE);
-  launcher->cancel = cancel;
+  launcher->cancel = cancel_source;
   locator->path = mk && mk->kind == BRO_JSON_VALUE_NULL ? NULL : g_strdup ("/opt/makemkvcon");
   tool = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), BRO_FILE_SYSTEM (fs), BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
   invocation->options.min_length_seconds = (int) bro_json_value_get_integer (bro_json_value_member (bro_json_value_member (given, "options"), "minLengthSeconds"), -1);
@@ -1840,7 +1842,8 @@ static void
 test_clock_now_and_sleep (void)
 {
   g_autoptr (BroSystemClock) clock = bro_system_clock_new ();
-  g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
+  g_autoptr (BroCancellationSource) cancel_source = bro_cancellation_source_new ();
+  BroCancellationToken *cancel = bro_cancellation_source_token (cancel_source);
   g_autoptr (BroBroError) error = NULL;
   BroDuration before;
   g_assert_cmpint (ABS (bro_clock_now (BRO_CLOCK (clock)).unix_milliseconds - g_get_real_time () / 1000), <, 1000);
@@ -1853,7 +1856,7 @@ static gpointer
 cancel_soon (gpointer data)
 {
   g_usleep (G_USEC_PER_SEC / 20);
-  bro_cancellation_token_cancel (data);
+  bro_cancellation_source_cancel (data);
   return NULL;
 }
 
@@ -1861,9 +1864,10 @@ static void
 test_clock_cancelled_sleep (void)
 {
   g_autoptr (BroSystemClock) clock = bro_system_clock_new ();
-  g_autoptr (BroCancellationToken) cancel = bro_cancellation_token_new ();
+  g_autoptr (BroCancellationSource) cancel_source = bro_cancellation_source_new ();
+  BroCancellationToken *cancel = bro_cancellation_source_token (cancel_source);
   g_autoptr (BroBroError) error = NULL;
-  GThread *t = g_thread_new ("cancel", cancel_soon, cancel);
+  GThread *t = g_thread_new ("cancel", cancel_soon, cancel_source);
   gint64 t0 = g_get_monotonic_time ();
   g_assert_false (bro_clock_sleep (BRO_CLOCK (clock), (BroDuration) { 30 }, cancel, &error));
   g_thread_join (t);
