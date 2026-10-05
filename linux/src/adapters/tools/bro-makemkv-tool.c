@@ -65,13 +65,14 @@ feed_line (const BroOutputLine *line, gpointer data, BroStopReason *reason)
   return stop;
 }
 
-/* Runs @spec and feeds its lines to @func as robot events. FALSE and @error set when it can't start. */
+/* Runs @spec and feeds its lines to @func as robot events; *@transcript_problem (nullable) gets
+ * process.noTranscript when the transcript couldn't be written. FALSE and @error set when it can't start. */
 static gboolean
 feed (BroMakemkvTool *self, const BroProcessSpec *spec, BroCancellationToken *cancel, EventFunc func, gpointer data, BroProcessExit *exit,
-      BroBroError **error)
+      BroBroMessage **transcript_problem, BroBroError **error)
 {
   Feed f = { func, data };
-  return bro_tool_run (self->launcher, spec, cancel, NULL, feed_line, &f, exit, error);
+  return bro_tool_run (self->launcher, spec, cancel, NULL, feed_line, &f, exit, transcript_problem, error);
 }
 
 static gboolean
@@ -98,7 +99,7 @@ bro_makemkv_tool_scan_drives (BroMakemkvTool *self, BroCancellationToken *cancel
   spec->arguments = bro_makemkv_args_scan_drives ();
   spec->stop_policy = BRO_STOP_POLICY_TERMINATE_FIRST;
   drives = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_makemkv_drive_free);
-  if (!feed (self, spec, cancel, collect_drive, drives, &exit, error))
+  if (!feed (self, spec, cancel, collect_drive, drives, &exit, NULL, error))
     g_clear_pointer (&drives, g_ptr_array_unref);
   return drives;
 }
@@ -192,6 +193,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   g_autofree char *exe = NULL;
   g_autoptr (GHashTable) before = NULL;
   g_autoptr (GPtrArray) produced = NULL;
+  g_autoptr (BroBroMessage) transcript_problem = NULL;
   g_autoptr (BroIsolationLease) lease = NULL;
   g_autoptr (BroProcessSpec) spec = NULL;
   g_autofree char *profile = NULL;
@@ -232,7 +234,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   spec->stall_timeout = invocation->stall_timeout;
   spec->transcript = g_strdup (invocation->transcript);
   st = (RunState) { lease, TRUE, accumulator, builder, sink };
-  if (!feed (self, spec, cancel, on_event, &st, &exit, error))
+  if (!feed (self, spec, cancel, on_event, &st, &exit, &transcript_problem, error))
     {
       bro_isolation_lease_release (lease);
       return NULL;
@@ -246,6 +248,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   run->notice = accumulator->problem ? bro_makemkv_notice_copy (accumulator->problem) : NULL;
   run->libre_drive = g_strdup (accumulator->libre_drive);
   run->version = g_strdup (accumulator->makemkv_version);
+  run->transcript_problem = g_steal_pointer (&transcript_problem);
   return run;
 }
 

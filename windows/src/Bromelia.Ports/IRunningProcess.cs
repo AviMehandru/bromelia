@@ -19,4 +19,8 @@ public interface IRunningProcess
 
     /// <summary>Stops it (see above); wait reports the reason.</summary>
     void Stop(StopReason reason);
+
+    /// <summary>process.noTranscript when the transcript the spec asked for couldn't be opened, or a line couldn't be
+    /// written to it (the first failure); null otherwise.</summary>
+    BroMessage? TranscriptProblem() => null;
 }

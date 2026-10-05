@@ -61,7 +61,7 @@ run (BroMkvToolNix *self, BroToolKind tool, const char *const *arguments, double
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = stall;
-  if (!bro_tool_run (self->launcher, spec, cancel, NULL, keep_stdout, lines, exit, error))
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, keep_stdout, lines, exit, NULL, error))
     return FALSE;
   if (exit->cancelled)
     {

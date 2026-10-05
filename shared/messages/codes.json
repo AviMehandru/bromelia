@@ -274,6 +274,15 @@
       },
       "today": "ProcessRunner abandoned flag"
     },
+    "process.noTranscript": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "new: the ProcessLauncher (a transcript that couldn't be opened or written was skipped without a word)"
+    },
     "process.failed": {
       "kind": "error",
       "params": {

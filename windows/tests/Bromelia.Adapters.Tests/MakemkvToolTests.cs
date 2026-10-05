@@ -58,6 +58,7 @@ public sealed class MakemkvToolTests : IDisposable
                 ExitCode = (int)(given["exitCode"]?.AsInteger ?? 0),
                 WriteFileIn = writes.Count > 0 ? destination : null,
                 WriteFileNames = writes,
+                TranscriptFails = given["transcriptFails"]?.AsBool == true,
             };
             if (given["cancelAfterLines"]?.AsInteger is { } after) launcher.AfterLine = n => { if (n == after) cancel.Cancel(); };
             var isolation = new RecordingIsolation();
@@ -118,6 +119,8 @@ public sealed class MakemkvToolTests : IDisposable
             if (expect["errorCode"]?.AsString is { } code) Assert.Equal(code, MessageCode.Wire(run!.Outcome.Error!.Code));
             if (expect["version"]?.AsString is { } version) Assert.Equal(version, run!.Version);
             if (expect["debugLog"]?.AsString is { } log) Assert.Equal(log, run!.Outcome.DebugLog);
+            if (expect["transcriptProblem"]?.AsString is { } tp) Assert.Equal(tp, run!.TranscriptProblem is { } m ? MessageCode.Wire(m.Code) : null);
+            else if (run != null) Assert.Null(run.TranscriptProblem);
             if (expect["produced"] is { } produced) Assert.Equal(produced.AsArray!.Select(n => n.AsString), run!.Outcome.Produced);
             if (run != null) Assert.True(sink.Events > 0);
             return true;

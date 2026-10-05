@@ -82,6 +82,8 @@ struct _BroSpawnedProcess {
   GMutex lock;
   GCond cond;
   /* Guarded by lock: */
+  char *transcript_path;               /* nullable */
+  BroBroMessage *transcript_problem;   /* the first failure to open or write it; nullable */
   int transcript; /* fd, or -1: finish closes it while a reader may still be running, and the number may then belong to
                    * any file the engine opens */
   GQueue lines;          /* BroOutputLine *, waiting to be read */
@@ -113,14 +115,15 @@ now_instant (void)
   return (BroInstant) { g_get_real_time () / 1000 };
 }
 
-static void
+/* 0, or the errno of a write that failed. */
+static int
 transcript_write (int fd, const char *line)
 {
   g_autofree char *with_newline = NULL;
   size_t left;
   const char *p;
   if (fd < 0)
-    return;
+    return 0;
   with_newline = g_strconcat (line, "\n", NULL);
   /* One write per line with O_APPEND, under the lock: lines from the two readers never interleave. */
   p = with_newline;
@@ -131,18 +134,28 @@ transcript_write (int fd, const char *line)
       if (n < 0 && errno == EINTR)
         continue;
       if (n <= 0)
-        return;
+        return n < 0 ? errno : EIO;
       p += n;
       left -= (size_t) n;
     }
+  return 0;
 }
 
-static void
+static int
 transcript_stamp (int fd, const char *what)
 {
   g_autofree char *at = bro_instant_format (now_instant ());
   g_autofree char *line = g_strdup_printf ("==== %s %s", at, what);
-  transcript_write (fd, line);
+  return transcript_write (fd, line);
+}
+
+static BroBroMessage *
+no_transcript (const char *path, int code)
+{
+  BroJsonValue *params = bro_json_value_new_object ();
+  bro_json_value_set (params, "path", bro_json_value_new_string (path));
+  bro_json_value_set (params, "reason", bro_json_value_new_string (g_strerror (code)));
+  return bro_bro_message_new (BRO_MSG_PROCESS_NO_TRANSCRIPT, params, BRO_SEVERITY_WARNING);
 }
 
 static BroOutputLine *
@@ -219,6 +232,17 @@ bro_spawned_process_stop (BroRunningProcess *process, BroStopReason reason)
   g_mutex_unlock (&self->lock);
 }
 
+static BroBroMessage *
+bro_spawned_process_transcript_problem (BroRunningProcess *process)
+{
+  BroSpawnedProcess *self = BRO_SPAWNED_PROCESS (process);
+  BroBroMessage *problem;
+  g_mutex_lock (&self->lock);
+  problem = self->transcript_problem ? bro_bro_message_copy (self->transcript_problem) : NULL;
+  g_mutex_unlock (&self->lock);
+  return problem;
+}
+
 typedef struct {
   BroSpawnedProcess *self;
   int fd;
@@ -232,7 +256,9 @@ emit (BroSpawnedProcess *self, BroOutputSource source, char *text)
 {
   BroOutputLine *out;
   gboolean waited = FALSE;
-  transcript_write (self->transcript, text);
+  int failed = transcript_write (self->transcript, text);
+  if (failed && !self->transcript_problem)
+    self->transcript_problem = no_transcript (self->transcript_path, failed);
   while (g_queue_get_length (&self->lines) >= BRO_QUEUED_LINES && !self->ended)
     {
       self->waiting_for_room++;
@@ -335,7 +361,11 @@ finish (BroSpawnedProcess *self, BroProcessExit exit)
     g_string_append (ending, ", stalled");
   if (exit.cancelled)
     g_string_append (ending, ", cancelled");
-  transcript_stamp (self->transcript, ending->str);
+  {
+    int failed = transcript_stamp (self->transcript, ending->str);
+    if (failed && !self->transcript_problem)
+      self->transcript_problem = no_transcript (self->transcript_path, failed);
+  }
   g_string_free (ending, TRUE);
   if (self->transcript >= 0)
     close (self->transcript);
@@ -394,6 +424,8 @@ bro_spawned_process_finalize (GObject *object)
   while ((item = g_queue_pop_head (&self->lines)) != NULL)
     bro_output_line_free (item);
   g_clear_object (&self->read_cancel);
+  g_free (self->transcript_path);
+  g_clear_pointer (&self->transcript_problem, bro_bro_message_free);
   if (self->transcript >= 0)
     close (self->transcript);
   g_mutex_clear (&self->lock);
@@ -426,6 +458,7 @@ bro_spawned_process_iface_init (BroRunningProcessInterface *iface)
   iface->lines = bro_spawned_process_lines;
   iface->wait = bro_spawned_process_wait;
   iface->stop = bro_spawned_process_stop;
+  iface->transcript_problem = bro_spawned_process_transcript_problem;
 }
 
 /* ---- the launcher ---- */
@@ -496,7 +529,7 @@ bro_platform_process_launcher_start (BroPlatformProcessLauncher *self, const Bro
   g_auto (GStrv) envp = g_get_environ ();
   GHashTableIter it;
   gpointer key, value;
-  int transcript = -1, out_fd = -1, err_fd = -1;
+  int transcript = -1, transcript_failed = 0, out_fd = -1, err_fd = -1;
   GPid pid = 0;
   BroSpawnedProcess *p;
   Reader *r;
@@ -516,8 +549,10 @@ bro_platform_process_launcher_start (BroPlatformProcessLauncher *self, const Bro
       g_autofree char *dir = g_path_get_dirname (spec->transcript);
       g_mkdir_with_parents (dir, 0755);
       transcript = open (spec->transcript, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+      transcript_failed = transcript < 0 ? errno : 0;
     }
-  transcript_stamp (transcript, shown->str);
+  if (!transcript_failed)
+    transcript_failed = transcript_stamp (transcript, shown->str);
 
   if (spec->working_directory && *spec->working_directory && !g_file_test (spec->working_directory, G_FILE_TEST_IS_DIR))
     {
@@ -547,6 +582,9 @@ bro_platform_process_launcher_start (BroPlatformProcessLauncher *self, const Bro
   p = g_object_new (BRO_TYPE_SPAWNED_PROCESS, NULL);
   p->pid = pid;
   p->transcript = transcript;
+  p->transcript_path = g_strdup (spec->transcript && *spec->transcript ? spec->transcript : NULL);
+  if (transcript_failed)
+    p->transcript_problem = no_transcript (spec->transcript, transcript_failed);
   p->stop_policy = spec->stop_policy;
   p->has_stall_timeout = spec->has_stall_timeout;
   p->stall_seconds = spec->stall_timeout.seconds;

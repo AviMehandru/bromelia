@@ -80,7 +80,9 @@ public final class MakemkvTool: Sendable {
                                stallTimeout: invocation.stallTimeout, transcript: invocation.transcript)
         var accumulator = start
         var first = true
-        let exit = try await feed(spec, cancel: cancel) { e in
+        final class Started: @unchecked Sendable { var process: (any RunningProcess)? }
+        let started = Started()
+        let exit = try await feed(spec, cancel: cancel, started: { started.process = $0 }) { e in
             if first {
                 first = false
                 lease.firstOutput()
@@ -92,12 +94,14 @@ public final class MakemkvTool: Sendable {
         }
         let newNames = try destination.map { (d: String) throws(BroError) in try self.newNames(d, before: before ?? []) } ?? []
         return MakemkvRun(outcome: RunOutcome.classify(accumulator, exit: exit, product: product, newNames: newNames),
-                          notice: accumulator.problem, libreDrive: accumulator.libreDrive, version: accumulator.makemkvVersion)
+                          notice: accumulator.problem, libreDrive: accumulator.libreDrive, version: accumulator.makemkvVersion,
+                          transcriptProblem: started.process?.transcriptProblem())
     }
 
     /// Feeds the process's lines as robot events; `handle` returns a reason to stop it.
-    private func feed(_ spec: ProcessSpec, cancel: CancellationToken, _ handle: (RobotEvent) -> StopReason?) async throws(BroError) -> ProcessExit {
-        try await ToolRun.run(launcher, spec, cancel: cancel) { line in handle(Robot.parseLine(line.text) ?? .raw(text: line.text)) }
+    private func feed(_ spec: ProcessSpec, cancel: CancellationToken, started: ((any RunningProcess) -> Void)? = nil,
+                      _ handle: (RobotEvent) -> StopReason?) async throws(BroError) -> ProcessExit {
+        try await ToolRun.run(launcher, spec, cancel: cancel, started: started) { line in handle(Robot.parseLine(line.text) ?? .raw(text: line.text)) }
     }
 
     /// The names in the destination before the run: none when it isn't there yet.

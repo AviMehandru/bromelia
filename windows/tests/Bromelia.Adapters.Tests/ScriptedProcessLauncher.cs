@@ -26,6 +26,8 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
     /// <summary>When it ends normally: write this text to the file named by argument Index (mkvextract's output).</summary>
     public (int Index, string Text)? WriteArgument;
     public Script? Last;
+    /// <summary>The process reports process.noTranscript for the spec's transcript.</summary>
+    public bool TranscriptFails;
 
     public IRunningProcess Start(ProcessSpec spec)
     {
@@ -86,6 +88,10 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
         }
 
         public Task<ProcessExit> Wait() => _exit.Task;
+
+        public BroMessage? TranscriptProblem() => _owner.TranscriptFails
+            ? new BroMessage(MessageCode.ProcessNoTranscript, Severity.Warning, ("path", JsonValue.Of(_spec.Transcript ?? "")), ("reason", JsonValue.Of("No space left on device")))
+            : null;
 
         /// <summary>As a real process: it ends when stopped, whether or not anyone reads the rest of its lines.</summary>
         public void Stop(StopReason reason)

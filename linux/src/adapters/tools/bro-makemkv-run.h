@@ -1,5 +1,5 @@
-/* bro-makemkv-run.h: one run: its outcome, the first key, version or drive notice, the LibreDrive detail, and
- * MakeMKV's version. */
+/* bro-makemkv-run.h: one run: its outcome, the first key, version or drive notice, the LibreDrive detail, MakeMKV's
+ * version, and process.noTranscript when its transcript couldn't be written. */
 #pragma once
 
 #include "bro-makemkv-notice.h"
@@ -13,6 +13,7 @@ typedef struct {
   BroMakemkvNotice *notice; /* nullable */
   char *libre_drive;        /* nullable */
   char *version;            /* nullable */
+  BroBroMessage *transcript_problem; /* nullable */
 } BroMakemkvRun;
 
 /* Everything zero. */

@@ -74,7 +74,7 @@ bro_hand_brake_presets (BroHandBrake *self, BroCancellationToken *cancel, BroBro
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = 60;
-  if (!bro_tool_run (self->launcher, spec, cancel, NULL, preset_line, &list, &exit, error))
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, preset_line, &list, &exit, NULL, error))
     return NULL;
   if (exit.cancelled)
     return cancelled (error), NULL;
@@ -246,7 +246,7 @@ bro_hand_brake_encode (BroHandBrake *self, const BroStepDefinition *step, const 
   spec->arguments = bro_hand_brake_args_build (step, input, output, self->home);
   spec->working_directory = g_path_get_dirname (output);
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
-  ran = bro_tool_run (self->launcher, spec, cancel, encode_started, encode_line, &e, &run->exit, error);
+  ran = bro_tool_run (self->launcher, spec, cancel, encode_started, encode_line, &e, &run->exit, NULL, error);
   run->timed_out = e.deadline && g_atomic_int_get (&e.deadline->timed_out);
   if (e.timer)
     {

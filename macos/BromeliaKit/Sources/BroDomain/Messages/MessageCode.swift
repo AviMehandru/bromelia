@@ -54,6 +54,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case processCouldNotStart = "process.couldNotStart"
     case processStalled = "process.stalled"
     case processAbandoned = "process.abandoned"
+    case processNoTranscript = "process.noTranscript"
     case processFailed = "process.failed"
     case processSavedNothing = "process.savedNothing"
     case processExitStatus = "process.exitStatus"

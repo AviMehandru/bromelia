@@ -186,6 +186,21 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         Assert.Equal("==== <instant> $ cmd.exe /c 'echo hi'\nhi\n==== <instant> exit status 0\n", text);
     }
 
+    [Fact] // transcript-cant-be-written
+    public void AMissingTranscriptIsReported()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        File.WriteAllText(Path.Combine(_dir, "a-file"), "not a folder");
+        var transcript = Path.Combine(_dir, "a-file", "t.txt");
+        var p = _launcher.Start(Spec("cmd.exe", "/c", "echo hi") with { Transcript = transcript });
+        var (lines, exit) = Run(p);
+        Assert.Equal(new[] { "hi" }, lines.Select(l => l.Text));
+        Assert.Equal(0, exit.Status);
+        var problem = p.TranscriptProblem();
+        Assert.Equal("process.noTranscript", problem is { } m ? MessageCode.Wire(m.Code) : null);
+        Assert.Equal(transcript, problem!.ToJson()["params"]!["path"]!.AsString);
+    }
+
     [Fact]
     public void OutputLinesSayWhichStreamTheyCameFrom()
     {

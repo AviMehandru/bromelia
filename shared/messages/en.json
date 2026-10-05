@@ -51,6 +51,7 @@
   "process.couldNotStart": "Could not start {tool}: {reason}",
   "process.stalled": "{tool} printed nothing for {minutes, plural, one {# minute} other {# minutes}} and was stopped",
   "process.abandoned": "{tool} didn't exit 30 seconds after it was killed and was left behind; the drive may need to be reset",
+  "process.noTranscript": "The run's log {path} could not be written, so it is incomplete or missing: {reason}",
   "process.failed": "{tool} failed (exit status {status})",
   "process.savedNothing": "{tool} saved nothing",
   "process.exitStatus": "makemkvcon exit status {status}",

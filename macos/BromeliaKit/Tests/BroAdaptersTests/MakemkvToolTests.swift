@@ -57,6 +57,7 @@ struct MakemkvToolTests {
         launcher.exitCode = Int(given["exitCode"]?.int ?? 0)
         launcher.writeFileIn = writes.isEmpty ? nil : destination
         launcher.writeFileNames = writes
+        launcher.transcriptFails = given["transcriptFails"]?.bool == true
         if let after = given["cancelAfterLines"]?.int { launcher.afterLine = { n in if n == Int(after) { cancel.cancel() } } }
         let isolation = RecordingIsolation()
         let makemkvcon: String? = given["makemkvcon"]?.isNull == true ? nil : "/opt/makemkvcon"
@@ -115,6 +116,7 @@ struct MakemkvToolTests {
         if let version = expect["version"]?.string { try Fixtures.same(version, run?.version, "version") }
         if let log = expect["debugLog"]?.string { try Fixtures.same(log, run?.outcome.debugLog, "debugLog") }
         if let produced = expect["produced"]?.array { try Fixtures.same(produced.map { $0.string! }, run?.outcome.produced, "produced") }
+        try Fixtures.same(expect["transcriptProblem"]?.string, run?.transcriptProblem?.code.rawValue, "transcriptProblem")
         if run != nil { try Fixtures.check(sink.events > 0, "the sink heard something") }
     }
 

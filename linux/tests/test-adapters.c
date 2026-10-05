@@ -328,6 +328,31 @@ replace_instants (const char *text)
   return g_regex_replace_literal (re, text, -1, 0, "<instant>", 0, NULL);
 }
 
+/* transcript-cant-be-written: the tool runs anyway and the run says its log is missing. */
+static void
+test_transcript_missing (void)
+{
+  g_autofree char *file = g_build_filename (scratch, "a-file", NULL);
+  g_autofree char *path = g_build_filename (scratch, "a-file", "t.txt", NULL);
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/echo", "hi", NULL);
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroRunningProcess) p = NULL;
+  g_autoptr (BroBroMessage) problem = NULL;
+  BroProcessExit exit;
+  g_file_set_contents (file, "not a folder", -1, NULL);
+  spec->transcript = g_strdup (path);
+  p = start (spec);
+  exit = run (p, lines);
+  g_assert_cmpint (exit.status, ==, 0);
+  g_assert_cmpuint (lines->len, ==, 1);
+  g_assert_cmpstr (lines->pdata[0], ==, "stdout:hi");
+  problem = bro_running_process_transcript_problem (p);
+  g_assert_nonnull (problem);
+  g_assert_cmpstr (bro_message_code_wire (problem->code), ==, "process.noTranscript");
+  g_assert_cmpstr (bro_json_value_get_string (bro_json_value_member (problem->params, "path"), NULL), ==, path);
+  g_unlink (file);
+}
+
 static void
 test_transcript (void)
 {
@@ -1074,6 +1099,7 @@ struct _TestScript {
   int split_parts;      /* create this many parts from the -o argument's %03d pattern */
   int write_index;      /* write write_text to the file named by this argument (-1: none) */
   char *write_text;
+  char *transcript_fails_at; /* report process.noTranscript for this path (nullable) */
   int handed;
   gboolean stopped;
   BroStopReason reason;
@@ -1154,6 +1180,19 @@ script_stop (BroRunningProcess *p, BroStopReason reason)
     }
 }
 
+static BroBroMessage *
+script_transcript_problem (BroRunningProcess *p)
+{
+  TestScript *self = TEST_SCRIPT (p);
+  BroJsonValue *params;
+  if (!self->transcript_fails_at)
+    return NULL;
+  params = bro_json_value_new_object ();
+  bro_json_value_set (params, "path", bro_json_value_new_string (self->transcript_fails_at));
+  bro_json_value_set (params, "reason", bro_json_value_new_string ("No space left on device"));
+  return bro_bro_message_new (BRO_MSG_PROCESS_NO_TRANSCRIPT, params, BRO_SEVERITY_WARNING);
+}
+
 static void
 test_script_finalize (GObject *o)
 {
@@ -1163,6 +1202,7 @@ test_script_finalize (GObject *o)
   g_strfreev (self->write_files);
   g_strfreev (self->arguments);
   g_free (self->write_file_in);
+  g_free (self->transcript_fails_at);
   g_free (self->write_text);
   G_OBJECT_CLASS (test_script_parent_class)->finalize (o);
 }
@@ -1176,6 +1216,7 @@ test_script_iface_init (BroRunningProcessInterface *iface)
   iface->lines = script_lines;
   iface->wait = script_wait;
   iface->stop = script_stop;
+  iface->transcript_problem = script_transcript_problem;
 }
 
 #define TEST_TYPE_SCRIPTED_LAUNCHER (test_scripted_launcher_get_type ())
@@ -1194,6 +1235,7 @@ struct _TestScriptedLauncher {
   int split_parts;
   int write_index; /* -1: none */
   char *write_text;
+  gboolean transcript_fails; /* the process reports process.noTranscript */
   GPtrArray *started; /* BroProcessSpec * (copies of what matters) */
   TestScript *last;
 };
@@ -1241,6 +1283,7 @@ launcher_start (BroProcessLauncher *l, const BroProcessSpec *spec, BroBroError *
   script->split_parts = self->split_parts;
   script->write_index = self->write_index;
   script->write_text = g_strdup (self->write_text);
+  script->transcript_fails_at = self->transcript_fails ? g_strdup (spec->transcript ? spec->transcript : "") : NULL;
   g_set_object (&self->last, script);
   return BRO_RUNNING_PROCESS (script);
 }
@@ -1529,6 +1572,7 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
         launcher->write_files[i] = g_strdup (bro_json_value_get_string (bro_json_value_at (v, i), ""));
     }
   launcher->cancel_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "cancelAfterLines"), -1);
+  launcher->transcript_fails = bro_json_value_get_bool (bro_json_value_member (given, "transcriptFails"), FALSE);
   launcher->cancel = cancel;
   locator->path = mk && mk->kind == BRO_JSON_VALUE_NULL ? NULL : g_strdup ("/opt/makemkvcon");
   tool = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), BRO_FILE_SYSTEM (fs), BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
@@ -1657,6 +1701,8 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     bro_test_same_string (failures, id, "version", bro_json_value_get_string (v, ""), run ? run->version : NULL);
   if ((v = bro_json_value_member (expect, "debugLog")))
     bro_test_same_string (failures, id, "debugLog", bro_json_value_get_string (v, ""), run ? run->outcome->debug_log : NULL);
+  bro_test_same_string (failures, id, "transcriptProblem", bro_json_value_get_string (bro_json_value_member (expect, "transcriptProblem"), NULL),
+                        run && run->transcript_problem ? bro_message_code_wire (run->transcript_problem->code) : NULL);
   if ((v = bro_json_value_member (expect, "produced")))
     {
       g_autofree char *want = joined_strings (v);
@@ -1883,6 +1929,7 @@ main (int argc, char **argv)
   g_test_add_func ("/process/slow-reader-gets-everything", test_slow_reader_gets_everything);
   g_test_add_func ("/process/process-group", test_process_group);
   g_test_add_func ("/process/transcript", test_transcript);
+  g_test_add_func ("/process/transcript-missing", test_transcript_missing);
   g_test_add_func ("/process/streams", test_streams);
   g_test_add_func ("/process/could-not-start", test_could_not_start);
   g_test_add_func ("/process/interpreter", test_interpreter);

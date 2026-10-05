@@ -9,7 +9,7 @@ stop_on_cancel (gpointer process, gpointer unused)
 
 gboolean
 bro_tool_run (BroProcessLauncher *launcher, const BroProcessSpec *spec, BroCancellationToken *cancel, BroToolRunStartedFunc started,
-              BroToolRunLineFunc on_line, gpointer data, BroProcessExit *exit, BroBroError **error)
+              BroToolRunLineFunc on_line, gpointer data, BroProcessExit *exit, BroBroMessage **transcript_problem, BroBroError **error)
 {
   g_autoptr (BroRunningProcess) process = bro_process_launcher_start (launcher, spec, error);
   gboolean stopped = FALSE;
@@ -31,6 +31,8 @@ bro_tool_run (BroProcessLauncher *launcher, const BroProcessSpec *spec, BroCance
       bro_output_line_free (line);
     }
   *exit = bro_running_process_wait (process);
+  if (transcript_problem)
+    *transcript_problem = bro_running_process_transcript_problem (process);
   if (handler)
     bro_cancellation_token_disconnect (cancel, handler);
   return TRUE;
