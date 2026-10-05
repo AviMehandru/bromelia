@@ -18,6 +18,7 @@ struct _TestFakeDisc {
   BroCancellationToken *cancel;
   int reads;
   gboolean closed;
+  gboolean size_fails;
 };
 static void test_fake_disc_iface_init (BroSectorReaderInterface *iface);
 G_DEFINE_TYPE_WITH_CODE (TestFakeDisc, test_fake_disc, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_SECTOR_READER, test_fake_disc_iface_init))
@@ -48,7 +49,19 @@ fd_read (BroSectorReader *r, gint64 sector, int count, BroBroError **error)
   return g_bytes_new_take (data, (gsize) n);
 }
 
-static gint64 fd_count (BroSectorReader *r, BroBroError **error) { return TEST_FAKE_DISC (r)->sectors; }
+static gint64
+fd_count (BroSectorReader *r, BroBroError **error)
+{
+  if (TEST_FAKE_DISC (r)->size_fails)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "path", bro_json_value_new_string ("/dev/sr0"));
+      bro_json_value_set (params, "reason", bro_json_value_new_string ("Inappropriate ioctl for device"));
+      bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_DRIVE_SIZE_UNKNOWN), params);
+      return -1;
+    }
+  return TEST_FAKE_DISC (r)->sectors;
+}
 static void fd_close (BroSectorReader *r) { TEST_FAKE_DISC (r)->closed = TRUE; }
 static void test_fake_disc_finalize (GObject *o) { g_hash_table_unref (TEST_FAKE_DISC (o)->unreadable); G_OBJECT_CLASS (test_fake_disc_parent_class)->finalize (o); }
 static void test_fake_disc_class_init (TestFakeDiscClass *k) { G_OBJECT_CLASS (k)->finalize = test_fake_disc_finalize; }
@@ -111,6 +124,7 @@ data_imager_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   if (bro_json_value_get_bool (bro_json_value_member (given, "existing"), FALSE))
     g_file_set_contents (dest, "already here", -1, NULL);
   disc->sectors = bro_json_value_get_integer (bro_json_value_member (given, "sectors"), 0);
+  disc->size_fails = bro_json_value_get_bool (bro_json_value_member (given, "sizeFails"), FALSE);
   for (guint i = 0; i < bro_json_value_length (bro_json_value_member (given, "unreadable")); i++)
     g_hash_table_add (disc->unreadable,
                       GSIZE_TO_POINTER ((gsize) bro_json_value_get_integer (bro_json_value_at (bro_json_value_member (given, "unreadable"), i), 0) + 1));

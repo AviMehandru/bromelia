@@ -1217,6 +1217,22 @@
       "http": 409,
       "today": "AppModel.webAction / DiscSession \"The drive is busy with a job.\""
     },
+    "drive.sizeUnknown": {
+      "kind": "error",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "new: DriveControl.openRaw (a size it couldn't read was taken as 0 sectors)"
+    },
+    "drive.partialSector": {
+      "kind": "error",
+      "params": {
+        "path": "path",
+        "size": "int"
+      },
+      "today": "new: DriveControl.openRaw (the bytes after the last whole sector were left out)"
+    },
     "episodes.readingMenus": {
       "kind": "progress",
       "today": "JobRunner.prepareEpisodes phase"
@@ -2244,6 +2260,10 @@
         "reason": "string"
       },
       "today": "data-disc copy (OtherDiscTools; 'A read error fails the job')"
+    },
+    "other.emptyDisc": {
+      "kind": "error",
+      "today": "new: DataImager (a disc with no sectors gave an empty image)"
     },
     "session.opening": {
       "kind": "progress",

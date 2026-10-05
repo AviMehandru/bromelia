@@ -86,12 +86,22 @@ public final class PlatformDriveControl: DriveControl, @unchecked Sendable {
             throw Self.failed("open", path, String(cString: strerror(errno)))
         }
         var st = stat()
-        var bytes: Int64 = 0
+        let bytes: Int64
         if fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG {
             bytes = Int64(st.st_size)
         } else {
             var count: UInt64 = 0, size: UInt32 = 0
-            if ioctl(fd, DKIOCGETBLOCKCOUNT_, &count) == 0, ioctl(fd, DKIOCGETBLOCKSIZE_, &size) == 0 { bytes = Int64(count) * Int64(size) }
+            guard ioctl(fd, DKIOCGETBLOCKCOUNT_, &count) == 0, ioctl(fd, DKIOCGETBLOCKSIZE_, &size) == 0 else {
+                let reason = String(cString: strerror(errno))
+                Darwin.close(fd)
+                throw BroMessage(.driveSizeUnknown, [("path", .string(path)), ("reason", .string(reason))], severity: .error).toError()
+            }
+            bytes = Int64(count) * Int64(size)
+        }
+        // A partial last sector would be left out of every image.
+        guard bytes % Int64(Self.sector) == 0 else {
+            Darwin.close(fd)
+            throw BroMessage(.drivePartialSector, [("path", .string(path)), ("size", .integer(bytes))], severity: .error).toError()
         }
         return RawReader(fd: fd, path: path, sectors: bytes / Int64(Self.sector))
     }

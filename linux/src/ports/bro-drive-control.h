@@ -34,6 +34,8 @@ char *bro_drive_control_wait_for_mount (BroDriveControl *self, const char *devic
 
 BroDiscContent bro_drive_control_probe_content (BroDriveControl *self, const char *device);
 
+/* Whole 2048-byte sectors of a drive's disc or an image file; fails when the size can't be read (drive.sizeUnknown) or
+ * isn't a whole number of sectors (drive.partialSector). NULL and @error set on failure. */
 BroSectorReader *bro_drive_control_open_raw (BroDriveControl *self, const char *device, BroBroError **error);
 
 G_END_DECLS

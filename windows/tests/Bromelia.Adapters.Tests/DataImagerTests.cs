@@ -15,6 +15,7 @@ internal sealed class FakeDisc : ISectorReader
     public Action<int>? AfterRead;
     public int Reads;
     public bool Closed;
+    public bool SizeFails;
 
     public static byte At(long i) => (byte)((i / 2048 + i) % 256);
 
@@ -32,7 +33,10 @@ internal sealed class FakeDisc : ISectorReader
         return data;
     }
 
-    public long SectorCount() => Sectors;
+    public long SectorCount() => SizeFails
+        ? throw new BroFailure(new BroMessage(MessageCode.DriveSizeUnknown, Severity.Error, ("path", JsonValue.Of("/dev/sr0")),
+            ("reason", JsonValue.Of("Inappropriate ioctl for device"))).ToError())
+        : Sectors;
     public void Close() => Closed = true;
 }
 
@@ -73,7 +77,7 @@ public sealed class DataImagerTests : IDisposable
             var dest = Path.Combine(_dir, "disc.iso");
             if (given["existing"]?.AsBool == true) File.WriteAllText(dest, "already here");
             var cancel = new CancellationToken();
-            var disc = new FakeDisc { Sectors = given["sectors"]!.AsInteger!.Value };
+            var disc = new FakeDisc { Sectors = given["sectors"]!.AsInteger!.Value, SizeFails = given["sizeFails"]?.AsBool == true };
             foreach (var s in given["unreadable"]?.AsArray ?? Array.Empty<JsonValue>()) disc.Unreadable.Add(s.AsInteger!.Value);
             if (given["cancelAfterChunks"]?.AsInteger is { } after) disc.AfterRead = n => { if (n == after) cancel.Cancel(); };
             var drives = new FakeDriveControl { Disc = given["openFails"]?.AsBool == true ? null : disc };

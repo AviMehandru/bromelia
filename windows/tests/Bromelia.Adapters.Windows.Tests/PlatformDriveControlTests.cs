@@ -50,7 +50,11 @@ public sealed class PlatformDriveControlTests
                     }
                     finally { reader.Close(); }
                 }
-                catch (BroFailure f) { Assert.Equal(expect["error"]?.AsString, f.Error.Code); }
+                catch (BroFailure f)
+                {
+                    Assert.Equal(expect["error"]?.AsString, f.Error.Code);
+                    if (expect["size"] is { } size) Assert.Equal(size.AsInteger, f.Error.Params["size"]?.AsInteger);
+                }
             }
             else if (given["probeContent"]?.AsString is { } probe)
                 Assert.Equal(expect["content"]!.AsString, EnumWire.Name(drives.ProbeContent(Path_(probe))));

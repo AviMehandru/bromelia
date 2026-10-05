@@ -12,5 +12,7 @@ public protocol DriveControl: Sendable {
 
     func probeContent(_ device: String) -> DiscContent
 
+    /// Whole 2048-byte sectors of a drive's disc or an image file; fails when the size can't be read (drive.sizeUnknown) or
+    /// isn't a whole number of sectors (drive.partialSector).
     func openRaw(_ device: String) throws(BroError) -> any SectorReader
 }

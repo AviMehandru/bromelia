@@ -104,6 +104,11 @@ bro_data_imager_copy (BroDataImager *self, const char *device, const char *dest_
   total = bro_sector_reader_sector_count (reader, error);
   if (total < 0)
     goto out;
+  if (total == 0)
+    {
+      bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_OTHER_EMPTY_DISC), NULL);
+      goto out;
+    }
   fd = g_open (part, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
   if (fd < 0)
     {
