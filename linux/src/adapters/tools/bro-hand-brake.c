@@ -230,7 +230,7 @@ encode_line (const BroOutputLine *line, gpointer data, BroStopReason *reason)
 
 gboolean
 bro_hand_brake_encode (BroHandBrake *self, const BroStepDefinition *step, const char *input, const char *output, BroRunSink *sink,
-                       BroCancellationToken *cancel, BroHandBrakeRun *run, BroBroError **error)
+                       BroCancellationToken *cancel, BroHandBrakeRun *out, BroBroError **error)
 {
   g_autofree char *exe = executable (self, step, error);
   g_autoptr (BroProcessSpec) spec = NULL;
@@ -246,8 +246,8 @@ bro_hand_brake_encode (BroHandBrake *self, const BroStepDefinition *step, const 
   spec->arguments = bro_hand_brake_args_build (step, input, output, self->home);
   spec->working_directory = g_path_get_dirname (output);
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
-  ran = bro_tool_run (self->launcher, spec, cancel, encode_started, encode_line, &e, &run->exit, NULL, error);
-  run->timed_out = e.deadline && g_atomic_int_get (&e.deadline->timed_out);
+  ran = bro_tool_run (self->launcher, spec, cancel, encode_started, encode_line, &e, &out->exit, NULL, error);
+  out->timed_out = e.deadline && g_atomic_int_get (&e.deadline->timed_out);
   if (e.timer)
     {
       bro_timer_handle_cancel (e.timer);
@@ -257,7 +257,7 @@ bro_hand_brake_encode (BroHandBrake *self, const BroStepDefinition *step, const 
     deadline_release (e.deadline);
   if (!ran)
     return FALSE;
-  if (run->exit.cancelled)
+  if (out->exit.cancelled)
     return cancelled (error);
   return TRUE;
 }

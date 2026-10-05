@@ -30,8 +30,8 @@ GStrv bro_hand_brake_presets (BroHandBrake *self, BroCancellationToken *cancel, 
 
 /* Encodes @input to @output (whose folder must exist) in that folder. Progress goes to @sink as PROGRESS_VALUE (of
  * 10000), the lines bro_hand_brake_args_keep_line keeps as RAW. FALSE and @error set when HandBrakeCLI can't be found
- * (tool.notFoundAt, tool.missing) or started, or when cancelled (job.cancelled); otherwise *@run tells how it ended. */
+ * (tool.notFoundAt, tool.missing) or started, or when cancelled (job.cancelled); otherwise *@out tells how it ended. */
 gboolean bro_hand_brake_encode (BroHandBrake *self, const BroStepDefinition *step, const char *input, const char *output, BroRunSink *sink,
-                                BroCancellationToken *cancel, BroHandBrakeRun *run, BroBroError **error);
+                                BroCancellationToken *cancel, BroHandBrakeRun *out, BroBroError **error);
 
 G_END_DECLS
