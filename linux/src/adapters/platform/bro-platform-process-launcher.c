@@ -29,11 +29,12 @@ struct _BroSpawnedProcess {
   gboolean has_stall_timeout;
   double stall_seconds;
   GAsyncQueue *lines; /* BroOutputLine *, then &end_of_lines */
-  int transcript;     /* fd, or -1 */
   GCancellable *read_cancel;
   GMutex lock;
   GCond cond;
   /* Guarded by lock: */
+  int transcript; /* fd, or -1: finish closes it while a reader may still be running, and the number may then belong to
+                   * any file the engine opens */
   gint64 last_output; /* monotonic µs */
   int readers_left;
   gboolean exited;
@@ -68,7 +69,7 @@ transcript_write (int fd, const char *line)
   if (fd < 0)
     return;
   with_newline = g_strconcat (line, "\n", NULL);
-  /* One write per line with O_APPEND: lines from the two readers never interleave. */
+  /* One write per line with O_APPEND, under the lock: lines from the two readers never interleave. */
   p = with_newline;
   left = strlen (with_newline);
   while (left > 0)
@@ -181,11 +182,12 @@ reader_thread (gpointer data)
       g_free (line);
       g_mutex_lock (&self->lock);
       self->last_output = g_get_monotonic_time ();
+      if (*valid)
+        transcript_write (self->transcript, valid);
       g_mutex_unlock (&self->lock);
       if (*valid)
         {
           BroOutputLine *out = bro_output_line_new ();
-          transcript_write (self->transcript, valid);
           out->stream = r->source;
           out->text = g_steal_pointer (&valid);
           out->at = now_instant ();

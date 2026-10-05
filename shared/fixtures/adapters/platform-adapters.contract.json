@@ -136,6 +136,34 @@
       }
     },
     {
+      "id": "late-output-goes-nowhere",
+      "from": [
+        "review of phases 0–2, P2-3: the transcript was closed while a reader still wrote to it"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "(sleep 6; echo late) & echo early"
+        ],
+        "transcript": "late.txt",
+        "then": "right after wait returns, open 20 files and keep them open for 2 s"
+      },
+      "expect": {
+        "lines": [
+          "early"
+        ],
+        "transcriptHas": [
+          "early"
+        ],
+        "transcriptLacks": [
+          "the line late"
+        ],
+        "openedFilesEmpty": true,
+        "rule": "a line read after the process has ended (a child left behind kept the pipe open past 5 s) is dropped: it never reaches the transcript, which is closed, nor a file that reuses the transcript's descriptor; the transcript is written under the launcher's lock, so a reader still holding a line when the process ends can't write either"
+      }
+    },
+    {
       "id": "process-group",
       "from": [
         "rearchitecture-plan §10.3 (posix_spawn + process group; Job Object; setpgid)"
@@ -256,7 +284,8 @@
     {
       "id": "interpreter",
       "from": [
-        "macos TemplateTests.postProcessInvocation", "windows TemplateTests.PostProcessInvocation",
+        "macos TemplateTests.postProcessInvocation",
+        "windows TemplateTests.PostProcessInvocation",
         "docs/architecture.md#post-processing (scripts run through an interpreter)"
       ],
       "given": {

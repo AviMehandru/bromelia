@@ -91,6 +91,22 @@ import Testing
         #expect(elapsed(since: start) < 8)
     }
 
+    /// late-output-goes-nowhere
+    @Test func lateOutputGoesNowhere() async throws {
+        var s = spec("/bin/sh", "-c", "(sleep 6; echo late) & echo early")
+        s.transcript = dir + "/late.txt"
+        let (lines, _) = await run(try launcher.start(s))
+        let opened = (0..<20).map { open(dir + "/opened-\($0)", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0o644) }
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        for (i, fd) in opened.enumerated() {
+            close(fd)
+            #expect(try String(contentsOfFile: dir + "/opened-\(i)", encoding: .utf8) == "")
+        }
+        #expect(lines.map(\.text) == ["early"])
+        let text = try String(contentsOfFile: dir + "/late.txt", encoding: .utf8)
+        #expect(text.contains("\nearly\n") && !text.contains("\nlate\n"))
+    }
+
     /// process-group
     @Test func stopEndsTheWholeGroup() async throws {
         let pidFile = dir + "/child.pid"

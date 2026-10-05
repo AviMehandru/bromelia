@@ -210,10 +210,12 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         }
     }
 
-    /// <summary>The transcript file: appended to, one line at a time, from both output pumps.</summary>
+    /// <summary>The transcript file: appended to, one line at a time, from both output pumps. A line that comes after
+    /// the end (a child left behind kept a pipe open) is dropped.</summary>
     sealed class Transcript : IDisposable
     {
         readonly StreamWriter? _writer;
+        bool _closed;
 
         public Transcript(string path)
         {
@@ -240,6 +242,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             if (_writer is null) return;
             lock (_writer)
             {
+                if (_closed) return;
                 try { _writer.WriteLine(line); }
                 catch (IOException) { }
             }
@@ -248,7 +251,11 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         public void Dispose()
         {
             if (_writer is null) return;
-            lock (_writer) _writer.Dispose();
+            lock (_writer)
+            {
+                _closed = true;
+                _writer.Dispose();
+            }
         }
     }
 
