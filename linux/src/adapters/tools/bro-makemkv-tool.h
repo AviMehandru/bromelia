@@ -2,8 +2,9 @@
  * (SettingsIsolation), builds the arguments (MakemkvArgs), starts it (ProcessLauncher; TERM first, since makemkvcon
  * ignores INT), feeds every line to Robot.parseLine, the RunAccumulator and the sink, gives the settings back on the
  * first line, stops it when the accumulator says so (MakeMKV's space warning, a renumbered drive) or when cancelled,
- * and classifies the run with the files it produced. Holds no state between calls. Synchronous: call it from a
- * worker thread (plan §6). */
+ * and classifies the run with the names that are new in the destination (bro_run_outcome_products picks what counts).
+ * A destination that can't be listed before or after the run fails the call: every name in it would otherwise look
+ * new, or none. Holds no state between calls. Synchronous: call it from a worker thread (plan §6). */
 #pragma once
 
 #include "bro-cancellation-token.h"

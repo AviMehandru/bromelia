@@ -46,12 +46,17 @@ struct MakemkvToolTests {
             FileManager.default.createFile(atPath: root + "/" + f, contents: Data())
         }
         let destination = given["destination"]?.string.map { root + "/" + $0 }
-        if let destination { try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: true) }
+        if let destination {
+            try FileManager.default.createDirectory(atPath: given["destinationExists"]?.bool == false ? (destination as NSString).deletingLastPathComponent : destination,
+                                                    withIntermediateDirectories: true)
+        }
+        let writes = (given["writes"]?.array ?? []).map { $0.string! }
         let cancel = CancellationToken()
         let launcher = ScriptedProcessLauncher()
         launcher.lines = try lines(given)
         launcher.exitCode = Int(given["exitCode"]?.int ?? 0)
-        launcher.writeFileIn = given["writesFile"]?.bool == true ? destination : nil
+        launcher.writeFileIn = writes.isEmpty ? nil : destination
+        launcher.writeFileNames = writes
         if let after = given["cancelAfterLines"]?.int { launcher.afterLine = { n in if n == Int(after) { cancel.cancel() } } }
         let isolation = RecordingIsolation()
         let makemkvcon: String? = given["makemkvcon"]?.isNull == true ? nil : "/opt/makemkvcon"
@@ -108,6 +113,7 @@ struct MakemkvToolTests {
         if let code = expect["errorCode"]?.string { try Fixtures.same(code, run?.outcome.error?.code.rawValue, "errorCode") }
         if let version = expect["version"]?.string { try Fixtures.same(version, run?.version, "version") }
         if let log = expect["debugLog"]?.string { try Fixtures.same(log, run?.outcome.debugLog, "debugLog") }
+        if let produced = expect["produced"]?.array { try Fixtures.same(produced.map { $0.string! }, run?.outcome.produced, "produced") }
         if run != nil { try Fixtures.check(sink.events > 0, "the sink heard something") }
     }
 }

@@ -32,7 +32,8 @@ struct OutcomeTests {
             if let fixture = given["fixture"]?.string {
                 let acc = try accumulate(fixture, readsData: true)
                 let run = RunOutcome.classify(acc, exit: ProcessExit(status: Int(given["exitCode"]?.int ?? 0)),
-                                              producedFiles: Int(given["producedFiles"]?.int ?? 0))
+                                              product: RunProduct(rawValue: given["product"]?.string ?? "")!,
+                                              newNames: (given["newNames"]?.array ?? []).map { $0.string! })
                 try Fixtures.same(expect["statusWord"]?.string, run.status.rawValue, "status word")
                 try Fixtures.same(expect["failed"]?.bool, run.status == .failed, "failed")
                 try Fixtures.same(expect["readErrors"]?.bool, run.status == .errors, "read errors")
@@ -42,6 +43,8 @@ struct OutcomeTests {
                 } else {
                     try Fixtures.same(nil, text, "error")
                 }
+                if let code = expect["errorCode"]?.string { try Fixtures.same(code, run.error?.code.rawValue, "error code") }
+                if let produced = expect["produced"]?.array { try Fixtures.same(produced.map { $0.string! }, run.produced, "produced") }
                 return true
             }
             if let steps = given["steps"]?.array {
@@ -61,9 +64,9 @@ struct OutcomeTests {
 
     @Test func stalledAndCancelledRuns() throws {
         let acc = RunAccumulator(readsData: true)
-        let stalled = RunOutcome.classify(acc, exit: ProcessExit(status: -1, signal: 9, stalled: Duration(seconds: 600), abandoned: true), producedFiles: 0)
+        let stalled = RunOutcome.classify(acc, exit: ProcessExit(status: -1, signal: 9, stalled: Duration(seconds: 600), abandoned: true), product: .titles, newNames: [])
         #expect(stalled.status == .failed)
         #expect(try English.render(stalled.error!.toJson()) == "makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry.")
-        #expect(RunOutcome.classify(acc, exit: ProcessExit(status: 143, signal: 15, cancelled: true), producedFiles: 1).status == .cancelled)
+        #expect(RunOutcome.classify(acc, exit: ProcessExit(status: 143, signal: 15, cancelled: true), product: .titles, newNames: ["title_t00.mkv"]).status == .cancelled)
     }
 }

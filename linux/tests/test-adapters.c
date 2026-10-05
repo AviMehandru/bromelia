@@ -916,7 +916,8 @@ struct _TestScript {
   GObject parent_instance;
   GStrv lines;
   GArray *stderr_at; /* int: the indexes of the lines that come on stderr (nullable) */
-  char *write_file_name; /* the file written in write_file_in (NULL: title_t00.mkv) */
+  GStrv write_files;     /* written in write_file_in (NULL: title_t00.mkv); a name with / makes its folders, "" writes
+                          * write_file_in itself as a file */
   gboolean stalls;       /* after the lines: end as stopped for silence */
   double stall_seconds;  /* the spec's */
   int exit_code;
@@ -959,9 +960,12 @@ script_lines (BroRunningProcess *p)
     self->exit = (BroProcessExit) { -1, 15, -1, FALSE, self->reason == BRO_STOP_REASON_CANCELLED || self->reason == BRO_STOP_REASON_SHUTDOWN };
   else
     {
-      if (self->write_file_in)
+      static const char *const one_title[] = { "title_t00.mkv", NULL };
+      for (const char *const *name = self->write_files ? (const char *const *) self->write_files : one_title; self->write_file_in && *name; name++)
         {
-          g_autofree char *f = g_build_filename (self->write_file_in, self->write_file_name ? self->write_file_name : "title_t00.mkv", NULL);
+          g_autofree char *f = **name ? g_build_filename (self->write_file_in, *name, NULL) : g_strdup (self->write_file_in);
+          g_autofree char *dir = g_path_get_dirname (f);
+          g_mkdir_with_parents (dir, 0755);
           g_file_set_contents (f, "", 0, NULL);
         }
       for (int i = 0; self->split_parts > 0 && self->arguments && self->arguments[i]; i++)
@@ -1010,7 +1014,7 @@ test_script_finalize (GObject *o)
   TestScript *self = TEST_SCRIPT (o);
   g_strfreev (self->lines);
   g_clear_pointer (&self->stderr_at, g_array_unref);
-  g_free (self->write_file_name);
+  g_strfreev (self->write_files);
   g_strfreev (self->arguments);
   g_free (self->write_file_in);
   g_free (self->write_text);
@@ -1035,7 +1039,7 @@ struct _TestScriptedLauncher {
   GObject parent_instance;
   GStrv lines;
   GArray *stderr_at; /* int (nullable) */
-  char *write_file_name;
+  GStrv write_files; /* NULL: title_t00.mkv */
   gboolean stalls;
   int exit_code;
   char *write_file_in;
@@ -1080,7 +1084,7 @@ launcher_start (BroProcessLauncher *l, const BroProcessSpec *spec, BroBroError *
   g_ptr_array_add (self->started, spec_copy (spec));
   script->lines = g_strdupv (self->lines);
   script->stderr_at = self->stderr_at ? g_array_ref (self->stderr_at) : NULL;
-  script->write_file_name = g_strdup (self->write_file_name);
+  script->write_files = g_strdupv (self->write_files);
   script->stalls = self->stalls;
   script->stall_seconds = spec->has_stall_timeout ? spec->stall_timeout.seconds : 0;
   script->exit_code = self->exit_code;
@@ -1101,7 +1105,7 @@ test_scripted_launcher_finalize (GObject *o)
   TestScriptedLauncher *self = TEST_SCRIPTED_LAUNCHER (o);
   g_strfreev (self->lines);
   g_clear_pointer (&self->stderr_at, g_array_unref);
-  g_free (self->write_file_name);
+  g_strfreev (self->write_files);
   g_free (self->write_file_in);
   g_free (self->write_text);
   g_ptr_array_unref (self->started);
@@ -1364,13 +1368,20 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     }
   if ((v = bro_json_value_member (given, "destination")))
     {
+      g_autofree char *parent = NULL;
       destination = fs_path (bro_json_value_get_string (v, ""));
-      g_mkdir_with_parents (destination, 0755);
+      parent = g_path_get_dirname (destination);
+      g_mkdir_with_parents (bro_json_value_get_bool (bro_json_value_member (given, "destinationExists"), TRUE) ? destination : parent, 0755);
     }
   launcher->lines = case_lines (given);
   launcher->exit_code = (int) bro_json_value_get_integer (bro_json_value_member (given, "exitCode"), 0);
-  if (bro_json_value_get_bool (bro_json_value_member (given, "writesFile"), FALSE))
-    launcher->write_file_in = g_strdup (destination);
+  if ((v = bro_json_value_member (given, "writes")) && bro_json_value_length (v) > 0)
+    {
+      launcher->write_file_in = g_strdup (destination);
+      launcher->write_files = g_new0 (char *, bro_json_value_length (v) + 1);
+      for (guint i = 0; i < bro_json_value_length (v); i++)
+        launcher->write_files[i] = g_strdup (bro_json_value_get_string (bro_json_value_at (v, i), ""));
+    }
   launcher->cancel_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "cancelAfterLines"), -1);
   launcher->cancel = cancel;
   locator->path = mk && mk->kind == BRO_JSON_VALUE_NULL ? NULL : g_strdup ("/opt/makemkvcon");
@@ -1497,6 +1508,18 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     bro_test_same_string (failures, id, "version", bro_json_value_get_string (v, ""), run ? run->version : NULL);
   if ((v = bro_json_value_member (expect, "debugLog")))
     bro_test_same_string (failures, id, "debugLog", bro_json_value_get_string (v, ""), run ? run->outcome->debug_log : NULL);
+  if ((v = bro_json_value_member (expect, "produced")))
+    {
+      g_autofree char *want = joined_strings (v);
+      g_autofree char *got = NULL;
+      if (run)
+        {
+          g_ptr_array_add (run->outcome->produced, NULL);
+          got = g_strjoinv ("|", (char **) run->outcome->produced->pdata);
+          g_ptr_array_remove_index (run->outcome->produced, run->outcome->produced->len - 1);
+        }
+      bro_test_same_string (failures, id, "produced", want, got);
+    }
   if (run && sink->events == 0)
     bro_test_fail (failures, id, "the sink heard nothing");
   return TRUE;

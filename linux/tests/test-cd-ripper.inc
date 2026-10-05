@@ -75,7 +75,7 @@ cd_ripper_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
   if (saves)
     {
       launcher->write_file_in = g_strdup (dest);
-      launcher->write_file_name = g_strdup (saves);
+      launcher->write_files = g_strdupv ((char *[]) { (char *) saves, NULL });
     }
   for (guint i = 0; i < bro_json_value_length (located); i++)
     {

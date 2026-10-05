@@ -16,8 +16,8 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
     var stderr: Set<Int> = []
     var exitCode = 0
     var writeFileIn: String?
-    /// The name of the file written in writeFileIn.
-    var writeFileName = "title_t00.mkv"
+    /// The files written in writeFileIn: a name with / makes its folders; "" writes writeFileIn itself as a file.
+    var writeFileNames = ["title_t00.mkv"]
     /// After the lines: end as stopped for silence (status -1, signal 15, stalled for the spec's timeout).
     var stalls = false
     var afterLine: (@Sendable (Int) -> Void)?
@@ -41,7 +41,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             effects.append { FileManager.default.createFile(atPath: path, contents: Data(text.utf8)) }
         }
         let script = Script(lines: lines, stderr: stderr, exitCode: exitCode, writeFileIn: writeFileIn, afterLine: afterLine, effects: effects)
-        script.writeFileName = writeFileName
+        script.writeFileNames = writeFileNames
         script.stalledFor = stalls ? (spec.stallTimeout ?? Duration(seconds: 0)) : nil
         lock.withLock {
             started.append(spec)
@@ -59,7 +59,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         private let afterLine: (@Sendable (Int) -> Void)?
         private let effects: [@Sendable () -> Void]
         private var stoppedBy: StopReason?
-        var writeFileName = "title_t00.mkv"
+        var writeFileNames = ["title_t00.mkv"]
         var stalledFor: Duration?
         private var handed = 0
         private var result: ProcessExit?
@@ -96,7 +96,13 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             } else if let reason = stoppedBy {
                 exit = ProcessExit(status: -1, signal: 15, cancelled: reason == .cancelled || reason == .shutdown)
             } else {
-                if let dir = writeFileIn { FileManager.default.createFile(atPath: dir + "/" + writeFileName, contents: Data()) }
+                if let dir = writeFileIn {
+                    for name in writeFileNames {
+                        let path = name.isEmpty ? dir : dir + "/" + name
+                        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+                        FileManager.default.createFile(atPath: path, contents: Data())
+                    }
+                }
                 if result == nil { for e in effects { e() } }
                 exit = ProcessExit(status: exitCode)
             }

@@ -904,7 +904,13 @@ outcome_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
   if (J (given, "fixture")) {
     g_autoptr (BroRunAccumulator) acc = accumulate_data (JS (given, "fixture"));
     BroProcessExit exit = bro_process_exit_status (bro_json_value_get_integer (J (given, "exitCode"), 0));
-    g_autoptr (BroRunOutcome) run = bro_run_outcome_classify (acc, &exit, bro_json_value_get_integer (J (given, "producedFiles"), 0));
+    g_autoptr (GPtrArray) new_names = g_ptr_array_new_with_free_func (g_free);
+    BroRunProduct product = BRO_RUN_PRODUCT_NOTHING;
+    for (guint i = 0; i < bro_json_value_length (J (given, "newNames")); i++)
+      g_ptr_array_add (new_names, g_strdup (bro_json_value_get_string (bro_json_value_at (J (given, "newNames"), i), "")));
+    if (!bro_run_product_from_wire (JS (given, "product"), &product))
+      bro_test_fail (failures, id, "product");
+    g_autoptr (BroRunOutcome) run = bro_run_outcome_classify (acc, &exit, product, new_names);
     bro_test_same_string (failures, id, "status word", JS (expect, "statusWord"), bro_status_word_to_wire (run->status));
     g_autoptr (BroJsonValue) failed = bro_json_value_new_bool (run->status == BRO_STATUS_WORD_FAILED);
     g_autoptr (BroJsonValue) read_errors = bro_json_value_new_bool (run->status == BRO_STATUS_WORD_ERRORS);
@@ -915,6 +921,14 @@ outcome_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     const char *part = JS (expect, "errorContains");
     if (part ? !text || !strstr (text, part) : text != NULL)
       bro_test_fail (failures, id, "error \"%s\" should contain \"%s\"", text ? text : "none", part ? part : "(no error)");
+    if (J (expect, "errorCode"))
+      bro_test_same_string (failures, id, "error code", JS (expect, "errorCode"), run->error ? bro_message_code_wire (run->error->code) : NULL);
+    if (J (expect, "produced")) {
+      g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+      for (guint i = 0; i < run->produced->len; i++)
+        bro_json_value_append (got, bro_json_value_new_string (run->produced->pdata[i]));
+      bro_test_same_json (failures, id, "produced", J (expect, "produced"), got);
+    }
     return TRUE;
   }
   if (J (given, "steps")) {
@@ -947,13 +961,15 @@ test_stalled_and_cancelled_runs (void)
 {
   g_autoptr (BroRunAccumulator) acc = bro_run_accumulator_new (TRUE, -1, NULL);
   BroProcessExit stalled = { -1, 9, 600, TRUE, FALSE };
-  g_autoptr (BroRunOutcome) run = bro_run_outcome_classify (acc, &stalled, 0);
+  g_autoptr (BroRunOutcome) run = bro_run_outcome_classify (acc, &stalled, BRO_RUN_PRODUCT_TITLES, NULL);
   g_assert_cmpint (run->status, ==, BRO_STATUS_WORD_FAILED);
   g_autoptr (BroJsonValue) error = bro_bro_message_to_json (run->error);
   g_autofree char *text = bro_test_english (error);
   g_assert_cmpstr (text, ==, "makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry.");
   BroProcessExit cancelled = { 143, 15, -1, FALSE, TRUE };
-  g_autoptr (BroRunOutcome) c = bro_run_outcome_classify (acc, &cancelled, 1);
+  g_autoptr (GPtrArray) one = g_ptr_array_new ();
+  g_ptr_array_add (one, (char *) "title_t00.mkv");
+  g_autoptr (BroRunOutcome) c = bro_run_outcome_classify (acc, &cancelled, BRO_RUN_PRODUCT_TITLES, one);
   g_assert_cmpint (c->status, ==, BRO_STATUS_WORD_CANCELLED);
 }
 

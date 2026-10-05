@@ -49,13 +49,15 @@ public sealed class MakemkvToolTests : IDisposable
                 File.WriteAllText(path, "");
             }
             var destination = given["destination"]?.AsString is { } dest ? Path.Combine(_root, dest) : null;
-            if (destination != null) Directory.CreateDirectory(destination);
+            if (destination != null) Directory.CreateDirectory(given["destinationExists"]?.AsBool == false ? Path.GetDirectoryName(destination)! : destination);
+            var writes = (given["writes"]?.AsArray ?? new List<JsonValue>()).Select(w => w.AsString!).ToList();
             var cancel = new CancellationToken();
             var launcher = new ScriptedProcessLauncher
             {
                 Lines = Lines(given),
                 ExitCode = (int)(given["exitCode"]?.AsInteger ?? 0),
-                WriteFileIn = given["writesFile"]?.AsBool == true ? destination : null,
+                WriteFileIn = writes.Count > 0 ? destination : null,
+                WriteFileNames = writes,
             };
             if (given["cancelAfterLines"]?.AsInteger is { } after) launcher.AfterLine = n => { if (n == after) cancel.Cancel(); };
             var isolation = new RecordingIsolation();
@@ -115,6 +117,7 @@ public sealed class MakemkvToolTests : IDisposable
             if (expect["errorCode"]?.AsString is { } code) Assert.Equal(code, MessageCode.Wire(run!.Outcome.Error!.Code));
             if (expect["version"]?.AsString is { } version) Assert.Equal(version, run!.Version);
             if (expect["debugLog"]?.AsString is { } log) Assert.Equal(log, run!.Outcome.DebugLog);
+            if (expect["produced"] is { } produced) Assert.Equal(produced.AsArray!.Select(n => n.AsString), run!.Outcome.Produced);
             if (run != null) Assert.True(sink.Events > 0);
             return true;
         });
