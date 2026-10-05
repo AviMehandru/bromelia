@@ -65,7 +65,8 @@ public abstract record JsonValue
     // ---- parsing ---------------------------------------------------------------------------------
 
     /// <summary>Strict JSON (RFC 8259). Null when the text isn't JSON. A repeated key keeps its first
-    /// position and its last value.</summary>
+    /// position and its last value. An integer outside the 64-bit range isn't accepted: as a double it would lose
+    /// digits.</summary>
     public static JsonValue? Parse(string text)
     {
         var p = new Parser(text);
@@ -234,8 +235,8 @@ public abstract record JsonValue
                 while (_i < _s.Length && char.IsAsciiDigit(_s[_i])) _i++;
             }
             var text = _s.Substring(start, _i - start);
-            if (integral && long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n))
-                return new Integer(n);
+            // An integer that doesn't fit in 64 bits would lose digits as a double: not accepted.
+            if (integral) return long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n) ? new Integer(n) : throw new FormatException();
             return new Number(double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture));
         }
     }

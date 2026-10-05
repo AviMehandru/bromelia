@@ -340,8 +340,8 @@ parse_number (Parser *p)
     char *end = NULL;
     errno = 0;
     gint64 n = g_ascii_strtoll (text, &end, 10);
-    if (errno == 0 && end && *end == '\0')
-      return bro_json_value_new_integer (n);
+    /* An integer that doesn't fit in 64 bits would lose digits as a double: not accepted. */
+    return errno == 0 && end && *end == '\0' ? bro_json_value_new_integer (n) : NULL;
   }
   return bro_json_value_new_number (g_ascii_strtod (text, NULL));
 }

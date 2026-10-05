@@ -8,7 +8,7 @@
     "JsonValue.parse",
     "JsonValue.encodeCanonical"
   ],
-  "description": "Foundation: short ids, instants, clock durations and canonical JSON (the bytes Python's json.dumps(value, indent=2, ensure_ascii=False) + \"\\n\" writes). Instant cases: format(parse(given)) or null when it doesn't parse. Duration cases: parseClock, then formatClock of the result. JSON cases: encodeCanonical(parse(given)), or null when parse rejects the text.",
+  "description": "Foundation: short ids, instants, clock durations and canonical JSON (the bytes Python's json.dumps(value, indent=2, ensure_ascii=False) + \"\\n\" writes). Instant cases: format(parse(given)) or null when it doesn't parse. Duration cases: parseClock, then formatClock of the result. JSON cases: encodeCanonical(parse(given)), or null when parse rejects the text. A repeated key keeps its first position and its last value (json-5). An integer literal (no fraction, no exponent) outside the 64-bit range isn't accepted: as a double it would lose digits; the same digits with an exponent are a double.",
   "cases": [
     {
       "id": "id-short",
@@ -260,6 +260,24 @@
       }
     },
     {
+      "id": "json-14",
+      "given": {
+        "json": "9223372036854775807"
+      },
+      "expect": {
+        "canonical": "9223372036854775807\n"
+      }
+    },
+    {
+      "id": "json-15",
+      "given": {
+        "json": "9.223372036854775808e18"
+      },
+      "expect": {
+        "canonical": "9.223372036854776e+18\n"
+      }
+    },
+    {
       "id": "json-invalid-1",
       "given": {
         "json": "{\"a\": 1,}"
@@ -362,6 +380,33 @@
       "id": "json-invalid-12",
       "given": {
         "json": ""
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-13",
+      "given": {
+        "json": "9223372036854775808"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-14",
+      "given": {
+        "json": "-9223372036854775809"
+      },
+      "expect": {
+        "canonical": null
+      }
+    },
+    {
+      "id": "json-invalid-15",
+      "given": {
+        "json": "{\"size\": 123456789012345678901234567890}"
       },
       "expect": {
         "canonical": null

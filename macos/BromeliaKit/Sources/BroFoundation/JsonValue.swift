@@ -56,7 +56,7 @@ public enum JsonValue: Sendable, Equatable, CustomStringConvertible {
     // MARK: Parsing
 
     /// Strict JSON (RFC 8259). Nil when the text isn't JSON. A repeated key keeps its first position and its
-    /// last value.
+    /// last value. An integer outside the 64-bit range isn't accepted: as a double it would lose digits.
     public static func parse(_ text: String) -> JsonValue? { parse(Array(text.utf8)) }
 
     public static func parse(_ bytes: [UInt8]) -> JsonValue? {
@@ -221,7 +221,8 @@ public enum JsonValue: Sendable, Equatable, CustomStringConvertible {
                 while digit(peek()) { i += 1 }
             }
             let text = String(decoding: bytes[start..<i], as: UTF8.self)
-            if integral, let n = Int64(text) { return .integer(n) }
+            // An integer that doesn't fit in 64 bits would lose digits as a double: not accepted.
+            if integral { return Int64(text).map(JsonValue.integer) }
             return Double(text).map(JsonValue.number)
         }
     }
