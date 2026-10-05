@@ -2,26 +2,19 @@ using System;
 
 namespace Bromelia.Foundation;
 
-/// <summary>Cancellation that crosses layers (plan §6), wrapping .NET's token so adapters can pass it on.</summary>
+/// <summary>Cancellation that crosses layers (plan §6): the side that is told. It can't cancel anything itself; its
+/// CancellationSource does.</summary>
 public sealed class CancellationToken
 {
-    private readonly System.Threading.CancellationTokenSource _source;
+    private readonly System.Threading.CancellationToken _token;
 
-    public CancellationToken() : this(new System.Threading.CancellationTokenSource()) { }
+    internal CancellationToken(System.Threading.CancellationToken token) { _token = token; }
 
-    private CancellationToken(System.Threading.CancellationTokenSource source) { _source = source; }
-
-    /// <summary>A token that is cancelled when <paramref name="parent"/> is, or when it is cancelled itself.</summary>
-    public static CancellationToken Child(CancellationToken parent) =>
-        new(System.Threading.CancellationTokenSource.CreateLinkedTokenSource(parent.Token));
-
-    public bool IsCancelled => _source.IsCancellationRequested;
-
-    public void Cancel() => _source.Cancel();
+    public bool IsCancelled => _token.IsCancellationRequested;
 
     /// <summary>Runs <paramref name="handler"/> once on cancellation (straight away if already cancelled).</summary>
-    public IDisposable OnCancel(Action handler) => _source.Token.Register(handler);
+    public IDisposable OnCancel(Action handler) => _token.Register(handler);
 
     /// <summary>The .NET token, for APIs that take one.</summary>
-    public System.Threading.CancellationToken Token => _source.Token;
+    public System.Threading.CancellationToken Token => _token;
 }

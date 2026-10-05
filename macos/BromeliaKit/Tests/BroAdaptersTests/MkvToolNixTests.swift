@@ -35,7 +35,8 @@ struct MkvToolNixTests {
         if given["mkvextract"]?.isNull != true { tools[.mkvextract] = "/opt/mkvextract" }
         let mkv = MkvToolNix(launcher: launcher, fs: PlatformFileSystem(), locator: MapLocator(paths: tools), workDirectory: root)
         let call = given["call"]!.array!
-        let cancel = CancellationToken()
+        let cancelSource = CancellationSource()
+        let cancel = cancelSource.token
         do {
             switch call[0].string! {
             case "probe":

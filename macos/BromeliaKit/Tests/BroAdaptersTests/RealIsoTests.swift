@@ -31,7 +31,7 @@ struct RealIsoTests {
         let invocation = MakemkvInvocation(settings: MakemkvRunSettings(settings: [:], dataDir: "", workDirectory: work + "/home"),
                                            options: MakemkvOptions(), stallTimeout: Duration(seconds: 300), transcript: work + "/makemkv.txt")
         let events = Events()
-        let result = try await tool.listing(.iso(path: Self.iso), invocation: invocation, sink: events, cancel: CancellationToken())
+        let result = try await tool.listing(.iso(path: Self.iso), invocation: invocation, sink: events, cancel: CancellationSource().token)
         #expect(result.run.outcome.status == .success)
         #expect(result.listing.titles.count > 0)
         #expect(events.count > 0)
@@ -57,12 +57,12 @@ struct RealIsoTests {
         let tool = MakemkvTool(launcher: PlatformProcessLauncher(), fs: fs, isolation: HomeDirIsolation(fs: fs, layout: .macos), locator: locator)
         let invocation = MakemkvInvocation(settings: MakemkvRunSettings(settings: [:], dataDir: "", workDirectory: work + "/home"),
                                            options: MakemkvOptions(), stallTimeout: Duration(seconds: 300), transcript: work + "/makemkv.txt")
-        let listing = try await tool.listing(.iso(path: Self.iso), invocation: invocation, sink: Events(), cancel: CancellationToken()).listing
+        let listing = try await tool.listing(.iso(path: Self.iso), invocation: invocation, sink: Events(), cancel: CancellationSource().token).listing
         let smallest = try #require(listing.titles.min { $0.sizeBytes < $1.sizeBytes })
         try FileManager.default.createDirectory(atPath: work + "/staging", withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: work + "/staging/.DS_Store", contents: Data())
         let run = try await tool.rip(.iso(path: Self.iso), title: String(smallest.index), destination: work + "/staging", invocation: invocation,
-                                     sink: Events(), cancel: CancellationToken())
+                                     sink: Events(), cancel: CancellationSource().token)
         print("title \(smallest.index) (\(smallest.sizeBytes) bytes): \(run.outcome.status), saved \(run.outcome.saved.map(String.init) ?? "none"), produced \(run.outcome.produced)")
         #expect(run.outcome.status == .success)
         #expect(run.outcome.saved == 1)

@@ -15,13 +15,14 @@ struct SystemClockTests {
 
     @Test func sleepsAndTheMonotonicClockAdvances() async throws {
         let before = clock.monotonic()
-        try await clock.sleep(Duration(seconds: 0.2), cancel: CancellationToken())
+        try await clock.sleep(Duration(seconds: 0.2), cancel: CancellationSource().token)
         let slept = clock.monotonic().seconds - before.seconds
         #expect(slept >= 0.15 && slept < 5)
     }
 
     @Test func aCancelledSleepFailsWithJobCancelled() async {
-        let cancel = CancellationToken()
+        let cancelSource = CancellationSource()
+        let cancel = cancelSource.token
         let sleeper = Task { () async -> String? in
             do {
                 try await clock.sleep(Duration(seconds: 30), cancel: cancel)
@@ -33,7 +34,7 @@ struct SystemClockTests {
             }
         }
         try? await Task.sleep(nanoseconds: 50_000_000)
-        cancel.cancel()
+        cancelSource.cancel()
         #expect(await sleeper.value == "job.cancelled")
     }
 

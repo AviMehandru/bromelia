@@ -20,7 +20,7 @@ public class SystemClockTests
     public async Task SleepsAndTheMonotonicClockAdvances()
     {
         var before = _clock.Monotonic();
-        await _clock.Sleep(new Duration(0.2), new CancellationToken());
+        await _clock.Sleep(new Duration(0.2), new CancellationSource().Token);
         var slept = _clock.Monotonic().Seconds - before.Seconds;
         Assert.InRange(slept, 0.15, 5);
     }
@@ -28,9 +28,10 @@ public class SystemClockTests
     [Fact]
     public async Task ACancelledSleepFailsWithJobCancelled()
     {
-        var cancel = new CancellationToken();
+        var cancelSource = new CancellationSource();
+        var cancel = cancelSource.Token;
         var sleep = _clock.Sleep(new Duration(30), cancel);
-        cancel.Cancel();
+        cancelSource.Cancel();
         var e = await Assert.ThrowsAsync<BroFailure>(() => sleep);
         Assert.Equal("job.cancelled", e.Error.Code);
     }

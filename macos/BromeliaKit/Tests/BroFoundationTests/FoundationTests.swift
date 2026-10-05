@@ -36,15 +36,30 @@ struct FoundationTests {
     }
 
     @Test func cancellationRunsHandlersOnce() {
-        let token = CancellationToken()
-        let child = CancellationToken.child(of: token)
+        let parent = CancellationSource()
+        let child = CancellationSource.linked(to: parent.token)
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
-        child.onCancel { counter.calls += 1 }
-        #expect(!child.isCancelled)
-        token.cancel()
-        token.cancel()
-        #expect(child.isCancelled)
+        child.token.onCancel { counter.calls += 1 }
+        #expect(!child.token.isCancelled)
+        parent.cancel()
+        parent.cancel()
+        #expect(child.token.isCancelled)
         #expect(counter.calls == 1)
+    }
+
+    /// A closed (or freed) linked source no longer follows its parent: a parent that lives long doesn't keep a handler
+    /// per child.
+    @Test func aClosedLinkedSourceLetsGoOfItsParent() {
+        let parent = CancellationSource()
+        let child = CancellationSource.linked(to: parent.token)
+        child.close()
+        var freed: CancellationSource? = CancellationSource.linked(to: parent.token)
+        weak let gone = freed
+        freed = nil
+        #expect(gone == nil)
+        parent.cancel()
+        #expect(!child.token.isCancelled)
+        #expect(CancellationSource.linked(to: parent.token).token.isCancelled)
     }
 }

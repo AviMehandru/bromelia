@@ -2,6 +2,7 @@
 bro_foundation_lib = static_library('bro-foundation',
   files(
     'bro-bro-error.c',
+    'bro-cancellation-source.c',
     'bro-cancellation-token.c',
     'bro-duration.c',
     'bro-http-request-spec.c',

@@ -23,7 +23,7 @@ drop_handler (Handler *h)
 }
 
 BroCancellationToken *
-bro_cancellation_token_new (void)
+_bro_cancellation_token_new (void)
 {
   BroCancellationToken *t = g_atomic_rc_box_new0 (BroCancellationToken);
   g_mutex_init (&t->lock);
@@ -63,7 +63,7 @@ bro_cancellation_token_is_cancelled (BroCancellationToken *token)
 }
 
 void
-bro_cancellation_token_cancel (BroCancellationToken *token)
+_bro_cancellation_token_cancel (BroCancellationToken *token)
 {
   g_mutex_lock (&token->lock);
   if (token->cancelled) {
@@ -113,20 +113,4 @@ bro_cancellation_token_disconnect (BroCancellationToken *token, guint id)
   g_mutex_unlock (&token->lock);
   if (dropped.id)
     drop_handler (&dropped);
-}
-
-static void
-cancel_child (gpointer child, gpointer parent)
-{
-  bro_cancellation_token_cancel (child);
-}
-
-BroCancellationToken *
-bro_cancellation_token_child (BroCancellationToken *parent)
-{
-  BroCancellationToken *child = bro_cancellation_token_new ();
-  /* The parent holds a reference to the child until it is cancelled or freed. */
-  bro_cancellation_token_on_cancel (parent, cancel_child, bro_cancellation_token_ref (child),
-                                    (GDestroyNotify) bro_cancellation_token_unref);
-  return child;
 }

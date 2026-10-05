@@ -47,7 +47,7 @@ import Testing
         let control = PlatformDriveControl(launcher: PlatformProcessLauncher(), clock: SystemClock())
 
         // Mounted (macOS mounts a DVD by itself), and its content.
-        let mount = await control.waitForMount(device, timeout: Duration(seconds: 30), cancel: CancellationToken())
+        let mount = await control.waitForMount(device, timeout: Duration(seconds: 30), cancel: CancellationSource().token)
         let path = try #require(mount, "not mounted")
         #expect(state.drive.mountPath == path)
         let content = control.probeContent(device)
@@ -79,7 +79,7 @@ import Testing
         let locator = locator(fs)
         if locator.locate(.makemkvcon).path != nil {
             let tool = MakemkvTool(launcher: PlatformProcessLauncher(), fs: fs, isolation: HomeDirIsolation(fs: fs, layout: .macos), locator: locator)
-            let drives = try await tool.scanDrives(CancellationToken())
+            let drives = try await tool.scanDrives(CancellationSource().token)
             for d in drives { print("makemkv drive \(d.index): \(d.identification) | \(d.label) | \(d.device) | \(d.state)") }
             let product = state.drive.identification.split(separator: " ").last.map(String.init) ?? ""
             let match = try #require(drives.first { $0.identification.contains(product) && !$0.device.isEmpty }, "MakeMKV doesn't list \(product)")
@@ -88,7 +88,7 @@ import Testing
             let invocation = MakemkvInvocation(settings: MakemkvRunSettings(settings: [:], dataDir: "", workDirectory: work + "/home"),
                                                options: MakemkvOptions(), stallTimeout: Duration(seconds: 600), transcript: work + "/makemkv.txt")
             let listing = try await tool.listing(.drive(index: match.index, device: match.device), invocation: invocation, sink: Events(),
-                                                 cancel: CancellationToken())
+                                                 cancel: CancellationSource().token)
             print("makemkv listing: \(listing.listing.titles.count) titles, outcome \(listing.run.outcome.status)")
             #expect(listing.run.outcome.status == .success)
             #expect(listing.listing.titles.count > 0)
@@ -104,7 +104,7 @@ import Testing
         let events = Events()
         let started = Date()
         let copy = try await DataImager(drives: control, fs: PlatformFileSystem()).copy(state.drive.device, destIso: dir + "/disc.iso", sink: events,
-                                                                                         cancel: CancellationToken())
+                                                                                         cancel: CancellationSource().token)
         let bytes = copy.bytes
         #expect(copy.warning == nil)
         let seconds = Date().timeIntervalSince(started)

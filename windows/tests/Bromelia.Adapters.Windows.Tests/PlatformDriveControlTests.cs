@@ -61,7 +61,7 @@ public sealed class PlatformDriveControlTests
             else
             {
                 var watch = Stopwatch.StartNew();
-                var mount = drives.WaitForMount(Path_(given["waitForMount"]!.AsString!), new Duration(given["timeout"]!.AsNumber!.Value), new CancellationToken())
+                var mount = drives.WaitForMount(Path_(given["waitForMount"]!.AsString!), new Duration(given["timeout"]!.AsNumber!.Value), new CancellationSource().Token)
                     .GetAwaiter().GetResult();
                 Assert.Null(mount);
                 Assert.True(watch.Elapsed.TotalSeconds < expect["within"]!.AsNumber!.Value);
@@ -80,7 +80,7 @@ public sealed class PlatformDriveControlTests
         {
             var device = d.Name.TrimEnd('\\');
             Assert.Equal(DiscContent.Unknown, drives.ProbeContent(device));
-            Assert.Null(drives.WaitForMount(device, new Duration(1), new CancellationToken()).GetAwaiter().GetResult());
+            Assert.Null(drives.WaitForMount(device, new Duration(1), new CancellationSource().Token).GetAwaiter().GetResult());
         }
     }
 }

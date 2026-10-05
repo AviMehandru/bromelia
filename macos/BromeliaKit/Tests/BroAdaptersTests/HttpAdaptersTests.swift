@@ -139,9 +139,10 @@ struct MapLocator: ToolLocator {
                 let request = HttpRequestSpec(method: given["method"]!.string!, url: url,
                                               headers: (given["headers"]?.members ?? []).map { (name: $0.key, value: $0.value.string!) },
                                               body: given["body"]?.string.map { Array($0.utf8) })
-                let cancel = CancellationToken()
+                let cancelSource = CancellationSource()
+                let cancel = cancelSource.token
                 if let after = given["cancelAfter"]?.double {
-                    Task { try? await Task.sleep(nanoseconds: UInt64(after * 1e9)); cancel.cancel() }
+                    Task { try? await Task.sleep(nanoseconds: UInt64(after * 1e9)); cancelSource.cancel() }
                 }
                 let start = Date()
                 do {
@@ -178,7 +179,7 @@ struct MapLocator: ToolLocator {
                 let sender = NotificationSender(http: http, apprise: AppriseTool(launcher: launcher, locator: MapLocator(paths: tools)))
                 do {
                     try await sender.send(given["url"]!.string!, title: "T", body: "B", status: StatusWord(rawValue: given["status"]!.string!)!,
-                                          cancel: CancellationToken())
+                                          cancel: CancellationSource().token)
                     try Fixtures.check(expect["error"] == nil, "expected \(expect["error"]!)")
                 } catch let error as BroError {
                     guard let want = expect["error"] else { throw error }
@@ -214,7 +215,7 @@ struct MapLocator: ToolLocator {
                 http.failReason = answer["reason"]?.string
                 http.body = try answer["file"]?.string.map { try Fixtures.bytes($0) } ?? Array((answer["text"]?.string ?? "").utf8)
                 do {
-                    let key = try await BetaKeySource(http: http).currentKey(CancellationToken())
+                    let key = try await BetaKeySource(http: http).currentKey(CancellationSource().token)
                     try Fixtures.check(key.hasPrefix(expect["keyPrefix"]!.string!), "key \(key)")
                     try Fixtures.same(BetaKeyPage.url, http.sent?.url, "url")
                     try Fixtures.same("GET", http.sent?.method, "method")

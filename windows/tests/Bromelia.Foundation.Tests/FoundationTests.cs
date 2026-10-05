@@ -48,14 +48,28 @@ public class FoundationTests
     [Fact]
     public void CancellationRunsHandlersOnce()
     {
-        var token = new CancellationToken();
-        var child = CancellationToken.Child(token);
+        var parent = new CancellationSource();
+        using var child = CancellationSource.Linked(parent.Token);
         int calls = 0;
-        using var _ = child.OnCancel(() => calls++);
-        Assert.False(child.IsCancelled);
-        token.Cancel();
-        token.Cancel();
-        Assert.True(child.IsCancelled);
+        using var _ = child.Token.OnCancel(() => calls++);
+        Assert.False(child.Token.IsCancelled);
+        parent.Cancel();
+        parent.Cancel();
+        Assert.True(child.Token.IsCancelled);
         Assert.Equal(1, calls);
+    }
+
+    /// <summary>A closed linked source no longer follows its parent: a parent that lives long doesn't keep a
+    /// registration per child.</summary>
+    [Fact]
+    public void AClosedLinkedSourceLetsGoOfItsParent()
+    {
+        var parent = new CancellationSource();
+        var child = CancellationSource.Linked(parent.Token);
+        child.Close();
+        parent.Cancel();
+        Assert.False(child.Token.IsCancelled);
+        var own = CancellationSource.Linked(parent.Token); // the parent is cancelled already: so is a new child
+        Assert.True(own.Token.IsCancelled);
     }
 }

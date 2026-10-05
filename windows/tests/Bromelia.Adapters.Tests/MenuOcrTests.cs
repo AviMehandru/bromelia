@@ -35,8 +35,9 @@ public sealed class MenuOcrTests : IDisposable
             };
             var tools = given["located"]!.AsArray!.ToDictionary(t => EnumWire.Parse<ToolKind>(t.AsString)!.Value, t => "/opt/" + t.AsString);
             var ocr = new MenuOcr(launcher, new MapLocator(tools), new DiskFileSystem());
-            var cancel = new CancellationToken();
-            if (given["cancelled"]?.AsBool == true) cancel.Cancel();
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
+            if (given["cancelled"]?.AsBool == true) cancelSource.Cancel();
             try
             {
                 if (given["op"]!.AsString == "extractStills")

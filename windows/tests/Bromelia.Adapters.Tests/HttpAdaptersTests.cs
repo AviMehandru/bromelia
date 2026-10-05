@@ -55,8 +55,9 @@ public sealed class HttpAdaptersTests
             var headers = (given["headers"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
                 .Select(m => new KeyValuePair<string, string>(m.Key, m.Value.AsString!)).ToList();
             var request = new HttpRequestSpec(given["method"]!.AsString!, url, headers, given["body"]?.AsString is { } b ? Encoding.UTF8.GetBytes(b) : null);
-            var cancel = new CancellationToken();
-            if (given["cancelAfter"]?.AsNumber is { } after) _ = Task.Delay(TimeSpan.FromSeconds(after)).ContinueWith(_ => cancel.Cancel());
+            var cancelSource = new CancellationSource();
+            var cancel = cancelSource.Token;
+            if (given["cancelAfter"]?.AsNumber is { } after) _ = Task.Delay(TimeSpan.FromSeconds(after)).ContinueWith(_ => cancelSource.Cancel());
             var watch = Stopwatch.StartNew();
             try
             {
@@ -92,7 +93,7 @@ public sealed class HttpAdaptersTests
             var sender = new NotificationSender(http, new AppriseTool(launcher, new MapLocator(tools)));
             try
             {
-                sender.Send(given["url"]!.AsString!, "T", "B", EnumWire.Parse<StatusWord>(given["status"]!.AsString)!.Value, new CancellationToken())
+                sender.Send(given["url"]!.AsString!, "T", "B", EnumWire.Parse<StatusWord>(given["status"]!.AsString)!.Value, new CancellationSource().Token)
                     .GetAwaiter().GetResult();
                 Assert.Null(expect["error"]);
             }
@@ -133,7 +134,7 @@ public sealed class HttpAdaptersTests
             };
             try
             {
-                var key = new BetaKeySource(http).CurrentKey(new CancellationToken()).GetAwaiter().GetResult();
+                var key = new BetaKeySource(http).CurrentKey(new CancellationSource().Token).GetAwaiter().GetResult();
                 Assert.StartsWith(expect["keyPrefix"]!.AsString!, key);
                 Assert.Equal(BetaKeyPage.Url, http.Sent!.Url);
                 Assert.Equal("GET", http.Sent.Method);
