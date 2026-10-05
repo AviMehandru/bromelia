@@ -224,4 +224,4 @@ turns on and off.
   check happen only in the process that holds `automation.lock` (`flock` on macOS and Linux, a file opened without
   sharing on Windows); the others try again every minute. Command-line web settings are kept out of the saved
   configuration. `docker/Dockerfile` builds it
-  together with MakeMKV (see [docker.md](docker.md)).
+  together with MakeMKV, whose library gets its own LGPL FFmpeg built in (see [docker.md](docker.md), "Licences").

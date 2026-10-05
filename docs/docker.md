@@ -19,15 +19,32 @@ docker build -f docker/Dockerfile --build-arg ACCEPT_MAKEMKV_EULA=yes -t bromeli
 The image also has `mkvmerge`, `ffmpeg` + `tesseract` (episode numbers from DVD menus), `abcde` (and `cyanrip` when
 the distribution has it) for audio CDs, `eject` and `curl`.
 
+### Licences
+
+- **MakeMKV** is GuinpinSoft's, under its EULA (`src/eula_en_linux.txt` in `makemkv-bin`). Its open-source part
+  (`makemkv-oss`) is mostly LGPL; `makemkvcon` itself is closed source.
+- **FFmpeg inside MakeMKV's library.** `makemkvcon` loads `libmakemkv.so.1`, which uses FFmpeg's audio codecs
+  (converting audio when a MakeMKV profile asks for it). Debian's FFmpeg is a GPL build, and a closed program linked
+  to GPL code can't be distributed, so the build compiles its own FFmpeg as LGPL (no `--enable-gpl` or
+  `--enable-nonfree`; only `libavcodec` and `libavutil`) and builds it into `libmakemkv.so.1`. Its licence is in
+  `/usr/share/doc/makemkv/ffmpeg/`. The FFmpeg version matches Debian's (`--build-arg FFMPEG_VERSION=…` with
+  `FFMPEG_SHA256=…` picks another). Debian's `ffmpeg` command stays in the image as a separate program, used for menu
+  OCR.
+- Converting audio to AAC doesn't work in the image, as before: MakeMKV's AAC-stereo profile asks for `libfdk_aac`,
+  which neither Debian's FFmpeg nor this one has (FDK AAC can't be redistributed), and MakeMKV's profile check
+  rejects FFmpeg's own `aac` encoder. FLAC conversion works.
+- These steps make an image that could be shared; **it isn't published anywhere yet**. Build it yourself as above.
+
 ### Check a build
 
 ```bash
 docker/smoke-test.sh bromelia
 ```
 
-This checks the image without a drive: every program the daemon calls is there and finds its libraries, `makemkvcon`
-starts, the first start writes the configuration, the web page answers with its token (401 without it, 403 for an
-action without the `X-Bromelia` header), and `docker stop` ends the daemon cleanly. CI runs it on every push. It
+This checks the image without a drive: every program the daemon calls is there and finds its libraries, MakeMKV's
+library has the LGPL FFmpeg built in (not Debian's GPL one), `makemkvcon` starts, the first start writes the
+configuration, the web page answers with its token (401 without it, 403 for an action without the `X-Bromelia`
+header), and `docker stop` ends the daemon cleanly. CI runs it on every push. It
 can't check ripping; do that once with a real drive (below).
 
 ## Run

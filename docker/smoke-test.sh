@@ -1,5 +1,6 @@
 #!/bin/sh
-# Checks a built image without a drive: every program the daemon calls is there and loads its libraries, the first
+# Checks a built image without a drive: every program the daemon calls is there and loads its libraries, MakeMKV's
+# library has its LGPL FFmpeg built in rather than Debian's GPL one, the first
 # start writes the configuration, the web page answers with its token (and refuses without it), makemkvcon runs, and
 # `docker stop` ends the daemon cleanly. CI runs it after building; run it after your own builds the same way:
 #
@@ -26,6 +27,14 @@ docker run --rm --entrypoint sh "$image" -ec '
   done
   missing=$(for p in /usr/bin/makemkvcon /usr/bin/bromelia-daemon; do ldd "$p"; done | grep "not found" || true)
   [ -z "$missing" ] || { echo "libraries not found:"; echo "$missing"; exit 1; }
+  # The MakeMKV library has its own LGPL FFmpeg built in (docs/docker.md, "Licences"). Debian ships a GPL build of
+  # libavcodec, and linking that to the closed makemkvcon would make an image that cannot be published.
+  lib=/usr/lib/libmakemkv.so.1
+  if ldd "$lib" | grep -q "libav"; then echo "$lib links a shared FFmpeg library"; exit 1; fi
+  grep -aq "LGPL version 2.1 or later" "$lib" || { echo "$lib has no LGPL FFmpeg in it"; exit 1; }
+  if grep -aq -- "--enable-gpl" "$lib"; then echo "$lib has a GPL FFmpeg in it"; exit 1; fi
+  [ -f /usr/share/doc/makemkv/ffmpeg/COPYING.LGPLv2.1 ] || { echo "the FFmpeg licence is not in the image"; exit 1; }
+  echo "libmakemkv: FFmpeg built in, LGPL"
   if command -v cyanrip >/dev/null; then echo "cyanrip: yes"; else echo "cyanrip: not in this distribution (abcde rips audio CDs)"; fi
   bromelia-daemon --version
   # With no drive, makemkvcon still starts, prints its version and scans; that proves its own libraries load.
