@@ -13,6 +13,8 @@ serve_request (gpointer data)
   GOutputStream *out = g_io_stream_get_output_stream (G_IO_STREAM (connection));
   g_autoptr (GString) head = g_string_new (NULL);
   g_autofree char *header = NULL;
+  g_autofree char *host = NULL;
+  g_autofree char *location = NULL;
   g_autofree char *body = NULL;
   g_autofree char *text = NULL;
   g_autofree char *reply = NULL;
@@ -38,6 +40,8 @@ serve_request (gpointer data)
       name = g_ascii_strdown (lines[i], colon - lines[i]);
       if (g_str_equal (name, "x-test"))
         header = g_strstrip (g_strdup (colon + 1));
+      if (g_str_equal (name, "host"))
+        host = g_strstrip (g_strdup (colon + 1));
       if (g_str_equal (name, "content-length"))
         length = (gsize) g_ascii_strtoull (colon + 1, NULL, 10);
     }
@@ -49,7 +53,30 @@ serve_request (gpointer data)
         break;
       got += (gsize) n;
     }
-  if (g_str_equal (parts[1], "/echo"))
+  if (g_str_has_prefix (parts[1], "/big/"))
+    {
+      gsize n = (gsize) g_ascii_strtoull (parts[1] + strlen ("/big/"), NULL, 10), sent = 0;
+      g_autofree char *head = g_strdup_printf ("HTTP/1.1 200 X\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n", n);
+      g_autofree char *x = g_strnfill (65536, 'x');
+      g_output_stream_write_all (out, head, strlen (head), NULL, NULL, NULL);
+      while (sent < n && g_output_stream_write_all (out, x, MIN ((gsize) 65536, n - sent), NULL, NULL, NULL))
+        sent += MIN ((gsize) 65536, n - sent);
+      return NULL;
+    }
+  if (g_str_has_prefix (parts[1], "/redirect/"))
+    {
+      status = 302;
+      location = g_strconcat ("/", parts[1] + strlen ("/redirect/"), NULL);
+      text = g_strdup ("moved");
+    }
+  else if (g_str_has_prefix (parts[1], "/redirect-to-localhost/"))
+    {
+      const char *colon = host ? strrchr (host, ':') : NULL;
+      status = 302;
+      location = g_strdup_printf ("http://localhost:%s/%s", colon ? colon + 1 : "80", parts[1] + strlen ("/redirect-to-localhost/"));
+      text = g_strdup ("moved");
+    }
+  else if (g_str_equal (parts[1], "/echo"))
     {
       g_autoptr (BroJsonValue) v = bro_json_value_new_object ();
       bro_json_value_set (v, "method", bro_json_value_new_string (parts[0]));
@@ -68,7 +95,8 @@ serve_request (gpointer data)
       g_usleep (5 * G_USEC_PER_SEC);
       text = g_strdup ("slow");
     }
-  reply = g_strdup_printf ("HTTP/1.1 %d X\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s", status, strlen (text), text);
+  reply = g_strdup_printf ("HTTP/1.1 %d X\r\n%s%s%sContent-Length: %zu\r\nConnection: close\r\n\r\n%s", status, location ? "Location: " : "",
+                           location ? location : "", location ? "\r\n" : "", strlen (text), text);
   g_output_stream_write_all (out, reply, strlen (reply), NULL, NULL, NULL);
   return NULL;
 }
@@ -156,6 +184,14 @@ http_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
         }
       if ((v = bro_json_value_member (expect, "text")))
         bro_test_same_string (failures, id, "text", bro_json_value_get_string (v, ""), text);
+      if ((v = bro_json_value_member (expect, "length")) && (gint64) n != bro_json_value_get_integer (v, -1))
+        bro_test_fail (failures, id, "length %" G_GSIZE_FORMAT, n);
+    }
+  if ((v = bro_json_value_member (expect, "reasonLacks")) && error)
+    {
+      g_autofree char *params = bro_json_value_to_text (error->params);
+      if (strstr (params, bro_json_value_get_string (v, "")))
+        bro_test_fail (failures, id, "the error quotes the URL");
     }
   if ((v = bro_json_value_member (expect, "within")) && since (t0) >= bro_json_value_get_number (v, 0))
     bro_test_fail (failures, id, "took %.1f s", since (t0));

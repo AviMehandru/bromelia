@@ -2,7 +2,7 @@
   "functions": [
     "PlatformHttpClient.send"
   ],
-  "description": "PlatformHttpClient against a small HTTP/1.1 server the test runs on 127.0.0.1 (plan §9 HttpClient): URLSession, HttpClient, libsoup. The server's routes: /echo answers 200 with the JSON {method, path, header (the X-Test request header, or null), body (the request body as text)}; /status/<n> answers <n> with the body 'status <n>'; /slow waits 5 s, then answers 200. given.url's <server> is the server's address (http://127.0.0.1:<port>); <closed> is a port nothing listens on. Any status is an answer; no answer is http.failed with the system's reason; a cancelled call is job.cancelled.",
+  "description": "PlatformHttpClient against a small HTTP/1.1 server the test runs on 127.0.0.1 (plan §9 HttpClient): URLSession, HttpClient, libsoup. The server's routes: /echo answers 200 with the JSON {method, path, header (the X-Test request header, or null), body (the request body as text)}; /status/<n> answers <n> with the body 'status <n>'; /slow waits 5 s, then answers 200; /redirect/<path> answers 302 to /<path> (the same origin); /redirect-to-localhost/<path> answers 302 to http://localhost:<port>/<path> (another origin: another host name); /big/<n> answers 200 with n bytes of x. given.url's <server> is the server's address (http://127.0.0.1:<port>); <closed> is a port nothing listens on. Any status is an answer; no answer is http.failed with the system's reason; a cancelled call is job.cancelled. Redirects are followed within the same origin only (the same host and port, or http to https on the same host): a redirect elsewhere is the answer, so the request's headers never reach another host. A body larger than 16 MiB (16777216 bytes) is http.failed. A URL that can't be parsed is http.failed, and no error quotes a URL (expect.reasonLacks).",
   "cases": [
     {
       "id": "get-echo",
@@ -74,6 +74,71 @@
       "expect": {
         "error": "job.cancelled",
         "within": 3
+      }
+    },
+    {
+      "id": "redirect-same-origin",
+      "given": {
+        "method": "GET",
+        "url": "<server>/redirect/echo",
+        "headers": {
+          "X-Test": "one"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "method": "GET",
+          "path": "/echo",
+          "header": "one",
+          "body": ""
+        }
+      }
+    },
+    {
+      "id": "redirect-elsewhere-is-the-answer",
+      "given": {
+        "method": "GET",
+        "url": "<server>/redirect-to-localhost/echo",
+        "headers": {
+          "X-Test": "one"
+        }
+      },
+      "expect": {
+        "status": 302,
+        "rule": "the X-Test header (an API key, say) never goes to a host the request didn't name"
+      }
+    },
+    {
+      "id": "answer-at-the-limit",
+      "given": {
+        "method": "GET",
+        "url": "<server>/big/16777216"
+      },
+      "expect": {
+        "status": 200,
+        "length": 16777216
+      }
+    },
+    {
+      "id": "answer-too-big",
+      "given": {
+        "method": "GET",
+        "url": "<server>/big/16777217"
+      },
+      "expect": {
+        "error": "http.failed"
+      }
+    },
+    {
+      "id": "not-a-url",
+      "given": {
+        "method": "GET",
+        "url": "http://[not-an-address/?key=s3cret"
+      },
+      "expect": {
+        "error": "http.failed",
+        "reasonLacks": "s3cret"
       }
     }
   ]

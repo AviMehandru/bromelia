@@ -66,10 +66,12 @@ public sealed class HttpAdaptersTests
                 Assert.Equal(expect["status"]!.AsInteger, response.Status);
                 if (expect["json"] is { } json) Assert.Equal(json, JsonValue.Parse(response.Body));
                 if (expect["text"]?.AsString is { } text) Assert.Equal(text, Encoding.UTF8.GetString(response.Body));
+                if (expect["length"]?.AsInteger is { } length) Assert.Equal(length, response.Body.Length);
             }
             catch (BroFailure f)
             {
                 Assert.Equal(expect["error"]?.AsString, f.Error.Code);
+                if (expect["reasonLacks"]?.AsString is { } secret) Assert.DoesNotContain(secret, f.Error.ToString());
             }
             if (expect["within"]?.AsNumber is { } within) Assert.True(watch.Elapsed.TotalSeconds < within, watch.Elapsed.ToString());
             return true;
