@@ -1597,6 +1597,32 @@ test_real_iso (void)
   g_assert_true (g_file_get_contents (transcript_path, &transcript, NULL, NULL));
   g_assert_true (g_str_has_prefix (transcript, "==== "));
   g_assert_nonnull (strstr (transcript, " exit status 0\n"));
+
+  /* The smallest title, ripped: MakeMKV's saved count and the new MKV file agree, so the run succeeds and the file is
+   * what it produced (a .DS_Store written beforehand doesn't count). */
+  {
+    BroTitle *smallest = NULL;
+    g_autofree char *staging = g_build_filename (work, "staging", NULL);
+    g_autofree char *stray = g_build_filename (staging, ".DS_Store", NULL);
+    g_autofree char *title = NULL;
+    g_autoptr (BroMakemkvRun) run = NULL;
+    for (guint i = 0; i < result->listing->titles->len; i++)
+      {
+        BroTitle *t = result->listing->titles->pdata[i];
+        if (!smallest || t->size_bytes < smallest->size_bytes)
+          smallest = t;
+      }
+    g_mkdir_with_parents (staging, 0755);
+    g_file_set_contents (stray, "", 0, NULL);
+    title = g_strdup_printf ("%d", smallest->index);
+    run = bro_makemkv_tool_rip (tool, source, title, staging, invocation, BRO_RUN_SINK (sink), NULL, &error);
+    g_assert_null (error);
+    g_test_message ("title %s: %s, produced %u", title, bro_status_word_to_wire (run->outcome->status), run->outcome->produced->len);
+    g_assert_cmpstr (bro_status_word_to_wire (run->outcome->status), ==, "success");
+    g_assert_true (run->outcome->has_saved && run->outcome->saved == 1);
+    g_assert_cmpuint (run->outcome->produced->len, ==, 1);
+    g_assert_true (g_str_has_suffix (run->outcome->produced->pdata[0], ".mkv"));
+  }
 }
 
 #include "test-store.inc"
