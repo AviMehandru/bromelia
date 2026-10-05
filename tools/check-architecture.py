@@ -9,6 +9,13 @@
             plan §28 that the module will hold). Missing entries are reported; they fail only with --strict or for entries of
             a phase ≤ --require-phase.
   unmapped  public symbols in the layer folders that the map doesn't list (reported; fail with --strict).
+  signatures for each function found: its parameters, in order, are the map's "params" (a "label:name" param is
+            checked by its name; Swift accepts the label or the name, and any name behind a _ label; C#'s @event
+            is event; an instance method may leave out a first param naming its receiver; C names are snake_case,
+            and C may add its idioms around them: a receiver first (self, or any name of the owner's type), error,
+            callback data and destroy, out and *_out results, a length or n_<name> next to an array, has_<name>
+            next to an optional; a function's "cNames" lists C names that can't follow, such as new_listing). A mismatch always fails: three ports drifting apart is what the map is for.
+            Return types aren't compared: the map writes them abstractly.
 
   only      a type or function with "only": ["cs"] (and a "why") exists on those platforms alone: platform
             adapters that only one OS has (the Windows registry swap, macOS's drutil parser). Presence is
@@ -243,12 +250,125 @@ class Checker:
                             if not known(m.group(1), known_funcs) and not m.group(1).endswith(("_get_type", "_free", "_copy", "_new", "_ref", "_unref")):
                                 self.unmapped.append((platform, f"{rel}: {m.group(1)}"))
 
+    # ---- signatures -------------------------------------------------------------------------------
+    @staticmethod
+    def _inside(text, open_at):
+        """The text between the parenthesis at open_at and its match, and the index of the match."""
+        depth = 0
+        for j in range(open_at, len(text)):
+            if text[j] in "([{":
+                depth += 1
+            elif text[j] in ")]}":
+                depth -= 1
+                if depth == 0:
+                    return text[open_at + 1:j], j
+        return "", len(text)
+
+    @staticmethod
+    def _split(params):
+        parts, depth, cur = [], 0, ""
+        for ch in params:
+            if ch in "([{<":
+                depth += 1
+            elif ch in ")]}>":
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append(cur.strip())
+                cur = ""
+            else:
+                cur += ch
+        if cur.strip():
+            parts.append(cur.strip())
+        return parts
+
+    def declared_params(self, platform, text, fn):
+        """The parameter list of fn's declaration: [(label, name)]; None when no declaration is found."""
+        spelled = fn[platform]
+        if platform == "swift":
+            name = spelled.split(".", 1)[1].split("(")[0]
+            labels = spelled.split("(", 1)[1].rstrip(")").split(":")[:-1] if "(" in spelled else None
+            first = None
+            for m in re.finditer(rf"\bfunc\s+{re.escape(name)}\s*(?:<[^>]*>)?\(", text):
+                inner, _ = self._inside(text, m.end() - 1)
+                params = []
+                for part in self._split(inner):
+                    words = part.split(":", 1)[0].split()
+                    params.append((words[0], words[-1]))
+                if labels is None or [p[0] for p in params] == labels:
+                    return params
+                first = first or params
+            return first  # labels that don't match the map's: a mismatch
+        if platform == "cs":
+            name = spelled.split(".", 1)[1]
+            decl = re.compile(rf"^[ \t]*(?!return\b|await\b|throw\b|yield\b|var\b|if\b|else\b|new\b|case\b)"
+                              rf"(?:[\w<>\[\]?,.()]+[ \t]+)+{re.escape(name)}\s*(?:<[^>]*>)?\(", re.M)
+            for m in decl.finditer(text):
+                inner, close = self._inside(text, m.end() - 1)
+                after = text[close + 1:close + 80].lstrip()
+                if not after.startswith(("{", "=>", ";", "where")):
+                    continue
+                static = re.search(r"\bstatic\b", m.group(0)) is not None or "interface" in text[:m.start()].rsplit("class ", 1)[-1][:0]
+                params = [(None, re.sub(r"\s*=.*$", "", part).split()[-1].lstrip("@")) for part in self._split(inner)]
+                return params if static else [("instance", None)] + params
+            return None
+        m = re.search(rf"\b{re.escape(spelled)}\s*\(", text)
+        if not m:
+            return None
+        inner, _ = self._inside(text, m.end() - 1)
+        params = []
+        for part in self._split(inner):
+            if part == "void":
+                continue
+            words = re.sub(r"\[.*?\]", "", part).replace("*", " ").split()
+            params.append((" ".join(words[:-1]), words[-1]))  # (type, name)
+        return params
+
+    def signatures(self, platform):
+        for key, m in self.selected().items():
+            for fn in m["functions"]:
+                if platform not in fn.get("only", PLATFORMS) or platform not in fn:
+                    continue
+                owner = fn["name"].split(".")[0]
+                entry = self.types[owner][0][1] if owner in self.types else None
+                f = ROOT / entry[platform]["file"] if entry and platform in entry else None
+                if f is None or not f.exists():
+                    continue
+                got = self.declared_params(platform, f.read_text(encoding="utf-8", errors="replace"), fn)
+                if got is None:
+                    continue  # presence reports it
+                want = [p.split(":")[-1] for p in fn["params"]]
+                labels = [p.split(":")[0] if ":" in p else None for p in fn["params"]]
+                if platform == "swift":
+                    def same(g, w, l):
+                        return g[0] == "_" or w in (g[0], g[1]) or (l is not None and l == g[0])
+                    ok = len(got) == len(want) and all(same(g, w, l) for (g, w, l) in zip(got, want, labels))
+                    if not ok and len(got) == len(want) - 1:  # an instance method: the receiver is self
+                        ok = all(same(g, w, l) for g, w, l in zip(got, want[1:], labels[1:]))
+                elif platform == "cs":
+                    instance = got and got[0] == ("instance", None)
+                    names = [g[1] for g in got if g != ("instance", None)]
+                    ok = names == want or (instance and names == want[1:])
+                else:
+                    c_names = fn.get("cNames") or [snake(w) for w in want]
+                    owner_c = entry["c"]["name"]
+                    names = [g[1] for g in got]
+                    if got and got[0][1] not in c_names and (got[0][1] == "self" or owner_c in got[0][0].split()):
+                        names = names[1:]  # the receiver
+                    def idiom(n):
+                        return (n in {"error", "data", "user_data", "destroy", "out", "length"} or n.endswith("_out")
+                                or (n.startswith("n_") and n[2:] in c_names) or (n.startswith("has_") and n[4:] in c_names))
+                    ok = [n for n in names if n in c_names] == c_names and all(n in c_names or idiom(n) for n in names)
+                if not ok:
+                    shown = [g[1] or g[0] for g in got if g != ("instance", None)]
+                    self.lint_errors.append(f"{key}: {fn[platform]} takes {shown}, the map says {fn['params']}")
+
     def run(self):
         self.lint()
         platforms = [self.args.platform] if self.args.platform else list(PLATFORMS)
         for p in platforms:
             self.presence(p)
             self.unmapped_symbols(p)
+            self.signatures(p)
         status = 0
         for e in self.lint_errors:
             print(f"lint: {e}")

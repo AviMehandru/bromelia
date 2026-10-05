@@ -1379,7 +1379,12 @@
           "returns": "BroMessage?",
           "swift": "ListingMatch.differentDisc(_:new:)",
           "cs": "ListingMatch.DifferentDisc",
-          "c": "bro_listing_match_different_disc"
+          "c": "bro_listing_match_different_disc",
+          "cNames": [
+            "old",
+            "new_listing"
+          ],
+          "cNamesWhy": "new is a C++ keyword (the headers are C++-safe)"
         },
         {
           "name": "ListingMatch.mapTitles",
@@ -1393,7 +1398,14 @@
           "throws": true,
           "swift": "ListingMatch.mapTitles(_:from:to:sameTracks:)",
           "cs": "ListingMatch.MapTitles",
-          "c": "bro_listing_match_map_titles"
+          "c": "bro_listing_match_map_titles",
+          "cNames": [
+            "indices",
+            "old",
+            "new_listing",
+            "same_tracks"
+          ],
+          "cNamesWhy": "new is a C++ keyword (the headers are C++-safe)"
         },
         {
           "name": "OnePass.plan",
@@ -2658,7 +2670,12 @@
           "returns": "String",
           "swift": "TemplateEngine.render(_:values:)",
           "cs": "TemplateEngine.Render",
-          "c": "bro_template_engine_render"
+          "c": "bro_template_engine_render",
+          "cNames": [
+            "template_text",
+            "values"
+          ],
+          "cNamesWhy": "template is a C++ keyword"
         },
         {
           "name": "TemplateEngine.renderPath",
@@ -2669,7 +2686,12 @@
           "returns": "String",
           "swift": "TemplateEngine.renderPath(_:values:)",
           "cs": "TemplateEngine.RenderPath",
-          "c": "bro_template_engine_render_path"
+          "c": "bro_template_engine_render_path",
+          "cNames": [
+            "template_text",
+            "values"
+          ],
+          "cNamesWhy": "template is a C++ keyword"
         },
         {
           "name": "TokenRegistry.values",
@@ -9361,7 +9383,13 @@
           ],
           "swift": "OutboxRepository.markFailed(_:error:retryAt:)",
           "cs": "OutboxRepository.MarkFailed",
-          "c": "bro_outbox_repository_mark_failed"
+          "c": "bro_outbox_repository_mark_failed",
+          "cNames": [
+            "id",
+            "last_error",
+            "retry_at"
+          ],
+          "cNamesWhy": "error is the BroBroError ** out-parameter"
         }
       ]
     },

@@ -16,7 +16,7 @@ BroPreviousEpisode *bro_episode_continuation_choose (const BroContinuationQuery 
 
 /* Whether an archived disc is of the query's set: the same show (its name or its label's title, normalised) and the
  * same season, part and volume. */
-gboolean bro_episode_continuation_same_set (const BroArchivedDisc *r, const BroContinuationQuery *q);
+gboolean bro_episode_continuation_same_set (const BroArchivedDisc *disc, const BroContinuationQuery *query);
 
 /* The highest episode number of @season in @file_names (… S02E05 …); FALSE when none. */
 gboolean bro_episode_continuation_highest_in_season (const char *const *file_names, int season, int *out);

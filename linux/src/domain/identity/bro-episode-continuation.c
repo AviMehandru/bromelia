@@ -28,14 +28,14 @@ _bro_identity_normalize_name (const char *name)
 }
 
 gboolean
-bro_episode_continuation_same_set (const BroArchivedDisc *r, const BroContinuationQuery *q)
+bro_episode_continuation_same_set (const BroArchivedDisc *disc, const BroContinuationQuery *query)
 {
-  g_autofree char *name = _bro_identity_normalize_name (q->name);
-  g_autofree char *title = _bro_identity_normalize_name (q->label_title);
-  g_autofree char *rname = _bro_identity_normalize_name (r->name);
-  g_autofree char *rtitle = _bro_identity_normalize_name (r->label_title);
-  gboolean same_show = (name[0] && strcmp (rname, name) == 0) || (title[0] && strcmp (rtitle, title) == 0);
-  return same_show && r->season == q->season && r->part == q->part && r->volume == q->volume;
+  g_autofree char *name = _bro_identity_normalize_name (query->name);
+  g_autofree char *title = _bro_identity_normalize_name (query->label_title);
+  g_autofree char *disc_name = _bro_identity_normalize_name (disc->name);
+  g_autofree char *disc_title = _bro_identity_normalize_name (disc->label_title);
+  gboolean same_show = (name[0] && strcmp (disc_name, name) == 0) || (title[0] && strcmp (disc_title, title) == 0);
+  return same_show && disc->season == query->season && disc->part == query->part && disc->volume == query->volume;
 }
 
 BroPreviousEpisode *
