@@ -16,6 +16,9 @@ public final class SqliteStore: Store, @unchecked Sendable {
     private let clock: any Clock
     private let lock = AsyncLock()
     private var closed = false
+    /// The store whose transaction this task is inside: its outer repositories would wait for ever for the lock the
+    /// transaction holds.
+    @TaskLocal fileprivate static var inTransactionOf: ObjectIdentifier?
 
     private init(db: OpaquePointer, clock: any Clock) {
         self.db = db
@@ -32,7 +35,12 @@ public final class SqliteStore: Store, @unchecked Sendable {
             throw failed("open", reason)
         }
         let store = SqliteStore(db: handle, clock: clock)
-        try store.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
+        let mode = try store.rows("PRAGMA journal_mode=WAL", []) { $0.text(0) }.first ?? ""
+        // SQLite answers with the mode it is in: anything but WAL (a network share, a read-only folder) isn't safe here.
+        guard mode == "wal" || (path == ":memory:" && mode == "memory") else {
+            throw failed("open", "the journal is \(mode), not WAL")
+        }
+        try store.exec("PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
         return store
     }
 
@@ -50,25 +58,39 @@ public final class SqliteStore: Store, @unchecked Sendable {
     public func kv() -> any KeyValueRepository { KvRepo(Db(self, inTransaction: false)) }
 
     /// BEGIN IMMEDIATE … COMMIT around block, which must use the store it is given (the store's lock is held
-    /// meanwhile); a failure rolls back.
+    /// meanwhile: the outer store fails with store.reentered); a failure rolls back.
     public func transaction<T: Sendable>(_ block: @Sendable (any Store) async throws(BroError) -> T) async throws(BroError) -> T {
+        try checkNotReentered()
         await lock.acquire()
         defer { lock.release() }
         try exec("BEGIN IMMEDIATE")
-        do {
-            let result = try await block(TxStore(Db(self, inTransaction: true)))
+        let result: Result<T, BroError> = await Self.$inTransactionOf.withValue(ObjectIdentifier(self)) {
+            do throws(BroError) { return .success(try await block(TxStore(Db(self, inTransaction: true)))) } catch { return .failure(error) }
+        }
+        do throws(BroError) {
+            let value = try result.get()
             try exec("COMMIT")
-            return result
+            return value
         } catch {
             try? exec("ROLLBACK")
             throw error
         }
     }
 
-    /// Applies the migrations whose number is above PRAGMA user_version, each in one transaction.
+    /// store.reentered when this task is inside one of this store's transactions.
+    fileprivate func checkNotReentered() throws(BroError) {
+        if Self.inTransactionOf == ObjectIdentifier(self) { throw BroMessage(.storeReentered, severity: .error).toError() }
+    }
+
+    /// Applies the migrations whose number is above PRAGMA user_version, each in one transaction. A database newer than
+    /// every migration (a newer Bromelia's) is refused: store.tooNew.
     public func migrate() async throws(BroError) {
         try await Db(self, inTransaction: false).run { s throws(BroError) in
             let current = try s.rows("PRAGMA user_version", []) { $0.int(0) }.first ?? 0
+            let newest = Migrations.all.map(\.version).max() ?? 0
+            if current > newest {
+                throw BroMessage(.storeTooNew, [("version", .integer(Int64(current))), ("newest", .integer(Int64(newest)))], severity: .error).toError()
+            }
             for m in Migrations.all where m.version > current {
                 try s.exec("BEGIN")
                 do throws(BroError) {
@@ -158,6 +180,7 @@ public final class SqliteStore: Store, @unchecked Sendable {
 
         func run<T>(_ body: (SqliteStore) throws(BroError) -> T) async throws(BroError) -> T {
             if inTransaction { return try body(store) }
+            try store.checkNotReentered()
             await store.lock.acquire()
             defer { store.lock.release() }
             return try body(store)

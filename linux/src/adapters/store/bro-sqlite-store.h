@@ -22,11 +22,12 @@ G_DECLARE_FINAL_TYPE (BroSqliteStore, bro_sqlite_store, BRO, SQLITE_STORE, GObje
  * @error set (store.failed) when it can't be opened. Keeps a reference to @clock. */
 BroSqliteStore *bro_sqlite_store_open (const char *path, BroClock *clock, BroBroError **error);
 
-/* Applies the migrations whose number is above PRAGMA user_version, each in one transaction. */
+/* Applies the migrations whose number is above PRAGMA user_version, each in one transaction. A database newer than
+ * every migration (a newer Bromelia's) is refused: store.tooNew. */
 gboolean bro_sqlite_store_migrate (BroSqliteStore *self, BroBroError **error);
 
 /* BEGIN IMMEDIATE … COMMIT around @block, which must use the store it is given (the store's lock is held
- * meanwhile); FALSE from the block rolls back. */
+ * meanwhile: the outer store fails with store.reentered); FALSE from the block rolls back. */
 gboolean bro_sqlite_store_transaction (BroSqliteStore *self, BroStoreBlockFunc block, gpointer data, BroBroError **error);
 
 /* Closes the connection; later calls fail. Also done when the last reference goes. */

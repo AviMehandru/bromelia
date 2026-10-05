@@ -271,6 +271,8 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "fs.failed",
   "fs.notSynced",
   "store.failed",
+  "store.reentered",
+  "store.tooNew",
   "keystore.failed",
   "archive.recordWritten",
   "archive.renameFailed",

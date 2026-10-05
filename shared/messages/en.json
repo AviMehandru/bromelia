@@ -266,6 +266,8 @@
   "fs.failed": "Could not {operation} {path}: {reason}",
   "fs.notSynced": "{path} is complete, but its folder could not be flushed to disk: {reason}",
   "store.failed": "The database failed ({operation}): {reason}",
+  "store.reentered": "A transaction used the outer store instead of the one it was given",
+  "store.tooNew": "The database was made by a newer Bromelia (version {version}; this one knows up to {newest})",
   "keystore.failed": "Couldn't use the secret “{name}”: {reason}",
   "archive.recordWritten": "Wrote the archive record {file}",
   "archive.renameFailed": "Could not rename {path}: {reason}",

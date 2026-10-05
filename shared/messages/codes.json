@@ -1806,6 +1806,18 @@
       "http": 500,
       "today": "new: SqliteStore (plan §10.4); reason is SQLite's text"
     },
+    "store.reentered": {
+      "kind": "error",
+      "today": "new: SqliteStore (a transaction's block used the outer store, which waited for ever for its own lock)"
+    },
+    "store.tooNew": {
+      "kind": "error",
+      "params": {
+        "version": "int",
+        "newest": "int"
+      },
+      "today": "new: SqliteStore.migrate (a database from a newer Bromelia was opened as if it were current)"
+    },
     "keystore.failed": {
       "kind": "error",
       "params": {

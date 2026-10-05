@@ -85,12 +85,30 @@ sql_failed (BroSqliteStore *self, BroBroError **error)
   return store_failed (error, "query", self->shared->db ? sqlite3_errmsg (self->shared->db) : "the database is closed");
 }
 
-/* Every call takes the lock unless it runs inside a transaction view. */
-static void
-enter (BroSqliteStore *self)
+/* The connection whose transaction this thread is inside: the outer store would relock its lock (undefined
+ * behaviour for a GMutex, a hang at best). */
+static GPrivate in_transaction_of = G_PRIVATE_INIT (NULL);
+
+/* store.reentered when this thread is inside one of the connection's transactions and @self isn't its view. */
+static gboolean
+check_not_reentered (BroSqliteStore *self, BroBroError **error)
 {
+  if (self->in_transaction || g_private_get (&in_transaction_of) != self->shared)
+    return TRUE;
+  bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_STORE_REENTERED), NULL);
+  return FALSE;
+}
+
+/* Every call takes the lock unless it runs inside a transaction view; FALSE and @error set when the outer store is
+ * used inside a transaction. */
+static gboolean
+enter (BroSqliteStore *self, BroBroError **error)
+{
+  if (!check_not_reentered (self, error))
+    return FALSE;
   if (!self->in_transaction)
     g_mutex_lock (&self->shared->lock);
+  return TRUE;
 }
 
 static void
@@ -228,7 +246,8 @@ static GPtrArray *
 locked_rows (BroSqliteStore *self, const char *sql, Arg *args, int n, MapFunc map, GDestroyNotify free_func, BroBroError **error)
 {
   GPtrArray *out;
-  enter (self);
+  if (!enter (self, error))
+    return NULL;
   out = query_rows (self, sql, args, n, map, free_func, error);
   leave (self);
   return out;
@@ -238,7 +257,8 @@ static gboolean
 locked_execute (BroSqliteStore *self, const char *sql, Arg *args, int n, BroBroError **error)
 {
   gboolean ok;
-  enter (self);
+  if (!enter (self, error))
+    return FALSE;
   ok = execute (self, sql, args, n, error);
   leave (self);
   return ok;
@@ -742,7 +762,8 @@ static gboolean
 atomic (BroSqliteStore *self, AtomicFunc body, gconstpointer a, gconstpointer b, gconstpointer c, BroBroError **error)
 {
   gboolean ok;
-  enter (self);
+  if (!enter (self, error))
+    return FALSE;
   if (self->in_transaction)
     ok = body (self, a, b, c, error);
   else if ((ok = exec_sql (self, "BEGIN IMMEDIATE", error)))
@@ -855,7 +876,8 @@ unit_open_intents (BroUnitRepository *repo, BroBroError **error)
 {
   BroSqliteStore *self = STORE (repo);
   GPtrArray *intents;
-  enter (self);
+  if (!enter (self, error))
+    return NULL;
   intents = query_rows (self, "SELECT unit_id, job_id, staging, destination, merge, quarantine, created_at FROM commit_intents ORDER BY created_at, unit_id",
                         NULL, 0, map_intent, (GDestroyNotify) bro_commit_intent_free, error);
   for (guint i = 0; intents && i < intents->len; i++)
@@ -1417,9 +1439,12 @@ gboolean
 bro_sqlite_store_transaction (BroSqliteStore *self, BroStoreBlockFunc block, gpointer data, BroBroError **error)
 {
   BroSqliteStore *view;
+  gpointer outer;
   gboolean ok;
   if (self->in_transaction)
     return block (BRO_STORE (self), data, error);
+  if (!check_not_reentered (self, error))
+    return FALSE;
   g_mutex_lock (&self->shared->lock);
   if (!exec_sql (self, "BEGIN IMMEDIATE", error))
     {
@@ -1429,7 +1454,10 @@ bro_sqlite_store_transaction (BroSqliteStore *self, BroStoreBlockFunc block, gpo
   view = g_object_new (BRO_TYPE_SQLITE_STORE, NULL);
   view->shared = shared_ref (self->shared);
   view->in_transaction = TRUE;
+  outer = g_private_get (&in_transaction_of);
+  g_private_set (&in_transaction_of, self->shared);
   ok = block (BRO_STORE (view), data, error);
+  g_private_set (&in_transaction_of, outer);
   if (ok)
     ok = exec_sql (self, "COMMIT", error);
   if (!ok)
@@ -1444,10 +1472,12 @@ bro_sqlite_store_migrate (BroSqliteStore *self, BroBroError **error)
 {
   const BroMigration *m;
   sqlite3_stmt *stmt = NULL;
-  int current = 0;
+  int current = 0, newest = 0;
   gboolean ok = TRUE;
   if (self->in_transaction)
     return store_failed (error, "migrate", "inside a transaction");
+  if (!check_not_reentered (self, error))
+    return FALSE;
   g_mutex_lock (&self->shared->lock);
   if (!self->shared->db || sqlite3_prepare_v2 (self->shared->db, "PRAGMA user_version", -1, &stmt, NULL) != SQLITE_OK)
     ok = sql_failed (self, error);
@@ -1456,6 +1486,17 @@ bro_sqlite_store_migrate (BroSqliteStore *self, BroBroError **error)
       if (sqlite3_step (stmt) == SQLITE_ROW)
         current = sqlite3_column_int (stmt, 0);
       sqlite3_finalize (stmt);
+    }
+  for (m = _bro_migrations (); ok && m->name; m++)
+    newest = MAX (newest, m->version);
+  /* A database from a newer Bromelia isn't migrated as if it were current. */
+  if (ok && current > newest)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "version", bro_json_value_new_integer (current));
+      bro_json_value_set (params, "newest", bro_json_value_new_integer (newest));
+      bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_STORE_TOO_NEW), params);
+      ok = FALSE;
     }
   for (m = _bro_migrations (); ok && m->name; m++)
     {
@@ -1529,6 +1570,8 @@ bro_sqlite_store_init (BroSqliteStore *self)
 {
 }
 
+static gpointer map_text (BroSqliteStore *self, sqlite3_stmt *r) { return col_text (r, 0); }
+
 BroSqliteStore *
 bro_sqlite_store_open (const char *path, BroClock *clock, BroBroError **error)
 {
@@ -1548,7 +1591,24 @@ bro_sqlite_store_open (const char *path, BroClock *clock, BroBroError **error)
   g_mutex_init (&self->shared->lock);
   self->shared->db = db;
   self->shared->clock = g_object_ref (clock);
-  if (!exec_sql (self, "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;", error))
+  {
+    /* SQLite answers with the mode it is in: anything but WAL (a network share, a read-only folder) isn't safe here. */
+    g_autoptr (GPtrArray) mode = query_rows (self, "PRAGMA journal_mode=WAL", NULL, 0, map_text, g_free, error);
+    const char *got = mode && mode->len ? mode->pdata[0] : "";
+    if (!mode)
+      {
+        g_object_unref (self);
+        return NULL;
+      }
+    if (!g_str_equal (got, "wal") && !(g_str_equal (path, ":memory:") && g_str_equal (got, "memory")))
+      {
+        g_autofree char *reason = g_strdup_printf ("the journal is %s, not WAL", got);
+        store_failed (error, "open", reason);
+        g_object_unref (self);
+        return NULL;
+      }
+  }
+  if (!exec_sql (self, "PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;", error))
     {
       g_object_unref (self);
       return NULL;

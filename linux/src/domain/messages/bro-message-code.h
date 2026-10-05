@@ -274,6 +274,8 @@ typedef enum {
   BRO_MSG_FS_FAILED, /* fs.failed */
   BRO_MSG_FS_NOT_SYNCED, /* fs.notSynced */
   BRO_MSG_STORE_FAILED, /* store.failed */
+  BRO_MSG_STORE_REENTERED, /* store.reentered */
+  BRO_MSG_STORE_TOO_NEW, /* store.tooNew */
   BRO_MSG_KEYSTORE_FAILED, /* keystore.failed */
   BRO_MSG_ARCHIVE_RECORD_WRITTEN, /* archive.recordWritten */
   BRO_MSG_ARCHIVE_RENAME_FAILED, /* archive.renameFailed */

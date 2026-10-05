@@ -25,6 +25,9 @@ public sealed class SqliteStore : IStore, IDisposable
     readonly IClock _clock;
     readonly SemaphoreSlim _lock = new(1, 1);
     readonly Db _top;
+    /// <summary>Whether this flow is inside one of this store's transactions: the outer store would wait for ever for
+    /// the lock the transaction holds.</summary>
+    readonly AsyncLocal<bool> _inTransaction = new();
 
     SqliteStore(SqliteConnection db, IClock clock)
     {
@@ -46,10 +49,20 @@ public sealed class SqliteStore : IStore, IDisposable
                 Pooling = false,
             }.ToString());
             db.Open();
+            string mode;
             using (var c = db.CreateCommand())
             {
-                c.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
+                c.CommandText = "PRAGMA journal_mode=WAL";
+                mode = Convert.ToString(c.ExecuteScalar(), CultureInfo.InvariantCulture) ?? "";
+                c.CommandText = "PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
                 c.ExecuteNonQuery();
+            }
+            // SQLite answers with the mode it is in: anything but WAL (a network share, a read-only folder) isn't safe here.
+            if (mode != "wal" && !(path == ":memory:" && mode == "memory"))
+            {
+                db.Dispose();
+                throw new BroFailure(new BroMessage(MessageCode.StoreFailed, Severity.Error, ("operation", JsonValue.Of("open")),
+                    ("reason", JsonValue.Of("the journal is " + mode + ", not WAL"))).ToError());
             }
             return new SqliteStore(db, clock);
         }
@@ -71,16 +84,20 @@ public sealed class SqliteStore : IStore, IDisposable
     public IKeyValueRepository Kv() => new KvRepo(_top);
 
     /// <summary>BEGIN IMMEDIATE … COMMIT around <paramref name="block"/>, which must use the store it is given (the
-    /// store's lock is held meanwhile); a failure rolls back.</summary>
+    /// store's lock is held meanwhile: the outer store fails with store.reentered); a failure rolls back.</summary>
     public async Task<T> Transaction<T>(Func<IStore, Task<T>> block)
     {
+        CheckNotReentered();
         await _lock.WaitAsync().ConfigureAwait(false);
         try
         {
             Exec("BEGIN IMMEDIATE");
             try
             {
-                var result = await block(new TxStore(new Db(this, inTransaction: true))).ConfigureAwait(false);
+                _inTransaction.Value = true;
+                T result;
+                try { result = await block(new TxStore(new Db(this, inTransaction: true))).ConfigureAwait(false); }
+                finally { _inTransaction.Value = false; }
                 Exec("COMMIT");
                 return result;
             }
@@ -100,10 +117,15 @@ public sealed class SqliteStore : IStore, IDisposable
         }
     }
 
-    /// <summary>Applies the migrations whose number is above PRAGMA user_version, each in one transaction.</summary>
+    /// <summary>Applies the migrations whose number is above PRAGMA user_version, each in one transaction. A database
+    /// newer than every migration (a newer Bromelia's) is refused: store.tooNew.</summary>
     public Task Migrate() => _top.Run(db =>
     {
         var current = Convert.ToInt32(Scalar(db, "PRAGMA user_version", null), CultureInfo.InvariantCulture);
+        var newest = Migrations.All.Max(m => m.Version);
+        if (current > newest)
+            throw new BroFailure(new BroMessage(MessageCode.StoreTooNew, Severity.Error, ("version", JsonValue.Of(current)),
+                ("newest", JsonValue.Of(newest))).ToError());
         foreach (var (version, _, sql) in Migrations.All)
         {
             if (version <= current) continue;
@@ -126,6 +148,12 @@ public sealed class SqliteStore : IStore, IDisposable
     }
 
     public void Dispose() => Close();
+
+    /// <summary>store.reentered when this flow is inside one of this store's transactions.</summary>
+    void CheckNotReentered()
+    {
+        if (_inTransaction.Value) throw new BroFailure(new BroMessage(MessageCode.StoreReentered, Severity.Error).ToError());
+    }
 
     void Exec(string sql)
     {
@@ -157,6 +185,7 @@ public sealed class SqliteStore : IStore, IDisposable
         public async Task<T> Run<T>(Func<SqliteConnection, T> body)
         {
             if (_inTransaction) return Guard(body);
+            Store.CheckNotReentered();
             await Store._lock.WaitAsync().ConfigureAwait(false);
             try
             {

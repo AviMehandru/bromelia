@@ -725,6 +725,62 @@ test_store_transaction (void)
   g_assert_cmpint (b->integer, ==, 2);
 }
 
+/* Writes through the view, then reads through the outer store (@data): that would relock the lock the transaction
+ * holds. */
+static gboolean
+use_outer_store (BroStore *s, gpointer outer, BroBroError **error)
+{
+  g_autoptr (BroJsonValue) a = bro_json_value_new_integer (1);
+  g_autoptr (BroJsonValue) got = NULL;
+  if (!bro_key_value_repository_set (bro_store_kv (s), "a", a, error))
+    return FALSE;
+  got = bro_key_value_repository_get (bro_store_kv (outer), "a", error);
+  return got != NULL;
+}
+
+static gboolean
+nothing (BroStore *s, gpointer data, BroBroError **error)
+{
+  return TRUE;
+}
+
+static gboolean
+nest_outer (BroStore *s, gpointer outer, BroBroError **error)
+{
+  return bro_store_transaction (outer, nothing, NULL, error);
+}
+
+/* The outer store inside a transaction fails at once (store.reentered) instead of relocking its lock, and the
+ * transaction rolls back; a database from a newer Bromelia isn't migrated as if it were current (store.tooNew). */
+static void
+test_store_reentered_and_too_new (void)
+{
+  g_autoptr (BroSqliteStore) store = new_store ("reenter");
+  g_autoptr (BroBroError) error = NULL, nested = NULL, newer_error = NULL;
+  g_autoptr (BroJsonValue) a = NULL;
+  g_autoptr (TestFixedClock) clock = g_object_new (TEST_TYPE_FIXED_CLOCK, NULL);
+  g_autofree char *path = g_strdup_printf ("%s/newer.sqlite", store_dir);
+  g_autoptr (BroSqliteStore) newer = NULL;
+  sqlite3 *raw;
+  g_assert_false (bro_store_transaction (BRO_STORE (store), use_outer_store, store, &error));
+  g_assert_cmpstr (error->code, ==, "store.reentered");
+  g_assert_false (bro_store_transaction (BRO_STORE (store), nest_outer, store, &nested));
+  g_assert_cmpstr (nested->code, ==, "store.reentered");
+  a = bro_key_value_repository_get (bro_store_kv (BRO_STORE (store)), "a", NULL);
+  g_assert_null (a);
+
+  g_clear_object (&store);
+  store = new_store ("newer");
+  bro_sqlite_store_close (store);
+  raw = raw_db ("newer");
+  sqlite3_exec (raw, "PRAGMA user_version = 99", NULL, NULL, NULL);
+  sqlite3_close (raw);
+  newer = bro_sqlite_store_open (path, BRO_CLOCK (clock), NULL);
+  g_assert_false (bro_sqlite_store_migrate (newer, &newer_error));
+  g_assert_cmpstr (newer_error->code, ==, "store.tooNew");
+  g_assert_cmpint (bro_json_value_member (newer_error->params, "version")->integer, ==, 99);
+}
+
 static void
 dump_rows (sqlite3 *db, const char *sql, GPtrArray *out)
 {

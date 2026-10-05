@@ -269,6 +269,8 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case fsFailed = "fs.failed"
     case fsNotSynced = "fs.notSynced"
     case storeFailed = "store.failed"
+    case storeReentered = "store.reentered"
+    case storeTooNew = "store.tooNew"
     case keystoreFailed = "keystore.failed"
     case archiveRecordWritten = "archive.recordWritten"
     case archiveRenameFailed = "archive.renameFailed"
