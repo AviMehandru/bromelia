@@ -11,7 +11,7 @@ import Testing
 struct PlatformFileSystemTests {
     let fs = PlatformFileSystem()
     /// Resolved (/private/var/…), so the paths in errors are the ones the cases are built under.
-    let root = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath().path + "/bromelia-fs-" + UUID().uuidString
+    let root = URL(fileURLWithPath: Fixtures.temporaryDirectory).resolvingSymlinksInPath().path + "/bromelia-fs-" + UUID().uuidString
 
     func p(_ relative: String) -> String { relative == "." ? root : root + "/" + relative }
 
@@ -144,7 +144,8 @@ struct PlatformFileSystemTests {
         let v = try fs.volume(p("not/yet/there"))
         #expect(v.id.count == 16)
         #expect(v.freeBytes > 0)
-        #expect(v.fsType == "apfs")
+        // The startup disk's; a BROMELIA_TEST_TMPDIR elsewhere (an SMB share: smbfs) has its own.
+        if ProcessInfo.processInfo.environment["BROMELIA_TEST_TMPDIR"] == nil { #expect(v.fsType == "apfs") }
         #expect(v.caseSensitive == false)
         #expect(try fs.volume(root).id == v.id)
     }
