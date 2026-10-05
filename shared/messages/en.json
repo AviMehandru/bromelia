@@ -79,6 +79,7 @@
   "makemkv.noSummary": "MakeMKV didn't say how many titles it saved",
   "makemkv.savedMismatch": "MakeMKV saved {saved, plural, one {# title} other {# titles}}, but {produced, plural, one {# new MKV file is} other {# new MKV files are}} in the folder",
   "makemkv.registryFailed": "Could not apply MakeMKV's settings in the registry: {reason}",
+  "makemkv.registryNotRestored": "Your own MakeMKV settings could not all be put back in the registry. They are saved in {path}; Bromelia tries again before the next MakeMKV run, which waits until they are back",
   "makemkv.titleProgress": "— {name}",
   "disc.op.reading": "Reading disc information",
   "disc.readingAgain": "Reading the disc listing again to check that the disc hasn't changed since it was opened",

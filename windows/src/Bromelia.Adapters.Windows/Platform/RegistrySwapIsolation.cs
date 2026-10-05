@@ -14,7 +14,11 @@ namespace Bromelia.Adapters.Windows;
 /// the run's values there, clearing the other catalogue keys, and gives the user's values back as soon as makemkvcon
 /// has read them: on its first output line, when the lease is released (it exited), or after 15 s. Launches are
 /// serialised: prepare waits for the previous lease to give the registry back. app_Key is touched only when the run
-/// sets it. The values are also written to settings.conf.txt in the run's folder, for reference.</summary>
+/// sets it. The values are also written to settings.conf.txt in the run's folder, for reference.
+/// The user's values are written to a snapshot file (in an owner-only folder: it can hold app_Key) before anything
+/// changes, and the file is removed once every value is back. A crash, a service stop or a power cut in between leaves
+/// the file: <see cref="Recover"/> (at startup) or the next Prepare puts those values back first, and a run never
+/// starts while they can't be (makemkv.registryNotRestored).</summary>
 public sealed class RegistrySwapIsolation : ISettingsIsolation
 {
     /// <summary>One launch at a time in this process: the registry is per user, not per job.</summary>
@@ -23,24 +27,41 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
     readonly IFileSystem _fs;
     readonly IMakemkvRegistry _registry;
     readonly IReadOnlyCollection<string> _catalogKeys;
+    readonly string _snapshotFile;
     readonly TimeSpan _restoreAfter;
 
     /// <param name="catalogKeys">Every key of shared/catalog/settings-catalog.json.</param>
+    /// <param name="snapshotFile">Where the user's values wait while a run's are in place
+    /// (&lt;data&gt;\run\makemkv-registry.json); its folder is made owner-only.</param>
     /// <param name="restoreAfter">When the values come back if makemkvcon says nothing (15 s).</param>
-    public RegistrySwapIsolation(IFileSystem fs, IMakemkvRegistry registry, IReadOnlyCollection<string> catalogKeys, Duration? restoreAfter = null)
+    public RegistrySwapIsolation(IFileSystem fs, IMakemkvRegistry registry, IReadOnlyCollection<string> catalogKeys, string snapshotFile,
+        Duration? restoreAfter = null)
     {
         _fs = fs;
         _registry = registry;
         _catalogKeys = catalogKeys;
+        _snapshotFile = snapshotFile;
         _restoreAfter = TimeSpan.FromSeconds(restoreAfter?.Seconds ?? 15);
+    }
+
+    /// <summary>Puts back the values of a snapshot a crash left behind; whether there was one. Fails with
+    /// makemkv.registryNotRestored when they can't all be put back (the file stays for the next try), and with
+    /// makemkv.registryFailed when the file isn't a snapshot.</summary>
+    public bool Recover()
+    {
+        Launch.Wait();
+        try { return RecoverLeftover(); }
+        finally { Launch.Release(); }
     }
 
     public IIsolationLease Prepare(MakemkvRunSettings settings)
     {
         Launch.Wait();
         var snapshot = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var saved = false; // nothing changes before the snapshot is saved
         try
         {
+            RecoverLeftover();
             _fs.CreateDirectory(settings.WorkDirectory, parentsMustExist: false);
             string? profile = null;
             if (settings.ProfileXml is { } xml)
@@ -55,31 +76,59 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
             var managed = new SortedSet<string>(_catalogKeys, StringComparer.Ordinal);
             managed.UnionWith(settings.Settings.Keys);
             if (!settings.Settings.ContainsKey("app_Key")) managed.Remove("app_Key");
+            foreach (var name in managed) snapshot[name] = _registry.Get(name);
+            SaveSnapshot(snapshot);
+            saved = true;
             foreach (var name in managed)
             {
-                var before = _registry.Get(name);
-                snapshot[name] = before;
                 if (settings.Settings.TryGetValue(name, out var value)) _registry.Set(name, value);
-                else if (before != null) _registry.Remove(name);
+                else if (snapshot[name] != null) _registry.Remove(name);
             }
             return new Lease(this, snapshot, profile);
         }
         catch (Exception e) when (e is UnauthorizedAccessException or SecurityException or System.IO.IOException)
         {
-            Restore(snapshot);
+            if (saved) Restore(snapshot);
             Launch.Release();
-            throw new BroFailure(new BroMessage(MessageCode.MakemkvRegistryFailed, Severity.Error, ("reason", JsonValue.Of(e.Message))).ToError());
+            throw RegistryFailed(e.Message);
         }
         catch
         {
-            Restore(snapshot);
+            if (saved) Restore(snapshot);
             Launch.Release();
             throw;
         }
     }
 
-    void Restore(Dictionary<string, string?> snapshot)
+    /// <summary>With the launch held: the leftover snapshot's values back, then the file removed; false when there was
+    /// none.</summary>
+    bool RecoverLeftover()
     {
+        if (!_fs.Exists(_snapshotFile)) return false;
+        var json = JsonValue.Parse(_fs.Read(_snapshotFile));
+        if (json?["values"]?.AsObject is not { } values) throw RegistryFailed(_snapshotFile + " isn't a registry snapshot");
+        var snapshot = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (name, value) in values) snapshot[name] = value.AsString;
+        if (!Restore(snapshot))
+            throw new BroFailure(new BroMessage(MessageCode.MakemkvRegistryNotRestored, Severity.Error, ("path", JsonValue.Of(_snapshotFile))).ToError());
+        return true;
+    }
+
+    /// <summary>The user's values, saved before any of them changes: written atomically into an owner-only
+    /// folder.</summary>
+    void SaveSnapshot(Dictionary<string, string?> snapshot)
+    {
+        if (System.IO.Path.GetDirectoryName(_snapshotFile) is { Length: > 0 } folder) OwnerOnly.Folder(folder);
+        var json = JsonValue.Of(("comment", JsonValue.Of("HKCU\\Software\\MakeMKV before a makemkvcon run; Bromelia puts these back")),
+            ("values", JsonValue.Of(snapshot.Select(kv => (kv.Key, JsonValue.Of(kv.Value))).ToArray())));
+        _fs.WriteAtomically(_snapshotFile, JsonValue.EncodeCanonical(json), 0x180);
+    }
+
+    /// <summary>Every value of the snapshot back (null: removed); then the snapshot file is removed. False, and the file
+    /// kept for the next try, when any of them couldn't be.</summary>
+    bool Restore(Dictionary<string, string?> snapshot)
+    {
+        var ok = true;
         foreach (var (name, value) in snapshot)
         {
             try
@@ -87,9 +136,18 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
                 if (value == null) _registry.Remove(name);
                 else _registry.Set(name, value);
             }
-            catch (Exception e) when (e is UnauthorizedAccessException or SecurityException or System.IO.IOException) { }
+            catch (Exception e) when (e is UnauthorizedAccessException or SecurityException or System.IO.IOException) { ok = false; }
         }
+        if (ok && _fs.Exists(_snapshotFile))
+        {
+            try { _fs.Remove(_snapshotFile); }
+            catch (BroFailure) { ok = false; }
+        }
+        return ok;
     }
+
+    static BroFailure RegistryFailed(string reason) =>
+        new(new BroMessage(MessageCode.MakemkvRegistryFailed, Severity.Error, ("reason", JsonValue.Of(reason))).ToError());
 
     sealed class Lease : IIsolationLease
     {

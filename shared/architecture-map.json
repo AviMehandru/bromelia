@@ -9930,7 +9930,7 @@
       "folder": "Platform",
       "cFolder": "platform",
       "csRoot": "windows/src/Bromelia.Adapters.Windows",
-      "doc": "SettingsIsolation on Windows (plan §10.3): makemkvcon reads HKCU\\Software\\MakeMKV, so each launch writes the run's values there (clearing the other catalogue keys) and restores the user's values on the first output line, the exit or after 15 s; launches are serialised.",
+      "doc": "SettingsIsolation on Windows (plan §10.3): makemkvcon reads HKCU\\Software\\MakeMKV, so each launch writes the run's values there (clearing the other catalogue keys) and restores the user's values on the first output line, the exit or after 15 s; launches are serialised. The user's values wait in a snapshot file (<data>\\run\\makemkv-registry.json) until they are back, so a crash can't lose them: Recover() at startup, or the next launch, puts them back.",
       "phase": 2,
       "types": [
         {

@@ -138,7 +138,7 @@
     {
       "id": "late-output-goes-nowhere",
       "from": [
-        "review of phases 0–2, P2-3: the transcript was closed while a reader still wrote to it"
+        "the Linux launcher wrote the transcript without its lock, so a reader could write to the closed descriptor"
       ],
       "given": {
         "command": [
@@ -406,7 +406,8 @@
         }
       },
       "expect": {
-        "registry": "HKCU\\Software\\MakeMKV gets the drive's values (other catalogue keys cleared) and the previous values back on the first output line, the exit or after 15 s; launches are serialised (MakemkvLaunch lease); a warning when the MakeMKV GUI runs"
+        "registry": "HKCU\\Software\\MakeMKV gets the drive's values (other catalogue keys cleared) and the previous values back on the first output line, the exit or after 15 s; launches are serialised (MakemkvLaunch lease); a warning when the MakeMKV GUI runs",
+        "snapshot": "before any value changes, the user's values are written atomically to <data>\\run\\makemkv-registry.json (an owner-only folder: it can hold app_Key) and the file is removed once they are all back; a file left by a crash is put back by Recover() at startup or before the next launch, and a launch fails with makemkv.registryNotRestored while it can't be"
       }
     },
     {

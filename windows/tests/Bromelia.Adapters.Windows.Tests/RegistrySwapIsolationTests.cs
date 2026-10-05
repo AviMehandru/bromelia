@@ -10,9 +10,12 @@ internal sealed class FakeRegistry : IMakemkvRegistry
 {
     public readonly Dictionary<string, string> Values = new();
     public readonly List<string> Log = new();
+    /// <summary>Writes fail as a locked-down key would.</summary>
+    public bool Fails;
     public string? Get(string name) => Values.TryGetValue(name, out var v) ? v : null;
-    public void Set(string name, string value) { Values[name] = value; Log.Add($"set {name}={value}"); }
-    public void Remove(string name) { Values.Remove(name); Log.Add($"remove {name}"); }
+    public void Set(string name, string value) { Refuse(); Values[name] = value; Log.Add($"set {name}={value}"); }
+    public void Remove(string name) { Refuse(); Values.Remove(name); Log.Add($"remove {name}"); }
+    void Refuse() { if (Fails) throw new UnauthorizedAccessException("Access is denied."); }
 }
 
 /// <summary>platform-adapters.contract.json#settings-isolation-registry, against a fake registry; and the real
@@ -31,6 +34,11 @@ public sealed class RegistrySwapIsolationTests : IDisposable
 
     MakemkvRunSettings Run(Dictionary<string, string> settings, string? profile = null) => new(settings, profile, "", Path.Combine(_root, "home"));
 
+    string Snapshot => Path.Combine(_root, "run", "makemkv-registry.json");
+
+    RegistrySwapIsolation Isolation(FakeRegistry reg, Duration? restoreAfter = null) =>
+        new(new PlatformFileSystem(), reg, Catalog, Snapshot, restoreAfter);
+
     [Fact]
     public void TheRunsValuesAreInPlaceUntilMakemkvconHasReadThem()
     {
@@ -40,7 +48,7 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         reg.Values["io_ErrorRetryCount"] = "5";
         reg.Values["app_Key"] = "M-purchased";
         reg.Values["unrelated"] = "kept";
-        var iso = new RegistrySwapIsolation(new PlatformFileSystem(), reg, Catalog);
+        var iso = Isolation(reg);
         var lease = iso.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30" }, "<profile/>"));
 
         // The run's value, the other catalogue keys cleared, app_Key and keys outside the catalogue untouched.
@@ -68,7 +76,7 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         if (!OperatingSystem.IsWindows()) return;
         var reg = new FakeRegistry();
         reg.Values["app_Key"] = "T-old";
-        var lease = new RegistrySwapIsolation(new PlatformFileSystem(), reg, Catalog).Prepare(Run(new() { ["app_Key"] = "T-new" }));
+        var lease = Isolation(reg).Prepare(Run(new() { ["app_Key"] = "T-new" }));
         Assert.Equal("T-new", reg.Get("app_Key"));
         Assert.DoesNotContain("app_Key", File.ReadAllText(Path.Combine(_root, "home", "settings.conf.txt")));
         lease.Release();
@@ -81,20 +89,99 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         if (!OperatingSystem.IsWindows()) return;
         var reg = new FakeRegistry();
         reg.Values["dvd_MinimumTitleLength"] = "120";
-        var iso = new RegistrySwapIsolation(new PlatformFileSystem(), reg, Catalog, new Duration(0.5));
-        var first = iso.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "1" }));
+        var iso = Isolation(reg, new Duration(0.5));
         var started = DateTime.UtcNow;
+        var first = iso.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "1" }));
         IIsolationLease? second = null;
-        var t = Task.Run(() => second = iso.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "2" })));
-        await Task.Delay(200);
-        Assert.Null(second);              // waiting for the first launch
+        var secondAt = DateTime.MinValue;
+        var t = Task.Run(() =>
+        {
+            second = iso.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "2" }));
+            secondAt = DateTime.UtcNow;
+        });
         Assert.Same(t, await Task.WhenAny(t, Task.Delay(TimeSpan.FromSeconds(10))));
-        Assert.True(DateTime.UtcNow - started >= TimeSpan.FromSeconds(0.4)); // the first gave it back after its timeout
+        // The second waited for the first launch, which gave the registry back after its timeout (only a lower bound:
+        // a busy machine may run either thread late).
+        Assert.True(secondAt - started >= TimeSpan.FromSeconds(0.45), (secondAt - started).ToString());
         Assert.Equal("2", reg.Get("dvd_MinimumTitleLength"));
         first.Release();                  // late: changes nothing
         Assert.Equal("2", reg.Get("dvd_MinimumTitleLength"));
         second!.FirstOutput();
         Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
+    }
+
+    [Fact]
+    public void TheUsersValuesAreOnDiskWhileARunsAreInPlace()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var reg = new FakeRegistry();
+        reg.Values["dvd_MinimumTitleLength"] = "120";
+        reg.Values["app_Key"] = "M-purchased";
+        var lease = Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30", ["app_Key"] = "T-beta" }));
+        var saved = JsonValue.Parse(File.ReadAllBytes(Snapshot))!["values"]!;
+        Assert.Equal("120", saved["dvd_MinimumTitleLength"]!.AsString);
+        Assert.Equal("M-purchased", saved["app_Key"]!.AsString);
+        Assert.True(saved["io_ErrorRetryCount"]!.IsNull);
+        Assert.True(OwnerOnly.Holds(Path.GetDirectoryName(Snapshot)!));
+        Assert.True(OwnerOnly.Holds(Snapshot));
+        lease.FirstOutput();
+        Assert.False(File.Exists(Snapshot));
+        Assert.Equal("M-purchased", reg.Get("app_Key"));
+    }
+
+    /// <summary>A crash with a run's values in place: the snapshot left behind puts the user's back, at startup
+    /// (Recover) or before the next run.</summary>
+    [Fact]
+    public void ASnapshotLeftByACrashIsPutBack()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var reg = new FakeRegistry();
+        reg.Values["dvd_MinimumTitleLength"] = "120";
+        reg.Values["app_Key"] = "M-purchased";
+        var lease = Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30", ["app_Key"] = "T-beta" }));
+        var left = File.ReadAllBytes(Snapshot);
+        lease.Release();
+
+        // As the crash left it: the run's values in the registry, the snapshot on disk.
+        reg.Values["dvd_MinimumTitleLength"] = "30";
+        reg.Values["app_Key"] = "T-beta";
+        File.WriteAllBytes(Snapshot, left);
+        Assert.True(Isolation(reg).Recover());
+        Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
+        Assert.Equal("M-purchased", reg.Get("app_Key"));
+        Assert.False(File.Exists(Snapshot));
+        Assert.False(Isolation(reg).Recover());
+
+        // Again, found by the next run instead: its snapshot holds the user's values, not the leftover ones.
+        reg.Values["dvd_MinimumTitleLength"] = "30";
+        reg.Values["app_Key"] = "T-beta";
+        File.WriteAllBytes(Snapshot, left);
+        var next = Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "45" }));
+        Assert.Equal("45", reg.Get("dvd_MinimumTitleLength"));
+        Assert.Equal("120", JsonValue.Parse(File.ReadAllBytes(Snapshot))!["values"]!["dvd_MinimumTitleLength"]!.AsString);
+        next.Release();
+        Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
+        Assert.Equal("M-purchased", reg.Get("app_Key"));
+    }
+
+    /// <summary>Values that can't be put back stay on disk, and no run starts until they are back.</summary>
+    [Fact]
+    public void AFailedRestoreKeepsTheSnapshotAndStopsTheNextRun()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var reg = new FakeRegistry();
+        reg.Values["dvd_MinimumTitleLength"] = "120";
+        var lease = Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30" }));
+        reg.Fails = true;
+        lease.Release();
+        Assert.True(File.Exists(Snapshot));
+        var failure = Assert.Throws<BroFailure>(() => Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "45" })));
+        Assert.Equal("makemkv.registryNotRestored", failure.Error.Code);
+        Assert.Equal("30", reg.Get("dvd_MinimumTitleLength"));
+        reg.Fails = false;
+        Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "45" })).Release();
+        Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
+        Assert.False(File.Exists(Snapshot));
     }
 
     [Fact]
