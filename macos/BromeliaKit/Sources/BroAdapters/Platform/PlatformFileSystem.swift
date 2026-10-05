@@ -7,7 +7,8 @@ import Foundation
 /// The FileSystem port on macOS (plan §9, §10.3; shared/fixtures/adapters/file-system.cases.json): writes are
 /// flushed with F_FULLFSYNC (the file, then its folder), renames never replace (renamex_np with RENAME_EXCL) except
 /// writeAtomically's, a missing parent is created only when asked, uncached reads use F_NOCACHE, and the volume comes
-/// from statfs.
+/// from statfs. A file system without RENAME_EXCL (an SMB share) gets the Linux fallback: link + unlink for a file,
+/// else a rename only after checking nothing is there.
 public final class PlatformFileSystem: FileSystem {
     public init() {}
 
@@ -114,10 +115,26 @@ public final class PlatformFileSystem: FileSystem {
         let parent = (to as NSString).deletingLastPathComponent
         guard isDirectory(parent) else { throw fsError(.fsParentMissing, parent) }
         // RENAME_EXCL: a file that appears meanwhile is kept, never replaced.
-        guard renamex_np(from, to, UInt32(RENAME_EXCL)) == 0 else {
+        guard Self.renameNoReplace(from, to) == 0 else {
             if errno == EEXIST { throw fsError(.fsAlreadyExists, to) }
             throw errnoError("rename", from)
         }
+    }
+
+    /// renamex_np with RENAME_EXCL. macOS's SMB client doesn't offer it (ENOTSUP): then link + unlink, which never
+    /// replaces either, and where links aren't offered (SMB again) a check that nothing is there, then rename. That last
+    /// step could replace a file created in between; Bromelia's names are unique to it, so nothing else makes them.
+    static func renameNoReplace(_ from: String, _ to: String) -> Int32 {
+        if renamex_np(from, to, UInt32(RENAME_EXCL)) == 0 { return 0 }
+        guard errno == ENOTSUP || errno == EINVAL else { return -1 }
+        var st = Darwin.stat()
+        if lstat(from, &st) == 0, (st.st_mode & S_IFMT) != S_IFDIR, link(from, to) == 0 { return unlink(from) }
+        if errno == EEXIST { return -1 }
+        if lstat(to, &st) == 0 {
+            errno = EEXIST
+            return -1
+        }
+        return Darwin.rename(from, to)
     }
 
     public func moveMerging(_ from: String, to: String, policy: MovePolicy) throws(BroError) -> [MovedItem] {

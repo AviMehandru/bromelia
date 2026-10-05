@@ -19,6 +19,12 @@ public enum Fixtures {
 
     public static func url(_ relative: String) -> URL { root.appendingPathComponent(relative) }
 
+    /// Where tests make their temporary folders: BROMELIA_TEST_TMPDIR when set (to run the file system's tests on a
+    /// network share, say), else the system's. NSTemporaryDirectory ignores TMPDIR on macOS.
+    public static var temporaryDirectory: String {
+        ProcessInfo.processInfo.environment["BROMELIA_TEST_TMPDIR"].map { $0.hasSuffix("/") ? $0 : $0 + "/" } ?? NSTemporaryDirectory()
+    }
+
     public static func bytes(_ relative: String) throws -> [UInt8] { Array(try Data(contentsOf: url(relative))) }
 
     public static func text(_ relative: String) throws -> String { String(decoding: try bytes(relative), as: UTF8.self) }

@@ -57,7 +57,7 @@ final class FakeDriveControl: DriveControl, @unchecked Sendable {
 
 /// shared/fixtures/adapters/data-imager.cases.json.
 @Suite(.serialized) struct DataImagerTests {
-    let dir = (NSTemporaryDirectory() as NSString).appendingPathComponent("bromelia-image-\(UUID().uuidString)")
+    let dir = (Fixtures.temporaryDirectory as NSString).appendingPathComponent("bromelia-image-\(UUID().uuidString)")
 
     @Test func theSharedCasesPass() async throws {
         let doc = try Fixtures.json("adapters/data-imager.cases.json")

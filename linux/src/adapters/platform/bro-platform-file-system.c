@@ -404,14 +404,22 @@ static int
 rename_no_replace (const char *from, const char *to)
 {
 #if defined(__APPLE__)
-  return renamex_np (from, to, RENAME_EXCL);
+  /* macOS's SMB client has no RENAME_EXCL (ENOTSUP). */
+  int rc = renamex_np (from, to, RENAME_EXCL);
+  if (rc == 0 || (errno != ENOTSUP && errno != EINVAL))
+    return rc;
 #elif defined(__linux__) && defined(RENAME_NOREPLACE)
   int rc = renameat2 (AT_FDCWD, from, AT_FDCWD, to, RENAME_NOREPLACE);
   if (rc == 0 || (errno != EINVAL && errno != ENOSYS))
     return rc;
-  /* A file system without RENAME_NOREPLACE: link + unlink never replaces either (files only). */
+#endif
+#if defined(__APPLE__) || (defined(__linux__) && defined(RENAME_NOREPLACE))
+  /* A file system without an exclusive rename: link + unlink never replaces either (files only); where links aren't
+   * offered either, a check that nothing is there, then rename (Bromelia's names are unique to it). */
   if (!is_directory (from) && link (from, to) == 0)
     return unlink (from);
+  if (errno == EEXIST)
+    return -1;
   if (exists (to))
     {
       errno = EEXIST;

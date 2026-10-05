@@ -8,7 +8,7 @@ import Testing
 
 /// shared/fixtures/adapters/makemkv-tool.cases.json.
 struct MakemkvToolTests {
-    let root = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath().path + "/bromelia-makemkv-" + UUID().uuidString
+    let root = URL(fileURLWithPath: Fixtures.temporaryDirectory).resolvingSymlinksInPath().path + "/bromelia-makemkv-" + UUID().uuidString
 
     func shown(_ s: String) -> String { s.replacingOccurrences(of: root + "/home", with: "<work>").replacingOccurrences(of: root, with: "<root>") }
 
