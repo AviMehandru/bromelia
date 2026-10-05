@@ -66,7 +66,7 @@ run (BroMenuOcr *self, const char *exe, const char *const *arguments, BroCancell
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = 60;
-  if (!bro_tool_run (self->launcher, spec, cancel, NULL, join_stdout, out, exit, error))
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, join_stdout, out, exit, NULL, error))
     return FALSE;
   if (exit->cancelled)
     {

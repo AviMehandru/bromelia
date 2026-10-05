@@ -91,6 +91,20 @@ import Testing
         #expect(elapsed(since: start) < 8)
     }
 
+    /// transcript-cant-be-written
+    @Test func aMissingTranscriptIsReported() async throws {
+        FileManager.default.createFile(atPath: dir + "/a-file", contents: Data("not a folder".utf8))
+        var s = spec("/bin/echo", "hi")
+        s.transcript = dir + "/a-file/t.txt"
+        let p = try launcher.start(s)
+        let (lines, exit) = await run(p)
+        #expect(lines.map(\.text) == ["hi"])
+        #expect(exit.status == 0)
+        let problem = p.transcriptProblem()
+        #expect(problem?.code == .processNoTranscript)
+        #expect(problem.map { JsonValue.object($0.params)["path"] } == .string(dir + "/a-file/t.txt"))
+    }
+
     /// late-output-goes-nowhere
     @Test func lateOutputGoesNowhere() async throws {
         var s = spec("/bin/sh", "-c", "(sleep 6; echo late) & echo early")

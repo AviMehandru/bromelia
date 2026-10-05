@@ -56,6 +56,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "process.couldNotStart",
   "process.stalled",
   "process.abandoned",
+  "process.noTranscript",
   "process.failed",
   "process.savedNothing",
   "process.exitStatus",

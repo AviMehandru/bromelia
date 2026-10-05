@@ -167,6 +167,8 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
 
     func lines() -> AsyncStream<OutputLine> { AsyncStream(unfolding: { [self] in await nextLine() }) }
 
+    func transcriptProblem() -> BroMessage? { transcript?.problem }
+
     /// The next queued line; waits for one; nil once the process has ended and the queue is empty.
     private func nextLine() async -> OutputLine? {
         await withCheckedContinuation { (c: CheckedContinuation<OutputLine?, Never>) in
@@ -341,21 +343,33 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
     }
 }
 
-/// The transcript file: appended to, one line at a time, from both reader threads.
+/// The transcript file: appended to, one line at a time, from both reader threads. The first failure to open or write it
+/// is kept as `problem` (process.noTranscript).
 private final class Transcript: @unchecked Sendable {
     private let lock = NSLock()
+    private let path: String
     private var fd: Int32
+    private var failure: BroMessage?
 
     init(_ path: String) {
+        self.path = path
         try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o644)
+        if fd < 0 { fail(String(cString: strerror(errno))) }
+    }
+
+    var problem: BroMessage? { lock.withLock { failure } }
+
+    private func fail(_ reason: String) {
+        if failure == nil { failure = BroMessage(.processNoTranscript, [("path", .string(path)), ("reason", .string(reason))], severity: .warning) }
     }
 
     func write(_ line: String) {
         lock.withLock {
             guard fd >= 0 else { return }
             let bytes = Array((line + "\n").utf8)
-            _ = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let written = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            if written != bytes.count { fail(written < 0 ? String(cString: strerror(errno)) : "a short write") }
         }
     }
 

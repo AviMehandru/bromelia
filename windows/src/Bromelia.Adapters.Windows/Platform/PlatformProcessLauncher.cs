@@ -152,6 +152,8 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
 
         public Task<ProcessExit> Wait() => _exit;
 
+        public BroMessage? TranscriptProblem() => _transcript?.Problem;
+
         public void Stop(StopReason reason)
         {
             lock (_gate)
@@ -262,17 +264,37 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
     /// the end (a child left behind kept a pipe open) is dropped.</summary>
     sealed class Transcript : IDisposable
     {
+        readonly string _path;
+        readonly object _gate = new();
         readonly StreamWriter? _writer;
         bool _closed;
+        BroMessage? _problem;
 
         public Transcript(string path)
         {
+            _path = path;
             try
             {
                 if (Path.GetDirectoryName(path) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
                 _writer = new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read), new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true };
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { _writer = null; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                _writer = null;
+                Fail(e.Message);
+            }
+        }
+
+        /// <summary>process.noTranscript for the first failure; null when every line was written.</summary>
+        public BroMessage? Problem
+        {
+            get { lock (_gate) return _problem; }
+        }
+
+        void Fail(string reason)
+        {
+            lock (_gate)
+                _problem ??= new BroMessage(MessageCode.ProcessNoTranscript, Severity.Warning, ("path", JsonValue.Of(_path)), ("reason", JsonValue.Of(reason)));
         }
 
         /// <summary><c>exit status 0</c>, <c>signal 15</c> or <c>abandoned</c>, then <c>, stalled</c> and
@@ -292,7 +314,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             {
                 if (_closed) return;
                 try { _writer.WriteLine(line); }
-                catch (IOException) { }
+                catch (IOException e) { Fail(e.Message); }
             }
         }
 

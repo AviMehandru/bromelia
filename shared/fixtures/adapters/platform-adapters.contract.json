@@ -250,7 +250,34 @@
           "then": ", stalled / , cancelled when they apply",
           "couldNotStart": "==== <instant> could not start: <reason>"
         },
-        "commandLine": "ArgumentSplitter.quote of each word of the invocation (after the interpreter choice)"
+        "commandLine": "ArgumentSplitter.quote of each word of the invocation (after the interpreter choice)",
+        "transcriptProblem": null
+      }
+    },
+    {
+      "id": "transcript-cant-be-written",
+      "given": {
+        "command": [
+          "/bin/echo",
+          "hi"
+        ],
+        "transcript": "a-file/t.txt",
+        "tree": {
+          "a-file": "not a folder"
+        }
+      },
+      "expect": {
+        "lines": [
+          "hi"
+        ],
+        "exit": 0,
+        "transcriptProblem": {
+          "code": "process.noTranscript",
+          "params": {
+            "path": "<dir>/a-file/t.txt"
+          }
+        },
+        "rule": "the tool runs anyway, and the run says its log is missing (RunningProcess.transcriptProblem), instead of carrying on without one in silence"
       }
     },
     {

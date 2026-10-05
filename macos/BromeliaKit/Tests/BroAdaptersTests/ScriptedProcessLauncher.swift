@@ -25,6 +25,8 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
     var splitParts = 0
     /// When it ends normally: write this text to the file named by argument index (mkvextract's output).
     var writeArgument: (index: Int, text: String)?
+    /// The process reports process.noTranscript for the spec's transcript.
+    var transcriptFails = false
 
     func start(_ spec: ProcessSpec) throws(BroError) -> any RunningProcess {
         var effects: [@Sendable () -> Void] = []
@@ -42,6 +44,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         }
         let script = Script(lines: lines, stderr: stderr, exitCode: exitCode, writeFileIn: writeFileIn, afterLine: afterLine, effects: effects)
         script.writeFileNames = writeFileNames
+        script.transcriptFailsAt = transcriptFails ? spec.transcript ?? "" : nil
         script.stalledFor = stalls ? (spec.stallTimeout ?? Duration(seconds: 0)) : nil
         lock.withLock {
             started.append(spec)
@@ -61,6 +64,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         private var stoppedBy: StopReason?
         var writeFileNames = ["title_t00.mkv"]
         var stalledFor: Duration?
+        var transcriptFailsAt: String?
         private var handed = 0
         private var result: ProcessExit?
         private var waiters: [CheckedContinuation<ProcessExit, Never>] = []
@@ -75,6 +79,10 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         }
 
         var stopReason: StopReason? { lock.withLock { stoppedBy } }
+
+        func transcriptProblem() -> BroMessage? {
+            transcriptFailsAt.map { BroMessage(.processNoTranscript, [("path", .string($0)), ("reason", .string("No space left on device"))], severity: .warning) }
+        }
         var linesHanded: Int { lock.withLock { handed } }
 
         func lines() -> AsyncStream<OutputLine> {

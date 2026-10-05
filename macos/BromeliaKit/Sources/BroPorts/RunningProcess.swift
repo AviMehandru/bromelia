@@ -13,4 +13,12 @@ public protocol RunningProcess: Sendable {
 
     /// Stops it (see above); wait reports the reason.
     func stop(_ reason: StopReason)
+
+    /// process.noTranscript when the transcript the spec asked for couldn't be opened, or a line couldn't be written to
+    /// it (the first failure); nil otherwise.
+    func transcriptProblem() -> BroMessage?
+}
+
+extension RunningProcess {
+    public func transcriptProblem() -> BroMessage? { nil }
 }

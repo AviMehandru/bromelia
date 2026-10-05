@@ -6909,6 +6909,14 @@
           "swift": "RunningProcess.stop(_:)",
           "cs": "RunningProcess.Stop",
           "c": "bro_running_process_stop"
+        },
+        {
+          "name": "RunningProcess.transcriptProblem",
+          "params": [],
+          "returns": "BroMessage?",
+          "swift": "RunningProcess.transcriptProblem()",
+          "cs": "RunningProcess.TranscriptProblem",
+          "c": "bro_running_process_transcript_problem"
         }
       ]
     },
@@ -10182,9 +10190,10 @@
             "outcome",
             "notice",
             "libreDrive",
-            "version"
+            "version",
+            "transcriptProblem"
           ],
-          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, and MakeMKV's version.",
+          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, MakeMKV's version, and the warning when its transcript couldn't be written.",
           "swift": {
             "name": "MakemkvRun",
             "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/MakemkvRun.swift"

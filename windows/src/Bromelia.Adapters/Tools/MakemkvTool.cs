@@ -87,6 +87,7 @@ public sealed class MakemkvTool
             var spec = new ProcessSpec(exe, arguments(options), lease.Environment(), invocation.Settings.WorkDirectory, StopPolicy.TerminateFirst,
                 invocation.StallTimeout, invocation.Transcript);
             var first = true;
+            IRunningProcess? process = null;
             var exit = await Run(spec, cancel, e =>
             {
                 if (first)
@@ -98,9 +99,9 @@ public sealed class MakemkvTool
                 also?.Invoke(e);
                 sink.Event(e);
                 return accumulator.StopReason is null ? null : StopReason.Policy;
-            }).ConfigureAwait(false);
+            }, started => process = started).ConfigureAwait(false);
             var outcome = RunOutcome.Classify(accumulator, exit, product, destination is null ? Array.Empty<string>() : NewNames(destination, before!));
-            return new MakemkvRun(outcome, accumulator.Problem, accumulator.LibreDrive, accumulator.MakemkvVersion);
+            return new MakemkvRun(outcome, accumulator.Problem, accumulator.LibreDrive, accumulator.MakemkvVersion, process?.TranscriptProblem());
         }
         finally
         {
@@ -109,8 +110,8 @@ public sealed class MakemkvTool
     }
 
     /// <summary>Feeds the process's lines as robot events; <paramref name="onEvent"/> returns a reason to stop it.</summary>
-    Task<ProcessExit> Run(ProcessSpec spec, CancellationToken cancel, Func<RobotEvent, StopReason?> onEvent) =>
-        ToolRun.Run(_launcher, spec, cancel, line => onEvent(Robot.ParseLine(line.Text) ?? new RobotEvent.Raw(line.Text)));
+    Task<ProcessExit> Run(ProcessSpec spec, CancellationToken cancel, Func<RobotEvent, StopReason?> onEvent, Action<IRunningProcess>? started = null) =>
+        ToolRun.Run(_launcher, spec, cancel, line => onEvent(Robot.ParseLine(line.Text) ?? new RobotEvent.Raw(line.Text)), started);
 
     /// <summary>The names in the destination before the run: none when it isn't there yet.</summary>
     HashSet<string> NamesBefore(string destination)

@@ -28,3 +28,12 @@ bro_running_process_stop (BroRunningProcess *self, BroStopReason reason)
   g_return_if_fail (BRO_IS_RUNNING_PROCESS (self));
   BRO_RUNNING_PROCESS_GET_IFACE (self)->stop (self, reason);
 }
+
+BroBroMessage *
+bro_running_process_transcript_problem (BroRunningProcess *self)
+{
+  g_return_val_if_fail (BRO_IS_RUNNING_PROCESS (self), NULL);
+  if (!BRO_RUNNING_PROCESS_GET_IFACE (self)->transcript_problem)
+    return NULL;
+  return BRO_RUNNING_PROCESS_GET_IFACE (self)->transcript_problem (self);
+}

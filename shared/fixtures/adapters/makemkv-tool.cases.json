@@ -5,7 +5,7 @@
     "MakemkvTool.rip",
     "MakemkvTool.backup"
   ],
-  "description": "MakemkvTool against a scripted launcher (plan §26, 'Adapters'), the same on the three platforms. The launcher emits given.transcript (a file in shared/fixtures) or given.lines, one line at a time, as stdout; when the tool stops it, no more lines come and the process ends with status -1, signal 15 (cancelled when the reason was cancelled); otherwise it ends with given.exitCode, after creating the files given.writes in the destination (a name with / makes its folders; \"\" makes the destination itself a file). given.cancelAfterLines cancels the call's token after that many lines. The isolation is a fake that records prepare / firstOutput / release and gives HOME = <work> (<root>/home) and, with given.profileXml, the profile <work>/profile.mmcp.xml. The locator finds makemkvcon at /opt/makemkvcon unless given.makemkvcon is null. Paths: <root> is an empty temporary folder; given.destination and given.existing are relative to it. The destination folder is created first unless given.destinationExists is false. The run's produced files are the names new in the destination that RunOutcome.products counts; a destination that can't be listed fails the call. expect.arguments, environment, workingDirectory, stopPolicy, stallTimeout and transcriptFile are those of the ProcessSpec; status is RunOutcome's (success, errors, failed, cancelled); errorContains is part of its error rendered in English; errorCode its code; produced the outcome's produced names; error is the code of the failure thrown before anything runs; stopped says whether the tool stopped the process, stopReason why (policy for MakeMKV's space warning and a renumbered drive, cancelled for the caller's token); linesRead how many lines it had read by then.",
+  "description": "MakemkvTool against a scripted launcher (plan §26, 'Adapters'), the same on the three platforms. The launcher emits given.transcript (a file in shared/fixtures) or given.lines, one line at a time, as stdout; when the tool stops it, no more lines come and the process ends with status -1, signal 15 (cancelled when the reason was cancelled); otherwise it ends with given.exitCode, after creating the files given.writes in the destination (a name with / makes its folders; \"\" makes the destination itself a file). given.transcriptFails makes the process report process.noTranscript (expect.transcriptProblem is the run's). given.cancelAfterLines cancels the call's token after that many lines. The isolation is a fake that records prepare / firstOutput / release and gives HOME = <work> (<root>/home) and, with given.profileXml, the profile <work>/profile.mmcp.xml. The locator finds makemkvcon at /opt/makemkvcon unless given.makemkvcon is null. Paths: <root> is an empty temporary folder; given.destination and given.existing are relative to it. The destination folder is created first unless given.destinationExists is false. The run's produced files are the names new in the destination that RunOutcome.products counts; a destination that can't be listed fails the call. expect.arguments, environment, workingDirectory, stopPolicy, stallTimeout and transcriptFile are those of the ProcessSpec; status is RunOutcome's (success, errors, failed, cancelled); errorContains is part of its error rendered in English; errorCode its code; produced the outcome's produced names; error is the code of the failure thrown before anything runs; stopped says whether the tool stopped the process, stopReason why (policy for MakeMKV's space warning and a renumbered drive, cancelled for the caller's token); linesRead how many lines it had read by then.",
   "cases": [
     {
       "id": "scan-drives",
@@ -336,6 +336,32 @@
         "stallTimeout": 600,
         "transcriptFile": "<root>/jobs/1/makemkv.txt",
         "status": "success"
+      }
+    },
+    {
+      "id": "rip-without-its-transcript",
+      "given": {
+        "call": "rip",
+        "source": {
+          "drive": {
+            "index": 0,
+            "device": "/dev/rdisk4"
+          }
+        },
+        "title": "all",
+        "destination": "staging",
+        "transcript": "mkv-rip.txt",
+        "exitCode": 0,
+        "writes": [
+          "title_t00.mkv"
+        ],
+        "transcriptFile": "jobs/1/makemkv.txt",
+        "transcriptFails": true
+      },
+      "expect": {
+        "status": "success",
+        "transcriptProblem": "process.noTranscript",
+        "rule": "a log that couldn't be written is on the run for the job to show"
       }
     },
     {

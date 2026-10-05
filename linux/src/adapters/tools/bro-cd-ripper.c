@@ -93,7 +93,7 @@ bro_cd_ripper_rip (BroCdRipper *self, const char *device, const char *dest, cons
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = stall_minutes > 0;
   spec->stall_timeout.seconds = stall_minutes * 60.0;
-  if (!bro_tool_run (self->launcher, spec, cancel, NULL, raw_line, sink, &exit, error))
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, raw_line, sink, &exit, NULL, error))
     goto out;
   if (exit.cancelled)
     bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);

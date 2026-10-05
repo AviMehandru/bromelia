@@ -59,6 +59,7 @@ typedef enum {
   BRO_MSG_PROCESS_COULD_NOT_START, /* process.couldNotStart */
   BRO_MSG_PROCESS_STALLED, /* process.stalled */
   BRO_MSG_PROCESS_ABANDONED, /* process.abandoned */
+  BRO_MSG_PROCESS_NO_TRANSCRIPT, /* process.noTranscript */
   BRO_MSG_PROCESS_FAILED, /* process.failed */
   BRO_MSG_PROCESS_SAVED_NOTHING, /* process.savedNothing */
   BRO_MSG_PROCESS_EXIT_STATUS, /* process.exitStatus */
