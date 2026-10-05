@@ -40,6 +40,7 @@ struct PlatformDriveControlTests {
                         }
                     } catch let error as BroError {
                         try Fixtures.same(expect["error"]?.string, error.code, "error")
+                        if let size = expect["size"] { try Fixtures.same(size, JsonValue.object(error.params)["size"] ?? .null, "size") }
                     }
                 } else if let probe = given["probeContent"]?.string {
                     try Fixtures.same(expect["content"]!.string!, drives.probeContent(Fixtures.url(probe).path).rawValue, "content")
@@ -55,5 +56,17 @@ struct PlatformDriveControlTests {
             }
         }
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
+    }
+
+    /// Something that is neither a file nor a disk (a folder) has no size to read: drive.sizeUnknown, never 0 sectors.
+    @Test func noSizeIsAnError() {
+        let drives = PlatformDriveControl(launcher: PlatformProcessLauncher(), clock: SystemClock())
+        do throws(BroError) {
+            let reader = try drives.openRaw(NSTemporaryDirectory())
+            reader.close()
+            Issue.record("opened a folder")
+        } catch {
+            #expect(error.code == MessageCode.driveSizeUnknown.rawValue)
+        }
     }
 }

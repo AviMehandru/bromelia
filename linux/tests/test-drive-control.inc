@@ -18,9 +18,14 @@ drive_control_case (const char *id, BroJsonValue *given, BroJsonValue *expect, G
       BroJsonValue *reads = bro_json_value_member (expect, "reads");
       if (!reader)
         {
+          BroJsonValue *size = bro_json_value_member (expect, "size");
           bro_test_same_string (failures, id, "error", bro_json_value_get_string (bro_json_value_member (expect, "error"), NULL), error->code);
+          if (size)
+            bro_test_same_json (failures, id, "size", size, bro_json_value_member (error->params, "size"));
           return TRUE;
         }
+      if (bro_json_value_member (expect, "error"))
+        bro_test_fail (failures, id, "expected an error");
       if (bro_sector_reader_sector_count (reader, NULL) != bro_json_value_get_integer (bro_json_value_member (expect, "sectorCount"), -1))
         bro_test_fail (failures, id, "sectorCount");
       for (guint i = 0; i < bro_json_value_length (reads); i++)
@@ -67,6 +72,21 @@ static void
 test_drive_control (void)
 {
   bro_test_run_cases ("adapters/drive-control.cases.json", drive_control_case);
+}
+
+/* Something that is neither a file nor a block device (a folder) has no size to read: drive.sizeUnknown, never 0
+ * sectors. */
+static void
+test_drive_control_no_size (void)
+{
+  g_autoptr (BroPlatformProcessLauncher) launcher = bro_platform_process_launcher_new ();
+  g_autoptr (BroSystemClock) clock = bro_system_clock_new ();
+  g_autoptr (BroPlatformDriveControl) drives = bro_platform_drive_control_new (BRO_PROCESS_LAUNCHER (launcher), BRO_CLOCK (clock));
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (BroSectorReader) reader = bro_platform_drive_control_open_raw (drives, g_get_tmp_dir (), &error);
+  g_assert_null (reader);
+  g_assert_nonnull (error);
+  g_assert_cmpstr (error->code, ==, "drive.sizeUnknown");
 }
 
 /* Each empty optical drive here (the Ubuntu VM's virtual one): unknown content, never mounted within a second. */

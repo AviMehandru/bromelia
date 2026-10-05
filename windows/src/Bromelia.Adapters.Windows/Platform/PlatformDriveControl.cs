@@ -86,16 +86,28 @@ public sealed class PlatformDriveControl : IDriveControl
         var isDevice = path != device.Trim();
         if (!isDevice && !File.Exists(path))
             throw new BroFailure(new BroMessage(MessageCode.FsNotFound, Severity.Error, ("path", JsonValue.Of(path))).ToError());
-        try
-        {
-            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1, FileOptions.None);
-            long bytes = isDevice ? DiskLength(stream.SafeFileHandle) : stream.Length;
-            return new RawReader(stream, path, bytes / Sector);
-        }
+        FileStream stream;
+        try { stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1, FileOptions.None); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             throw Failed("open", path, e.Message);
         }
+        long bytes;
+        try { bytes = isDevice ? DiskLength(stream.SafeFileHandle) : stream.Length; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            stream.Dispose();
+            throw new BroFailure(new BroMessage(MessageCode.DriveSizeUnknown, Severity.Error, ("path", JsonValue.Of(path)),
+                ("reason", JsonValue.Of(e.Message))).ToError());
+        }
+        // A partial last sector would be left out of every image.
+        if (bytes % Sector != 0)
+        {
+            stream.Dispose();
+            throw new BroFailure(new BroMessage(MessageCode.DrivePartialSector, Severity.Error, ("path", JsonValue.Of(path)),
+                ("size", JsonValue.Of(bytes))).ToError());
+        }
+        return new RawReader(stream, path, bytes / Sector);
     }
 
     static BroFailure Failed(string operation, string path, string reason) =>

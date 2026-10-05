@@ -11,6 +11,7 @@ final class FakeDisc: SectorReader, @unchecked Sendable {
     private let lock = NSLock()
     var sectors: Int64 = 0
     var unreadable: Set<Int64> = []
+    var sizeFails = false
     var afterRead: (@Sendable (Int) -> Void)?
     private(set) var reads = 0
     private(set) var closed = false
@@ -29,7 +30,12 @@ final class FakeDisc: SectorReader, @unchecked Sendable {
         return data
     }
 
-    func sectorCount() throws(BroError) -> Int64 { sectors }
+    func sectorCount() throws(BroError) -> Int64 {
+        if sizeFails {
+            throw BroMessage(.driveSizeUnknown, [("path", .string("/dev/sr0")), ("reason", .string("Inappropriate ioctl for device"))], severity: .error).toError()
+        }
+        return sectors
+    }
     func close() { lock.withLock { closed = true } }
 }
 
@@ -67,6 +73,7 @@ final class FakeDriveControl: DriveControl, @unchecked Sendable {
                 let cancel = CancellationToken()
                 let disc = FakeDisc()
                 disc.sectors = given["sectors"]!.int!
+                disc.sizeFails = given["sizeFails"]?.bool == true
                 disc.unreadable = Set((given["unreadable"]?.array ?? []).map { $0.int! })
                 if let after = given["cancelAfterChunks"]?.int { disc.afterRead = { n in if n == Int(after) { cancel.cancel() } } }
                 let drives = FakeDriveControl()

@@ -196,6 +196,8 @@ typedef enum {
   BRO_MSG_DRIVE_NOT_FOUND, /* drive.notFound */
   BRO_MSG_DRIVE_NO_DISC, /* drive.noDisc */
   BRO_MSG_DRIVE_BUSY, /* drive.busy */
+  BRO_MSG_DRIVE_SIZE_UNKNOWN, /* drive.sizeUnknown */
+  BRO_MSG_DRIVE_PARTIAL_SECTOR, /* drive.partialSector */
   BRO_MSG_EPISODES_READING_MENUS, /* episodes.readingMenus */
   BRO_MSG_EPISODES_CANNOT_OPEN_VIDEO_TS, /* episodes.cannotOpenVideoTs */
   BRO_MSG_EPISODES_PLAN, /* episodes.plan */
@@ -334,6 +336,7 @@ typedef enum {
   BRO_MSG_OTHER_COPYING_DATA, /* other.copyingData */
   BRO_MSG_OTHER_IMAGE_CHECK_FAILED, /* other.imageCheckFailed */
   BRO_MSG_OTHER_READ_ERROR, /* other.readError */
+  BRO_MSG_OTHER_EMPTY_DISC, /* other.emptyDisc */
   BRO_MSG_SESSION_OPENING, /* session.opening */
   BRO_MSG_SESSION_NO_TITLES_HERE, /* session.noTitlesHere */
   BRO_MSG_SESSION_NO_TITLES, /* session.noTitles */

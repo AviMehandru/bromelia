@@ -319,14 +319,36 @@ bro_platform_drive_control_open_raw (BroPlatformDriveControl *self, const char *
     }
   if (fstat (fd, &st) == 0 && S_ISREG (st.st_mode))
     bytes = st.st_size;
-#ifdef __linux__
   else
     {
+      int code = ENOTSUP;
+#ifdef __linux__
       guint64 size = 0;
       if (ioctl (fd, BLKGETSIZE64, &size) == 0)
-        bytes = (gint64) size;
-    }
+        code = 0, bytes = (gint64) size;
+      else
+        code = errno;
 #endif
+      if (code)
+        {
+          BroJsonValue *params = bro_json_value_new_object ();
+          bro_json_value_set (params, "path", bro_json_value_new_string (device));
+          bro_json_value_set (params, "reason", bro_json_value_new_string (g_strerror (code)));
+          bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_DRIVE_SIZE_UNKNOWN), params);
+          close (fd);
+          return NULL;
+        }
+    }
+  /* A partial last sector would be left out of every image. */
+  if (bytes % SECTOR != 0)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "path", bro_json_value_new_string (device));
+      bro_json_value_set (params, "size", bro_json_value_new_integer (bytes));
+      bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_DRIVE_PARTIAL_SECTOR), params);
+      close (fd);
+      return NULL;
+    }
   reader = g_object_new (BRO_TYPE_RAW_READER, NULL);
   reader->fd = fd;
   reader->path = g_strdup (device);

@@ -5,7 +5,8 @@ import Foundation
 
 /// Data discs to ISO images (plan §10.1; shared/fixtures/adapters/data-imager.cases.json): every sector of
 /// DriveControl.openRaw, 1 MiB at a time, into a hidden file that becomes the image only once every sector was read.
-/// A read error names the first byte that can't be read (other.readError).
+/// A read error names the first byte that can't be read (other.readError); a disc with no sectors is other.emptyDisc, never
+/// an empty image.
 public final class DataImager: Sendable {
     private static let sector = 2048, chunk = 512, max = 10000
     private let drives: any DriveControl
@@ -39,6 +40,7 @@ public final class DataImager: Sendable {
             if !done { unlink(part) }
         }
         let total = try reader.sectorCount()
+        guard total > 0 else { throw BroError(MessageCode.otherEmptyDisc.rawValue) }
         var copied: Int64 = 0
         let fd = open(part, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o644)
         guard fd >= 0 else { throw failed(part, String(cString: strerror(errno))) }

@@ -1,5 +1,5 @@
 {
-  "description": "DataImager (plan §10.1): copy(device, destIso, sink, cancel) copies every sector of DriveControl.openRaw(device) to destIso, 512 sectors (1 MiB) at a time, and returns the bytes copied. It writes a hidden file next to destIso ('.<name>.part-…'), flushes it, and renames it to destIso only when every sector was read: a failed or cancelled copy leaves nothing behind. A chunk that can't be read is read again sector by sector, so the error names the first byte that can't be read: other.readError {offset, reason (the reader's)}. destIso already there: fs.alreadyExists {path}, before anything is read. Cancelled: job.cancelled. Progress after each chunk: ProgressValue(current = total = sectors done × 10000 / all sectors, max 10000). The fake disc: 'sectors' sectors, byte i of the disc is (i / 2048 + i) mod 256; 'unreadable' sectors fail; 'cancelAfterChunks' cancels after that many chunks are written; 'openFails' makes openRaw fail with drive.notFound. 'left' lists the destination folder afterwards.",
+  "description": "DataImager (plan §10.1): copy(device, destIso, sink, cancel) copies every sector of DriveControl.openRaw(device) to destIso, 512 sectors (1 MiB) at a time, and returns the bytes copied. It writes a hidden file next to destIso ('.<name>.part-…'), flushes it, and renames it to destIso only when every sector was read: a failed or cancelled copy leaves nothing behind. A chunk that can't be read is read again sector by sector, so the error names the first byte that can't be read: other.readError {offset, reason (the reader's)}. destIso already there: fs.alreadyExists {path}, before anything is read. Cancelled: job.cancelled. Progress after each chunk: ProgressValue(current = total = sectors done × 10000 / all sectors, max 10000). The fake disc: 'sectors' sectors, byte i of the disc is (i / 2048 + i) mod 256; 'unreadable' sectors fail; 'cancelAfterChunks' cancels after that many chunks are written; 'openFails' makes openRaw fail with drive.notFound; 'sizeFails' makes sectorCount fail with drive.sizeUnknown. A disc with no sectors is other.emptyDisc, never an empty image. 'left' lists the destination folder afterwards.",
   "cases": [
     {
       "id": "copy",
@@ -110,6 +110,33 @@
           "code": "drive.notFound"
         },
         "left": []
+      }
+    },
+    {
+      "id": "the-size-cant-be-read",
+      "given": {
+        "sectors": 10,
+        "sizeFails": true
+      },
+      "expect": {
+        "error": {
+          "code": "drive.sizeUnknown"
+        },
+        "left": [],
+        "closed": true
+      }
+    },
+    {
+      "id": "no-sectors",
+      "given": {
+        "sectors": 0
+      },
+      "expect": {
+        "error": {
+          "code": "other.emptyDisc"
+        },
+        "left": [],
+        "closed": true
       }
     }
   ]

@@ -10,7 +10,8 @@ namespace Bromelia.Adapters;
 
 /// <summary>Data discs to ISO images (plan §10.1; shared/fixtures/adapters/data-imager.cases.json): every sector of
 /// DriveControl.OpenRaw, 1 MiB at a time, into a hidden file that becomes the image only once every sector was read.
-/// A read error names the first byte that can't be read (other.readError).</summary>
+/// A read error names the first byte that can't be read (other.readError); a disc with no sectors is other.emptyDisc,
+/// never an empty image.</summary>
 public sealed class DataImager
 {
     const int Sector = 2048;
@@ -40,6 +41,7 @@ public sealed class DataImager
         try
         {
             long total = reader.SectorCount(), copied = 0;
+            if (total <= 0) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.OtherEmptyDisc)));
             using (var file = new FileStream(part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20))
             {
                 while (copied < total)

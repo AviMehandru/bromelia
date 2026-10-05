@@ -1,5 +1,5 @@
 {
-  "description": "PlatformDriveControl (plan §10.3), the parts that need no disc: openRaw over a disc image file (a drive's raw device is read the same way, in whole 2048-byte sectors): sectorCount is its size / 2048; read(sector, count) gives fewer bytes at the end and none past it; a path that isn't there: fs.notFound {path}. probeContent of something that isn't a drive: unknown. waitForMount of something that isn't a drive: none, at once (within 5 s whatever the timeout). eject and closeTray need a drive with a disc (owner check); on the test VMs' empty virtual drives probeContent is unknown and waitForMount none.",
+  "description": "PlatformDriveControl (plan §10.3), the parts that need no disc: openRaw over a disc image file (a drive's raw device is read the same way, in whole 2048-byte sectors): sectorCount is its size / 2048; read(sector, count) gives fewer bytes at the end and none past it; a path that isn't there: fs.notFound {path}; a size that isn't a whole number of sectors: drive.partialSector {path, size} (the tail would be lost); a size that can't be read (a device that isn't a disc, such as /dev/null): drive.sizeUnknown {path, reason}, tested natively on macOS and Linux. probeContent of something that isn't a drive: unknown. waitForMount of something that isn't a drive: none, at once (within 5 s whatever the timeout). eject and closeTray need a drive with a disc (owner check); on the test VMs' empty virtual drives probeContent is unknown and waitForMount none.",
   "cases": [
     {
       "id": "raw-reads-of-an-image",
@@ -40,6 +40,16 @@
       },
       "expect": {
         "error": "fs.notFound"
+      }
+    },
+    {
+      "id": "an-image-with-a-partial-sector",
+      "given": {
+        "openRaw": "adapters/partial-sector.img"
+      },
+      "expect": {
+        "error": "drive.partialSector",
+        "size": 2049
       }
     },
     {
