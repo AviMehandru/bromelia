@@ -7,7 +7,8 @@ import Darwin
 import Foundation
 import Testing
 
-/// A tiny HTTP/1.1 server on 127.0.0.1 with the routes of http-client.cases.json: /echo, /status/n, /slow.
+/// A tiny HTTP/1.1 server on 127.0.0.1 with the routes of http-client.cases.json: /echo, /status/n, /slow,
+/// /redirect/path, /redirect-to-localhost/path, /big/n.
 final class TestHttpServer: @unchecked Sendable {
     let fd: Int32
     let port: UInt16
@@ -61,12 +62,13 @@ final class TestHttpServer: @unchecked Sendable {
         }
         let lines = String(decoding: head, as: UTF8.self).components(separatedBy: "\r\n")
         let parts = lines[0].split(separator: " ").map(String.init)
-        var header: String?
+        var header: String?, host = ""
         var length = 0
         for l in lines.dropFirst() {
             guard let i = l.firstIndex(of: ":") else { continue }
             let name = l[..<i].trimmingCharacters(in: .whitespaces).lowercased(), value = l[l.index(after: i)...].trimmingCharacters(in: .whitespaces)
             if name == "x-test" { header = value }
+            if name == "host" { host = value }
             if name == "content-length" { length = Int(value) ?? 0 }
         }
         var body = [UInt8](repeating: 0, count: length)
@@ -79,7 +81,29 @@ final class TestHttpServer: @unchecked Sendable {
         func json(_ s: String) -> String { String(decoding: JsonValue.encodeCanonical(.string(s)), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) }
         var status = 200
         var text: String
-        if parts[1] == "/echo" {
+        var location: String?
+        if parts[1].hasPrefix("/big/") {
+            let n = Int(parts[1].dropFirst("/big/".count)) ?? 0
+            let head = Array("HTTP/1.1 200 X\r\nContent-Length: \(n)\r\nConnection: close\r\n\r\n".utf8)
+            _ = head.withUnsafeBytes { write(c, $0.baseAddress, $0.count) }
+            let x = [UInt8](repeating: UInt8(ascii: "x"), count: 65536)
+            var sent = 0
+            while sent < n {
+                let w = x.withUnsafeBytes { write(c, $0.baseAddress, min(x.count, n - sent)) }
+                if w <= 0 { break }
+                sent += w
+            }
+            return
+        }
+        if parts[1].hasPrefix("/redirect/") {
+            status = 302
+            location = "/" + parts[1].dropFirst("/redirect/".count)
+            text = "moved"
+        } else if parts[1].hasPrefix("/redirect-to-localhost/") {
+            status = 302
+            location = "http://localhost:\(host.split(separator: ":").last ?? "")/" + parts[1].dropFirst("/redirect-to-localhost/".count)
+            text = "moved"
+        } else if parts[1] == "/echo" {
             text = "{\"method\":\(json(parts[0])),\"path\":\"/echo\",\"header\":\(header.map(json) ?? "null"),\"body\":\(json(String(decoding: body, as: UTF8.self)))}"
         } else if parts[1].hasPrefix("/status/") {
             status = Int(parts[1].dropFirst("/status/".count)) ?? 500
@@ -89,7 +113,7 @@ final class TestHttpServer: @unchecked Sendable {
             text = "slow"
         }
         let bytes = Array(text.utf8)
-        let response = Array("HTTP/1.1 \(status) X\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n".utf8) + bytes
+        let response = Array("HTTP/1.1 \(status) X\r\n\(location.map { "Location: \($0)\r\n" } ?? "")Content-Length: \(bytes.count)\r\nConnection: close\r\n\r\n".utf8) + bytes
         _ = response.withUnsafeBytes { write(c, $0.baseAddress, $0.count) }
     }
 }
@@ -151,8 +175,10 @@ struct MapLocator: ToolLocator {
                     try Fixtures.same(expect["status"]?.int, Int64(response.status), "status")
                     if let json = expect["json"] { try Fixtures.same(json, JsonValue.parse(response.body) ?? .null, "json") }
                     if let text = expect["text"]?.string { try Fixtures.same(text, String(decoding: response.body, as: UTF8.self), "text") }
+                    if let length = expect["length"]?.int { try Fixtures.same(Int(length), response.body.count, "length") }
                 } catch let error as BroError {
                     try Fixtures.same(expect["error"]?.string, error.code, "error")
+                    if let secret = expect["reasonLacks"]?.string { try Fixtures.check(!"\(error)".contains(secret), "the error quotes the URL") }
                 }
                 if let within = expect["within"]?.double { try Fixtures.check(Date().timeIntervalSince(start) < within, "within \(within) s") }
             } catch {

@@ -1,7 +1,9 @@
 /* bro-platform-http-client.h: BroPlatformHttpClient: HttpClient on libsoup 3 (plan §6, §9;
  * shared/fixtures/adapters/http-client.cases.json). Any status is an answer; no answer is http.failed with the
- * system's reason; a cancelled call is job.cancelled. Follows redirects, gives up after the timeout (60 s), and says
- * User-Agent: Bromelia unless the request sets one. Synchronous: call it from a worker thread (plan §6). Built only
+ * system's reason; a cancelled call is job.cancelled. Follows redirects within the same origin only (the same host and
+ * port; http to https on the same host too): a redirect elsewhere is the answer, so a request's headers (an API key)
+ * never go to a host the request didn't name. Bodies are read up to 16 MiB; a larger one is http.failed. Gives up
+ * after the timeout (60 s), and says User-Agent: Bromelia unless the request sets one. Errors never quote the URL. Synchronous: call it from a worker thread (plan §6). Built only
  * where libsoup 3 is found (always on Linux). */
 #pragma once
 
