@@ -112,6 +112,8 @@ public sealed class HttpAdaptersTests
             {
                 var spec = launcher.Started.Single();
                 Assert.Equal(argv.AsArray!.Select(a => a.AsString), new[] { spec.Executable }.Concat(spec.Arguments));
+                Assert.Equal(expect["appriseEnvironment"]!.AsObject!.Select(m => m.Key + "=" + m.Value.AsString),
+                    spec.Environment.OrderBy(kv => kv.Key).Select(kv => kv.Key + "=" + kv.Value));
             }
             return true;
         });

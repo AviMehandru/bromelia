@@ -2217,9 +2217,12 @@ test_command_cases (void)
 static void
 test_other_tool_arguments (void)
 {
-  g_auto (GStrv) apprise = bro_apprise_args_build ("tgram://bot/chat", "T", "B");
-  const char *want_apprise[] = { "-t", "T", "-b", "B", "tgram://bot/chat", NULL };
+  g_auto (GStrv) apprise = bro_apprise_args_build ("T", "B");
+  const char *want_apprise[] = { "-t", "T", "-b", "B", NULL };
+  g_autoptr (GHashTable) apprise_env = bro_apprise_args_environment ("tgram://bot/chat");
   g_assert_true (g_strv_equal ((const char *const *) apprise, want_apprise));
+  g_assert_cmpuint (g_hash_table_size (apprise_env), ==, 1);
+  g_assert_cmpstr (g_hash_table_lookup (apprise_env, "APPRISE_URLS"), ==, "tgram://bot/chat");
   g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
   const char *both[] = { "abcde", "cyanrip", NULL }, *abcde[] = { "abcde", NULL }, *nothing[] = { NULL };
   g_autoptr (BroCommandLine) cyanrip = bro_cd_ripper_args_build (none, "/dev/sr0", both);

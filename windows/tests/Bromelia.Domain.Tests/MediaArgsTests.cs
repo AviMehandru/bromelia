@@ -145,7 +145,8 @@ public class MediaArgsTests
     [Fact]
     public void OtherToolArguments()
     {
-        Assert.Equal(new[] { "-t", "T", "-b", "B", "tgram://bot/chat" }, AppriseArgs.Build("tgram://bot/chat", "T", "B"));
+        Assert.Equal(new[] { "-t", "T", "-b", "B" }, AppriseArgs.Build("T", "B"));
+        Assert.Equal(new Dictionary<string, string> { ["APPRISE_URLS"] = "tgram://bot/chat" }, AppriseArgs.Environment("tgram://bot/chat"));
         var none = JsonValue.Of();
         Assert.Equal(new CommandLine("cyanrip", new[] { "-d", "/dev/sr0", "-o", "flac" }).Arguments,
             CdRipperArgs.Build(none, "/dev/sr0", new[] { "abcde", "cyanrip" })!.Arguments);

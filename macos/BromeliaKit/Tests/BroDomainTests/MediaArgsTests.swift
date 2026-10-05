@@ -138,7 +138,8 @@ struct MediaArgsTests {
     }
 
     @Test func otherToolArguments() throws {
-        #expect(AppriseArgs.build("tgram://bot/chat", title: "T", body: "B") == ["-t", "T", "-b", "B", "tgram://bot/chat"])
+        #expect(AppriseArgs.build("T", body: "B") == ["-t", "T", "-b", "B"])
+        #expect(AppriseArgs.environment("tgram://bot/chat") == ["APPRISE_URLS": "tgram://bot/chat"])
         let none = JsonValue.object([])
         #expect(CdRipperArgs.build(none, device: "/dev/sr0", available: ["abcde", "cyanrip"])?.arguments == ["-d", "/dev/sr0", "-o", "flac"])
         #expect(CdRipperArgs.build(none, device: "/dev/sr0", available: ["abcde"])?.executable == "abcde")

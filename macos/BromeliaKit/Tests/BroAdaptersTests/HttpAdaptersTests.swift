@@ -193,6 +193,8 @@ struct MapLocator: ToolLocator {
                 if let argv = expect["apprise"]?.array {
                     let spec = launcher.started.first
                     try Fixtures.same(argv.map { $0.string! }, spec.map { [$0.executable] + $0.arguments }, "apprise")
+                    let env = (expect["appriseEnvironment"]?.members ?? []).map { "\($0.key)=\($0.value.string!)" }
+                    try Fixtures.same(env, (spec?.environment ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }, "appriseEnvironment")
                 }
             } catch {
                 failures.append("\(c["id"]!.string!): \(error)")

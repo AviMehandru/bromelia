@@ -4911,14 +4911,23 @@
         {
           "name": "AppriseArgs.build",
           "params": [
-            "url",
             "title",
             "body"
           ],
           "returns": "[String]",
-          "swift": "AppriseArgs.build(_:title:body:)",
+          "swift": "AppriseArgs.build(_:body:)",
           "cs": "AppriseArgs.Build",
           "c": "bro_apprise_args_build"
+        },
+        {
+          "name": "AppriseArgs.environment",
+          "params": [
+            "url"
+          ],
+          "returns": "[String: String]",
+          "swift": "AppriseArgs.environment(_:)",
+          "cs": "AppriseArgs.Environment",
+          "c": "bro_apprise_args_environment"
         },
         {
           "name": "CommandArgs.build",

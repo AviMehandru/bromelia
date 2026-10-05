@@ -308,6 +308,16 @@ notification_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GP
       g_autofree char *args = spec ? g_strjoinv ("|", spec->arguments) : NULL;
       g_autofree char *got = spec ? g_strconcat (spec->executable, "|", args, NULL) : NULL;
       bro_test_same_string (failures, id, "apprise", want_argv, got);
+      {
+        BroJsonValue *env = bro_json_value_member (expect, "appriseEnvironment");
+        g_autoptr (GString) want_env = g_string_new (NULL), got_env = g_string_new (NULL);
+        g_autoptr (GList) keys = spec ? g_list_sort (g_hash_table_get_keys (spec->environment), (GCompareFunc) strcmp) : NULL;
+        for (guint i = 0; i < bro_json_value_length (env); i++)
+          g_string_append_printf (want_env, "%s=%s;", (char *) env->keys->pdata[i], bro_json_value_get_string (bro_json_value_at (env, i), ""));
+        for (GList *k = keys; k; k = k->next)
+          g_string_append_printf (got_env, "%s=%s;", (char *) k->data, (char *) g_hash_table_lookup (spec->environment, k->data));
+        bro_test_same_string (failures, id, "appriseEnvironment", want_env->str, got_env->str);
+      }
     }
   return TRUE;
 }
