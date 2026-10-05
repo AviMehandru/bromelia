@@ -44,19 +44,17 @@ public sealed class HandBrake
     {
         if (_locator.Locate(ToolKind.Handbrake).Path is not { } exe) return BuiltInPresets;
         if (cancel.IsCancelled) throw Cancelled();
-        var process = _launcher.Start(new ProcessSpec(exe, new[] { "--preset-list" }, new Dictionary<string, string>(), null,
-            StopPolicy.InterruptFirst, new Duration(60)));
-        using var onCancel = cancel.OnCancel(() => process.Stop(StopReason.Cancelled));
         var names = new List<string>();
         var inCategory = false;
-        await foreach (var line in process.Lines().ConfigureAwait(false))
+        var exit = await ToolRun.Run(_launcher, new ProcessSpec(exe, new[] { "--preset-list" }, new Dictionary<string, string>(), null,
+            StopPolicy.InterruptFirst, new Duration(60)), cancel, line =>
         {
             var text = line.Text;
             if (text[0] != ' ') inCategory = text.EndsWith('/'); // a category, or anything else at column 0
             else if (inCategory && text.Length > 4 && text.StartsWith("    ", StringComparison.Ordinal) && text[4] != ' ')
                 names.Add(text.Substring(4).TrimEnd());
-        }
-        var exit = await process.Wait().ConfigureAwait(false);
+            return null;
+        }).ConfigureAwait(false);
         if (exit.Cancelled) throw Cancelled();
         return exit.Status == 0 && names.Count > 0 ? names : BuiltInPresets;
     }
@@ -67,13 +65,11 @@ public sealed class HandBrake
     {
         var exe = Executable(step);
         if (cancel.IsCancelled) throw Cancelled();
-        var process = _launcher.Start(new ProcessSpec(exe, HandBrakeArgs.Build(step, input, output, _home), new Dictionary<string, string>(),
-            Path.GetDirectoryName(output), StopPolicy.InterruptFirst));
-        using var onCancel = cancel.OnCancel(() => process.Stop(StopReason.Cancelled));
         var timedOut = 0;
         ITimerHandle? timer = null;
-        if (step.TimeoutSeconds > 0)
+        void Started(IRunningProcess process)
         {
+            if (step.TimeoutSeconds <= 0) return;
             var at = new Instant(_clock.Now().UnixMilliseconds + step.TimeoutSeconds * 1000L);
             timer = _clock.Timer(new TimerSchedule.At(at), () =>
             {
@@ -84,12 +80,13 @@ public sealed class HandBrake
         try
         {
             var filter = new ProgressFilter(0, 0);
-            await foreach (var line in process.Lines().ConfigureAwait(false))
+            var exit = await ToolRun.Run(_launcher, new ProcessSpec(exe, HandBrakeArgs.Build(step, input, output, _home), new Dictionary<string, string>(),
+                Path.GetDirectoryName(output), StopPolicy.InterruptFirst), cancel, line =>
             {
                 if (ProgressOf(line.Text) is { } p) sink.Event(new RobotEvent.ProgressValue(p.Current, p.Total, Max));
                 if (HandBrakeArgs.KeepLine(ref filter, line.Text)) sink.Event(new RobotEvent.Raw(line.Text));
-            }
-            var exit = await process.Wait().ConfigureAwait(false);
+                return null;
+            }, Started).ConfigureAwait(false);
             if (exit.Cancelled) throw Cancelled();
             return new HandBrakeRun(exit, Volatile.Read(ref timedOut) == 1);
         }

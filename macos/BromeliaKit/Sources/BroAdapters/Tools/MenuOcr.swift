@@ -58,13 +58,12 @@ public final class MenuOcr: Sendable {
 
     private func run(_ exe: String, _ arguments: [String], _ cancel: CancellationToken) async throws(BroError) -> (ProcessExit, [String]) {
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
-        let process = try launcher.start(ProcessSpec(executable: exe, arguments: arguments, environment: [:], stopPolicy: .interruptFirst,
-                                                     stallTimeout: Duration(seconds: 60)))
-        let remove = cancel.onCancel { process.stop(.cancelled) }
-        defer { remove() }
         var lines: [String] = []
-        for await line in process.lines() where line.stream == .stdout { lines.append(line.text) }
-        let exit = await process.wait()
+        let exit = try await ToolRun.run(launcher, ProcessSpec(executable: exe, arguments: arguments, environment: [:], stopPolicy: .interruptFirst,
+                                                               stallTimeout: Duration(seconds: 60)), cancel: cancel) { line in
+            if line.stream == .stdout { lines.append(line.text) }
+            return nil
+        }
         if exit.cancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         return (exit, lines)
     }

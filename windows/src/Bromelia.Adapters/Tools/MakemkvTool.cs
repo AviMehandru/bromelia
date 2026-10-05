@@ -97,7 +97,7 @@ public sealed class MakemkvTool
                 accumulator.Feed(e);
                 also?.Invoke(e);
                 sink.Event(e);
-                return accumulator.StopReason is null ? null : StopReason.Cancelled;
+                return accumulator.StopReason is null ? null : StopReason.Policy;
             }).ConfigureAwait(false);
             var outcome = RunOutcome.Classify(accumulator, exit, product, destination is null ? Array.Empty<string>() : NewNames(destination, before!));
             return new MakemkvRun(outcome, accumulator.Problem, accumulator.LibreDrive, accumulator.MakemkvVersion);
@@ -108,24 +108,9 @@ public sealed class MakemkvTool
         }
     }
 
-    /// <summary>Starts the process and feeds it line by line; <paramref name="onEvent"/> returns a reason to stop it
-    /// (once). Cancelling the token stops it too.</summary>
-    async Task<ProcessExit> Run(ProcessSpec spec, CancellationToken cancel, Func<RobotEvent, StopReason?> onEvent)
-    {
-        var process = _launcher.Start(spec);
-        using var onCancel = cancel.OnCancel(() => process.Stop(StopReason.Cancelled));
-        var stopped = false;
-        await foreach (var line in process.Lines().ConfigureAwait(false))
-        {
-            var e = Robot.ParseLine(line.Text) ?? new RobotEvent.Raw(line.Text);
-            if (onEvent(e) is { } reason && !stopped)
-            {
-                stopped = true;
-                process.Stop(reason);
-            }
-        }
-        return await process.Wait().ConfigureAwait(false);
-    }
+    /// <summary>Feeds the process's lines as robot events; <paramref name="onEvent"/> returns a reason to stop it.</summary>
+    Task<ProcessExit> Run(ProcessSpec spec, CancellationToken cancel, Func<RobotEvent, StopReason?> onEvent) =>
+        ToolRun.Run(_launcher, spec, cancel, line => onEvent(Robot.ParseLine(line.Text) ?? new RobotEvent.Raw(line.Text)));
 
     /// <summary>The names in the destination before the run: none when it isn't there yet.</summary>
     HashSet<string> NamesBefore(string destination)

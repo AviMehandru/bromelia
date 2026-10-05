@@ -4,6 +4,7 @@
 #include "bro-cell-ref.h"
 #include "bro-menu-numbers.h"
 #include "bro-message-code.h"
+#include "bro-tool-run.h"
 
 #define SECTOR G_GINT64_CONSTANT (2048)
 
@@ -16,10 +17,13 @@ struct _BroMenuOcr {
 
 G_DEFINE_FINAL_TYPE (BroMenuOcr, bro_menu_ocr, G_TYPE_OBJECT)
 
-static void
-stop_process (gpointer process, gpointer unused)
+/* The stdout lines, joined with newlines. */
+static gboolean
+join_stdout (const BroOutputLine *line, gpointer out, BroStopReason *reason)
 {
-  bro_running_process_stop (process, BRO_STOP_REASON_CANCELLED);
+  if (line->stream == BRO_OUTPUT_SOURCE_STDOUT)
+    g_string_append_printf (out, "%s%s", ((GString *) out)->len ? "\n" : "", line->text);
+  return FALSE;
 }
 
 static char *
@@ -49,10 +53,7 @@ run (BroMenuOcr *self, const char *exe, const char *const *arguments, BroCancell
      BroBroError **error)
 {
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
   g_autoptr (GString) out = g_string_new (NULL);
-  BroOutputLine *line;
-  guint handler = 0;
   if (cancel && bro_cancellation_token_is_cancelled (cancel))
     {
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
@@ -65,20 +66,8 @@ run (BroMenuOcr *self, const char *exe, const char *const *arguments, BroCancell
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = 60;
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
+  if (!bro_tool_run (self->launcher, spec, cancel, NULL, join_stdout, out, exit, error))
     return FALSE;
-  if (cancel)
-    handler = bro_cancellation_token_on_cancel (cancel, stop_process, process, NULL);
-  while ((line = bro_running_process_lines (process)) != NULL)
-    {
-      if (line->stream == BRO_OUTPUT_SOURCE_STDOUT)
-        g_string_append_printf (out, "%s%s", out->len ? "\n" : "", line->text);
-      bro_output_line_free (line);
-    }
-  *exit = bro_running_process_wait (process);
-  if (handler)
-    bro_cancellation_token_disconnect (cancel, handler);
   if (exit->cancelled)
     {
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);

@@ -78,12 +78,13 @@ public sealed class MkvToolNix
         var exe = info.Path ?? throw new BroFailure((info.Why ?? new BroMessage(MessageCode.ToolMissing, Severity.Warning,
             ("tool", JsonValue.Of(EnumWire.Name(tool))))).ToError());
         if (cancel.IsCancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
-        var process = _launcher.Start(new ProcessSpec(exe, arguments, new Dictionary<string, string>(), null, StopPolicy.InterruptFirst, stall));
-        using var onCancel = cancel.OnCancel(() => process.Stop(StopReason.Cancelled));
         var lines = new List<string>();
-        await foreach (var line in process.Lines().ConfigureAwait(false))
-            if (line.Stream == OutputSource.Stdout) lines.Add(line.Text);
-        var exit = await process.Wait().ConfigureAwait(false);
+        var exit = await ToolRun.Run(_launcher, new ProcessSpec(exe, arguments, new Dictionary<string, string>(), null, StopPolicy.InterruptFirst, stall),
+            cancel, line =>
+            {
+                if (line.Stream == OutputSource.Stdout) lines.Add(line.Text);
+                return null;
+            }).ConfigureAwait(false);
         if (exit.Cancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
         return (exit, lines);
     }

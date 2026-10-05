@@ -87,7 +87,12 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
 
         public Task<ProcessExit> Wait() => _exit.Task;
 
-        public void Stop(StopReason reason) => _stopped ??= reason;
+        /// <summary>As a real process: it ends when stopped, whether or not anyone reads the rest of its lines.</summary>
+        public void Stop(StopReason reason)
+        {
+            _stopped ??= reason;
+            _exit.TrySetResult(new ProcessExit(-1, 15, null, false, _stopped is StopReason.Cancelled or StopReason.Shutdown));
+        }
     }
 }
 

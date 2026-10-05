@@ -57,13 +57,12 @@ public final class MkvToolNix: Sendable {
             throw (info.why ?? BroMessage(.toolMissing, [("tool", .string(tool.rawValue))], severity: .warning)).toError()
         }
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
-        let process = try launcher.start(ProcessSpec(executable: exe, arguments: arguments, environment: [:], stopPolicy: .interruptFirst,
-                                                     stallTimeout: Duration(seconds: stall)))
-        let remove = cancel.onCancel { process.stop(.cancelled) }
-        defer { remove() }
         var lines: [String] = []
-        for await line in process.lines() where line.stream == .stdout { lines.append(line.text) }
-        let exit = await process.wait()
+        let exit = try await ToolRun.run(launcher, ProcessSpec(executable: exe, arguments: arguments, environment: [:], stopPolicy: .interruptFirst,
+                                                               stallTimeout: Duration(seconds: stall)), cancel: cancel) { line in
+            if line.stream == .stdout { lines.append(line.text) }
+            return nil
+        }
         if exit.cancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         return (exit, lines)
     }

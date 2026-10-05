@@ -39,6 +39,7 @@ bro_adapters_sources = files(
   'tools/bro-mkv-tool-nix.c',
   'tools/bro-run-sink.c',
   'tools/bro-system-tool-locator.c',
+  'tools/bro-tool-run.c',
   'tools/bro-video-ts-byte-source.c',
 )
 

@@ -96,6 +96,7 @@ struct MakemkvToolTests {
         if let tf = expect["transcriptFile"]?.string { try Fixtures.same(tf, spec?.transcript.map(shown), "transcriptFile") }
         if let lease = expect["lease"]?.array { try Fixtures.same(lease.map { $0.string! }, isolation.log, "lease") }
         if let stopped = expect["stopped"]?.bool { try Fixtures.same(stopped, launcher.last?.stopReason != nil, "stopped") }
+        if let why = expect["stopReason"]?.string { try Fixtures.same(why, launcher.last?.stopReason?.rawValue, "stopReason") }
         if let read = expect["linesRead"]?.int { try Fixtures.same(Int(read), launcher.last?.linesHanded, "linesRead") }
         if let want = expect["drives"]?.array {
             try Fixtures.same(want.map { "\($0.array![0].int!) \($0.array![1].string!) \($0.array![2].string!)" },
@@ -115,5 +116,28 @@ struct MakemkvToolTests {
         if let log = expect["debugLog"]?.string { try Fixtures.same(log, run?.outcome.debugLog, "debugLog") }
         if let produced = expect["produced"]?.array { try Fixtures.same(produced.map { $0.string! }, run?.outcome.produced, "produced") }
         if run != nil { try Fixtures.check(sink.events > 0, "the sink heard something") }
+    }
+
+    /// A cancelled task ends the lines early: makemkvcon is stopped before it is waited for, not left running with
+    /// nobody reading it.
+    @Test func aCancelledTaskStopsTheTool() async throws {
+        try? FileManager.default.removeItem(atPath: root)
+        try FileManager.default.createDirectory(atPath: root + "/home", withIntermediateDirectories: true)
+        final class Box: @unchecked Sendable { var task: Task<MakemkvRun?, Never>? }
+        let box = Box()
+        let launcher = ScriptedProcessLauncher()
+        launcher.lines = Array(repeating: "PRGV:1,0,65536", count: 1000)
+        launcher.afterLine = { n in if n == 3 { box.task?.cancel() } }
+        let tool = MakemkvTool(launcher: launcher, fs: PlatformFileSystem(), isolation: RecordingIsolation(), locator: FixedLocator(makemkvcon: "/opt/makemkvcon"))
+        let invocation = MakemkvInvocation(settings: MakemkvRunSettings(settings: [:], dataDir: "/data", workDirectory: root + "/home"), options: MakemkvOptions())
+        let task = Task<MakemkvRun?, Never> {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            return try? await tool.rip(.drive(index: 0, device: "/dev/rdisk4"), title: "all", destination: root + "/staging", invocation: invocation,
+                                       sink: RecordingSink(), cancel: CancellationToken())
+        }
+        box.task = task
+        _ = await task.value
+        #expect(launcher.last?.stopReason == .cancelled)
+        #expect(launcher.last.map { $0.linesHanded < 1000 } == true)
     }
 }

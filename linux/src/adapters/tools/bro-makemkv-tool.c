@@ -6,6 +6,7 @@
 #include "bro-message-code.h"
 #include "bro-robot.h"
 #include "bro-run-accumulator.h"
+#include "bro-tool-run.h"
 #include <string.h>
 
 struct _BroMakemkvTool {
@@ -42,38 +43,35 @@ executable (BroMakemkvTool *self, BroBroError **error)
 /* Called for each event; returns TRUE to stop the process (acted on once). */
 typedef gboolean (*EventFunc) (const BroRobotEvent *event, gpointer data);
 
-static void
-stop_on_cancel (gpointer process, gpointer unused)
+typedef struct {
+  EventFunc func;
+  gpointer data;
+} Feed;
+
+static gboolean
+feed_line (const BroOutputLine *line, gpointer data, BroStopReason *reason)
 {
-  bro_running_process_stop (process, BRO_STOP_REASON_CANCELLED);
+  Feed *f = data;
+  BroRobotEvent *event = bro_robot_parse_line (line->text);
+  gboolean stop;
+  if (!event)
+    {
+      event = bro_robot_event_new (BRO_ROBOT_EVENT_RAW);
+      event->text = g_strdup (line->text);
+    }
+  stop = f->func (event, f->data);
+  bro_robot_event_free (event);
+  *reason = BRO_STOP_REASON_POLICY;
+  return stop;
 }
 
-/* Reads the process line by line until it ends; cancelling @cancel stops it. */
-static BroProcessExit
-feed (BroRunningProcess *process, BroCancellationToken *cancel, EventFunc func, gpointer data)
+/* Runs @spec and feeds its lines to @func as robot events. FALSE and @error set when it can't start. */
+static gboolean
+feed (BroMakemkvTool *self, const BroProcessSpec *spec, BroCancellationToken *cancel, EventFunc func, gpointer data, BroProcessExit *exit,
+      BroBroError **error)
 {
-  guint handler = cancel ? bro_cancellation_token_on_cancel (cancel, stop_on_cancel, process, NULL) : 0;
-  gboolean stopped = FALSE;
-  BroOutputLine *line;
-  while ((line = bro_running_process_lines (process)) != NULL)
-    {
-      BroRobotEvent *event = bro_robot_parse_line (line->text);
-      if (!event)
-        {
-          event = bro_robot_event_new (BRO_ROBOT_EVENT_RAW);
-          event->text = g_strdup (line->text);
-        }
-      if (func (event, data) && !stopped)
-        {
-          stopped = TRUE;
-          bro_running_process_stop (process, BRO_STOP_REASON_CANCELLED);
-        }
-      bro_robot_event_free (event);
-      bro_output_line_free (line);
-    }
-  if (handler)
-    bro_cancellation_token_disconnect (cancel, handler);
-  return bro_running_process_wait (process);
+  Feed f = { func, data };
+  return bro_tool_run (self->launcher, spec, cancel, NULL, feed_line, &f, exit, error);
 }
 
 static gboolean
@@ -90,8 +88,8 @@ bro_makemkv_tool_scan_drives (BroMakemkvTool *self, BroCancellationToken *cancel
 {
   g_autofree char *exe = executable (self, error);
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
   GPtrArray *drives;
+  BroProcessExit exit;
   if (!exe)
     return NULL;
   spec = bro_process_spec_new ();
@@ -99,11 +97,9 @@ bro_makemkv_tool_scan_drives (BroMakemkvTool *self, BroCancellationToken *cancel
   g_strfreev (spec->arguments);
   spec->arguments = bro_makemkv_args_scan_drives ();
   spec->stop_policy = BRO_STOP_POLICY_TERMINATE_FIRST;
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
-    return NULL;
   drives = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_makemkv_drive_free);
-  feed (process, cancel, collect_drive, drives);
+  if (!feed (self, spec, cancel, collect_drive, drives, &exit, error))
+    g_clear_pointer (&drives, g_ptr_array_unref);
   return drives;
 }
 
@@ -198,7 +194,6 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   g_autoptr (GPtrArray) produced = NULL;
   g_autoptr (BroIsolationLease) lease = NULL;
   g_autoptr (BroProcessSpec) spec = NULL;
-  g_autoptr (BroRunningProcess) process = NULL;
   g_autofree char *profile = NULL;
   BroMakemkvOptions options = invocation->options;
   BroMakemkvRun *run;
@@ -236,14 +231,12 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   spec->has_stall_timeout = invocation->has_stall_timeout;
   spec->stall_timeout = invocation->stall_timeout;
   spec->transcript = g_strdup (invocation->transcript);
-  process = bro_process_launcher_start (self->launcher, spec, error);
-  if (!process)
+  st = (RunState) { lease, TRUE, accumulator, builder, sink };
+  if (!feed (self, spec, cancel, on_event, &st, &exit, error))
     {
       bro_isolation_lease_release (lease);
       return NULL;
     }
-  st = (RunState) { lease, TRUE, accumulator, builder, sink };
-  exit = feed (process, cancel, on_event, &st);
   bro_isolation_lease_release (lease);
   produced = destination ? new_names (self, destination, before, error) : g_ptr_array_new_with_free_func (g_free);
   if (!produced)

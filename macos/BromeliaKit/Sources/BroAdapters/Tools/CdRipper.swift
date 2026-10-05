@@ -33,13 +33,13 @@ public final class CdRipper: Sendable {
         let name = line.executable
         let exe = located[name] ?? ToolKind(rawValue: name).flatMap { [.cyanrip, .abcde].contains($0) ? locator.locate($0).path : nil } ?? name
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
-        let process = try launcher.start(ProcessSpec(executable: exe, arguments: line.arguments, environment: [:], workingDirectory: dest,
-                                                     stopPolicy: .interruptFirst,
-                                                     stallTimeout: stallMinutes > 0 ? Duration(seconds: Double(stallMinutes * 60)) : nil))
-        let remove = cancel.onCancel { process.stop(.cancelled) }
-        defer { remove() }
-        for await output in process.lines() { sink.event(.raw(text: output.text)) }
-        let exit = await process.wait()
+        let exit = try await ToolRun.run(launcher, ProcessSpec(executable: exe, arguments: line.arguments, environment: [:], workingDirectory: dest,
+                                                               stopPolicy: .interruptFirst,
+                                                               stallTimeout: stallMinutes > 0 ? Duration(seconds: Double(stallMinutes * 60)) : nil),
+                                         cancel: cancel) { output in
+            sink.event(.raw(text: output.text))
+            return nil
+        }
         if exit.cancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         if exit.stalled != nil { throw failed(.processStalled, name, [("minutes", .integer(Int64(stallMinutes)))]) }
         if exit.status != 0 { throw failed(.processFailed, name, [("status", .integer(Int64(exit.status)))]) }

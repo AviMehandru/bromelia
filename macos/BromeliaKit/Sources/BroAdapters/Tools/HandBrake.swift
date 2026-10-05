@@ -29,21 +29,18 @@ public final class HandBrake: Sendable {
     public func presets(_ cancel: CancellationToken) async throws(BroError) -> [String] {
         guard let exe = locator.locate(.handbrake).path else { return Self.builtInPresets }
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
-        let process = try launcher.start(ProcessSpec(executable: exe, arguments: ["--preset-list"], environment: [:], stopPolicy: .interruptFirst,
-                                                     stallTimeout: Duration(seconds: 60)))
-        let remove = cancel.onCancel { process.stop(.cancelled) }
-        defer { remove() }
         var names: [String] = []
         var inCategory = false
-        for await line in process.lines() {
+        let exit = try await ToolRun.run(launcher, ProcessSpec(executable: exe, arguments: ["--preset-list"], environment: [:], stopPolicy: .interruptFirst,
+                                                               stallTimeout: Duration(seconds: 60)), cancel: cancel) { line in
             let text = line.text
             if !text.hasPrefix(" ") {
                 inCategory = text.hasSuffix("/") // a category, or anything else at column 0
             } else if inCategory, text.hasPrefix("    "), text.count > 4, text.dropFirst(4).first != " " {
                 names.append(String(text.dropFirst(4)).trimmingCharacters(in: .whitespaces))
             }
+            return nil
         }
-        let exit = await process.wait()
         if exit.cancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         return exit.status == 0 && !names.isEmpty ? names : Self.builtInPresets
     }
@@ -55,27 +52,24 @@ public final class HandBrake: Sendable {
     {
         let exe = try executable(step)
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
-        let process = try launcher.start(ProcessSpec(executable: exe, arguments: HandBrakeArgs.build(step, input: input, output: output, home: home),
-                                                     environment: [:], workingDirectory: (output as NSString).deletingLastPathComponent,
-                                                     stopPolicy: .interruptFirst))
-        let remove = cancel.onCancel { process.stop(.cancelled) }
-        defer { remove() }
         let timedOut = Flag()
         var timer: (any TimerHandle)?
-        if step.timeoutSeconds > 0 {
-            let at = Instant(unixMilliseconds: clock.now().unixMilliseconds + Int64(step.timeoutSeconds) * 1000)
-            timer = clock.timer(.at(instant: at)) {
+        defer { timer?.cancel() }
+        var filter = ProgressFilter()
+        let spec = ProcessSpec(executable: exe, arguments: HandBrakeArgs.build(step, input: input, output: output, home: home), environment: [:],
+                               workingDirectory: (output as NSString).deletingLastPathComponent, stopPolicy: .interruptFirst)
+        let exit = try await ToolRun.run(launcher, spec, cancel: cancel, started: { process in
+            guard step.timeoutSeconds > 0 else { return }
+            let at = Instant(unixMilliseconds: self.clock.now().unixMilliseconds + Int64(step.timeoutSeconds) * 1000)
+            timer = self.clock.timer(.at(instant: at)) {
                 timedOut.set()
                 process.stop(.timedOut)
             }
-        }
-        defer { timer?.cancel() }
-        var filter = ProgressFilter()
-        for await line in process.lines() {
+        }) { line in
             if let p = Self.progress(line.text) { sink.event(.progressValue(current: p.current, total: p.total, max: Self.max)) }
             if HandBrakeArgs.keepLine(&filter, line: line.text) { sink.event(.raw(text: line.text)) }
+            return nil
         }
-        let exit = await process.wait()
         if exit.cancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         return HandBrakeRun(exit: exit, timedOut: timedOut.isSet)
     }

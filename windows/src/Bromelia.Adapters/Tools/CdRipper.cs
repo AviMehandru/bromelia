@@ -44,11 +44,12 @@ public sealed class CdRipper
             : name is "cyanrip" or "abcde" && _locator.Locate(EnumWire.Parse<ToolKind>(name)!.Value).Path is { } p ? p
             : name;
         if (cancel.IsCancelled) throw Cancelled();
-        var process = _launcher.Start(new ProcessSpec(exe, line.Arguments, new Dictionary<string, string>(), dest, StopPolicy.InterruptFirst,
-            stallMinutes > 0 ? new Duration(stallMinutes * 60) : null));
-        using var onCancel = cancel.OnCancel(() => process.Stop(StopReason.Cancelled));
-        await foreach (var output in process.Lines().ConfigureAwait(false)) sink.Event(new RobotEvent.Raw(output.Text));
-        var exit = await process.Wait().ConfigureAwait(false);
+        var exit = await ToolRun.Run(_launcher, new ProcessSpec(exe, line.Arguments, new Dictionary<string, string>(), dest, StopPolicy.InterruptFirst,
+            stallMinutes > 0 ? new Duration(stallMinutes * 60) : null), cancel, output =>
+        {
+            sink.Event(new RobotEvent.Raw(output.Text));
+            return null;
+        }).ConfigureAwait(false);
         if (exit.Cancelled) throw Cancelled();
         if (exit.Stalled is not null) throw Failed(MessageCode.ProcessStalled, name, ("minutes", JsonValue.Of(stallMinutes)));
         if (exit.Status != 0) throw Failed(MessageCode.ProcessFailed, name, ("status", JsonValue.Of(exit.Status)));

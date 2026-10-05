@@ -1,5 +1,6 @@
 /* bro-running-process.h: BroRunningProcess: A started process. stop escalates (INT →) TERM → KILL, 5 s apart, and
- * abandons the process 30 s after KILL. */
+ * abandons the process 30 s after KILL. An abandoned process (BroProcessExit.abandoned) may still be running and
+ * writing: whatever it was writing to (a staging folder, an image) must be quarantined, never reused or removed. */
 #pragma once
 
 #include "bro-output-line.h"
