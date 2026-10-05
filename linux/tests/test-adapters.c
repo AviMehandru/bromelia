@@ -880,6 +880,26 @@ list_files (const char *dir, GPtrArray *out)
   g_dir_close (d);
 }
 
+
+/* Every file under @work, and its text, are @want's. */
+static void
+home_same_files (GPtrArray *failures, const char *id, const char *work, BroJsonValue *want, const char *when)
+{
+  g_autoptr (GPtrArray) files = g_ptr_array_new_with_free_func (g_free);
+  list_files (work, files);
+  g_ptr_array_sort (files, compare_strings);
+  if (files->len != bro_json_value_length (want))
+    bro_test_fail (failures, id, "%s: %u files, expected %u", when, files->len, bro_json_value_length (want));
+  for (guint i = 0; i < bro_json_value_length (want); i++)
+    {
+      g_autofree char *path = fs_path (want->keys->pdata[i]);
+      g_autofree char *text = NULL;
+      g_autofree char *what = g_strdup_printf ("%s: %s", when, (char *) want->keys->pdata[i]);
+      g_file_get_contents (path, &text, NULL, NULL);
+      bro_test_same_string (failures, id, what, bro_json_value_get_string (bro_json_value_at (want, i), ""), text);
+    }
+}
+
 static gboolean
 isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
 {
@@ -889,7 +909,6 @@ isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
   g_autoptr (BroIsolationLease) lease = NULL;
   g_autoptr (BroBroError) error = NULL;
   g_autoptr (GHashTable) env = NULL;
-  g_autoptr (GPtrArray) files = g_ptr_array_new_with_free_func (g_free);
   g_autofree char *profile = NULL;
   g_autofree char *shown = NULL;
   BroJsonValue *before = bro_json_value_member (given, "before");
@@ -922,7 +941,18 @@ isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
       return TRUE;
     }
   bro_isolation_lease_first_output (lease);
+  {
+    BroJsonValue *during = bro_json_value_member (given, "duringRun");
+    for (guint i = 0; during && i < bro_json_value_length (during); i++)
+      {
+        g_autofree char *path = fs_path (during->keys->pdata[i]);
+        g_file_set_contents (path, bro_json_value_get_string (bro_json_value_at (during, i), ""), -1, NULL);
+      }
+  }
+  home_same_files (failures, id, run->work_directory, want_files, "while running");
   bro_isolation_lease_release (lease);
+  home_same_files (failures, id, run->work_directory, bro_json_value_member (expect, "afterRelease") ? bro_json_value_member (expect, "afterRelease") : want_files,
+                   "after release");
   env = bro_isolation_lease_environment (lease);
   for (guint i = 0; i < bro_json_value_length (want_env); i++)
     {
@@ -932,17 +962,6 @@ isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
   profile = bro_isolation_lease_profile_path (lease);
   shown = shown_path (profile);
   bro_test_same_string (failures, id, "profilePath", bro_json_value_get_string (bro_json_value_member (expect, "profilePath"), "(none)"), shown);
-  list_files (run->work_directory, files);
-  g_ptr_array_sort (files, compare_strings);
-  if (files->len != bro_json_value_length (want_files))
-    bro_test_fail (failures, id, "%u files, expected %u", files->len, bro_json_value_length (want_files));
-  for (guint i = 0; i < bro_json_value_length (want_files); i++)
-    {
-      g_autofree char *path = fs_path (want_files->keys->pdata[i]);
-      g_autofree char *text = NULL;
-      g_file_get_contents (path, &text, NULL, NULL);
-      bro_test_same_string (failures, id, want_files->keys->pdata[i], bro_json_value_get_string (bro_json_value_at (want_files, i), ""), text);
-    }
   for (guint i = 0; modes && i < bro_json_value_length (modes); i++)
     {
       g_autofree char *path = fs_path (modes->keys->pdata[i]);
