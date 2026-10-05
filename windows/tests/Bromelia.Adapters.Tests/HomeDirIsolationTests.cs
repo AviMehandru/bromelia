@@ -36,16 +36,22 @@ public sealed class HomeDirIsolationTests : IDisposable
             var run = new MakemkvRunSettings(settings, given["profileXml"]!.AsString, "/unused", P(given["workDirectory"]!.AsString!));
             var lease = new HomeDirIsolation(new DiskFileSystem(), layout).Prepare(run);
             lease.FirstOutput();
+            foreach (var m in given["duringRun"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()) File.WriteAllText(P(m.Key), m.Value.AsString);
+            var work = P(given["workDirectory"]!.AsString!);
+            void SameFiles(JsonValue want, string when)
+            {
+                var files = Directory.EnumerateFiles(work, "*", SearchOption.AllDirectories)
+                    .Select(f => Path.GetRelativePath(_root, f).Replace('\\', '/')).OrderBy(f => f, StringComparer.Ordinal).ToList();
+                Assert.Equal(want.AsObject!.Select(m => m.Key).OrderBy(f => f, StringComparer.Ordinal), files);
+                foreach (var m in want.AsObject!) Assert.True(m.Value.AsString == File.ReadAllText(P(m.Key)), when + ": " + m.Key);
+            }
+            SameFiles(expect["files"]!, "while running");
             lease.Release();
+            SameFiles(expect["afterRelease"] ?? expect["files"]!, "after release");
 
             var env = lease.Environment();
             foreach (var m in expect["environment"]!.AsObject!) Assert.Equal(m.Value.AsString, Shown(env[m.Key]));
             Assert.Equal(expect["profilePath"]!.AsString ?? "(none)", Shown(lease.ProfilePath()));
-            var work = P(given["workDirectory"]!.AsString!);
-            var files = Directory.EnumerateFiles(work, "*", SearchOption.AllDirectories)
-                .Select(f => Path.GetRelativePath(_root, f).Replace('\\', '/')).OrderBy(f => f, StringComparer.Ordinal).ToList();
-            Assert.Equal(expect["files"]!.AsObject!.Select(m => m.Key).OrderBy(f => f, StringComparer.Ordinal), files);
-            foreach (var m in expect["files"]!.AsObject!) Assert.Equal(m.Value.AsString, File.ReadAllText(P(m.Key)));
             if (!OperatingSystem.IsWindows())
                 foreach (var m in expect["modes"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
                     Assert.Equal(m.Value.AsInteger, (long)File.GetUnixFileMode(P(m.Key)));

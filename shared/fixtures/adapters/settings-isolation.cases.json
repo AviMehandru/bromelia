@@ -2,7 +2,7 @@
   "functions": [
     "HomeDirIsolation.prepare"
   ],
-  "description": "What HomeDirIsolation writes for one makemkvcon run (plan §10.3; macOS and Linux in production, all three in tests). Paths are relative to an empty temporary folder, <root> in the expectations; given.before are files already there. expect.files lists every file under workDirectory afterwards; modes are POSIX permission bits (checked where the OS has them). The lease's firstOutput and release change nothing: the files stay with the job.",
+  "description": "What HomeDirIsolation writes for one makemkvcon run (plan §10.3; macOS and Linux in production, all three in tests). Paths are relative to an empty temporary folder, <root> in the expectations; given.before are files already there. expect.files lists every file under workDirectory afterwards; modes are POSIX permission bits (checked where the OS has them). expect.files is what is there while the run holds the lease (after prepare and firstOutput, which changes nothing). release removes the app_Key line from settings.conf, whatever wrote it (the registration key shouldn't wait in the job's folder for retention); expect.afterRelease lists the files then, when they differ; the rest stays with the job.",
   "cases": [
     {
       "id": "home-macos",
@@ -29,6 +29,9 @@
         },
         "modes": {
           "home/Library/MakeMKV/settings.conf": 384
+        },
+        "afterRelease": {
+          "home/Library/MakeMKV/settings.conf": "#\n# MakeMKV settings file. Written by Bromelia for one makemkvcon run.\n# Changes made here are overwritten before every job.\n#\n\ndvd_MinimumTitleLength = \"30\"\n"
         }
       }
     },
@@ -84,6 +87,33 @@
           "home/profile.mmcp.xml": "old profile"
         },
         "rule": "settings.conf is replaced atomically; a profile file left from an earlier run isn't passed (profilePath is none)"
+      }
+    },
+    {
+      "id": "home-key-written-by-makemkv",
+      "given": {
+        "layout": "linux",
+        "settings": {
+          "app_DataDir": "/data"
+        },
+        "profileXml": null,
+        "workDirectory": "home",
+        "duringRun": {
+          "home/.MakeMKV/settings.conf": "app_DataDir = \"/data\"\napp_Key = \"M-registered-meanwhile\"\n"
+        }
+      },
+      "expect": {
+        "environment": {
+          "HOME": "<root>/home"
+        },
+        "profilePath": null,
+        "files": {
+          "home/.MakeMKV/settings.conf": "app_DataDir = \"/data\"\napp_Key = \"M-registered-meanwhile\"\n"
+        },
+        "afterRelease": {
+          "home/.MakeMKV/settings.conf": "app_DataDir = \"/data\"\n"
+        },
+        "rule": "given.duringRun is what makemkvcon wrote while it ran (after firstOutput): a key it stored itself goes too"
       }
     }
   ]
