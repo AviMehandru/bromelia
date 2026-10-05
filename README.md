@@ -227,7 +227,7 @@ that one quits (and the other way round). Web settings given on the command line
 docker build -f docker/Dockerfile --build-arg ACCEPT_MAKEMKV_EULA=yes -t bromelia .
 ```
 
-See [docs/docker.md](docs/docker.md) for drives, folders and the web page token.
+See [docs/docker.md](docs/docker.md) for drives, folders, the web page token and the licences of what's in the image.
 
 ## Testing
 

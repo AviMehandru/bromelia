@@ -17,18 +17,45 @@ RUN if [ "$ACCEPT_MAKEMKV_EULA" != "yes" ]; then \
       echo "Build with --build-arg ACCEPT_MAKEMKV_EULA=yes to accept it."; \
       exit 1; \
     fi
+# No libavcodec-dev: Debian's FFmpeg is a GPL build, and MakeMKV's library must not link it (below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential pkg-config ca-certificates curl \
-      libssl-dev libexpat1-dev libavcodec-dev zlib1g-dev \
+      build-essential pkg-config ca-certificates curl xz-utils nasm \
+      libssl-dev libexpat1-dev zlib1g-dev \
       meson ninja-build libglib2.0-dev libjson-glib-dev libsqlite3-dev libsoup-3.0-dev libsecret-1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# MakeMKV (makemkvcon only: no GUI).
+# FFmpeg for MakeMKV's library, built as LGPL. makemkvcon is closed source and loads libmakemkv, which uses FFmpeg's
+# audio codecs; linking it to Debian's GPL libavcodec would make an image that can't be published. Without
+# --enable-gpl or --enable-nonfree FFmpeg is LGPL 2.1+, and MakeMKV's audio codecs (FLAC, AAC, AC-3, DTS, TrueHD) are
+# all FFmpeg's own. Static, so libmakemkv can't pick up Debian's GPL libavcodec.so (the ffmpeg command needs it).
+# The same version as Debian's, so audio conversion matches. The checksum is of the tarball whose signature by
+# FFmpeg's release key (FCF986EA15E6E293A5644F10B4322F04D67658D8) was checked when it was pinned.
+ARG FFMPEG_VERSION=7.1.5
+ARG FFMPEG_SHA256=de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f
+WORKDIR /src/ffmpeg
+RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz \
+ && echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c - \
+ && tar xJf ffmpeg.tar.xz \
+ && cd "ffmpeg-${FFMPEG_VERSION}" \
+ && ./configure --prefix=/opt/ffmpeg-lgpl --enable-static --disable-shared --enable-pic \
+      --disable-autodetect --disable-programs --disable-doc --disable-network \
+      --disable-avformat --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample \
+ && grep -q '#define FFMPEG_LICENSE "LGPL version 2.1 or later"' config.h \
+ && make -j"$(nproc)" \
+ && make install \
+ && install -D -m 644 -t /out/usr/share/doc/makemkv/ffmpeg LICENSE.md COPYING.LGPLv2.1 \
+ && echo "FFmpeg ${FFMPEG_VERSION} (https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz), built into libmakemkv.so.1 as LGPL 2.1+." \
+      > /out/usr/share/doc/makemkv/ffmpeg/README
+
+# MakeMKV (makemkvcon only: no GUI), its library built against the FFmpeg above.
 WORKDIR /src/makemkv
 RUN curl -fsSL "https://www.makemkv.com/download/makemkv-oss-${MAKEMKV_VERSION}.tar.gz" | tar xz \
  && curl -fsSL "https://www.makemkv.com/download/makemkv-bin-${MAKEMKV_VERSION}.tar.gz" | tar xz
 RUN cd "makemkv-oss-${MAKEMKV_VERSION}" \
+ && export PKG_CONFIG_PATH=/opt/ffmpeg-lgpl/lib/pkgconfig \
  && ./configure --prefix=/usr --disable-gui \
+      ffmpeg_CFLAGS="$(pkg-config --cflags libavcodec libavutil)" \
+      ffmpeg_LIBS="$(pkg-config --static --libs libavcodec libavutil)" \
  && make -j"$(nproc)" \
  && make install DESTDIR=/out
 # makemkv-bin asks for the EULA interactively; it was accepted above.
