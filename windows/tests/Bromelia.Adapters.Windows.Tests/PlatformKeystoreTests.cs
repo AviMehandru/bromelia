@@ -125,6 +125,9 @@ public sealed class PlatformKeystoreTests
         {
             Assert.Equal(new[] { "metadata.tmdb" }, Directory.GetFiles(dir).Select(Path.GetFileName).ToArray());
             Assert.Equal("abc123", File.ReadAllText(Path.Combine(dir, "metadata.tmdb")));
+            // Only the current user and SYSTEM can open them, whatever the folder above allows.
+            Assert.True(OwnerOnly.Holds(dir));
+            Assert.True(OwnerOnly.Holds(Path.Combine(dir, "metadata.tmdb")));
         }
         finally { Directory.Delete(dir, true); }
     }
