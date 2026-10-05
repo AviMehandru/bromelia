@@ -18,7 +18,7 @@ char *
 _bro_apprise_tool_scheme (const char *url)
 {
   const char *sep = strstr (url, "://");
-  return sep && sep > url ? g_strndup (url, (gsize) (sep - url)) : g_strdup (url);
+  return sep && sep > url ? g_strndup (url, (gsize) (sep - url)) : g_strdup ("(no scheme)");
 }
 
 gboolean
@@ -39,7 +39,9 @@ bro_apprise_tool_send (BroAppriseTool *self, const char *url, const char *title,
   spec = bro_process_spec_new ();
   spec->executable = g_strdup (info->path);
   g_strfreev (spec->arguments);
-  spec->arguments = bro_apprise_args_build (url, title, body);
+  spec->arguments = bro_apprise_args_build (title, body);
+  g_hash_table_unref (spec->environment);
+  spec->environment = bro_apprise_args_environment (url);
   spec->stop_policy = BRO_STOP_POLICY_INTERRUPT_FIRST;
   spec->has_stall_timeout = TRUE;
   spec->stall_timeout.seconds = 120;

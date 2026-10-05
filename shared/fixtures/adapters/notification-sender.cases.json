@@ -3,7 +3,7 @@
     "NotificationSender.send",
     "AppriseTool.send"
   ],
-  "description": "NotificationSender against a fake HttpClient (it answers given.answer: a status, or no answer with a reason) and AppriseTool on a scripted launcher (apprise found at /opt/apprise unless given.apprise is null; it exits with given.appriseExit). Title T, body B. expect.request is what was sent over HTTP (the body compared as JSON when it is JSON); expect.apprise is the apprise command line; expect.error the code and params of the failure. URLs are secrets, so no message carries one: badUrl and needsApprise name the scheme, httpFailed and failed the host of the request.",
+  "description": "NotificationSender against a fake HttpClient (it answers given.answer: a status, or no answer with a reason) and AppriseTool on a scripted launcher (apprise found at /opt/apprise unless given.apprise is null; it exits with given.appriseExit). Title T, body B. expect.request is what was sent over HTTP (the body compared as JSON when it is JSON); expect.apprise is the apprise command line and expect.appriseEnvironment what it adds to the environment (the URL is never on the command line, which every user can see); expect.error the code and params of the failure. URLs are secrets, so no message carries one: badUrl and needsApprise name the scheme (\"(no scheme)\" when there is none), httpFailed and failed the host of the request.",
   "cases": [
     {
       "id": "discord",
@@ -83,9 +83,11 @@
           "-t",
           "T",
           "-b",
-          "B",
-          "mailto://user:pass@example.org"
-        ]
+          "B"
+        ],
+        "appriseEnvironment": {
+          "APPRISE_URLS": "mailto://user:pass@example.org"
+        }
       }
     },
     {
@@ -121,6 +123,23 @@
       }
     },
     {
+      "id": "no-scheme-is-never-shown",
+      "given": {
+        "url": "user:secret-token@host",
+        "status": "success",
+        "apprise": null
+      },
+      "expect": {
+        "error": {
+          "code": "notify.badUrl",
+          "params": {
+            "target": "(no scheme)"
+          }
+        },
+        "rule": "a value without :// may still be a secret: it is never shown"
+      }
+    },
+    {
       "id": "not-a-url",
       "given": {
         "url": "not a url",
@@ -130,10 +149,10 @@
         "error": {
           "code": "notify.badUrl",
           "params": {
-            "target": "not a url"
+            "target": "(no scheme)"
           }
         },
-        "rule": "a value without a scheme isn't a secret URL, so it is named"
+        "rule": "a value without a scheme may still hold a secret (a mistyped URL), so it is never shown"
       }
     }
   ]

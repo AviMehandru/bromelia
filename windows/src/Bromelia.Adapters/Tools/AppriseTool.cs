@@ -7,9 +7,9 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Adapters;
 
-/// <summary>The apprise command (plan §10.1): <c>apprise -t title -b body url</c>. notify.needsApprise when the
-/// locator can't find it (naming the URL's scheme: URLs are secrets), notify.appriseFailed when it exits
-/// non-zero.</summary>
+/// <summary>The apprise command (plan §10.1): <c>apprise -t title -b body</c>, the URL in APPRISE_URLS (never on the
+/// command line, which every user can see). notify.needsApprise when the locator can't find it (naming the URL's
+/// scheme: URLs are secrets), notify.appriseFailed when it exits non-zero.</summary>
 public sealed class AppriseTool
 {
     readonly IProcessLauncher _launcher;
@@ -25,17 +25,17 @@ public sealed class AppriseTool
     {
         var exe = _locator.Locate(ToolKind.Apprise).Path
                   ?? throw new BroFailure(new BroMessage(MessageCode.NotifyNeedsApprise, Severity.Warning, ("target", JsonValue.Of(Scheme(url)))).ToError());
-        var exit = await ToolRun.Run(_launcher, new ProcessSpec(exe, AppriseArgs.Build(url, title, body), new Dictionary<string, string>(), null,
+        var exit = await ToolRun.Run(_launcher, new ProcessSpec(exe, AppriseArgs.Build(title, body), AppriseArgs.Environment(url), null,
             StopPolicy.InterruptFirst, new Duration(120)), cancel, _ => null).ConfigureAwait(false);
         if (exit.Cancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
         if (exit.Status != 0)
             throw new BroFailure(new BroMessage(MessageCode.NotifyAppriseFailed, Severity.Warning, ("status", JsonValue.Of(exit.Status))).ToError());
     }
 
-    /// <summary>The URL's scheme ("mailto"), or the whole value when it has none (then it isn't a secret URL).</summary>
+    /// <summary>The URL's scheme ("mailto"), or "(no scheme)": a value without one may still be a secret.</summary>
     internal static string Scheme(string url)
     {
         var i = url.IndexOf("://", System.StringComparison.Ordinal);
-        return i > 0 ? url.Substring(0, i) : url;
+        return i > 0 ? url.Substring(0, i) : "(no scheme)";
     }
 }
