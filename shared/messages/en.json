@@ -266,6 +266,7 @@
   "fs.parentMissing": "{path} doesn't exist, so nothing was created in it",
   "fs.failed": "Could not {operation} {path}: {reason}",
   "fs.notSynced": "{path} is complete, but its folder could not be flushed to disk: {reason}",
+  "fs.notPrivate": "Secrets aren't kept in {path}: {reason}. Keep Bromelia's data folder on a local disk, or give secrets as BROMELIA_SECRET_<NAME>",
   "store.failed": "The database failed ({operation}): {reason}",
   "store.reentered": "A transaction used the outer store instead of the one it was given",
   "store.tooNew": "The database was made by a newer Bromelia (version {version}; this one knows up to {newest})",

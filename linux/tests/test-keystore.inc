@@ -22,6 +22,22 @@ keystore_text (const BroJsonValue *v)
   return g_string_free (s, FALSE);
 }
 
+/* Whether the scratch folder is on a network share (TMPDIR on a CIFS or NFS mount): the fallback files are refused
+ * there. */
+static gboolean
+keystore_on_share (void)
+{
+  struct statfs fs;
+  if (statfs (scratch, &fs) != 0)
+    return FALSE;
+#ifdef __APPLE__
+  return (fs.f_flags & MNT_LOCAL) == 0;
+#else
+  return (unsigned long) fs.f_type == 0xFF534D42 || (unsigned long) fs.f_type == 0xFE534D42
+         || (unsigned long) fs.f_type == 0x517B || (unsigned long) fs.f_type == 0x6969;
+#endif
+}
+
 static char *
 keystore_scratch (void)
 {
@@ -47,6 +63,16 @@ keystore_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
       g_autofree char *got = NULL, *value = keystore_text (bro_json_value_member (step, "value"));
       g_autoptr (BroBroError) error = NULL;
       gboolean ok = TRUE;
+      if (!keystore_system_store && !want_error && !g_str_equal (op, "remove") && keystore_on_share ())
+        {
+          /* Fallback files on a network share: every read and write is refused, removing still works. */
+          if (g_str_equal (op, "get"))
+            got = bro_keystore_get (BRO_KEYSTORE (keystore), name, &error);
+          else
+            bro_keystore_set (BRO_KEYSTORE (keystore), name, value, &error);
+          bro_test_same_string (failures, id, what, "fs.notPrivate", error ? error->code : "(no error)");
+          continue;
+        }
       if (g_str_equal (op, "get"))
         got = bro_keystore_get (BRO_KEYSTORE (keystore), name, &error);
       else if (g_str_equal (op, "set"))
@@ -85,6 +111,8 @@ test_keystore_without_secret_service (void)
       g_setenv ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bromelia-session-bus", TRUE);
       keystore = bro_platform_keystore_new (dir, NULL, TRUE);
       g_assert_cmpstr (bro_platform_keystore_backend (keystore), ==, "file");
+      if (keystore_on_share ())
+        return; /* checked by /keystore/files */
       g_assert_true (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
       g_assert_true (g_file_test (file, G_FILE_TEST_IS_REGULAR));
       got = bro_platform_keystore_get (keystore, "metadata.tmdb", &error);
@@ -110,6 +138,15 @@ test_keystore_files (void)
   bro_test_run_cases ("adapters/keystore.cases.json", keystore_case);
 
   g_assert_cmpstr (bro_platform_keystore_backend (keystore), ==, "file");
+  if (keystore_on_share ())
+    {
+      /* On a network share the server decides who reads the files: nothing is written. */
+      g_assert_false (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
+      g_assert_cmpstr (error->code, ==, "fs.notPrivate");
+      g_assert_false (g_file_test (file, G_FILE_TEST_EXISTS));
+      remove_tree (dir);
+      return;
+    }
   g_assert_true (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
   g_assert_true (bro_platform_keystore_set (keystore, "metadata.tmdb", "def456", &error));
   d = g_dir_open (dir, 0, NULL);
@@ -120,6 +157,27 @@ test_keystore_files (void)
   g_assert_cmpstr (text, ==, "def456");
   g_assert_cmpint (stat (file, &st), ==, 0);
   g_assert_cmpint (st.st_mode & 0777, ==, 0600);
+  g_assert_cmpint (stat (dir, &st), ==, 0);
+  g_assert_cmpint (st.st_mode & 0777, ==, 0700);
+  remove_tree (dir);
+}
+
+/* A fallback folder that already exists with looser permissions is made 0700 again before a secret goes in. */
+static void
+test_keystore_loose_folder (void)
+{
+  g_autofree char *dir = keystore_scratch ();
+  g_autoptr (BroPlatformKeystore) keystore = bro_platform_keystore_new (dir, NULL, FALSE);
+  g_autoptr (BroBroError) error = NULL;
+  struct stat st;
+  if (keystore_on_share ())
+    {
+      g_test_skip ("the scratch folder is on a network share");
+      return;
+    }
+  g_assert_cmpint (g_mkdir (dir, 0755), ==, 0);
+  g_assert_cmpint (chmod (dir, 0755), ==, 0);
+  g_assert_true (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
   g_assert_cmpint (stat (dir, &st), ==, 0);
   g_assert_cmpint (st.st_mode & 0777, ==, 0700);
   remove_tree (dir);

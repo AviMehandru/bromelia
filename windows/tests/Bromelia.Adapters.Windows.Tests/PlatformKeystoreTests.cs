@@ -22,6 +22,8 @@ public sealed class PlatformKeystoreTests
             var service = "BromeliaTest-" + Guid.NewGuid().ToString("N");
             var dir = Path.Combine(Path.GetTempPath(), service);
             var keystore = new PlatformKeystore(dir, service, systemStore);
+            // Fallback files on a network share (the SMB runs): every read and write is refused, removing still works.
+            var refused = !systemStore && OwnerOnly.IsOnNetworkShare(dir);
             var steps = given["steps"]!.AsArray!.ToArray();
             var results = expect["results"]!.AsArray!.ToArray();
             try
@@ -30,6 +32,14 @@ public sealed class PlatformKeystoreTests
                 {
                     var name = steps[i]["name"]!.AsString!;
                     var want = results[i];
+                    var op = steps[i]["op"]!.AsString;
+                    if (refused && want["error"] == null && op != "remove")
+                    {
+                        var e = Assert.Throws<BroFailure>(() => { if (op == "get") keystore.Get(name); else keystore.Set(name, Text(steps[i]["value"])!); });
+                        Assert.Equal("fs.notPrivate", e.Error.Code);
+                        Assert.False(Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any());
+                        continue;
+                    }
                     try
                     {
                         string? got = null;
@@ -113,6 +123,17 @@ public sealed class PlatformKeystoreTests
         Assert.DoesNotContain(service + ":metadata.tmdb", CmdKey("/list:" + service + "*"));
     }
 
+    /// <summary>Network shares are recognised by the path alone for UNC paths; local paths aren't shares.</summary>
+    [Fact]
+    public void NetworkSharesAreRecognised()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Assert.True(OwnerOnly.IsOnNetworkShare(@"\\nas\media\Bromelia\secrets"));
+        Assert.True(OwnerOnly.IsOnNetworkShare(@"\\?\UNC\nas\media\secrets"));
+        Assert.False(OwnerOnly.IsOnNetworkShare(@"\\?\C:\Bromelia\secrets"));
+        Assert.False(OwnerOnly.IsOnNetworkShare(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
+    }
+
     [Fact]
     public void TheFallbackIsOneFilePerSecret()
     {
@@ -120,6 +141,14 @@ public sealed class PlatformKeystoreTests
         var dir = Path.Combine(Path.GetTempPath(), "BromeliaTest-" + Guid.NewGuid().ToString("N"));
         var keystore = new PlatformKeystore(dir, systemStore: false);
         Assert.Equal("file", keystore.Backend());
+        if (OwnerOnly.IsOnNetworkShare(dir))
+        {
+            // On a network share the server decides who reads the files: nothing is written.
+            Assert.Equal("fs.notPrivate", Assert.Throws<BroFailure>(() => keystore.Set("metadata.tmdb", "abc123")).Error.Code);
+            Assert.False(Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any());
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            return;
+        }
         keystore.Set("metadata.tmdb", "abc123");
         try
         {

@@ -13,7 +13,8 @@ namespace Bromelia.Adapters.Windows;
 /// the value as UTF-8. When Credential Manager can't be used at all (no logon session: a service account, an SSH key
 /// logon), the secrets are files &lt;fallbackDir&gt;/&lt;name&gt; instead; that is decided once, at the first call. The folder
 /// is owner-only (Windows' 0700: the current user and SYSTEM, nothing inherited), since a service's data folder may be
-/// readable by every user; files written there inherit that. Names are SecretRef names (keystore.cases.json); anything
+/// readable by every user; files written there inherit that. A fallback folder on a network share, or one where that
+/// rule doesn't hold, is refused (fs.notPrivate) for reading and writing; removing still works. Names are SecretRef names (keystore.cases.json); anything
 /// else fails with keystore.failed.</summary>
 public sealed class PlatformKeystore : IKeystore
 {
@@ -130,6 +131,7 @@ public sealed class PlatformKeystore : IKeystore
 
     string? ReadFile(string name)
     {
+        OwnerOnly.RefuseNetwork(_fallbackDir);
         try { return File.Exists(FilePath(name)) ? Encoding.UTF8.GetString(File.ReadAllBytes(FilePath(name))) : null; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw Failed(name, e.Message); }
     }
@@ -140,7 +142,7 @@ public sealed class PlatformKeystore : IKeystore
         var temp = Path.Combine(_fallbackDir, $".{name}.{Guid.NewGuid():N}.tmp");
         try
         {
-            OwnerOnly.Folder(_fallbackDir); // before the secret is written, so the new file inherits it
+            OwnerOnly.SecretsFolder(_fallbackDir); // before the secret is written, so the new file inherits it
             File.WriteAllBytes(temp, Encoding.UTF8.GetBytes(value));
             File.Move(temp, FilePath(name), overwrite: true);
         }

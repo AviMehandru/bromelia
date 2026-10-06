@@ -269,6 +269,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case fsParentMissing = "fs.parentMissing"
     case fsFailed = "fs.failed"
     case fsNotSynced = "fs.notSynced"
+    case fsNotPrivate = "fs.notPrivate"
     case storeFailed = "store.failed"
     case storeReentered = "store.reentered"
     case storeTooNew = "store.tooNew"

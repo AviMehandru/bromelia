@@ -274,6 +274,7 @@ typedef enum {
   BRO_MSG_FS_PARENT_MISSING, /* fs.parentMissing */
   BRO_MSG_FS_FAILED, /* fs.failed */
   BRO_MSG_FS_NOT_SYNCED, /* fs.notSynced */
+  BRO_MSG_FS_NOT_PRIVATE, /* fs.notPrivate */
   BRO_MSG_STORE_FAILED, /* store.failed */
   BRO_MSG_STORE_REENTERED, /* store.reentered */
   BRO_MSG_STORE_TOO_NEW, /* store.tooNew */

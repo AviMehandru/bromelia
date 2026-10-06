@@ -482,7 +482,7 @@
       },
       "expect": {
         "registry": "HKCU\\Software\\MakeMKV gets the drive's values (other catalogue keys cleared) and the previous values back on the first output line, the exit or after 15 s; launches are serialised (MakemkvLaunch lease); a warning when the MakeMKV GUI runs",
-        "snapshot": "before any value changes, the user's values are written atomically to <data>\\run\\makemkv-registry.json (an owner-only folder: it can hold app_Key) and the file is removed once they are all back; a file left by a crash is put back by Recover() at startup or before the next launch, and a launch fails with makemkv.registryNotRestored while it can't be"
+        "snapshot": "before any value changes, the user's values are written atomically to <data>\\run\\makemkv-registry.json (an owner-only folder: it can hold app_Key) and the file is removed once they are all back; a file left by a crash is put back by Recover() at startup or before the next launch, and a launch fails with makemkv.registryNotRestored while it can't be; a snapshot folder on a network share, or one where owner-only doesn't hold, fails the launch with fs.notPrivate before any value changes"
       }
     },
     {
@@ -612,6 +612,20 @@
       },
       "expect": {
         "error": "the root isn't created"
+      }
+    },
+    {
+      "id": "secrets-never-on-a-share",
+      "from": [
+        "rebuild-review-followups 2026-10-05 (owner: refuse network sharing of secrets)"
+      ],
+      "given": {
+        "keystoreFallbackFolder": "on a network share (Windows: a UNC path or a drive GetDriveTypeW calls remote; macOS: a file system without MNT_LOCAL; Linux: NFS, SMB / CIFS, AFS, Coda, NCP or Ceph by statfs f_type)"
+      },
+      "expect": {
+        "getAndSet": "fs.notPrivate {path (the folder), reason}; nothing is written; remove still works",
+        "ownerOnly": "before each write the folder is made owner-only (macOS, Linux: chmod 0700 and the user's; Windows: OwnerOnly) and read back: if that didn't hold, fs.notPrivate",
+        "registrySnapshot": "the same rule for RegistrySwapIsolation's snapshot folder (settings-isolation-registry)"
       }
     }
   ]
