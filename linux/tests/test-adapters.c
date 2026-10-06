@@ -41,6 +41,11 @@
 #include <fcntl.h>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <sys/mount.h>
+#else
+#include <sys/statfs.h>
+#endif
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2012,6 +2017,7 @@ main (int argc, char **argv)
   g_test_add_func ("/power-manager/inhibit", test_power_manager);
   g_test_add_func ("/keystore/without-secret-service", test_keystore_without_secret_service);
   g_test_add_func ("/keystore/files", test_keystore_files);
+  g_test_add_func ("/keystore/loose-folder", test_keystore_loose_folder);
   g_test_add_func ("/keystore/secret-service", test_keystore_secret_service);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);

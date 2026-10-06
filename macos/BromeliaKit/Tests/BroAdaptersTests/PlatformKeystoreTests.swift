@@ -13,7 +13,14 @@ struct PlatformKeystoreTests {
         return String(repeating: v["repeat"]!.string!, count: Int(v["times"]!.int!))
     }
 
-    func scratch() -> String { (NSTemporaryDirectory() as NSString).appendingPathComponent("BromeliaTest-\(UUID().uuidString)") }
+    func scratch() -> String { (Fixtures.temporaryDirectory as NSString).appendingPathComponent("BromeliaTest-\(UUID().uuidString)") }
+
+    /// The temporary folder is on a network share (BROMELIA_TEST_TMPDIR on an SMB mount): the fallback files are
+    /// refused there.
+    var onShare: Bool {
+        var fs = statfs()
+        return statfs(Fixtures.temporaryDirectory, &fs) == 0 && fs.f_flags & UInt32(MNT_LOCAL) == 0
+    }
 
     func runAll(systemStore: Bool) throws {
         let doc = try Fixtures.json("adapters/keystore.cases.json")
@@ -22,9 +29,21 @@ struct PlatformKeystoreTests {
             let service = "BromeliaTest-\(UUID().uuidString)", dir = scratch()
             let keystore = PlatformKeystore(fallbackDir: dir, service: service, systemStore: systemStore)
             let steps = c["given"]!["steps"]!.array!, results = c["expect"]!["results"]!.array!
+            // Fallback files on a network share: every read and write is refused, removing still works.
+            let refused = !systemStore && onShare
             do {
                 for (i, step) in steps.enumerated() {
-                    let name = step["name"]!.string!, want = results[i]
+                    let name = step["name"]!.string!, want = results[i], op = step["op"]!.string!
+                    if refused && want["error"] == nil && op != "remove" {
+                        do {
+                            if op == "get" { _ = try keystore.get(name) } else { try keystore.set(name, value: text(step["value"])!) }
+                            try Fixtures.check(false, "step \(i): expected fs.notPrivate")
+                        } catch let error as BroError {
+                            try Fixtures.same("fs.notPrivate", error.code, "step \(i)")
+                        }
+                        try Fixtures.check(((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).isEmpty, "nothing written")
+                        continue
+                    }
                     do {
                         var got: String?
                         switch step["op"]!.string! {
@@ -85,6 +104,12 @@ struct PlatformKeystoreTests {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let keystore = PlatformKeystore(fallbackDir: dir, systemStore: false)
         #expect(keystore.backend() == "file")
+        if onShare {
+            // On a network share the server decides who reads the files: nothing is written.
+            #expect(throws: BroError.self) { try keystore.set("metadata.tmdb", value: "abc123") }
+            #expect(((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).isEmpty)
+            return
+        }
         try keystore.set("metadata.tmdb", value: "abc123")
         try keystore.set("metadata.tmdb", value: "def456")
         #expect(try FileManager.default.contentsOfDirectory(atPath: dir) == ["metadata.tmdb"])
@@ -93,5 +118,15 @@ struct PlatformKeystoreTests {
         let folder = try FileManager.default.attributesOfItem(atPath: dir)
         #expect((file[.posixPermissions] as? Int) == 0o600)
         #expect((folder[.posixPermissions] as? Int) == 0o700)
+    }
+
+    /// A fallback folder that already exists with looser permissions is made 0700 again before a secret goes in.
+    @Test func aLooseFallbackFolderIsMadeOwnerOnly() throws {
+        if onShare { return }
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        #expect(mkdir(dir, 0o755) == 0 && chmod(dir, 0o755) == 0)
+        try PlatformKeystore(fallbackDir: dir, systemStore: false).set("metadata.tmdb", value: "abc123")
+        #expect((try FileManager.default.attributesOfItem(atPath: dir)[.posixPermissions] as? Int) == 0o700)
     }
 }

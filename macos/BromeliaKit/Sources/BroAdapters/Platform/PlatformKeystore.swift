@@ -8,8 +8,9 @@ import Security
 /// Keystore on macOS (plan §10.3): generic passwords in the login Keychain (service "Bromelia", account the secret's
 /// name), never with UI: a locked keychain fails instead of asking. When there is no keychain at all (a daemon started
 /// before anyone logged in), the secrets are files <fallbackDir>/<name> (0600, in a 0700 folder) instead; that is
-/// decided once, at the first call. Names are SecretRef names (keystore.cases.json); anything else fails with
-/// keystore.failed.
+/// decided once, at the first call. A fallback folder on a network share (a file system without MNT_LOCAL), or one
+/// that doesn't stay 0700 and the user's, is refused (fs.notPrivate) for reading and writing; removing still works.
+/// Names are SecretRef names (keystore.cases.json); anything else fails with keystore.failed.
 public final class PlatformKeystore: Keystore, @unchecked Sendable {
     private let fallbackDir: String
     private let service: String
@@ -111,6 +112,7 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
     private func filePath(_ name: String) -> String { (fallbackDir as NSString).appendingPathComponent(name) }
 
     private func readFile(_ name: String) throws(BroError) -> String? {
+        try refuseNetwork()
         guard let data = FileManager.default.contents(atPath: filePath(name)) else {
             if access(filePath(name), F_OK) != 0 && errno == ENOENT { return nil }
             throw failed(name, String(cString: strerror(errno)))
@@ -120,7 +122,13 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
 
     /// Written next to the final file (0600 from the start), then renamed over it.
     private func writeFile(_ name: String, _ value: String) throws(BroError) {
+        try refuseNetwork()
         if mkdir(fallbackDir, 0o700) != 0 && errno != EEXIST { throw failed(name, String(cString: strerror(errno))) }
+        var st = Darwin.stat()
+        guard chmod(fallbackDir, 0o700) == 0, lstat(fallbackDir, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR,
+              st.st_uid == geteuid(), st.st_mode & 0o077 == 0 else {
+            throw notPrivate("the file system didn't keep its owner-only permissions")
+        }
         let temp = (fallbackDir as NSString).appendingPathComponent(".\(name).\(UUID().uuidString).tmp")
         let fd = open(temp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw failed(name, String(cString: strerror(errno))) }
@@ -140,6 +148,19 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
             unlink(temp)
             throw failed(name, why)
         }
+    }
+
+    /// fs.notPrivate when the fallback folder (or the nearest folder above it that exists) is on a network share: the
+    /// server decides who reads the files there, whatever mode is asked for.
+    private func refuseNetwork() throws(BroError) {
+        var path = fallbackDir
+        var fs = statfs()
+        while statfs(path, &fs) != 0 {
+            let up = (path as NSString).deletingLastPathComponent
+            if up == path || up.isEmpty { return }
+            path = up
+        }
+        if fs.f_flags & UInt32(MNT_LOCAL) == 0 { throw notPrivate("it is on a network share") }
     }
 
     // MARK: - Names and errors
@@ -171,5 +192,9 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
 
     private func failed(_ name: String, _ reason: String) -> BroError {
         BroMessage(.keystoreFailed, [("name", .string(name)), ("reason", .string(reason))], severity: .error).toError()
+    }
+
+    private func notPrivate(_ reason: String) -> BroError {
+        BroMessage(.fsNotPrivate, [("path", .string(fallbackDir)), ("reason", .string(reason))], severity: .error).toError()
     }
 }

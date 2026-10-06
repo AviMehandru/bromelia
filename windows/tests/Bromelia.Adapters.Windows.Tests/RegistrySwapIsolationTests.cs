@@ -36,13 +36,17 @@ public sealed class RegistrySwapIsolationTests : IDisposable
 
     string Snapshot => Path.Combine(_root, "run", "makemkv-registry.json");
 
+    /// <summary>The temporary folder is on a network share (the SMB runs): no snapshot can be written, so the tests
+    /// that need one step aside and ASnapshotOnANetworkShareIsRefused runs instead.</summary>
+    bool OnShare => OwnerOnly.IsOnNetworkShare(_root);
+
     RegistrySwapIsolation Isolation(FakeRegistry reg, Duration? restoreAfter = null) =>
         new(new PlatformFileSystem(), reg, Catalog, Snapshot, restoreAfter);
 
     [Fact]
     public void TheRunsValuesAreInPlaceUntilMakemkvconHasReadThem()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows() || OnShare) return;
         var reg = new FakeRegistry();
         reg.Values["dvd_MinimumTitleLength"] = "120";
         reg.Values["io_ErrorRetryCount"] = "5";
@@ -73,7 +77,7 @@ public sealed class RegistrySwapIsolationTests : IDisposable
     [Fact]
     public void AppKeyIsReplacedOnlyWhenTheRunSetsIt()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows() || OnShare) return;
         var reg = new FakeRegistry();
         reg.Values["app_Key"] = "T-old";
         var lease = Isolation(reg).Prepare(Run(new() { ["app_Key"] = "T-new" }));
@@ -86,7 +90,7 @@ public sealed class RegistrySwapIsolationTests : IDisposable
     [Fact]
     public async Task LaunchesWaitForTheRegistryAndTheValuesComeBackAfterTheTimeout()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows() || OnShare) return;
         var reg = new FakeRegistry();
         reg.Values["dvd_MinimumTitleLength"] = "120";
         var iso = Isolation(reg, new Duration(0.5));
@@ -113,7 +117,7 @@ public sealed class RegistrySwapIsolationTests : IDisposable
     [Fact]
     public void TheUsersValuesAreOnDiskWhileARunsAreInPlace()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows() || OnShare) return;
         var reg = new FakeRegistry();
         reg.Values["dvd_MinimumTitleLength"] = "120";
         reg.Values["app_Key"] = "M-purchased";
@@ -134,7 +138,7 @@ public sealed class RegistrySwapIsolationTests : IDisposable
     [Fact]
     public void ASnapshotLeftByACrashIsPutBack()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows() || OnShare) return;
         var reg = new FakeRegistry();
         reg.Values["dvd_MinimumTitleLength"] = "120";
         reg.Values["app_Key"] = "M-purchased";
@@ -168,7 +172,7 @@ public sealed class RegistrySwapIsolationTests : IDisposable
     [Fact]
     public void AFailedRestoreKeepsTheSnapshotAndStopsTheNextRun()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows() || OnShare) return;
         var reg = new FakeRegistry();
         reg.Values["dvd_MinimumTitleLength"] = "120";
         var lease = Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30" }));
@@ -181,6 +185,24 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         reg.Fails = false;
         Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "45" })).Release();
         Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
+        Assert.False(File.Exists(Snapshot));
+    }
+
+    /// <summary>The snapshot can hold app_Key: on a network share it is refused before any value changes, and the next
+    /// launch isn't left waiting.</summary>
+    [Fact]
+    public void ASnapshotOnANetworkShareIsRefused()
+    {
+        if (!OperatingSystem.IsWindows() || !OnShare) return;
+        var reg = new FakeRegistry();
+        reg.Values["dvd_MinimumTitleLength"] = "120";
+        reg.Values["app_Key"] = "M-purchased";
+        for (var i = 0; i < 2; i++)
+        {
+            var failure = Assert.Throws<BroFailure>(() => Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30", ["app_Key"] = "T-beta" })));
+            Assert.Equal("fs.notPrivate", failure.Error.Code);
+        }
+        Assert.Empty(reg.Log);
         Assert.False(File.Exists(Snapshot));
     }
 

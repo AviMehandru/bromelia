@@ -6,6 +6,12 @@
 #include <fcntl.h>
 #include <glib/gstdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#ifdef __APPLE__
+#include <sys/mount.h>
+#else
+#include <sys/statfs.h>
+#endif
 #include <unistd.h>
 #ifdef BRO_HAVE_LIBSECRET
 #include <libsecret/secret.h>
@@ -125,6 +131,56 @@ locked (GList *items)
 
 /* ---- the files ---- */
 
+static gboolean
+not_private (BroPlatformKeystore *self, BroBroError **error, const char *reason)
+{
+  BroJsonValue *params = bro_json_value_new_object ();
+  bro_json_value_set (params, "path", bro_json_value_new_string (self->fallback_dir));
+  bro_json_value_set (params, "reason", bro_json_value_new_string (reason));
+  bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_FS_NOT_PRIVATE), params);
+  return FALSE;
+}
+
+/* Whether @path (or the nearest folder above it that exists) is on a network file system: NFS, SMB / CIFS, AFS, Coda,
+ * NCP or Ceph. FUSE file systems (sshfs) aren't recognised. (A build on macOS, for development, asks MNT_LOCAL.) */
+static gboolean
+on_network_share (const char *path)
+{
+  static const unsigned long network[] = { 0x6969 /* NFS */,     0x517B /* SMB */,      0xFF534D42 /* CIFS */,
+                                           0xFE534D42 /* SMB2 */, 0x5346414F /* AFS */,  0x73757245 /* Coda */,
+                                           0x564C /* NCP */,      0x00C36400 /* Ceph */ };
+  g_autofree char *at = g_strdup (path);
+  struct statfs fs;
+  while (statfs (at, &fs) != 0)
+    {
+      char *up = g_path_get_dirname (at);
+      if (strcmp (up, at) == 0)
+        {
+          g_free (up);
+          return FALSE;
+        }
+      g_free (at);
+      at = up;
+    }
+#ifdef __APPLE__
+  (void) network;
+  return (fs.f_flags & MNT_LOCAL) == 0;
+#else
+  for (gsize i = 0; i < G_N_ELEMENTS (network); i++)
+    if ((unsigned long) fs.f_type == network[i])
+      return TRUE;
+  return FALSE;
+#endif
+}
+
+/* fs.notPrivate when the fallback folder is on a network share: the server decides who reads the files there,
+ * whatever mode is asked for. */
+static gboolean
+refuse_network (BroPlatformKeystore *self, BroBroError **error)
+{
+  return on_network_share (self->fallback_dir) ? not_private (self, error, "it is on a network share") : TRUE;
+}
+
 static char *
 file_path (BroPlatformKeystore *self, const char *name)
 {
@@ -137,6 +193,8 @@ read_file (BroPlatformKeystore *self, const char *name, BroBroError **error)
   g_autofree char *path = file_path (self, name);
   g_autoptr (GError) gerror = NULL;
   char *text = NULL;
+  if (!refuse_network (self, error))
+    return NULL;
   if (g_file_get_contents (path, &text, NULL, &gerror))
     return text;
   if (!g_error_matches (gerror, G_FILE_ERROR, G_FILE_ERROR_NOENT))
@@ -154,8 +212,14 @@ write_file (BroPlatformKeystore *self, const char *name, const char *value, BroB
   g_autofree char *temp = g_build_filename (self->fallback_dir, base, NULL);
   size_t length = strlen (value), written = 0;
   int fd, saved;
+  struct stat st;
+  if (!refuse_network (self, error))
+    return FALSE;
   if (g_mkdir_with_parents (self->fallback_dir, 0700) != 0)
     return failed (error, name, g_strerror (errno));
+  if (chmod (self->fallback_dir, 0700) != 0 || lstat (self->fallback_dir, &st) != 0 || !S_ISDIR (st.st_mode)
+      || st.st_uid != geteuid () || (st.st_mode & 077) != 0)
+    return not_private (self, error, "the file system didn't keep its owner-only permissions");
   fd = open (temp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
   if (fd < 0)
     return failed (error, name, g_strerror (errno));

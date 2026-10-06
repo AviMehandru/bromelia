@@ -1806,6 +1806,15 @@
       },
       "today": "new: DataImager (the image is complete; only flushing its folder failed, which some network shares refuse)"
     },
+    "fs.notPrivate": {
+      "kind": "error",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "http": 500,
+      "today": "new: PlatformKeystore's fallback folder and RegistrySwapIsolation's snapshot (secrets are never kept on a network share, or where owner-only permissions don't hold)"
+    },
     "store.failed": {
       "kind": "error",
       "params": {

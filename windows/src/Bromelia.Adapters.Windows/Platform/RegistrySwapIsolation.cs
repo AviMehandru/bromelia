@@ -115,10 +115,11 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
     }
 
     /// <summary>The user's values, saved before any of them changes: written atomically into an owner-only
-    /// folder.</summary>
+    /// folder. They can hold app_Key, so a folder on a network share, or one where owner-only doesn't hold, is refused
+    /// (fs.notPrivate) and the run doesn't start.</summary>
     void SaveSnapshot(Dictionary<string, string?> snapshot)
     {
-        if (System.IO.Path.GetDirectoryName(_snapshotFile) is { Length: > 0 } folder) OwnerOnly.Folder(folder);
+        if (System.IO.Path.GetDirectoryName(_snapshotFile) is { Length: > 0 } folder) OwnerOnly.SecretsFolder(folder);
         var json = JsonValue.Of(("comment", JsonValue.Of("HKCU\\Software\\MakeMKV before a makemkvcon run; Bromelia puts these back")),
             ("values", JsonValue.Of(snapshot.Select(kv => (kv.Key, JsonValue.Of(kv.Value))).ToArray())));
         _fs.WriteAtomically(_snapshotFile, JsonValue.EncodeCanonical(json), 0x180);
