@@ -11,11 +11,17 @@ namespace Bromelia.Adapters.Tests;
 /// <summary>shared/fixtures/adapters/makemkv-tool.cases.json.</summary>
 public sealed class MakemkvToolTests : IDisposable
 {
-    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-makemkv-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-makemkv-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _root;
+    int _case;
+
+    public MakemkvToolTests() => _root = Path.Combine(_base, "0");
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch (IOException) { }
+        try { Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     string Shown(string text)
@@ -40,7 +46,7 @@ public sealed class MakemkvToolTests : IDisposable
     {
         RunCases("adapters/makemkv-tool.cases.json", (id, given, expect) =>
         {
-            if (Directory.Exists(_root)) Directory.Delete(_root, true);
+            _root = Path.Combine(_base, (++_case).ToString());
             Directory.CreateDirectory(Path.Combine(_root, "home"));
             foreach (var f in given["existing"]?.AsArray ?? new List<JsonValue>())
             {

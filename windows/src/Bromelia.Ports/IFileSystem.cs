@@ -46,6 +46,7 @@ public interface IFileSystem
     /// <summary>F_FULLFSYNC / FlushFileBuffers / fsync.</summary>
     void SyncFile(string path);
 
+    /// <summary>Syncs a folder after a rename in it; succeeds when the file system can't sync folders at all.</summary>
     void SyncDirectory(string path);
 
     /// <summary>F_NOCACHE / NO_BUFFERING / fadvise when bypassCache.</summary>

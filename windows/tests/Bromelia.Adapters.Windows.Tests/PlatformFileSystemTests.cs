@@ -13,12 +13,18 @@ namespace Bromelia.Adapters.Windows.Tests;
 [SupportedOSPlatform("windows")]
 public sealed class PlatformFileSystemTests : IDisposable
 {
-    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-fs-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-fs-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _root;
+    int _case;
     readonly PlatformFileSystem _fs = new();
+
+    public PlatformFileSystemTests() => _root = Path.Combine(_base, "0");
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_root)) Directory.Delete(_root, true); } catch (IOException) { }
+        try { if (Directory.Exists(_base)) Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     string P(string relative) => relative == "." ? _root : Path.Combine(_root, relative.Replace('/', '\\'));
@@ -32,7 +38,7 @@ public sealed class PlatformFileSystemTests : IDisposable
 
     void Build(JsonValue tree)
     {
-        if (Directory.Exists(_root)) Directory.Delete(_root, true);
+        _root = Path.Combine(_base, (++_case).ToString());
         Directory.CreateDirectory(_root);
         foreach (var (name, content) in tree.AsObject!.Select(m => (m.Key, m.Value)))
             if (name.EndsWith('/')) Directory.CreateDirectory(P(name.TrimEnd('/')));

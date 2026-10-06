@@ -831,6 +831,26 @@ test_fs_durable_and_uncached (void)
   g_dir_close (dir);
 }
 
+/* file-system-durable-write, folderSyncUnsupported: fsync on a /proc folder is EINVAL, like a file system that
+ * can't sync folders at all. */
+static void
+test_fs_sync_unsupported_folder (void)
+{
+  g_autoptr (BroPlatformFileSystem) fs = bro_platform_file_system_new ();
+  g_autoptr (BroBroError) error = NULL;
+  int fd = open ("/proc", O_RDONLY | O_CLOEXEC);
+  if (fd < 0 || fsync (fd) == 0 || errno != EINVAL)
+    {
+      if (fd >= 0)
+        close (fd);
+      g_test_skip ("fsync on /proc isn't EINVAL here");
+      return;
+    }
+  close (fd);
+  g_assert_true (bro_platform_file_system_sync_directory (fs, "/proc", &error));
+  g_assert_null (error);
+}
+
 static void
 test_fs_volume (void)
 {
@@ -1958,6 +1978,7 @@ main (int argc, char **argv)
   g_test_add_func ("/process/interpreter", test_interpreter);
   g_test_add_func ("/file-system/cases", test_fs_cases);
   g_test_add_func ("/file-system/durable-and-uncached", test_fs_durable_and_uncached);
+  g_test_add_func ("/file-system/sync-unsupported-folder", test_fs_sync_unsupported_folder);
   g_test_add_func ("/file-system/volume", test_fs_volume);
   g_test_add_func ("/settings-isolation/home", test_home_isolation);
   g_test_add_func ("/tool-locator/cases", test_tool_locator);

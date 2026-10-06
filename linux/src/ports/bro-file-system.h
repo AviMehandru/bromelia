@@ -75,7 +75,8 @@ gboolean bro_file_system_move_to_trash (BroFileSystem *self, const char *path, c
 /* F_FULLFSYNC / FlushFileBuffers / fsync. FALSE and @error set on failure. */
 gboolean bro_file_system_sync_file (BroFileSystem *self, const char *path, BroBroError **error);
 
-/* FALSE and @error set on failure. */
+/* Syncs a folder after a rename in it; succeeds when the file system can't sync folders at all. FALSE and @error
+ * set on failure. */
 gboolean bro_file_system_sync_directory (BroFileSystem *self, const char *path, BroBroError **error);
 
 /* F_NOCACHE / NO_BUFFERING / fadvise when bypassCache. */

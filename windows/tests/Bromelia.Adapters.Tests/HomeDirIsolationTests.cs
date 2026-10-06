@@ -8,11 +8,17 @@ namespace Bromelia.Adapters.Tests;
 /// <summary>shared/fixtures/adapters/settings-isolation.cases.json.</summary>
 public sealed class HomeDirIsolationTests : IDisposable
 {
-    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-home-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-home-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _root;
+    int _case;
+
+    public HomeDirIsolationTests() => _root = Path.Combine(_base, "0");
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch (IOException) { }
+        try { Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     string P(string relative) => Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -24,7 +30,7 @@ public sealed class HomeDirIsolationTests : IDisposable
     {
         RunCases("adapters/settings-isolation.cases.json", (id, given, expect) =>
         {
-            if (Directory.Exists(_root)) Directory.Delete(_root, true);
+            _root = Path.Combine(_base, (++_case).ToString());
             Directory.CreateDirectory(_root);
             foreach (var m in given["before"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
             {
