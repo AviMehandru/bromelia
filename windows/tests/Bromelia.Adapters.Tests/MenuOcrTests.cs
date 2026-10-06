@@ -10,11 +10,17 @@ namespace Bromelia.Adapters.Tests;
 /// <summary>shared/fixtures/adapters/menu-ocr.cases.json.</summary>
 public sealed class MenuOcrTests : IDisposable
 {
-    readonly string _dir = Path.Combine(Path.GetTempPath(), "bromelia-ocr-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-ocr-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _dir;
+    int _case;
+
+    public MenuOcrTests() => _dir = Path.Combine(_base, "0");
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, true); } catch (IOException) { }
+        try { Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     string R(string s) => s.Replace("<dir>", _dir).Replace('\\', '/');
@@ -25,7 +31,7 @@ public sealed class MenuOcrTests : IDisposable
     {
         RunCases("adapters/menu-ocr.cases.json", (id, given, expect) =>
         {
-            if (Directory.Exists(_dir)) Directory.Delete(_dir, true);
+            _dir = Path.Combine(_base, (++_case).ToString());
             Directory.CreateDirectory(_dir);
             var launcher = new ScriptedProcessLauncher
             {

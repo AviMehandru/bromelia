@@ -581,7 +581,8 @@
           "macos": "F_FULLFSYNC",
           "windows": "FlushFileBuffers",
           "linux": "fsync"
-        }
+        },
+        "folderSyncUnsupported": "syncDirectory succeeds when the file system can't sync a folder at all (macOS, Linux: EINVAL or ENOTSUP; Windows: ERROR_INVALID_FUNCTION or ERROR_NOT_SUPPORTED, which the Windows SMB client answers for every folder): the rename has happened and nothing more can be asked of that file system. Any other failure is fs.failed."
       }
     },
     {

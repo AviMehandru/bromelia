@@ -40,12 +40,18 @@ internal sealed class RecordingSink : IRunSink
 /// <summary>shared/fixtures/adapters/handbrake.cases.json.</summary>
 public sealed class HandBrakeTests : IDisposable
 {
-    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-hb-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-hb-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _root;
+    int _case;
+
+    public HandBrakeTests() => _root = Path.Combine(_base, "0");
     readonly string _home = Path.Combine(Path.GetTempPath(), "bromelia-home");
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch (IOException) { }
+        try { Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     string R(string s) => s.Replace("<root>", _root).Replace("<home>", _home).Replace("<handbrake>", "/opt/HandBrakeCLI");
@@ -55,7 +61,7 @@ public sealed class HandBrakeTests : IDisposable
     {
         RunCases("adapters/handbrake.cases.json", (id, given, expect) =>
         {
-            if (Directory.Exists(_root)) Directory.Delete(_root, true);
+            _root = Path.Combine(_base, (++_case).ToString());
             Directory.CreateDirectory(_root);
             foreach (var f in given["files"]?.AsArray ?? Array.Empty<JsonValue>())
             {

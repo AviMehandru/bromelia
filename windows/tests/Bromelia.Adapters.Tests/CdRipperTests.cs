@@ -10,11 +10,17 @@ namespace Bromelia.Adapters.Tests;
 /// <summary>shared/fixtures/adapters/cd-ripper.cases.json.</summary>
 public sealed class CdRipperTests : IDisposable
 {
-    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-cd-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-cd-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _root;
+    int _case;
+
+    public CdRipperTests() => _root = Path.Combine(_base, "0");
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch (IOException) { }
+        try { Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     string R(string s) => s.Replace("<root>", _root);
@@ -27,7 +33,7 @@ public sealed class CdRipperTests : IDisposable
         {
             var expect = OperatingSystem.IsWindows() && Json("adapters/cd-ripper.cases.json")["cases"]!.AsArray!
                 .First(c => c["id"]!.AsString == id)["windows"] is { } w ? w : expectAll;
-            if (Directory.Exists(_root)) Directory.Delete(_root, true);
+            _root = Path.Combine(_base, (++_case).ToString());
             var dest = R(given["dest"]!.AsString!);
             Directory.CreateDirectory(dest);
             var lines = new List<string>();

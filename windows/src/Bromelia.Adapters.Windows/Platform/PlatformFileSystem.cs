@@ -174,14 +174,18 @@ public sealed class PlatformFileSystem : IFileSystem
     }
 
     /// <summary>FlushFileBuffers on the folder (opened with FILE_FLAG_BACKUP_SEMANTICS): the rename that just
-    /// happened in it reaches the disk.</summary>
+    /// happened in it reaches the disk. A file system that can't flush a folder at all (the SMB client answers
+    /// ERROR_INVALID_FUNCTION) has nothing to do: the rename is already the server's to keep.</summary>
     public void SyncDirectory(string path)
     {
         if (!Directory.Exists(path)) throw NotFound(path);
         using var h = Native.CreateFileW(path, Native.GENERIC_READ | Native.GENERIC_WRITE, FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero,
             FileMode.Open, Native.FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero);
         if (h.IsInvalid) throw Failed("sync", path, Native.LastError());
-        if (!Native.FlushFileBuffers(h)) throw Failed("sync", path, Native.LastError());
+        if (Native.FlushFileBuffers(h)) return;
+        var code = Marshal.GetLastWin32Error();
+        if (code is Native.ERROR_INVALID_FUNCTION or Native.ERROR_NOT_SUPPORTED) return;
+        throw Failed("sync", path, new System.ComponentModel.Win32Exception(code).Message);
     }
 
     public IByteStream OpenForReading(string path, bool bypassCache)
@@ -293,6 +297,8 @@ public sealed class PlatformFileSystem : IFileSystem
         public const uint GENERIC_WRITE = 0x40000000;
         public const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
         public const int FILE_FLAG_NO_BUFFERING = 0x20000000;
+        public const int ERROR_INVALID_FUNCTION = 1;
+        public const int ERROR_NOT_SUPPORTED = 50;
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool MoveFileExW(string from, string to, uint flags);

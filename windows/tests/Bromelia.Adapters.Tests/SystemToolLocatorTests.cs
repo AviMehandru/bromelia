@@ -8,11 +8,15 @@ namespace Bromelia.Adapters.Tests;
 /// <summary>shared/fixtures/adapters/tool-locator.cases.json.</summary>
 public sealed class SystemToolLocatorTests : IDisposable
 {
-    readonly string _root = Path.Combine(Path.GetTempPath(), "bromelia-tools-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-tools-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _root = "";
+    int _case;
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch (IOException) { }
+        try { Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     string R(string text) => text.Replace("<root>", _root);
@@ -28,7 +32,7 @@ public sealed class SystemToolLocatorTests : IDisposable
     {
         RunCases("adapters/tool-locator.cases.json", (id, given, expect) =>
         {
-            if (Directory.Exists(_root)) Directory.Delete(_root, true);
+            _root = Path.Combine(_base, (++_case).ToString());
             Directory.CreateDirectory(_root);
             foreach (var f in given["files"]!.AsArray!.Select(x => x.AsString!))
             {

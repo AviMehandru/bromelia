@@ -38,6 +38,7 @@ public protocol FileSystem: Sendable {
     /// F_FULLFSYNC / FlushFileBuffers / fsync.
     func syncFile(_ path: String) throws(BroError)
 
+    /// Syncs a folder after a rename in it; succeeds when the file system can't sync folders at all.
     func syncDirectory(_ path: String) throws(BroError)
 
     /// F_NOCACHE / NO_BUFFERING / fadvise when bypassCache.

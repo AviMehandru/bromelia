@@ -60,11 +60,17 @@ internal sealed class FakeDriveControl : IDriveControl
 /// <summary>shared/fixtures/adapters/data-imager.cases.json.</summary>
 public sealed class DataImagerTests : IDisposable
 {
-    readonly string _dir = Path.Combine(Path.GetTempPath(), "bromelia-image-" + Guid.NewGuid().ToString("N"));
+    readonly string _base = Path.Combine(Path.GetTempPath(), "bromelia-image-" + Guid.NewGuid().ToString("N"));
+    /// <summary>A new folder for each case: deleting a folder and making it again under the same name can leave the
+    /// Windows SMB client answering for the old one.</summary>
+    string _dir;
+    int _case;
+
+    public DataImagerTests() => _dir = Path.Combine(_base, "0");
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, true); } catch (IOException) { }
+        try { Directory.Delete(_base, true); } catch (IOException) { }
     }
 
     [Fact]
@@ -72,7 +78,7 @@ public sealed class DataImagerTests : IDisposable
     {
         RunCases("adapters/data-imager.cases.json", (id, given, expect) =>
         {
-            if (Directory.Exists(_dir)) Directory.Delete(_dir, true);
+            _dir = Path.Combine(_base, (++_case).ToString());
             Directory.CreateDirectory(_dir);
             var dest = Path.Combine(_dir, "disc.iso");
             if (given["existing"]?.AsBool == true) File.WriteAllText(dest, "already here");

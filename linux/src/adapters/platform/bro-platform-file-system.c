@@ -341,6 +341,9 @@ bro_platform_file_system_sync_directory (BroPlatformFileSystem *self, const char
   if (fd < 0)
     return set_errno_error (error, errno, "sync", path);
   ok = full_sync (fd);
+  /* A file system that can't sync a folder at all has nothing to do: the rename is already its to keep. */
+  if (!ok && (errno == EINVAL || errno == ENOTSUP || errno == EOPNOTSUPP))
+    ok = TRUE;
   if (!ok)
     set_errno_error (error, errno, "sync", path);
   close (fd);

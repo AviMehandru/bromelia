@@ -217,12 +217,13 @@ public final class PlatformFileSystem: FileSystem {
         if fcntl(fd, F_FULLFSYNC) != 0 && fsync(fd) != 0 { throw errnoError("sync", path) }
     }
 
-    /// F_FULLFSYNC on the folder: the rename that just happened in it reaches the disk.
+    /// F_FULLFSYNC on the folder: the rename that just happened in it reaches the disk. A file system that can't
+    /// sync a folder at all (EINVAL, ENOTSUP) has nothing to do: the rename is already its to keep.
     public func syncDirectory(_ path: String) throws(BroError) {
         let fd = open(path, O_RDONLY | O_CLOEXEC)
         guard fd >= 0 else { throw errnoError("sync", path) }
         defer { close(fd) }
-        if fcntl(fd, F_FULLFSYNC) != 0 && fsync(fd) != 0 { throw errnoError("sync", path) }
+        if fcntl(fd, F_FULLFSYNC) != 0 && fsync(fd) != 0 && errno != EINVAL && errno != ENOTSUP { throw errnoError("sync", path) }
     }
 
     public func openForReading(_ path: String, bypassCache: Bool) throws(BroError) -> any ByteStream {
