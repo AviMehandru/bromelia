@@ -36,7 +36,8 @@ public sealed class PlatformPowerManagerTests
         var first = power.Inhibit("Ripping discs");
         var second = power.Inhibit("Verifying");
         Assert.True(Eventually(() => power.Awake));
-        if (Requests() is { } requests) Assert.Contains("dotnet", requests, StringComparison.OrdinalIgnoreCase);
+        // Listed under this process's own executable: dotnet.exe or testhost.exe, depending on how the tests are run.
+        if (Requests() is { } requests) Assert.Contains(Path.GetFileName(Environment.ProcessPath!), requests, StringComparison.OrdinalIgnoreCase);
         first.Release();
         first.Release(); // twice changes nothing
         Thread.Sleep(200);
