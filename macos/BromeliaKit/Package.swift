@@ -22,7 +22,10 @@ let package = Package(
         .testTarget(name: "BroFoundationTests", dependencies: ["BroFoundation", "BroTestSupport"]),
         .testTarget(name: "BroDomainTests", dependencies: ["BroDomain", "BroTestSupport"]),
         .testTarget(name: "BroPortsTests", dependencies: ["BroPorts", "BroTestSupport"]),
-        .testTarget(name: "BroAdaptersTests", dependencies: ["BroAdapters", "BroTestSupport"]),
+        // Started by BroAdaptersTests (CrashTests): kills itself at a chosen point. Not shipped.
+        .executableTarget(name: "BroTestProbe", dependencies: ["BroFoundation", "BroDomain", "BroPorts", "BroAdapters"],
+                          path: "Tests/BroTestProbe"),
+        .testTarget(name: "BroAdaptersTests", dependencies: ["BroAdapters", "BroTestSupport", "BroTestProbe"]),
     ],
     swiftLanguageModes: [.v6]
 )
