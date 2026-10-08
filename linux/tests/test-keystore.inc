@@ -184,13 +184,14 @@ test_keystore_loose_folder (void)
 }
 
 #ifdef BRO_HAVE_LIBSECRET
-/* Whether the default collection is unlocked, asked of libsecret directly; -1 when there is no Secret Service. */
+/* Whether the default collection is unlocked, asked of libsecret directly; -1 when there is no Secret Service. As in
+ * the keystore, a session must open: without anything providing the service, libsecret still returns a proxy. */
 static int
 keystore_default_unlocked (void)
 {
   g_autoptr (SecretService) service = secret_service_get_sync (SECRET_SERVICE_NONE, NULL, NULL);
   g_autoptr (SecretCollection) collection = NULL;
-  if (!service)
+  if (!service || !secret_service_ensure_session_sync (service, NULL, NULL))
     return -1;
   collection = secret_collection_for_alias_sync (service, SECRET_COLLECTION_DEFAULT, SECRET_COLLECTION_NONE, NULL, NULL);
   return collection && !secret_collection_get_locked (collection);
