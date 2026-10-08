@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using Bromelia.Domain;
@@ -67,7 +68,7 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         Assert.Equal(new[] { "1", "2", "3", "4", "5", "6" }, lines.Select(l => l.Text));
     }
 
-    [Theory] // cancel-escalates, terminate-first: Windows has no signals, so the job ends at once either way
+    [Theory] // cancel-escalates, terminate-first: ping ignores CTRL_BREAK (it prints its statistics), so the job ends it
     [InlineData(StopPolicy.InterruptFirst)]
     [InlineData(StopPolicy.TerminateFirst)]
     public void StopEndsTheProcess(StopPolicy policy)
@@ -82,6 +83,53 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         Assert.Equal(-1, exit.Status);
         Assert.Null(exit.Signal);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(12), watch.Elapsed.ToString());
+    }
+
+    [DllImport("kernel32.dll")]
+    static extern bool FreeConsole();
+
+    /// <summary>The tool and the probe's dotnet run until it exits; the lines it printed.</summary>
+    static (List<string> Lines, ProcessExit Exit, TimeSpan Took) StopAfterReady(IRunningProcess p)
+    {
+        var lines = new List<string>();
+        var ready = new ManualResetEventSlim();
+        var read = Task.Run(async () => { await foreach (var l in p.Lines()) { lines.Add(l.Text); if (l.Text == "ready") ready.Set(); } });
+        Assert.True(ready.Wait(TimeSpan.FromSeconds(30)), "the probe never got ready");
+        var watch = Stopwatch.StartNew();
+        p.Stop(StopReason.Cancelled);
+        var exit = p.Wait().GetAwaiter().GetResult();
+        var took = watch.Elapsed;
+        read.Wait(TimeSpan.FromSeconds(10));
+        return (lines, exit, took);
+    }
+
+    /// <summary>P2-14: a stop sends CTRL_BREAK first, so a tool that handles it closes its files and exits on its own,
+    /// with its own exit status; the engine isn't touched. Both kinds of engine: one with a console (this test host,
+    /// over SSH or in CI; bromelia-daemon in a terminal) and one without (the app and the service).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AStopSendsCtrlBreakFirst(bool withoutConsole)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (withoutConsole) FreeConsole();
+        var (lines, exit, took) = StopAfterReady(_launcher.Start(Spec(TestProbe.Dotnet, TestProbe.Dll, "break-aware")));
+        Assert.Contains("break", lines);
+        Assert.Equal(7, exit.Status);
+        Assert.True(exit.Cancelled);
+        Assert.True(took < TimeSpan.FromSeconds(5), took.ToString());
+    }
+
+    /// <summary>A tool that ignores CTRL_BREAK is ended with its job after the grace period (5 s), exit status -1.</summary>
+    [Fact]
+    public void AToolThatIgnoresCtrlBreakEndsAfterTheGracePeriod()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var (lines, exit, took) = StopAfterReady(_launcher.Start(Spec(TestProbe.Dotnet, TestProbe.Dll, "break-ignoring")));
+        Assert.Contains("ignored", lines);
+        Assert.Equal(-1, exit.Status);
+        Assert.True(exit.Cancelled);
+        Assert.True(took > TimeSpan.FromSeconds(4.5) && took < TimeSpan.FromSeconds(10), took.ToString());
     }
 
     [Fact] // output-drained

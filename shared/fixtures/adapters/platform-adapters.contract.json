@@ -80,7 +80,7 @@
         ],
         "endedBy": "TERM",
         "rule": "Works without any main loop running (the watchdog has its own thread).",
-        "windows": "No signals: TerminateJobObject at once, exit status -1, no signal."
+        "windows": "No signals: CTRL_BREAK to the tool's console (sent by a short-lived hidden PowerShell attached to it), then TerminateJobObject after 5 s or as soon as the tool has exited; a tool that exits on the break reports its own exit status, one the job ends reports -1; no signal."
       }
     },
     {
@@ -98,7 +98,8 @@
           "KILL after 5 s"
         ],
         "endedBy": "KILL",
-        "exitStatus": -1
+        "exitStatus": -1,
+        "windows": "CTRL_BREAK, then TerminateJobObject after 5 s (as cancel-escalates)."
       }
     },
     {
@@ -226,7 +227,7 @@
       "expect": {
         "stopKillsTheGroup": true,
         "rule": "Signals go to the process group; once a stopped process has ended, what is left of its group is killed (a shell's background child ignores SIGINT). A process left running after a normal exit is left alone.",
-        "windows": "The Job Object: TerminateJobObject ends every process in it."
+        "windows": "The Job Object: once a stopped tool has ended (or 5 s after CTRL_BREAK), TerminateJobObject ends every process left in it."
       }
     },
     {

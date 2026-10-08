@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bromelia.Adapters.Tests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bromelia.Adapters.Windows.Tests", "tests\Bromelia.Adapters.Windows.Tests\Bromelia.Adapters.Windows.Tests.csproj", "{588DE70C-AA3E-415F-9DE2-D79B0115F1BC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bromelia.TestProbe", "tests\Bromelia.TestProbe\Bromelia.TestProbe.csproj", "{8A37E6BA-6ECA-48D5-B0ED-FBCFE290DD23}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -94,6 +96,10 @@ Global
 		{588DE70C-AA3E-415F-9DE2-D79B0115F1BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{588DE70C-AA3E-415F-9DE2-D79B0115F1BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{588DE70C-AA3E-415F-9DE2-D79B0115F1BC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8A37E6BA-6ECA-48D5-B0ED-FBCFE290DD23}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A37E6BA-6ECA-48D5-B0ED-FBCFE290DD23}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A37E6BA-6ECA-48D5-B0ED-FBCFE290DD23}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A37E6BA-6ECA-48D5-B0ED-FBCFE290DD23}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{149E82FE-8B31-41A9-913F-29F5115F478C} = {70C5135C-72EE-44FF-83EA-C95E052A5B9C}
@@ -109,5 +115,6 @@ Global
 		{C0A37614-8C12-4173-AB50-EA967DA44010} = {70C5135C-72EE-44FF-83EA-C95E052A5B9C}
 		{E2FC7196-E374-4F5E-9E16-DBDC19FCEA35} = {5D2821C3-A6BD-4F9B-83D0-4C49EABC4FF0}
 		{588DE70C-AA3E-415F-9DE2-D79B0115F1BC} = {5D2821C3-A6BD-4F9B-83D0-4C49EABC4FF0}
+		{8A37E6BA-6ECA-48D5-B0ED-FBCFE290DD23} = {5D2821C3-A6BD-4F9B-83D0-4C49EABC4FF0}
 	EndGlobalSection
 EndGlobal
