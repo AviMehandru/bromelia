@@ -205,11 +205,11 @@
       "id": "a-slow-reader-gets-everything",
       "given": {
         "command": "30000 numbered lines, then exit at once",
-        "then": "read them slowly: about 7 s in all"
+        "then": "read them slowly: about 15 s in all, so the backlog outlasts the 5 s after the exit"
       },
       "expect": {
         "lines": "all 30000, in order",
-        "rule": "the launcher keeps reading for 5 s after an exit, and longer while lines wait for a reader that is still taking them: a slow reader loses nothing; a child left holding the pipe still doesn't hold up the end (output-drained)"
+        "rule": "the launcher keeps reading for 5 s after an exit, and longer while lines wait for a reader that is still taking them: a slow reader loses nothing (lines still queued count as waiting, not only a launcher thread blocked for room); a child left holding the pipe still doesn't hold up the end (output-drained)"
       }
     },
     {

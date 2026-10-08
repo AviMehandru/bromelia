@@ -279,12 +279,15 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             var abandoned = await Task.WhenAny(exited, abandon).ConfigureAwait(false) != exited;
             // Output normally ends with the process. A child it left behind may keep the pipes open: stop reading 5 s after
             // the exit, unless lines are still waiting for a reader that keeps taking them (its backlog isn't dropped).
+            // Queued lines count too: a pump between two waits for room isn't counted, and ending then would drop what
+            // it hasn't read yet.
             if (!abandoned)
             {
                 var exitedAt = Environment.TickCount64;
                 var all = Task.WhenAll(pumps);
                 bool Reading() => Environment.TickCount64 - exitedAt < 5000
-                                  || (Volatile.Read(ref _waitingForRoom) > 0 && Environment.TickCount64 - Interlocked.Read(ref _lastTaken) < 5000);
+                                  || ((Volatile.Read(ref _waitingForRoom) > 0 || _lines.Reader.Count > 0)
+                                      && Environment.TickCount64 - Interlocked.Read(ref _lastTaken) < 5000);
                 while (!all.IsCompleted && Reading()) await Task.WhenAny(all, Task.Delay(Tick)).ConfigureAwait(false);
             }
             _watchdog?.Dispose();

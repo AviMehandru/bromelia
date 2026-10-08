@@ -311,7 +311,7 @@ test_slow_reader_gets_everything (void)
       g_assert_cmpstr (line->text, ==, want);
       bro_output_line_free (line);
       if (n % 100 == 0)
-        g_usleep (G_USEC_PER_SEC / 40);
+        g_usleep (G_USEC_PER_SEC / 20); /* the backlog outlasts the 5 s */
     }
   bro_running_process_wait (p);
   g_assert_cmpuint (n, ==, 30000);

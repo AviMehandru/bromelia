@@ -398,11 +398,14 @@ watchdog_thread (gpointer data)
           break;
         }
       /* Output normally ends with the process; a child it left behind may keep a pipe open: stop reading 5 s after the
-       * exit, unless lines are still waiting for a reader that keeps taking them. */
+       * exit, unless lines are still waiting for a reader that keeps taking them. Queued lines count too: each take wakes
+       * this thread as well, often while a reader is between two reads of the pipe, and ending then would drop what it
+       * hasn't read yet. */
       if (self->exited
           && (self->readers_left == 0
               || (now - self->exited_at >= 5 * G_USEC_PER_SEC
-                  && !(self->waiting_for_room > 0 && now - self->last_taken < 5 * G_USEC_PER_SEC))))
+                  && !((self->waiting_for_room > 0 || !g_queue_is_empty (&self->lines))
+                       && now - self->last_taken < 5 * G_USEC_PER_SEC))))
         {
           BroProcessExit exit = { -1, 0, self->stalled, FALSE, cancelled };
           if (WIFEXITED (self->wait_status))
