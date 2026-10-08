@@ -197,7 +197,7 @@
         "markerAfter3s": false,
         "lines": "all 50000, in order",
         "stalled": false,
-        "rule": "at most 10000 lines wait to be read; then the reading waits, so the tool waits to write: nothing is lost, memory stays bounded, and waiting for the reader isn't silence"
+        "rule": "at most 10000 lines, or 16 MiB of their text (UTF-8), wait to be read; then the reading waits, so the tool waits to write: nothing is lost, memory stays bounded (long lines for a reader that has stopped hold about 16 MiB, not 10000 x 64 KiB), and waiting for the reader isn't silence"
       }
     },
     {

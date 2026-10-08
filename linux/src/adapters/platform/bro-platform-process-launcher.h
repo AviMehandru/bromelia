@@ -2,8 +2,8 @@
  * (g_spawn + setpgid) and watches them from a thread of their own: stalls, stop escalation (INT →) TERM → KILL
  * 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (longer only while lines wait for a reader that
  * is still taking them), a transcript of every line. Lines are cut at 64 KiB (they end with " [cut]") and at most
- * BRO_QUEUED_LINES wait to be read: then the reading waits too, so the tool waits to write (nothing is lost) and that
- * wait doesn't count as silence.
+ * BRO_QUEUED_LINES, or BRO_QUEUED_BYTES of text, wait to be read: then the reading waits too, so the tool waits to write
+ * (nothing is lost) and that wait doesn't count as silence.
  *
  * Signals go to the whole group. Once a stopped process has ended, whatever is left of its group is killed (a
  * background child of a shell ignores SIGINT). A process left running after a normal exit is left alone. */
@@ -15,8 +15,10 @@
 
 G_BEGIN_DECLS
 
-/* How many lines may wait to be read before the reading waits. */
+/* How many lines, and how much of their text, may wait to be read before the reading waits: long lines for a reader
+ * that has stopped can't hold more than about 16 MiB. */
 #define BRO_QUEUED_LINES 10000
+#define BRO_QUEUED_BYTES (16 * 1024 * 1024)
 
 #define BRO_TYPE_PLATFORM_PROCESS_LAUNCHER (bro_platform_process_launcher_get_type ())
 G_DECLARE_FINAL_TYPE (BroPlatformProcessLauncher, bro_platform_process_launcher, BRO, PLATFORM_PROCESS_LAUNCHER, GObject)
