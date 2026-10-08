@@ -22,8 +22,10 @@ namespace Bromelia.Adapters.Windows;
 /// read: then the reading waits too, so the tool waits to write (nothing is lost) and that wait doesn't count as
 /// silence.
 ///
-/// Windows has no signals, so both stop policies end the whole job at once (TerminateJobObject); the exit status is
-/// then -1. The job also has KILL_ON_JOB_CLOSE until the process has ended, so a crashed engine leaves no tools
+/// Windows has no signals. A stop (either policy, or a stall) sends CTRL_BREAK to the tool's console (<see
+/// cref="ConsoleBreak"/>) so it can close its files, and ends the whole job (TerminateJobObject) 5 s later, or as soon as
+/// the tool has exited (whatever it left behind goes too). A tool that exits on the break reports its own exit status;
+/// one the job ends reports -1. The job also has KILL_ON_JOB_CLOSE until the process has ended, so a crashed engine leaves no tools
 /// behind. A process the tool leaves running after a normal exit is left alone, as on macOS and Linux.</summary>
 public sealed class PlatformProcessLauncher : IProcessLauncher
 {
@@ -61,7 +63,8 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(250);
 
         readonly Process _process;
-        readonly IntPtr _job;
+        /// <summary>The Job Object, until <see cref="Finish"/> closes it (guarded by <see cref="_gate"/>).</summary>
+        IntPtr _job;
         readonly ProcessSpec _spec;
         readonly Channel<OutputLine> _lines = Channel.CreateBounded<OutputLine>(new BoundedChannelOptions(QueuedLines)
         {
@@ -165,6 +168,9 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
 
         public BroMessage? TranscriptProblem() => _transcript?.Problem;
 
+        /// <summary>How long a tool has after CTRL_BREAK before the job is ended, as macOS and Linux wait after a signal.</summary>
+        static readonly TimeSpan Grace = TimeSpan.FromSeconds(5);
+
         public void Stop(StopReason reason)
         {
             lock (_gate)
@@ -172,7 +178,22 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
                 if (_reason is not null) return;
                 _reason = reason;
             }
-            Kill();
+            Escalate();
+        }
+
+        /// <summary>CTRL_BREAK, then the job ends after the grace period or as soon as the tool has exited.</summary>
+        void Escalate()
+        {
+            try
+            {
+                if (!_process.HasExited) ConsoleBreak.Send(_process.Id);
+            }
+            catch (InvalidOperationException) { }
+            _ = Task.Run(async () =>
+            {
+                await Task.WhenAny(_process.WaitForExitAsync(), Task.Delay(Grace)).ConfigureAwait(false);
+                Kill();
+            });
         }
 
         static Instant Now() => new(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
@@ -189,16 +210,17 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
                 _reason = StopReason.Stalled;
                 _stalled = new Duration(Math.Round(quiet, 3));
             }
-            Kill();
+            Escalate();
         }
 
+        /// <summary>Ends the job: the tool if it is still running, and whatever it left behind.</summary>
         void Kill()
         {
             try
             {
-                if (_process.HasExited) return;
-                if (_job == IntPtr.Zero || !Native.TerminateJobObject(_job, unchecked((uint)-1)))
-                    _process.Kill(entireProcessTree: true);
+                bool ended;
+                lock (_gate) ended = _job != IntPtr.Zero && Native.TerminateJobObject(_job, unchecked((uint)-1));
+                if (!ended && !_process.HasExited) _process.Kill(entireProcessTree: true);
             }
             catch (InvalidOperationException) { }
             catch (Win32Exception) { }
@@ -269,10 +291,14 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _watchdog = null;
             _ended = true;
             _lines.Writer.TryComplete();
-            if (_job != IntPtr.Zero)
+            lock (_gate)
             {
-                Native.KeepProcessesOnClose(_job);
-                Native.CloseHandle(_job);
+                if (_job != IntPtr.Zero)
+                {
+                    Native.KeepProcessesOnClose(_job);
+                    Native.CloseHandle(_job);
+                    _job = IntPtr.Zero;
+                }
             }
             ProcessExit exit;
             lock (_gate)
@@ -356,6 +382,32 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
                 try { _writer.Dispose(); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Fail(e.Message); }
             }
+        }
+    }
+
+    /// <summary>CTRL_BREAK for a tool. The tool runs in a console of its own (CreateNoWindow gives every tool one, even
+    /// when the engine has a console), and only a process attached to that console can send it. Attaching the engine
+    /// itself doesn't work: the break then ends the engine too, whatever handler it set (found 2026-10-07). So a
+    /// short-lived hidden PowerShell attaches to the tool's console and sends the break to everything on it (the tool
+    /// and its children); the break ends the helper as well, which is all it is for (about 0.7 s on the test VM).
+    /// Best effort: a tool the break doesn't reach, or without PowerShell, is ended with its job after the grace
+    /// period.</summary>
+    internal static class ConsoleBreak
+    {
+        public static void Send(int pid)
+        {
+            var script = "Add-Type -Name C -Namespace BromeliaBreak -MemberDefinition '" +
+                         "[DllImport(\"kernel32.dll\")] public static extern bool FreeConsole(); " +
+                         "[DllImport(\"kernel32.dll\")] public static extern bool AttachConsole(uint p); " +
+                         "[DllImport(\"kernel32.dll\")] public static extern bool GenerateConsoleCtrlEvent(uint e, uint g);'; " +
+                         $"[void][BromeliaBreak.C]::FreeConsole(); if ([BromeliaBreak.C]::AttachConsole({pid})) {{ [void][BromeliaBreak.C]::GenerateConsoleCtrlEvent(1, 0) }}";
+            try
+            {
+                var psi = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true };
+                foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command", script }) psi.ArgumentList.Add(a);
+                Process.Start(psi)?.Dispose();
+            }
+            catch (Win32Exception) { }
         }
     }
 

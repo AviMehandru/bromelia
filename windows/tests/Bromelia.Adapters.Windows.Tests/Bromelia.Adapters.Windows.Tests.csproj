@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Bromelia.Adapters.Windows\Bromelia.Adapters.Windows.csproj" />
+    <!-- Started by the tests (CrashTests, the CTRL_BREAK cases); built and copied next to them. -->
+    <ProjectReference Include="..\Bromelia.TestProbe\Bromelia.TestProbe.csproj" />
   </ItemGroup>
 
 </Project>

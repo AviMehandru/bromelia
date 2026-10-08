@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A program the Windows adapter tests start and stop: a tool that handles or ignores CTRL_BREAK, and the crash
+       points (it kills itself where a test asks). Not shipped. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Bromelia.Adapters.Windows\Bromelia.Adapters.Windows.csproj" />
+  </ItemGroup>
+
+</Project>
