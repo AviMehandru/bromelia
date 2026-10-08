@@ -18,8 +18,9 @@ namespace Bromelia.Adapters.Windows;
 /// <summary>Starts processes in a Job Object and watches them (plan §10.3): stalls, stopping, abandonment 30 s after
 /// the kill, output read for 5 s after exit (longer only while lines wait for a reader that is still taking them), a
 /// transcript of every line. Lines are cut at 64 KiB
-/// (<see cref="LineSplitter"/>) and at most <see cref="QueuedLines"/> wait to be read: then the reading waits too, so the
-/// tool waits to write (nothing is lost) and that wait doesn't count as silence.
+/// (<see cref="LineSplitter"/>) and at most <see cref="QueuedLines"/>, or <see cref="QueuedBytes"/> of text, wait to be
+/// read: then the reading waits too, so the tool waits to write (nothing is lost) and that wait doesn't count as
+/// silence.
 ///
 /// Windows has no signals, so both stop policies end the whole job at once (TerminateJobObject); the exit status is
 /// then -1. The job also has KILL_ON_JOB_CLOSE until the process has ended, so a crashed engine leaves no tools
@@ -28,6 +29,9 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
 {
     /// <summary>How many lines may wait to be read before the reading waits.</summary>
     public const int QueuedLines = 10000;
+    /// <summary>How much text (UTF-8) may wait to be read before the reading waits: long lines for a reader that has
+    /// stopped can't hold more than about 16 MiB.</summary>
+    public const int QueuedBytes = 16 * 1024 * 1024;
 
     public IRunningProcess Start(ProcessSpec spec) => Running.Start(spec);
 
@@ -68,6 +72,11 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         int _waitingForRoom;
         /// <summary>When the reader last took a line.</summary>
         long _lastTaken = Environment.TickCount64;
+        /// <summary>The text of the lines in <see cref="_lines"/>; a pump waits while it is <see cref="QueuedBytes"/>.</summary>
+        long _queuedBytes;
+        /// <summary>Released when the reader takes a line: room, maybe.</summary>
+        readonly SemaphoreSlim _taken = new(0, int.MaxValue);
+        volatile bool _ended;
         readonly object _gate = new();
         readonly TaskCompletionSource _killed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         readonly Transcript? _transcript;
@@ -146,6 +155,8 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             await foreach (var line in _lines.Reader.ReadAllAsync().ConfigureAwait(false))
             {
                 Interlocked.Exchange(ref _lastTaken, Environment.TickCount64);
+                Interlocked.Add(ref _queuedBytes, -Encoding.UTF8.GetByteCount(line.Text));
+                if (_taken.CurrentCount == 0) _taken.Release();
                 yield return line;
             }
         }
@@ -213,6 +224,21 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         {
             _transcript?.Write(line);
             var item = new OutputLine(source, line, Now());
+            if (Interlocked.Read(ref _queuedBytes) >= QueuedBytes)
+            {
+                Interlocked.Increment(ref _waitingForRoom);
+                try
+                {
+                    while (Interlocked.Read(ref _queuedBytes) >= QueuedBytes && !_ended) await _taken.WaitAsync(Tick).ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
+                    Interlocked.Decrement(ref _waitingForRoom);
+                }
+                if (_ended) return;
+            }
+            Interlocked.Add(ref _queuedBytes, Encoding.UTF8.GetByteCount(line));
             if (_lines.Writer.TryWrite(item)) return;
             Interlocked.Increment(ref _waitingForRoom);
             try { await _lines.Writer.WriteAsync(item).ConfigureAwait(false); }
@@ -241,6 +267,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             }
             _watchdog?.Dispose();
             _watchdog = null;
+            _ended = true;
             _lines.Writer.TryComplete();
             if (_job != IntPtr.Zero)
             {
@@ -318,13 +345,16 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             }
         }
 
+        /// <summary>Closing writes what the file stream still buffers: on a full disk that fails like any line
+        /// (process.noTranscript), never the run.</summary>
         public void Dispose()
         {
             if (_writer is null) return;
             lock (_writer)
             {
                 _closed = true;
-                _writer.Dispose();
+                try { _writer.Dispose(); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Fail(e.Message); }
             }
         }
     }

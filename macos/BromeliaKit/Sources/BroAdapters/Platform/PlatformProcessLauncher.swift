@@ -7,15 +7,17 @@ import Foundation
 /// Starts processes with posix_spawn in their own process group and watches them (plan §10.3): stalls, stop
 /// escalation (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (longer only
 /// while lines wait for a reader that is still taking them), a transcript of every line. Lines are cut at 64 KiB
-/// (LineSplitter) and at most `queuedLines` wait to be read: then the reading waits too, so the tool waits to write
-/// (nothing is lost) and that wait doesn't count as silence. Foundation's Process isn't used: it can't start a process
+/// (LineSplitter) and at most `queuedLines`, or `queuedBytes` of text, wait to be read: then the reading waits too, so
+/// the tool waits to write (nothing is lost) and that wait doesn't count as silence. Foundation's Process isn't used: it can't start a process
 /// group.
 ///
 /// Signals go to the whole group. Once a stopped process has ended, whatever is left of its group is killed (a
 /// background child of a shell ignores SIGINT). A process left running after a normal exit is left alone.
 public final class PlatformProcessLauncher: ProcessLauncher {
-    /// How many lines may wait to be read before the reading waits.
+    /// How many lines, and how much of their text, may wait to be read before the reading waits: long lines for a
+    /// reader that has stopped can't hold more than about 16 MiB.
     public static let queuedLines = 10000
+    public static let queuedBytes = 16 * 1024 * 1024
 
     public init() {}
 
@@ -48,6 +50,8 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
     // Guarded by cond:
     private var queue: [OutputLine] = []
     private var queueHead = 0
+    private var queuedBytes = 0      // the text of the lines not taken yet
+    private var takenBytes = 0       // the text of the taken lines still in `queue`
     private var lineWaiters: [CheckedContinuation<OutputLine?, Never>] = []
     private var ended = false        // no more lines: the reader gets what is queued, then nil
     private var waitingForRoom = 0   // readers waiting for the queue: the tool isn't silent, nobody is reading
@@ -176,9 +180,12 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
             if queueHead < queue.count {
                 let line = queue[queueHead]
                 queueHead += 1
-                if queueHead >= 4096 && queueHead * 2 >= queue.count {
+                queuedBytes -= line.text.utf8.count
+                takenBytes += line.text.utf8.count
+                if (queueHead >= 4096 && queueHead * 2 >= queue.count) || takenBytes >= PlatformProcessLauncher.queuedBytes {
                     queue.removeFirst(queueHead)
                     queueHead = 0
+                    takenBytes = 0
                 }
                 lastTaken = Self.clock()
                 cond.broadcast()   // room for a waiting reader
@@ -200,7 +207,7 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         transcript?.write(line.text)
         cond.lock()
         var waited = false
-        while queue.count - queueHead >= PlatformProcessLauncher.queuedLines && !ended {
+        while (queue.count - queueHead >= PlatformProcessLauncher.queuedLines || queuedBytes >= PlatformProcessLauncher.queuedBytes) && !ended {
             waitingForRoom += 1
             cond.wait()
             waitingForRoom -= 1
@@ -219,6 +226,7 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
             return
         }
         queue.append(line)
+        queuedBytes += line.text.utf8.count
         cond.unlock()
     }
 

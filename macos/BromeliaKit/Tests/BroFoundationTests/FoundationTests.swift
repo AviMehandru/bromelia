@@ -55,11 +55,16 @@ struct FoundationTests {
         let child = CancellationSource.linked(to: parent.token)
         child.close()
         var freed: CancellationSource? = CancellationSource.linked(to: parent.token)
-        weak let gone = freed
+        let gone = Weak(value: freed) // not `weak let`: CI's Xcode 16.4 (Swift 6.1) doesn't have it
         freed = nil
-        #expect(gone == nil)
+        #expect(gone.value == nil)
         parent.cancel()
         #expect(!child.token.isCancelled)
         #expect(CancellationSource.linked(to: parent.token).token.isCancelled)
     }
+}
+
+/// Holds an object without keeping it alive.
+private struct Weak<T: AnyObject> {
+    weak var value: T?
 }

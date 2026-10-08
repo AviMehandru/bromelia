@@ -43,8 +43,9 @@ public sealed class DataImager
         {
             long total = reader.SectorCount(), copied = 0;
             if (total <= 0) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.OtherEmptyDisc)));
-            using (var file = new FileStream(part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20))
+            try
             {
+                using var file = new FileStream(part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20);
                 while (copied < total)
                 {
                     if (cancel.IsCancelled) throw Cancelled();
@@ -56,6 +57,12 @@ public sealed class DataImager
                     sink.Event(new RobotEvent.ProgressValue(share, share, Max));
                 }
                 file.Flush(true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // A full disk, as on macOS and Linux: fs.failed for the hidden file, which goes below.
+                throw new BroFailure(new BroMessage(MessageCode.FsFailed, Severity.Error, ("operation", JsonValue.Of("write")),
+                    ("path", JsonValue.Of(part)), ("reason", JsonValue.Of(e.Message))).ToError());
             }
             if (cancel.IsCancelled) throw Cancelled();
             _fs.Rename(part, destIso);

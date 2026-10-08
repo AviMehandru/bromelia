@@ -87,6 +87,7 @@ struct _BroSpawnedProcess {
   int transcript; /* fd, or -1: finish closes it while a reader may still be running, and the number may then belong to
                    * any file the engine opens */
   GQueue lines;          /* BroOutputLine *, waiting to be read */
+  gsize queued_bytes;    /* the text of the lines in the queue */
   gboolean ended;        /* no more lines: the reader gets what is queued, then NULL */
   int waiting_for_room;  /* readers waiting for the queue: the tool isn't silent, nobody is reading */
   gint64 last_taken;     /* monotonic µs: when the reader last took a line */
@@ -169,6 +170,7 @@ bro_spawned_process_lines (BroRunningProcess *process)
   line = g_queue_pop_head (&self->lines);
   if (line)
     {
+      self->queued_bytes -= strlen (line->text);
       self->last_taken = g_get_monotonic_time ();
       g_cond_broadcast (&self->cond); /* room for a waiting reader */
     }
@@ -259,7 +261,7 @@ emit (BroSpawnedProcess *self, BroOutputSource source, char *text)
   int failed = transcript_write (self->transcript, text);
   if (failed && !self->transcript_problem)
     self->transcript_problem = no_transcript (self->transcript_path, failed);
-  while (g_queue_get_length (&self->lines) >= BRO_QUEUED_LINES && !self->ended)
+  while ((g_queue_get_length (&self->lines) >= BRO_QUEUED_LINES || self->queued_bytes >= BRO_QUEUED_BYTES) && !self->ended)
     {
       self->waiting_for_room++;
       g_cond_wait (&self->cond, &self->lock);
@@ -278,6 +280,7 @@ emit (BroSpawnedProcess *self, BroOutputSource source, char *text)
   out->text = text;
   out->at = now_instant ();
   g_queue_push_tail (&self->lines, out);
+  self->queued_bytes += strlen (out->text);
   g_cond_broadcast (&self->cond);
 }
 
