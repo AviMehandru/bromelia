@@ -71,6 +71,8 @@ video_ts_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
         {
           g_autofree char *got = g_strndup ((const char *) data, n);
           bro_test_same_string (failures, id, "text", text, got);
+          if (n != strlen (text)) /* a NUL byte after the text would end the string compared above */
+            bro_test_fail (failures, id, "text: %" G_GSIZE_FORMAT " bytes read, %" G_GSIZE_FORMAT " expected", (gsize) n, strlen (text));
         }
       if (hex)
         {
