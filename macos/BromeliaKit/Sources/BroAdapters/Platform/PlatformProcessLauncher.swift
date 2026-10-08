@@ -314,8 +314,10 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
             }
             if let exitedAt, let status = waitStatus {
                 // Output normally ends with the process; a child it left behind may keep a pipe open: stop reading 5 s
-                // after the exit, unless lines are still waiting for a reader that keeps taking them.
-                let backlog = waitingForRoom > 0 && now - lastTaken < 5
+                // after the exit, unless lines are still waiting for a reader that keeps taking them. Queued lines count
+                // too: each take wakes this thread as well, often just after a reader has queued a line and before it
+                // waits for room again, and ending then would drop what it hasn't read yet.
+                let backlog = (waitingForRoom > 0 || queueHead < queue.count) && now - lastTaken < 5
                 if readersLeft == 0 || (now - exitedAt >= 5 && !backlog) {
                     stopReading = true
                     let exited = (status & 0x7f) == 0

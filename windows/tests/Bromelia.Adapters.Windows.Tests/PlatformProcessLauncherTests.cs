@@ -196,7 +196,7 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         await foreach (var l in p.Lines())
         {
             lines.Add(l.Text);
-            if (lines.Count % 100 == 0) await Task.Delay(25);
+            if (lines.Count % 100 == 0) await Task.Delay(50); // the backlog outlasts the 5 s
         }
         await p.Wait();
         Assert.Equal(Enumerable.Range(1, 30000).Select(i => i.ToString()), lines);

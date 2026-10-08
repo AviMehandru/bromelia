@@ -146,7 +146,7 @@ import Testing
         var lines: [String] = []
         for await line in p.lines() {
             lines.append(line.text)
-            if lines.count % 100 == 0 { try await Task.sleep(nanoseconds: 25_000_000) }
+            if lines.count % 100 == 0 { try await Task.sleep(nanoseconds: 50_000_000) }   // the backlog outlasts the 5 s
         }
         _ = await p.wait()
         #expect(lines == (1...30000).map(String.init))
