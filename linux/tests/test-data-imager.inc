@@ -15,6 +15,8 @@ struct _TestFakeDisc {
   gint64 sectors;
   GHashTable *unreadable; /* gint64 sector + 1 as a pointer */
   int cancel_after;       /* reads; 0: never */
+  int kill_after;         /* reads; 0: never. Then the process is killed (SIGKILL), as by a crash */
+  gulong delay_us;        /* each read takes this long: a slow drive */
   BroCancellationSource *cancel;
   int reads;
   gboolean closed;
@@ -44,6 +46,10 @@ fd_read (BroSectorReader *r, gint64 sector, int count, BroBroError **error)
   for (gint64 i = 0; i < n; i++)
     data[i] = fake_disc_at (sector * 2048 + i);
   self->reads++;
+  if (self->delay_us)
+    g_usleep (self->delay_us);
+  if (self->kill_after && self->reads == self->kill_after)
+    kill (getpid (), SIGKILL);
   if (self->cancel_after && self->reads == self->cancel_after)
     bro_cancellation_source_cancel (self->cancel);
   return g_bytes_new_take (data, (gsize) n);

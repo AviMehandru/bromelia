@@ -60,6 +60,9 @@ struct MakemkvToolTests {
         launcher.writeFileNames = writes
         launcher.transcriptFails = given["transcriptFails"]?.bool == true
         if let after = given["cancelAfterLines"]?.int { launcher.afterLine = { n in if n == Int(after) { cancelSource.cancel() } } }
+        if let gone = given["deleteDestinationAfterLines"]?.int, let destination {
+            launcher.afterLine = { n in if n == Int(gone) { try? FileManager.default.removeItem(atPath: destination) } }
+        }
         let isolation = RecordingIsolation()
         let makemkvcon: String? = given["makemkvcon"]?.isNull == true ? nil : "/opt/makemkvcon"
         let tool = MakemkvTool(launcher: launcher, fs: PlatformFileSystem(), isolation: isolation, locator: FixedLocator(makemkvcon: makemkvcon))

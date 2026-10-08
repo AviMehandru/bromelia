@@ -54,6 +54,20 @@
 
 static char *scratch;
 
+/* Whether the scratch folder's file system keeps permission bits: a CIFS mount without Unix extensions shows every
+ * file as 0755 and ignores chmod, so tests of the execute bit or of a file's mode can't hold there. */
+static gboolean
+scratch_keeps_modes (void)
+{
+  g_autofree char *probe = g_build_filename (scratch, ".mode-probe", NULL);
+  struct stat st;
+  gboolean kept;
+  g_assert_true (g_file_set_contents (probe, "", 0, NULL));
+  kept = chmod (probe, 0600) == 0 && stat (probe, &st) == 0 && (st.st_mode & 0777) == 0600;
+  g_unlink (probe);
+  return kept;
+}
+
 /* ---- processes ------------------------------------------------------------------------------------ */
 
 static BroProcessSpec *
@@ -429,6 +443,11 @@ test_interpreter (void)
   g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
   g_autoptr (BroRunningProcess) p = NULL;
   BroProcessExit exit;
+  if (!scratch_keeps_modes ())
+    {
+      g_test_skip ("the scratch folder's file system ignores permission bits, so every script looks executable");
+      return;
+    }
   g_assert_true (g_file_set_contents (script, "echo hello $1\n", -1, NULL));
   c1 = bro_platform_process_launcher_invocation (plain);
   g_assert_cmpstr (c1->executable, ==, "/bin/sh");
@@ -816,7 +835,8 @@ test_fs_durable_and_uncached (void)
   g_assert_true (bro_platform_file_system_sync_file (fs, path, &error));
   g_assert_true (bro_platform_file_system_sync_directory (fs, fs_root, &error));
   g_assert_cmpint (stat (path, &st), ==, 0);
-  g_assert_cmpint (st.st_mode & 0777, ==, 0600);
+  if (scratch_keeps_modes ())
+    g_assert_cmpint (st.st_mode & 0777, ==, 0600);
   stream = bro_platform_file_system_open_for_reading (fs, path, TRUE, &error);
   g_assert_nonnull (stream);
   while ((chunk = bro_byte_stream_read (stream, 100000, &error)) != NULL && g_bytes_get_size (chunk) > 0)
@@ -1139,6 +1159,8 @@ struct _TestScript {
   int exit_code;
   char *write_file_in;
   int cancel_after;
+  int delete_after;     /* after this many lines, delete delete_dir (-1: never) */
+  char *delete_dir;
   BroCancellationSource *cancel;
   GStrv arguments;      /* the spec's */
   int split_parts;      /* create this many parts from the -o argument's %03d pattern */
@@ -1161,6 +1183,8 @@ script_lines (BroRunningProcess *p)
   BroOutputLine *line;
   if (!self->stopped && self->handed > 0 && self->handed == self->cancel_after && self->cancel)
     bro_cancellation_source_cancel (self->cancel);
+  if (!self->stopped && self->handed > 0 && self->handed == self->delete_after && self->delete_dir)
+    remove_tree (self->delete_dir);
   if (!self->stopped && self->lines && self->lines[self->handed])
     {
       line = bro_output_line_new ();
@@ -1247,13 +1271,14 @@ test_script_finalize (GObject *o)
   g_strfreev (self->write_files);
   g_strfreev (self->arguments);
   g_free (self->write_file_in);
+  g_free (self->delete_dir);
   g_free (self->transcript_fails_at);
   g_free (self->write_text);
   G_OBJECT_CLASS (test_script_parent_class)->finalize (o);
 }
 
 static void test_script_class_init (TestScriptClass *k) { G_OBJECT_CLASS (k)->finalize = test_script_finalize; }
-static void test_script_init (TestScript *self) { self->cancel_after = -1; self->write_index = -1; }
+static void test_script_init (TestScript *self) { self->cancel_after = -1; self->delete_after = -1; self->write_index = -1; }
 
 static void
 test_script_iface_init (BroRunningProcessInterface *iface)
@@ -1276,6 +1301,8 @@ struct _TestScriptedLauncher {
   int exit_code;
   char *write_file_in;
   int cancel_after;
+  int delete_after;
+  char *delete_dir;
   BroCancellationSource *cancel;
   int split_parts;
   int write_index; /* -1: none */
@@ -1323,6 +1350,8 @@ launcher_start (BroProcessLauncher *l, const BroProcessSpec *spec, BroBroError *
   script->exit_code = self->exit_code;
   script->write_file_in = g_strdup (self->write_file_in);
   script->cancel_after = self->cancel_after;
+  script->delete_after = self->delete_after;
+  script->delete_dir = g_strdup (self->delete_dir);
   script->cancel = self->cancel;
   script->arguments = g_strdupv (spec->arguments);
   script->split_parts = self->split_parts;
@@ -1341,6 +1370,7 @@ test_scripted_launcher_finalize (GObject *o)
   g_clear_pointer (&self->stderr_at, g_array_unref);
   g_strfreev (self->write_files);
   g_free (self->write_file_in);
+  g_free (self->delete_dir);
   g_free (self->write_text);
   g_ptr_array_unref (self->started);
   g_clear_object (&self->last);
@@ -1354,6 +1384,7 @@ test_scripted_launcher_init (TestScriptedLauncher *self)
 {
   self->started = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_process_spec_free);
   self->cancel_after = -1;
+  self->delete_after = -1;
   self->write_index = -1;
 }
 
@@ -1618,6 +1649,8 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
         launcher->write_files[i] = g_strdup (bro_json_value_get_string (bro_json_value_at (v, i), ""));
     }
   launcher->cancel_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "cancelAfterLines"), -1);
+  launcher->delete_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "deleteDestinationAfterLines"), -1);
+  launcher->delete_dir = g_strdup (destination);
   launcher->transcript_fails = bro_json_value_get_bool (bro_json_value_member (given, "transcriptFails"), FALSE);
   launcher->cancel = cancel_source;
   locator->path = mk && mk->kind == BRO_JSON_VALUE_NULL ? NULL : g_strdup ("/opt/makemkvcon");
@@ -1877,6 +1910,9 @@ test_real_iso (void)
 #include "test-video-ts.inc"
 #include "test-menu-ocr.inc"
 #include "test-data-imager.inc"
+#include "test-crash.inc"
+#include "test-full-disk.inc"
+#include "test-launcher-abuse.inc"
 #include "test-drives.inc"
 #include "test-drive-control.inc"
 
@@ -2008,6 +2044,17 @@ main (int argc, char **argv)
   g_test_add_func ("/menu-ocr/cases", test_menu_ocr);
   g_test_add_func ("/menu-ocr/real", test_menu_ocr_real);
   g_test_add_func ("/data-imager/cases", test_data_imager);
+  g_test_add_func ("/crash/data-imager", test_crash_data_imager);
+  g_test_add_func ("/crash/move-merging", test_crash_move_merging);
+  g_test_add_func ("/failure/read-only-destination", test_read_only_destination);
+  g_test_add_func ("/full-disk/data-imager", test_full_disk_data_imager);
+  g_test_add_func ("/full-disk/write-atomically", test_full_disk_write_atomically);
+  g_test_add_func ("/full-disk/transcript", test_full_disk_transcript);
+  g_test_add_func ("/full-disk/store", test_full_disk_store);
+  g_test_add_func ("/share-gone/data-imager", test_share_gone_data_imager);
+  g_test_add_func ("/abuse/binary-flood", test_abuse_binary_flood);
+  g_test_add_func ("/abuse/long-lines-reader-stops", test_abuse_long_lines_reader_stops);
+  g_test_add_func ("/abuse/deep-tree-ignores-term", test_abuse_deep_tree_ignores_term);
   g_test_add_func ("/drives/states", test_drive_states);
   g_test_add_func ("/drives/platform", test_platform_device_monitor);
   g_test_add_func ("/drive-control/cases", test_drive_control);

@@ -68,6 +68,8 @@ public sealed class MakemkvToolTests : IDisposable
                 TranscriptFails = given["transcriptFails"]?.AsBool == true,
             };
             if (given["cancelAfterLines"]?.AsInteger is { } after) launcher.AfterLine = n => { if (n == after) cancelSource.Cancel(); };
+            if (given["deleteDestinationAfterLines"]?.AsInteger is { } gone && destination != null)
+                launcher.AfterLine = n => { if (n == gone && Directory.Exists(destination)) Directory.Delete(destination, true); };
             var isolation = new RecordingIsolation();
             var makemkvcon = given["makemkvcon"] is { IsNull: true } ? null : "/opt/makemkvcon";
             var tool = new MakemkvTool(launcher, new DiskFileSystem(), isolation, new FixedLocator(makemkvcon));
