@@ -209,6 +209,17 @@ public class TemplateTests
     }
 
     [Fact]
+    public void ScriptsRunThroughWindowsOwnPowerShellByFullPath()
+    {
+        // A bare powershell.exe would be looked up in Bromelia's current folder before System32.
+        if (!OperatingSystem.IsWindows()) return;
+        var (exe, args) = PostProcessor.BuildInvocation(new PostProcessStep { Executable = @"C:\s\a.ps1", Arguments = "x" },
+            new Dictionary<string, string>(), Array.Empty<string>());
+        Assert.Equal(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"), exe);
+        Assert.Equal(new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", @"C:\s\a.ps1", "x" }, args);
+    }
+
+    [Fact]
     public void RunConditions()
     {
         var s = new PostProcessStep { Executable = "x" };
@@ -454,18 +465,23 @@ public class DriveDetectionTests
             var state = new AppState(new NullPlatformServices(), Path.Combine(dir, "config.json"), new SettingsCatalog());
             const string name = "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112";
             state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
-            state.ExpectTrayClosed(new[] { name });
+            state.ExpectTrayClosed(new[] { "dev:E:" });
             state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
             Assert.Null(state.LastError); // too soon: the tray may still be moving
-            state.ExpectTrayClosed(new[] { name }, DateTime.UtcNow.AddSeconds(-10));
+            state.ExpectTrayClosed(new[] { "dev:E:" }, DateTime.UtcNow.AddSeconds(-10));
             state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
             Assert.Equal(AppState.TrayStillOpen(name), state.LastError);
             state.LastError = null;
             state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
             Assert.Null(state.LastError); // checked once per request
-            state.ExpectTrayClosed(new[] { name }, DateTime.UtcNow.AddSeconds(-10));
+            state.ExpectTrayClosed(new[] { "dev:E:" }, DateTime.UtcNow.AddSeconds(-10));
             state.ApplyScan(new[] { E(0, DriveState.EmptyClosed, name, "E:") });
             Assert.Null(state.LastError);
+            // Two drives of the same model share a name: a request for one doesn't replace the other's.
+            state.ExpectTrayClosed(new[] { "dev:E:" }, DateTime.UtcNow.AddSeconds(-10));
+            state.ExpectTrayClosed(new[] { "dev:F:" });
+            state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:"), E(1, DriveState.EmptyOpen, name, "F:") });
+            Assert.Equal(AppState.TrayStillOpen(name), state.LastError);
         }
         finally
         {
@@ -494,6 +510,34 @@ public class DriveDetectionTests
             var job = Assert.Single(state.Jobs);
             Assert.Equal("SECOND", job.DiscLabel);
             state.Cancel(job);
+        }
+        finally
+        {
+            Paths.DataOverride = null;
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void ADriveLeftOutOfOneScanIsNotANewDisc()
+    {
+        // A USB reset, or a busy drive MakeMKV doesn't list: the disc is still the same one when the drive is back.
+        var dir = Path.Combine(Path.GetTempPath(), "bromelia-dd-" + Guid.NewGuid().ToString("N")[..6]);
+        Paths.DataOverride = dir;
+        try
+        {
+            var state = new AppState(new NullPlatformServices(), Path.Combine(dir, "config.json"), new SettingsCatalog());
+            state.Config.DefaultDrive.Automation.AutoRipOnInsert = true;
+            state.Config.DefaultDrive.Automation.AutoRipDelaySeconds = 60;
+            const string name = "BD-RE TEST DRIVE 1.00 SERIAL1";
+            state.ApplyScan(new[] { E(0, DriveState.Inserted, name, "/dev/rdisk12", "FIRST") });
+            state.ApplyScan(Array.Empty<DriveScanEntry>());
+            state.ApplyScan(new[] { E(0, DriveState.Inserted, name, "/dev/rdisk12", "FIRST") });
+            Assert.Empty(state.Jobs);
+            // Another drive listed at the old one's index doesn't make it forget its disc either.
+            state.ApplyScan(new[] { E(0, DriveState.EmptyClosed, "DVD+-RW OTHER DRIVE 1.00 SERIAL2", "") });
+            state.ApplyScan(new[] { E(0, DriveState.Inserted, name, "/dev/rdisk12", "FIRST") });
+            Assert.Empty(state.Jobs);
         }
         finally
         {

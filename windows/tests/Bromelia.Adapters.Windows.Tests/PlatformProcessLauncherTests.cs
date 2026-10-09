@@ -279,7 +279,10 @@ public sealed class PlatformProcessLauncherTests : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return;
         string Of(ProcessSpec s) { var c = PlatformProcessLauncher.Invocation(s); return string.Join(" ", new[] { c.Executable }.Concat(c.Arguments)); }
-        Assert.Equal("powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\s\\a.ps1 x", Of(Spec("C:\\s\\a.ps1", "x")));
+        // Windows' own programs by full path: a bare name would be looked up in the engine's current folder first.
+        Assert.Equal(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe") + " -NoProfile -ExecutionPolicy Bypass -File C:\\s\\a.ps1 x",
+            Of(Spec("C:\\s\\a.ps1", "x")));
+        Assert.True(Path.IsPathRooted(PlatformProcessLauncher.Invocation(Spec("C:\\s\\a.BAT")).Executable));
         Assert.EndsWith("cmd.exe /c C:\\s\\a.BAT x", Of(Spec("C:\\s\\a.BAT", "x")), StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith("cmd.exe /c C:\\s\\a.cmd", Of(Spec("C:\\s\\a.cmd")), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("py.exe C:\\s\\a.py x", Of(Spec("C:\\s\\a.py", "x")));

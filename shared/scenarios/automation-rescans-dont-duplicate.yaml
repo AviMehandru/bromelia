@@ -1,6 +1,9 @@
 title: Rescans while a disc stays in don't start another automatic rip
 from:
   - macos DriveDetectionTests.autoRipQueuesOnInsertOnly (rescans do not queue duplicates)
+  - macos DriveDetectionTests.aDriveLeftOutOfOneScanIsNotANewDisc (a drive missing from one scan keeps its disc)
+  - windows DriveDetectionTests.ADriveLeftOutOfOneScanIsNotANewDisc
+  - linux /state/drive-left-out-of-a-scan
 given:
   configPatch: {automation: {pollIntervalSeconds: 10, defaults: {ripOnInsert: true, delaySeconds: 0}}}
   drives:

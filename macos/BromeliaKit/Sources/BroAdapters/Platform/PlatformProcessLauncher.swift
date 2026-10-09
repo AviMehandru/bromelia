@@ -44,10 +44,11 @@ public final class PlatformProcessLauncher: ProcessLauncher {
 /// So that a crashed engine leaves no tools behind (as KILL_ON_JOB_CLOSE does on Windows), each process gets a
 /// watcher: /bin/sh in its own process group, reading a pipe that nothing writes to. The engine holds the pipe's write
 /// end (close-on-exec, never closed); when the engine ends, however it ends, the kernel closes it, the watcher's read
-/// returns, and it stops the process's group: TERM, then KILL 5 s later. When the process ends first, its watcher is
-/// killed and reaped before the process is reaped, so it can never signal a reused process group.
+/// returns, and it stops the process's group: TERM, then KILL if the group is still there 5 s later. The watcher stops as
+/// soon as the group is gone, so it never signals one used again. When the process ends first, its watcher is killed
+/// and reaped before the process is reaped, so it can never signal a reused process group.
 enum Lifeline {
-    static let script = #"read -r _; kill -s TERM -- "-$1" 2>/dev/null; sleep 5; kill -s KILL -- "-$1" 2>/dev/null"#
+    static let script = #"read -r _; kill -s TERM -- "-$1" 2>/dev/null || exit 0; i=0; while [ $i -lt 50 ]; do sleep 0.1; kill -0 -- "-$1" 2>/dev/null || exit 0; i=$((i+1)); done; kill -s KILL -- "-$1" 2>/dev/null"#
 
     /// The pipe's read end; -1 when it couldn't be made.
     static let readEnd: Int32 = {

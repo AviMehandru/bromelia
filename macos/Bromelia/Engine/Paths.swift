@@ -77,4 +77,31 @@ enum Paths {
             n += 1
         }
     }
+
+    /// A free name for something another program will create (MakeMKV makes a backup's destination itself, so nothing
+    /// holds the name until it has): `<stem><ext>`, else `<stem> (2)<ext>` and so on, held meanwhile by a hidden marker
+    /// next to it (`.<name>.bromelia`, created exclusively), so that two backups started together can't pick the same
+    /// one. Remove the marker once the thing has its name. No marker when the folder can't take one.
+    static func reserveUnique(in dir: URL, stem: String, ext: String) -> (url: URL, marker: URL?) {
+        let fm = FileManager.default
+        var n = 1
+        while true {
+            let leaf = n == 1 ? stem + ext : "\(stem) (\(n))\(ext)"
+            n += 1
+            let url = dir.appendingPathComponent(leaf, isDirectory: ext.isEmpty)
+            let marker = dir.appendingPathComponent(".\(leaf).bromelia")
+            if fm.fileExists(atPath: url.path) || fm.fileExists(atPath: marker.path) { continue }
+            let fd = open(marker.path, O_CREAT | O_EXCL | O_WRONLY, 0o644)
+            if fd < 0 {
+                if errno == EEXIST { continue }
+                return (url, nil)
+            }
+            close(fd)
+            if fm.fileExists(atPath: url.path) {
+                unlink(marker.path)
+                continue
+            }
+            return (url, marker)
+        }
+    }
 }

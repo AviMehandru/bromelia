@@ -518,6 +518,20 @@ public class ReliabilityTests
         Assert.Equal(0, r.ExitCode);
     }
 
+    /// <summary>Every tool joins the kill-on-close job, so a crash of Bromelia ends it (Windows; macOS and Linux give
+    /// it a lifeline watcher instead).</summary>
+    [Fact]
+    public void ToolsJoinTheKillOnCloseJob()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var runner = new ProcessRunner("cmd.exe", new[] { "/c", "ping -n 3 127.0.0.1 >nul" });
+        bool? held = null;
+        runner.Started += () => held = runner.InToolJob;
+        var r = runner.RunAsync(_ => { }, TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+        Assert.Equal(0, r.ExitCode);
+        Assert.True(held);
+    }
+
     RipJob Run(FakeMakeMkv fake, RipMode mode, DiscSource source, List<int>? titles = null, Action<DriveConfig>? setup = null)
     {
         Directory.CreateDirectory(_root);
@@ -585,6 +599,7 @@ public class ReliabilityTests
             var folder = Assert.Single(job.ProducedFiles, Directory.Exists);
             Assert.True(File.Exists(Path.Combine(folder, "BDMV", "index.bdmv")));
             Assert.Contains("mkv file:", fake.Calls);
+            Assert.Empty(Markers(Path.GetDirectoryName(folder)!));
         }
     }
 
@@ -600,6 +615,33 @@ public class ReliabilityTests
         var image = Assert.Single(job.ProducedFiles, f => f.EndsWith(".iso"));
         Assert.True(File.Exists(image));
         Assert.Contains("mkv iso:", fake.Calls);
+        Assert.Empty(Markers(Path.GetDirectoryName(image)!));
+    }
+
+    static string[] Markers(string dir) =>
+        Directory.GetFiles(dir, "*.bromelia").Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal).ToArray()!;
+
+    /// <summary>MakeMKV creates a backup's destination itself; until it has, a marker holds the name, so two backups of
+    /// discs with the same name, started together, get different names.</summary>
+    [Fact]
+    public void ABackupNameIsHeldUntilMakeMkvCreatesIt()
+    {
+        var dir = Path.Combine(_root, "reserve");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var first = Paths.ReserveUnique(dir, "Movie", "");
+            var second = Paths.ReserveUnique(dir, "Movie", "");
+            Assert.Equal("Movie", Path.GetFileName(first.Path));
+            Assert.Equal("Movie (2)", Path.GetFileName(second.Path));
+            Assert.Equal(new[] { ".Movie (2).bromelia", ".Movie.bromelia" }, Markers(dir));
+            Directory.CreateDirectory(first.Path);
+            File.Delete(first.Marker!);
+            Assert.Equal("Movie (3)", Path.GetFileName(Paths.ReserveUnique(dir, "Movie", "").Path));
+            File.Delete(second.Marker!);
+            Assert.Equal("Movie.iso", Path.GetFileName(Paths.ReserveUnique(dir, "Movie", ".iso").Path));
+        }
+        finally { Directory.Delete(_root, true); }
     }
 
     [Fact]

@@ -170,7 +170,8 @@ struct _BroState {
   BroWebUIConfig *saved_web_ui; /* written to the file instead of config->web_ui (the daemon's command-line web settings), or NULL */
   GPtrArray *drives;         /* BroDriveEntry* (present only) */
   GHashTable *known_states;  /* lane -> state */
-  GHashTable *tray_close_requests; /* drive name -> when its tray was asked to close (g_get_monotonic_time) */
+  GHashTable *known_drives;  /* lane -> the drive it was last listed for (drive_identity) */
+  GHashTable *tray_close_requests; /* lane -> when its drive's tray was asked to close (g_get_monotonic_time) */
   gboolean first_scan_done;
   GHashTable *sessions;      /* id -> BroSession* */
   GPtrArray *file_sessions;  /* BroSession* (refs) */
@@ -279,9 +280,10 @@ void            bro_state_clear_background (BroState *self);
 
 void            bro_state_close_tray (BroState *self, const char *lane);
 void            bro_state_close_all_trays (BroState *self);
-/* Checks, in the first scan at least 4 s after @at (g_get_monotonic_time), that the drive's tray closed: a drive without a
- * tray motor (most slim drives) accepts the command and leaves the tray open, and the OS can't tell; MakeMKV's scan can. */
-void            bro_state_expect_tray_closed (BroState *self, const char *drive_name, gint64 at);
+/* Checks, in the first scan at least 4 s after @at (g_get_monotonic_time), that the tray of the drive in @lane closed: a
+ * drive without a tray motor (most slim drives) accepts the command and leaves the tray open, and the OS can't tell;
+ * MakeMKV's scan can. By lane, not drive name: two drives of the same model share a name. */
+void            bro_state_expect_tray_closed (BroState *self, const char *lane, gint64 at);
 char           *bro_state_tray_still_open (const char *drive_name);
 /* With autoUpdateBetaKey: registers the forum's current beta key when MakeMKV uses a beta key (or none) and it
  * differs. A purchased key is never replaced. */

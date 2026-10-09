@@ -27,6 +27,11 @@ public static class PostProcessor
     /// <summary>Builds argv. Arguments are split first and rendered afterwards, so values with spaces stay
     /// single arguments; a lone {files} expands to one argument per file. Scripts are run through a
     /// suitable interpreter based on their extension when no interpreter is configured.</summary>
+    /// <summary>One of Windows' own programs by its full path: a bare name is looked up in Bromelia's current folder
+    /// before System32, so a powershell.exe planted there would run instead.</summary>
+    static string SystemProgram(string relative, string name) =>
+        Environment.SystemDirectory is { Length: > 0 } system && File.Exists(Path.Combine(system, relative)) ? Path.Combine(system, relative) : name;
+
     public static (string Executable, List<string> Arguments) BuildInvocation(PostProcessStep step, IReadOnlyDictionary<string, string> values, IReadOnlyList<string> files)
     {
         var args = new List<string>();
@@ -45,10 +50,12 @@ public static class PostProcessor
             switch (ext)
             {
                 case ".ps1":
-                    return ("powershell.exe", new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", exe }.Concat(args).ToList());
+                    return (SystemProgram(@"WindowsPowerShell\v1.0\powershell.exe", "powershell.exe"),
+                        new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", exe }.Concat(args).ToList());
                 case ".bat":
                 case ".cmd":
-                    return (Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", new[] { "/c", exe }.Concat(args).ToList());
+                    return (Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } c ? c : SystemProgram("cmd.exe", "cmd.exe"),
+                        new[] { "/c", exe }.Concat(args).ToList());
                 case ".py":
                     return ("py.exe", new[] { exe }.Concat(args).ToList());
             }

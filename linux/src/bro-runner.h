@@ -145,6 +145,12 @@ typedef struct {
 } BroProgressFilter;
 gboolean   bro_handbrake_keep_line (BroProgressFilter *f, const char *line);
 char      *bro_unique_path (const char *path);
+/* A free name for something another program will create (MakeMKV makes a backup's destination itself, so nothing holds
+ * the name until it has): "<stem><ext>" in @dir, else "<stem> (2)<ext>" and so on, held meanwhile by a hidden marker
+ * next to it (".<name>.bromelia", created exclusively), so that two backups started together can't pick the same one.
+ * @marker is set to the marker (NULL when the folder can't take one), which the caller removes once the thing has its
+ * name. */
+char      *bro_reserve_unique_path (const char *dir, const char *stem, const char *ext, char **marker);
 
 /* Name prefix of the hidden staging folder a job writes to inside its output folder. */
 #define BRO_STAGING_PREFIX ".bromelia-incomplete-"

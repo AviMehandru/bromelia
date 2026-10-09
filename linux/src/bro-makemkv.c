@@ -6,7 +6,13 @@
 #include <json-glib/json-glib.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
+#ifdef G_OS_UNIX
+#include <glib-unix.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 /* ---- helpers ---- */
 
@@ -672,6 +678,91 @@ watchdog_thread (gpointer data)
   return NULL;
 }
 
+#ifdef G_OS_UNIX
+/* So that a crash (or kill -9) of Bromelia leaves no tools behind, each process gets a watcher: /bin/sh in its own
+ * process group, reading a pipe that nothing writes to. Bromelia holds the pipe's write end (close-on-exec, never
+ * closed); when Bromelia ends, however it ends, the kernel closes it, the watcher's read returns, and it stops the
+ * process: TERM, then KILL if it is still there 5 s later. The watcher stops as soon as the process is gone, so it never
+ * signals a pid used again. When the process ends first, its watcher is killed and reaped at once.
+ * (makemkvcon ignores SIGPIPE, so without this it went on reading the disc into a folder recovery had marked
+ * INCOMPLETE.) GSubprocess reaps the process just before the wait returns, so for that moment a watcher outlives it;
+ * Bromelia would have to die in that moment, and the pid be reused, for a stray signal. No PR_SET_PDEATHSIG: it fires
+ * when the thread that started the child ends. */
+static const char lifeline_script[] = "read -r _; kill -s TERM \"$1\" 2>/dev/null || exit 0; i=0; while [ $i -lt 50 ]; do sleep 0.1; "
+                                      "kill -0 \"$1\" 2>/dev/null || exit 0; i=$((i+1)); done; kill -s KILL \"$1\" 2>/dev/null";
+
+static void
+lifeline_child_setup (gpointer data)
+{
+  sigset_t none;
+  setpgid (0, 0); /* out of Bromelia's group: a terminal's ^C doesn't reach it */
+  sigemptyset (&none);
+  sigprocmask (SIG_SETMASK, &none, NULL);
+}
+
+/* The pipe's read end; -1 when it couldn't be made. */
+static int
+lifeline_read_end (void)
+{
+  static gsize once;
+  static int read_end = -1;
+  if (g_once_init_enter (&once))
+    {
+      int fds[2];
+      if (g_unix_open_pipe (fds, FD_CLOEXEC, NULL))
+        read_end = fds[0]; /* fds[1] stays open until Bromelia ends */
+      g_once_init_leave (&once, 1);
+    }
+  return read_end;
+}
+
+GPid
+bro_lifeline_watch (GPid pid, int read_end)
+{
+  g_autofree char *arg = g_strdup_printf ("%d", (int) pid);
+  const char *argv[] = { "/bin/sh", "-c", lifeline_script, "bromelia-lifeline", arg, NULL };
+  const char *envp[] = { "PATH=/usr/bin:/bin", NULL };
+  GPid watcher = 0;
+  if (read_end < 0)
+    read_end = lifeline_read_end ();
+  if (pid <= 0 || read_end < 0)
+    return 0;
+  if (!g_spawn_async_with_pipes_and_fds (NULL, argv, envp,
+                                         G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                                         lifeline_child_setup, NULL, read_end, -1, -1, NULL, NULL, 0, &watcher, NULL, NULL, NULL, NULL))
+    return 0;
+  return watcher;
+}
+
+void
+bro_lifeline_end (GPid watcher)
+{
+  int status;
+  if (watcher <= 0)
+    return;
+  kill (watcher, SIGKILL);
+  while (waitpid (watcher, &status, 0) == -1 && errno == EINTR)
+    ;
+}
+
+typedef struct {
+  GSubprocess *proc;
+  GPid watcher;
+} Abandoned;
+
+/* An abandoned process keeps its watcher until it ends, if it ever does. */
+static gpointer
+end_lifeline_when_gone (gpointer data)
+{
+  Abandoned *a = data;
+  g_subprocess_wait (a->proc, NULL, NULL);
+  bro_lifeline_end (a->watcher);
+  g_object_unref (a->proc);
+  g_free (a);
+  return NULL;
+}
+#endif
+
 static void
 on_cancelled (GCancellable *c, gpointer data)
 {
@@ -710,6 +801,7 @@ bro_process_run_ex (const char *const *argv, const char *const *envp, const char
   GThread *watchdog;
   gulong handler = 0;
   gboolean waited;
+  GPid watcher = 0;
   char *line;
 
   if (out)
@@ -731,6 +823,9 @@ bro_process_run_ex (const char *const *argv, const char *const *envp, const char
     return FALSE;
   if (g_subprocess_get_identifier (st.proc))
     st.pid = (GPid) atoi (g_subprocess_get_identifier (st.proc));
+#ifdef G_OS_UNIX
+  watcher = bro_lifeline_watch (st.pid, -1);
+#endif
   g_mutex_init (&st.lock);
   g_cond_init (&st.cond);
   if (opt)
@@ -755,6 +850,19 @@ bro_process_run_ex (const char *const *argv, const char *const *envp, const char
       g_free (line);
     }
   waited = g_subprocess_wait (st.proc, st.wait_cancel, NULL);
+#ifdef G_OS_UNIX
+  if (waited)
+    bro_lifeline_end (watcher);
+  else if (watcher > 0)
+    {
+      Abandoned *a = g_new0 (Abandoned, 1);
+      a->proc = g_object_ref (st.proc);
+      a->watcher = watcher;
+      g_thread_unref (g_thread_new ("bro-lifeline", end_lifeline_when_gone, a));
+    }
+#else
+  (void) watcher;
+#endif
 
   g_mutex_lock (&st.lock);
   st.finished = TRUE;

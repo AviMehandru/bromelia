@@ -1,8 +1,10 @@
 /* test-core.c — unit tests for the platform-neutral core, using the shared fixtures.
  * Set BROMELIA_TEST_ISO to additionally run an end-to-end rip against a real disc image. */
+#include <errno.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <string.h>
@@ -529,18 +531,23 @@ test_tray_stays_open (void)
   const char *name = "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112";
   g_autofree char *want = bro_state_tray_still_open (name);
   scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
-  bro_state_expect_tray_closed (st, name, g_get_monotonic_time ());
+  bro_state_expect_tray_closed (st, "dev:/dev/sr0", g_get_monotonic_time ());
   scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
   g_assert_null (st->last_error); /* too soon: the tray may still be moving */
-  bro_state_expect_tray_closed (st, name, g_get_monotonic_time () - 10 * G_USEC_PER_SEC);
+  bro_state_expect_tray_closed (st, "dev:/dev/sr0", g_get_monotonic_time () - 10 * G_USEC_PER_SEC);
   scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
   g_assert_cmpstr (st->last_error, ==, want);
   bro_state_set_error (st, NULL);
   scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
   g_assert_null (st->last_error); /* checked once per request */
-  bro_state_expect_tray_closed (st, name, g_get_monotonic_time () - 10 * G_USEC_PER_SEC);
+  bro_state_expect_tray_closed (st, "dev:/dev/sr0", g_get_monotonic_time () - 10 * G_USEC_PER_SEC);
   scan (st, entry (0, BRO_DRIVE_EMPTY_CLOSED, name, "/dev/sr0", ""), NULL);
   g_assert_null (st->last_error);
+  /* Two drives of the same model share a name: a request for one doesn't replace the other's. */
+  bro_state_expect_tray_closed (st, "dev:/dev/sr0", g_get_monotonic_time () - 10 * G_USEC_PER_SEC);
+  bro_state_expect_tray_closed (st, "dev:/dev/sr1", g_get_monotonic_time ());
+  scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), entry (1, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr1", ""));
+  g_assert_cmpstr (st->last_error, ==, want);
 }
 
 static void
@@ -561,6 +568,24 @@ test_reinsert_without_device_path (void)
   job = st->jobs->pdata[0];
   g_assert_cmpstr (job->disc_label, ==, "SECOND");
   bro_state_cancel_job (st, job);
+}
+
+/* A USB reset, or a busy drive MakeMKV doesn't list: the disc is still the same one when the drive is back. */
+static void
+test_drive_left_out_of_a_scan (void)
+{
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  const char *name = "BD-RE TEST DRIVE 1.00 SERIAL1";
+  st->config->default_drive->automation.auto_rip_on_insert = TRUE;
+  st->config->default_drive->automation.auto_rip_delay_seconds = 60;
+  scan (st, entry (0, BRO_DRIVE_INSERTED, name, "/dev/rdisk12", "FIRST"), NULL);
+  scan (st, NULL, NULL);
+  scan (st, entry (0, BRO_DRIVE_INSERTED, name, "/dev/rdisk12", "FIRST"), NULL);
+  g_assert_cmpuint (st->jobs->len, ==, 0);
+  /* Another drive listed at the old one's index doesn't make it forget its disc either. */
+  scan (st, entry (0, BRO_DRIVE_EMPTY_CLOSED, "DVD+-RW OTHER DRIVE 1.00 SERIAL2", "", ""), NULL);
+  scan (st, entry (0, BRO_DRIVE_INSERTED, name, "/dev/rdisk12", "FIRST"), NULL);
+  g_assert_cmpuint (st->jobs->len, ==, 0);
 }
 
 /* ---- integration ---- */
@@ -1850,6 +1875,111 @@ test_stuck_process (void)
   g_assert_cmpint (st.exit_status, ==, 0);
 }
 
+static void rm_rf (const char *path);
+
+static gboolean
+pid_alive (GPid pid)
+{
+  return kill (pid, 0) == 0 || errno == EPERM;
+}
+
+/* The pids (one per line) of the lifeline watchers of process @pid. */
+static char *
+lifelines_of (GPid pid)
+{
+  g_autofree char *pattern = g_strdup_printf ("bromelia-lifeline %d$", (int) pid);
+  const char *argv[] = { "pgrep", "-f", pattern, NULL };
+  char *out = NULL;
+  g_spawn_sync (NULL, (char **) argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, &out, NULL, NULL, NULL);
+  return out ? out : g_strdup ("");
+}
+
+static gpointer
+lifeline_tool (gpointer data)
+{
+  const char *argv[] = { "/bin/sh", "-c", "echo $$ > tool.pid; exec sleep 60", NULL };
+  BroRunOptions opt = { 0, 0, SIGTERM };
+  BroRunStatus st = { 0 };
+  bro_process_run_ex (argv, NULL, data, &opt, NULL, NULL, NULL, &st, NULL);
+  return NULL;
+}
+
+static GPid
+read_tool_pid (const char *dir)
+{
+  g_autofree char *path = g_build_filename (dir, "tool.pid", NULL), *text = NULL;
+  return g_file_get_contents (path, &text, NULL, NULL) ? (GPid) atoi (text) : 0;
+}
+
+/* Bromelia killed (kill -9) while a tool runs: the tool's lifeline stops it within a few seconds, so a crash never
+ * leaves makemkvcon reading the disc into a folder recovery marked INCOMPLETE. */
+static void
+test_crash_stops_the_tool (void)
+{
+  if (g_test_subprocess ())
+    {
+      const char *dir = g_getenv ("BROMELIA_CRASH_DIR");
+      g_autofree char *pid_file = g_build_filename (dir, "tool.pid", NULL);
+      g_thread_unref (g_thread_new ("tool", lifeline_tool, (gpointer) dir));
+      for (int i = 0; i < 200 && !g_file_test (pid_file, G_FILE_TEST_EXISTS); i++)
+        g_usleep (25000);
+      g_usleep (200000);
+      kill (getpid (), SIGKILL);
+      g_assert_not_reached ();
+    }
+  {
+    g_autofree char *dir = g_dir_make_tmp ("bromelia-crash-XXXXXX", NULL);
+    GPid tool;
+    gint64 deadline;
+    g_setenv ("BROMELIA_CRASH_DIR", dir, TRUE);
+    g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_DEFAULT);
+    g_test_trap_assert_failed ();
+    tool = read_tool_pid (dir);
+    g_assert_cmpint (tool, >, 0);
+    deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+    while (pid_alive (tool) && g_get_monotonic_time () < deadline)
+      g_usleep (100000);
+    if (pid_alive (tool))
+      {
+        kill (tool, SIGKILL);
+        g_error ("the tool (%d) outlived the killed Bromelia", (int) tool);
+      }
+    rm_rf (dir);
+  }
+}
+
+static gpointer
+short_tool (gpointer data)
+{
+  const char *argv[] = { "/bin/sh", "-c", "echo $$ > tool.pid; sleep 1", NULL };
+  BroRunOptions opt = { 30, 0, SIGTERM };
+  BroRunStatus *st = g_new0 (BroRunStatus, 1);
+  bro_process_run_ex (argv, NULL, data, &opt, NULL, NULL, NULL, st, NULL);
+  return st;
+}
+
+/* A running tool has a watcher, and it goes when the tool ends: what a finished tool left running is left alone, and
+ * no watcher can signal a reused pid. */
+static void
+test_lifeline_ends_with_the_tool (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-lifeline-XXXXXX", NULL);
+  g_autofree char *during = NULL, *after = NULL;
+  g_autofree BroRunStatus *st = NULL;
+  GThread *t = g_thread_new ("run", short_tool, dir);
+  GPid tool = 0;
+  for (int i = 0; i < 200 && !(tool = read_tool_pid (dir)); i++)
+    g_usleep (10000);
+  g_assert_cmpint (tool, >, 0);
+  during = lifelines_of (tool);
+  st = g_thread_join (t);
+  after = lifelines_of (tool);
+  g_assert_cmpint (st->exit_status, ==, 0);
+  g_assert_cmpstr (during, !=, "");
+  g_assert_cmpstr (after, ==, "");
+  rm_rf (dir);
+}
+
 typedef struct {
   GCancellable *cancel;
   BroRunStatus st;
@@ -1951,6 +2081,18 @@ test_iso_backups (void)
   }
 }
 
+/* No reservation marker (bro_reserve_unique_path) is left next to @path. */
+static void
+assert_no_markers (const char *path)
+{
+  g_autofree char *dir = g_path_get_dirname (path);
+  g_autoptr (GDir) d = g_dir_open (dir, 0, NULL);
+  const char *name;
+  while (d && (name = g_dir_read_name (d)))
+    if (g_str_has_suffix (name, ".bromelia"))
+      g_error ("a marker was left: %s/%s", dir, name);
+}
+
 static void
 test_folder_backups (void)
 {
@@ -1975,6 +2117,7 @@ test_folder_backups (void)
         g_assert_true (g_file_test (index, G_FILE_TEST_EXISTS));
       }
       g_assert_nonnull (strstr (calls, "mkv file:"));
+      assert_no_markers (folder);
       fake_free (f);
     }
   {
@@ -1991,8 +2134,37 @@ test_folder_backups (void)
     g_assert_nonnull (image);
     g_assert_true (g_file_test (image, G_FILE_TEST_IS_REGULAR));
     g_assert_nonnull (strstr (calls, "mkv iso:"));
+    assert_no_markers (image);
     fake_free (f);
   }
+}
+
+/* MakeMKV creates a backup's destination itself; until it has, a marker holds the name, so two backups of discs with
+ * the same name, started together, get different names. */
+static void
+test_backup_name_held (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-reserve-XXXXXX", NULL);
+  g_autofree char *m1 = NULL, *m2 = NULL, *m3 = NULL, *m4 = NULL;
+  g_autofree char *first = bro_reserve_unique_path (dir, "Movie", "", &m1);
+  g_autofree char *second = bro_reserve_unique_path (dir, "Movie", "", &m2);
+  g_autofree char *third = NULL, *iso = NULL, *b1 = g_path_get_basename (first), *b2 = g_path_get_basename (second);
+  g_autofree char *b3 = NULL, *b4 = NULL;
+  g_assert_cmpstr (b1, ==, "Movie");
+  g_assert_cmpstr (b2, ==, "Movie (2)");
+  g_assert_nonnull (m1);
+  g_assert_true (g_str_has_suffix (m1, "/.Movie.bromelia") && g_file_test (m1, G_FILE_TEST_EXISTS));
+  g_assert_true (g_str_has_suffix (m2, "/.Movie (2).bromelia") && g_file_test (m2, G_FILE_TEST_EXISTS));
+  g_mkdir (first, 0755);
+  g_unlink (m1);
+  third = bro_reserve_unique_path (dir, "Movie", "", &m3);
+  b3 = g_path_get_basename (third);
+  g_assert_cmpstr (b3, ==, "Movie (3)");
+  g_unlink (m2);
+  iso = bro_reserve_unique_path (dir, "Movie", ".iso", &m4);
+  b4 = g_path_get_basename (iso);
+  g_assert_cmpstr (b4, ==, "Movie.iso");
+  rm_rf (dir);
 }
 
 static void
@@ -4146,6 +4318,7 @@ main (int argc, char **argv)
   g_test_add_func ("/runner/remux-args", test_remux_args);
   g_test_add_func ("/state/auto-rip", test_auto_rip);
   g_test_add_func ("/state/reinsert-without-device-path", test_reinsert_without_device_path);
+  g_test_add_func ("/state/drive-left-out-of-a-scan", test_drive_left_out_of_a_scan);
   g_test_add_func ("/state/tray-stays-open", test_tray_stays_open);
   g_test_add_func ("/runner/integration", test_integration);
   g_test_add_func ("/identity/labels", test_labels);
@@ -4175,9 +4348,12 @@ main (int argc, char **argv)
   g_test_add_func ("/reliability/recorded-runs", test_recorded_runs);
   g_test_add_func ("/reliability/stuck-process", test_stuck_process);
   g_test_add_func ("/reliability/cancel-without-main-loop", test_cancel_without_main_loop);
+  g_test_add_func ("/reliability/crash-stops-the-tool", test_crash_stops_the_tool);
+  g_test_add_func ("/reliability/lifeline-ends-with-the-tool", test_lifeline_ends_with_the_tool);
   g_test_add_func ("/reliability/free-space", test_free_space);
   g_test_add_func ("/reliability/iso-backups", test_iso_backups);
   g_test_add_func ("/reliability/folder-backups", test_folder_backups);
+  g_test_add_func ("/reliability/backup-name-held", test_backup_name_held);
   g_test_add_func ("/reliability/archive-everything", test_archive_everything);
   g_test_add_func ("/parity/notices", test_notices);
   g_test_add_func ("/parity/beta-key", test_beta_key_parse);

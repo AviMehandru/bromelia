@@ -48,10 +48,10 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         switch (Path.GetExtension(exe).ToLowerInvariant())
         {
             case ".ps1":
-                return new CommandLine("powershell.exe", Then("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", exe).ToList());
+                return new CommandLine(SystemPrograms.PowerShell, Then("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", exe).ToList());
             case ".bat":
             case ".cmd":
-                return new CommandLine(Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } c ? c : "cmd.exe", Then("/c", exe).ToList());
+                return new CommandLine(Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } c ? c : SystemPrograms.Cmd, Then("/c", exe).ToList());
             case ".py":
                 return new CommandLine("py.exe", Then(exe).ToList());
         }
@@ -406,12 +406,23 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
                          $"[void][BromeliaBreak.C]::FreeConsole(); if ([BromeliaBreak.C]::AttachConsole({pid})) {{ [void][BromeliaBreak.C]::GenerateConsoleCtrlEvent(1, 0) }}";
             try
             {
-                var psi = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true };
+                var psi = new ProcessStartInfo(SystemPrograms.PowerShell) { UseShellExecute = false, CreateNoWindow = true };
                 foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command", script }) psi.ArgumentList.Add(a);
                 Process.Start(psi)?.Dispose();
             }
             catch (Win32Exception) { }
         }
+    }
+
+    /// <summary>Windows' own programs by their full path: a bare name is looked up in the engine's current folder before
+    /// System32, so a powershell.exe planted there would run instead.</summary>
+    internal static class SystemPrograms
+    {
+        public static string PowerShell => InSystem32(@"WindowsPowerShell\v1.0\powershell.exe", "powershell.exe");
+        public static string Cmd => InSystem32("cmd.exe", "cmd.exe");
+
+        static string InSystem32(string relative, string name) =>
+            Environment.SystemDirectory is { Length: > 0 } system && File.Exists(Path.Combine(system, relative)) ? Path.Combine(system, relative) : name;
     }
 
     static class Native

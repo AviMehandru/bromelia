@@ -479,6 +479,7 @@ bro_state_finalize (GObject *obj)
   g_free (self->config_path);
   g_ptr_array_unref (self->drives);
   g_hash_table_unref (self->known_states);
+  g_hash_table_unref (self->known_drives);
   g_hash_table_unref (self->tray_close_requests);
   g_hash_table_unref (self->sessions);
   g_ptr_array_unref (self->file_sessions);
@@ -528,6 +529,7 @@ bro_state_init (BroState *self)
   self->automation_fd = -1;
   self->drives = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_drive_entry_free);
   self->known_states = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->known_drives = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   self->tray_close_requests = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   self->sessions = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
   self->file_sessions = g_ptr_array_new_with_free_func (g_object_unref);
@@ -911,9 +913,9 @@ bro_state_set_error (BroState *self, const char *error)
 }
 
 void
-bro_state_expect_tray_closed (BroState *self, const char *drive_name, gint64 at)
+bro_state_expect_tray_closed (BroState *self, const char *lane, gint64 at)
 {
-  g_hash_table_replace (self->tray_close_requests, g_strdup (drive_name ? drive_name : ""), g_memdup2 (&at, sizeof at));
+  g_hash_table_replace (self->tray_close_requests, g_strdup (lane ? lane : ""), g_memdup2 (&at, sizeof at));
 }
 
 char *
@@ -934,15 +936,14 @@ check_tray_close_requests (BroState *self)
     {
       if (now - *(gint64 *) value < 4 * G_USEC_PER_SEC)
         continue;
-      for (guint i = 0; i < self->drives->len; i++)
-        {
-          BroDriveEntry *e = self->drives->pdata[i];
-          if (g_strcmp0 (e->drive_name, key) == 0 && e->state == BRO_DRIVE_EMPTY_OPEN)
-            {
-              g_autofree char *msg = bro_state_tray_still_open (key);
-              bro_state_set_error (self, msg);
-            }
-        }
+      {
+        BroDriveEntry *e = bro_state_entry_for_lane (self, key);
+        if (e && e->state == BRO_DRIVE_EMPTY_OPEN)
+          {
+            g_autofree char *msg = bro_state_tray_still_open (e->drive_name);
+            bro_state_set_error (self, msg);
+          }
+      }
       g_hash_table_iter_remove (&it);
     }
 }
@@ -1210,6 +1211,13 @@ lane_running (BroState *self, const char *lane)
   return FALSE;
 }
 
+/* What identifies a drive across its lanes: MakeMKV's index and the drive's name. */
+static char *
+drive_identity (const BroDriveEntry *e)
+{
+  return g_strdup_printf ("%d\x1f%s", e->index, e->drive_name ? e->drive_name : "");
+}
+
 void
 bro_state_apply_scan (BroState *self, GPtrArray *entries)
 {
@@ -1232,23 +1240,31 @@ bro_state_apply_scan (BroState *self, GPtrArray *entries)
 
   check_tray_close_requests (self);
 
-  /* A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed as
-   * disc:N until the next disc comes (often under the same device), which must count as inserted again. */
+  /* A lane whose drive is now listed under another lane lost its disc: on macOS an empty drive has no device path, so
+   * it is listed as disc:N until the next disc comes (often under the same device), which must count as inserted
+   * again. A drive left out of a scan altogether keeps its state, so that it isn't taken for a new disc when it is
+   * listed again. */
   {
+    g_autoptr (GHashTable) drives = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     GHashTableIter it;
     gpointer key, value;
+    for (guint i = 0; i < self->drives->len; i++)
+      g_hash_table_add (drives, drive_identity (self->drives->pdata[i]));
     g_hash_table_iter_init (&it, self->known_states);
     while (g_hash_table_iter_next (&it, &key, &value))
-      if (!bro_state_entry_for_lane (self, key))
-        {
-          if (GPOINTER_TO_INT (value) == BRO_DRIVE_INSERTED)
-            {
-              BroSession *s = g_hash_table_lookup (self->sessions, key);
-              if (s)
-                bro_session_reset (s);
-            }
-          g_hash_table_iter_remove (&it);
-        }
+      {
+        const char *drive = g_hash_table_lookup (self->known_drives, key);
+        if (bro_state_entry_for_lane (self, key) || !drive || !g_hash_table_contains (drives, drive))
+          continue;
+        if (GPOINTER_TO_INT (value) == BRO_DRIVE_INSERTED)
+          {
+            BroSession *s = g_hash_table_lookup (self->sessions, key);
+            if (s)
+              bro_session_reset (s);
+          }
+        g_hash_table_remove (self->known_drives, key);
+        g_hash_table_iter_remove (&it);
+      }
   }
 
   for (guint i = 0; i < self->drives->len; i++)
@@ -1259,6 +1275,7 @@ bro_state_apply_scan (BroState *self, GPtrArray *entries)
       gboolean had = g_hash_table_lookup_extended (self->known_states, lane, NULL, &prev_p);
       int prev = had ? GPOINTER_TO_INT (prev_p) : -1;
       g_hash_table_replace (self->known_states, lane, GINT_TO_POINTER (e->state));
+      g_hash_table_replace (self->known_drives, g_strdup (lane), drive_identity (e));
       if (!self->first_scan_done)
         continue;
       if (e->state == BRO_DRIVE_INSERTED && prev != BRO_DRIVE_INSERTED)
@@ -3177,7 +3194,7 @@ bro_state_close_tray (BroState *self, const char *lane)
   if (e && e->device && *e->device)
     {
       g_ptr_array_add (devices, g_strdup (e->device));
-      bro_state_expect_tray_closed (self, e->drive_name, g_get_monotonic_time ());
+      bro_state_expect_tray_closed (self, lane, g_get_monotonic_time ());
     }
   close_trays (self, devices);
 }
@@ -3191,8 +3208,9 @@ bro_state_close_all_trays (BroState *self)
       BroDriveEntry *e = self->drives->pdata[i];
       if (bro_drive_entry_present (e) && e->state != BRO_DRIVE_INSERTED && e->device && *e->device)
         {
+          g_autofree char *lane = bro_drive_entry_lane (e);
           g_ptr_array_add (devices, g_strdup (e->device));
-          bro_state_expect_tray_closed (self, e->drive_name, g_get_monotonic_time ());
+          bro_state_expect_tray_closed (self, lane, g_get_monotonic_time ());
         }
     }
   close_trays (self, devices);

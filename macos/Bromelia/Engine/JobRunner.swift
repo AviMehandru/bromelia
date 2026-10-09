@@ -1321,12 +1321,12 @@ final class JobRunner {
         try fm.createDirectory(at: dest, withIntermediateDirectories: true)
         var name = backupName(decrypt: decrypt)
         if name.isEmpty { name = TemplateRenderer.sanitizeComponent(job.discLabel.isEmpty ? "disc" : job.discLabel) }
-        // MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it.
-        if job.drive.rip.backupFormat == .iso {
-            dest = Paths.uniqueURL(dest.appendingPathComponent("\(name).iso"))
-        } else {
-            dest = Paths.uniqueURL(dest.appendingPathComponent(name, isDirectory: true))
-        }
+        // MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it; a
+        // marker holds the name until then.
+        let reserved = Paths.reserveUnique(in: dest, stem: name, ext: job.drive.rip.backupFormat == .iso ? ".iso" : "")
+        dest = reserved.url
+        var markers = [reserved.marker].compactMap { $0 }
+        defer { markers.forEach { try? fm.removeItem(at: $0) } }
         job.phase = decrypt ? "Backing up disc (decrypted)" : "Backing up disc"
         job.totalProgress = 0
         expectedDrive = (index, device)
@@ -1344,7 +1344,9 @@ final class JobRunner {
         var isDir: ObjCBool = false
         if job.drive.rip.backupFormat == .iso, fm.fileExists(atPath: dest.path, isDirectory: &isDir), isDir.boolValue,
            BackupVerifier.problem(dest, iso: false) == nil {
-            let folder = Paths.uniqueURL(dest.deletingPathExtension())
+            let r = Paths.reserveUnique(in: dest.deletingLastPathComponent(), stem: dest.deletingPathExtension().lastPathComponent, ext: "")
+            markers += [r.marker].compactMap { $0 }
+            let folder = r.url
             if (try? fm.moveItem(at: dest, to: folder)) != nil {
                 job.appendLog("MakeMKV wrote a folder instead of an ISO image; kept the backup as the folder \(folder.lastPathComponent)", severity: .warning)
                 dest = folder
@@ -1352,7 +1354,9 @@ final class JobRunner {
         } else if job.drive.rip.backupFormat == .folder, fm.fileExists(atPath: dest.path), !Self.isDirectory(dest),
                   !dest.lastPathComponent.lowercased().hasSuffix(".iso") {
             // MakeMKV writes DVD backups as ISO images whatever the destination is called: give the image its extension.
-            let image = Paths.uniqueURL(dest.deletingLastPathComponent().appendingPathComponent(dest.lastPathComponent + ".iso"))
+            let r = Paths.reserveUnique(in: dest.deletingLastPathComponent(), stem: dest.lastPathComponent, ext: ".iso")
+            markers += [r.marker].compactMap { $0 }
+            let image = r.url
             if (try? fm.moveItem(at: dest, to: image)) != nil {
                 job.appendLog("MakeMKV wrote an ISO image (as it does for DVDs); kept the backup as \(image.lastPathComponent)")
                 dest = image

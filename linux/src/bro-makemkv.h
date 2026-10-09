@@ -109,6 +109,15 @@ typedef struct {
 gboolean bro_process_run_ex (const char *const *argv, const char *const *envp, const char *cwd, const BroRunOptions *opt,
                              GCancellable *cancellable, BroLineFunc func, gpointer user_data, BroRunStatus *out, GError **error);
 
+#ifdef G_OS_UNIX
+/* The watcher bro_process_run_ex gives each process (see bro-makemkv.c): stops @pid (TERM, then KILL if it is still
+ * there 5 s later) when every write end of the pipe whose read end is @read_end has closed. -1 is Bromelia's own pipe, whose write end only
+ * Bromelia holds, so the watcher fires when Bromelia ends. 0 when it couldn't start. */
+GPid bro_lifeline_watch (GPid pid, int read_end);
+/* Kills and reaps a watcher (0 is ignored). */
+void bro_lifeline_end (GPid watcher);
+#endif
+
 void bro_ptr_array_add_all (GPtrArray *a, const char *first, ...) G_GNUC_NULL_TERMINATED;
 char **bro_ptr_array_to_strv (GPtrArray *a);
 
