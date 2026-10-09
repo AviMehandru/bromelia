@@ -170,6 +170,7 @@
   "backup.checkFailed": "Backup failed the check: {problem}",
   "backup.saved": "Backup saved to {path}",
   "backup.folderInsteadOfIso": "MakeMKV wrote a folder instead of an ISO image; kept the backup as the folder {folder}",
+  "backup.imageForFolder": "MakeMKV wrote an ISO image (as it does for DVDs); kept the backup as {file}",
   "backup.renamed": "Renamed the backup to {name}",
   "backup.removed": "Removing backup {path}",
   "structure.notCreated": "{name} was not created",

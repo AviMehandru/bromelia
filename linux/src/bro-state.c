@@ -1133,7 +1133,10 @@ disc_inserted (BroState *self, BroDriveEntry *e)
   BroJob *job;
   if (s)
     bro_session_reset (s);
-  if (!self->owns_automation || !cfg || !cfg->enabled || !cfg->automation.auto_rip_on_insert)
+  /* Drives without their own configuration use the default one, as everywhere else. */
+  if (!cfg)
+    cfg = self->config->default_drive;
+  if (!self->owns_automation || !cfg->enabled || !cfg->automation.auto_rip_on_insert)
     return;
   for (guint i = 0; i < self->jobs->len; i++)
     {
@@ -1187,6 +1190,25 @@ bro_state_apply_scan (BroState *self, GPtrArray *entries)
   g_ptr_array_unref (self->drives);
   self->drives = merged;
   ensure_sessions (self);
+
+  /* A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed as
+   * disc:N until the next disc comes (often under the same device), which must count as inserted again. */
+  {
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init (&it, self->known_states);
+    while (g_hash_table_iter_next (&it, &key, &value))
+      if (!bro_state_entry_for_lane (self, key))
+        {
+          if (GPOINTER_TO_INT (value) == BRO_DRIVE_INSERTED)
+            {
+              BroSession *s = g_hash_table_lookup (self->sessions, key);
+              if (s)
+                bro_session_reset (s);
+            }
+          g_hash_table_iter_remove (&it);
+        }
+  }
 
   for (guint i = 0; i < self->drives->len; i++)
     {

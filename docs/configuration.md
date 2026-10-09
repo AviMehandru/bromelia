@@ -26,7 +26,7 @@ between versions and platforms freely. Paths may start with `~`.
   "maxConcurrentJobs": 0,          // 0 = no global limit (always one job per drive)
   "registrationKey": "",           // empty = use the key MakeMKV is registered with
   "globalSettings": { "dvd_MinimumTitleLength": "120" },   // MakeMKV settings for every drive
-  "defaultDrive": { /* DriveConfig */ },   // drives without their own config, ISO / folders
+  "defaultDrive": { /* DriveConfig */ },   // drives without their own config (automatic rips too), ISO / folders
   "drives": [ /* DriveConfig */ ],
   "presets": [ { "id": "…", "name": "…", "config": { /* DriveConfig */ } } ],
   "plugins": [ /* PostProcessStep */ ],   // steps for every drive, usually with matchName / matchFormats
@@ -95,7 +95,7 @@ changed are kept.
   "rip": {
     "mode": "mkv",                             // mkv | backup | backupDecrypted | backupThenMkv | infoOnly
                                                // (audioCD and dataImage are chosen from the disc, see "Other discs")
-    "backupFormat": "folder",                  // folder | iso
+    "backupFormat": "folder",                  // folder | iso (MakeMKV writes DVDs as ISO images either way)
     "keepBackupAfterMKV": true,
     "titleSelection": {
       "strategy": "all",                       // all | longest | indices | manual
@@ -121,7 +121,7 @@ changed are kept.
   "output": {
     "rootOverride": "",                        // empty = outputRoot
     "folderTemplate": "{name}{discLabel? - {discLabel}}",
-    // MKV files and backups; empty = keep MakeMKV's names
+    // MKV files and backups; empty = keep MakeMKV's names (backups: the disc's name)
     "fileNameTemplate": "{name}{episode? - {episode}}{episodeTitle? - {episodeTitle}}{discLabel? - {discLabel}} - {rip}{track? - {track}} - {format}",
     "backupSubfolder": "backup",
     "conflictPolicy": "uniqueSuffix",          // uniqueSuffix | overwrite | skip

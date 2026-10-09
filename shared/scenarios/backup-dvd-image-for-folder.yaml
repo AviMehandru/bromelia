@@ -1,0 +1,22 @@
+title: MakeMKV writes a DVD backup as an ISO image even when a folder was asked for; the image gets its .iso extension and the MKV step reads it
+from:
+  - macos ReliabilityTests.dvdImageWrittenForAFolderBackupGetsItsExtension
+  - windows ReliabilityTests.DvdImageWrittenForAFolderBackupGetsItsExtension
+  - linux /reliability/folder-backups
+  - README.md (DVDs always come out as ISO images, which get the .iso extension)
+given:
+  drives:
+    - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0,
+       disc: {volume: SAMPLE_MOVIE, type: dvd, titles: [{duration: "0:00:10", source: 1}]}}
+  profile: {backup: {format: folder}, mode: {default: backupThenMkv}}
+  tools: {makemkvcon: tools/makemkvcon-backup-dvd-image.yaml}
+steps:
+  - rip: {drive: drive, as: job}
+  - expect:
+      job: {name: job, outcome: succeeded, mode: backupThenMkv}
+      log: {job: job, include: [backup.imageForFolder]}
+      files:
+        under: "library/Sample Movie"
+        include: ["backup/Sample Movie - Backup - DVD.iso", "Sample Movie - Rip - * - DVD.mkv"]
+        exclude: ["backup/Sample Movie - Backup - DVD"]
+      calls: {makemkvcon: {include: ["mkv iso:"]}}

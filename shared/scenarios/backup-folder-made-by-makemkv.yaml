@@ -1,0 +1,19 @@
+title: A folder backup goes to a folder that doesn't exist yet, because makemkvcon refuses one that does, even empty
+from:
+  - macos ReliabilityTests.folderBackupsLeaveTheFolderToMakeMKV
+  - windows ReliabilityTests.FolderBackupsLeaveTheFolderToMakeMkv
+  - linux /reliability/folder-backups
+  - docs/architecture.md#makemkvcon
+given:
+  drives:
+    - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
+  profile: {backup: {format: folder}, mode: {default: backupThenMkv}}
+steps:
+  - rip: {drive: drive, as: job}
+  - expect:
+      note: Every scripted makemkvcon refuses a backup destination that exists (see README, "Tool scripts").
+      job: {name: job, outcome: succeeded, mode: backupThenMkv}
+      files:
+        under: "library/Sample Movie"
+        include: ["backup/Sample Movie - Backup - BR/BDMV/index.bdmv", "Sample Movie - Rip - Playlist 00001 - BR.mkv"]
+      calls: {makemkvcon: {include: ["mkv file:"]}}

@@ -209,6 +209,11 @@ rules:
     exit: 0
 ```
 
+Like the real makemkvcon 2.0, every scripted makemkvcon refuses a `backup` whose destination already exists, even
+an empty folder: before any rule applies it prints `backupFolderExists`, `backupFailed` and `backupFailedSummary`
+(`tools/lines.yaml`) and exits with 0, writing nothing. So the engine must leave creating the backup's folder (or
+image) to MakeMKV.
+
 | Key | Meaning |
 | --- | --- |
 | `when` | `command`: for makemkvcon the subcommand (`info`, `mkv`, `backup`, `reg`, `f`), for other tools the first argument; `title`: makemkvcon's title argument; `argsInclude`: arguments that must be present; `file`: a glob on the input file. |

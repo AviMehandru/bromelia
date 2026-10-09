@@ -178,6 +178,7 @@ typedef enum {
   BRO_MSG_BACKUP_CHECK_FAILED, /* backup.checkFailed */
   BRO_MSG_BACKUP_SAVED, /* backup.saved */
   BRO_MSG_BACKUP_FOLDER_INSTEAD_OF_ISO, /* backup.folderInsteadOfIso */
+  BRO_MSG_BACKUP_IMAGE_FOR_FOLDER, /* backup.imageForFolder */
   BRO_MSG_BACKUP_RENAMED, /* backup.renamed */
   BRO_MSG_BACKUP_REMOVED, /* backup.removed */
   BRO_MSG_STRUCTURE_NOT_CREATED, /* structure.notCreated */

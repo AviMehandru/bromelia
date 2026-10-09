@@ -1319,12 +1319,13 @@ final class JobRunner {
             dest = outDir.appendingPathComponent(sub.isEmpty ? "backup" : sub, isDirectory: true)
         }
         try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-        let name = backupName(decrypt: decrypt)
+        var name = backupName(decrypt: decrypt)
+        if name.isEmpty { name = TemplateRenderer.sanitizeComponent(job.discLabel.isEmpty ? "disc" : job.discLabel) }
+        // MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it.
         if job.drive.rip.backupFormat == .iso {
-            dest = Paths.uniqueURL(dest.appendingPathComponent("\(name.isEmpty ? TemplateRenderer.sanitizeComponent(job.discLabel.isEmpty ? "disc" : job.discLabel) : name).iso"))
-        } else if !name.isEmpty {
+            dest = Paths.uniqueURL(dest.appendingPathComponent("\(name).iso"))
+        } else {
             dest = Paths.uniqueURL(dest.appendingPathComponent(name, isDirectory: true))
-            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
         }
         job.phase = decrypt ? "Backing up disc (decrypted)" : "Backing up disc"
         job.totalProgress = 0
@@ -1347,6 +1348,14 @@ final class JobRunner {
             if (try? fm.moveItem(at: dest, to: folder)) != nil {
                 job.appendLog("MakeMKV wrote a folder instead of an ISO image; kept the backup as the folder \(folder.lastPathComponent)", severity: .warning)
                 dest = folder
+            }
+        } else if job.drive.rip.backupFormat == .folder, fm.fileExists(atPath: dest.path), !Self.isDirectory(dest),
+                  !dest.lastPathComponent.lowercased().hasSuffix(".iso") {
+            // MakeMKV writes DVD backups as ISO images whatever the destination is called: give the image its extension.
+            let image = Paths.uniqueURL(dest.deletingLastPathComponent().appendingPathComponent(dest.lastPathComponent + ".iso"))
+            if (try? fm.moveItem(at: dest, to: image)) != nil {
+                job.appendLog("MakeMKV wrote an ISO image (as it does for DVDs); kept the backup as \(image.lastPathComponent)")
+                dest = image
             }
         }
         if job.drive.archive.verifyRips, let problem = BackupVerifier.problem(dest, iso: !Self.isDirectory(dest)) {

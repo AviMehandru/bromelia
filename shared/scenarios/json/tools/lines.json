@@ -10,5 +10,10 @@
   "failedToOpen": "MSG:5010,0,0,\"Failed to open disc\",\"Failed to open disc\"",
   "debugLogAnnounce": "MSG:1004,131072,1,\"Debug logging enabled, log will be saved as file://{debugLog}\",\"Debug logging enabled, log will be saved as %1\",\"file://{debugLog}\"",
   "spaceWarning": "MSG:5038,776,2,\"The total size of all output files may reach as much as 30000 megabytes while there are only 20000 megabytes free on the destination drive.\",\"x\",\"30000\",\"20000\"",
-  "driveRenumbered": "DRV:0,2,999,12,\"BD-RE OTHER DRIVE 1.00\",\"OTHER_DISC\",\"/dev/other0\""
+  "driveRenumbered": "DRV:0,2,999,12,\"BD-RE OTHER DRIVE 1.00\",\"OTHER_DISC\",\"/dev/other0\"",
+  "backupDone": "MSG:5070,128,0,\"Backup done\",\"Backup done\"",
+  "backupDoneSummary": "MSG:5081,260,0,\"Backup done.\",\"Backup done.\"",
+  "backupFolderExists": "MSG:5068,516,1,\"Folder {dest} already contains a backup, please choose another folder\",\"Folder %1 already contains a backup, please choose another folder\",\"{dest}\"",
+  "backupFailed": "MSG:5069,128,0,\"Backup failed\",\"Backup failed\"",
+  "backupFailedSummary": "MSG:5080,516,0,\"Backup failed.\",\"Backup failed.\""
 }

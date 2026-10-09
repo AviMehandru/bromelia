@@ -175,6 +175,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "backup.checkFailed",
   "backup.saved",
   "backup.folderInsteadOfIso",
+  "backup.imageForFolder",
   "backup.renamed",
   "backup.removed",
   "structure.notCreated",

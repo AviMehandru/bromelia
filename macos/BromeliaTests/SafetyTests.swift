@@ -47,6 +47,9 @@ private struct FakeMakeMKV {
     var executable: URL { dir.appendingPathComponent("makemkvcon") }
     var calls: String { (try? String(contentsOf: dir.appendingPathComponent("calls.txt"), encoding: .utf8)) ?? "" }
 
+    /// What makemkvcon 2.0 prints (exiting with 0) when the backup's folder exists, even empty.
+    static let refusesExisting = #"echo "MSG:5068,516,1,\"Folder $dest already contains a backup, please choose another folder\",\"Folder %1 already contains a backup, please choose another folder\",\"$dest\""; echo 'MSG:5069,128,0,"Backup failed","Backup failed"'; echo 'MSG:5080,516,0,"Backup failed.","Backup failed."'"#
+
     /// `mkv` is shell code run with `$title` and `$dest` set; `backup` with `$dest` set.
     init(listing: String, mkv: String, backup: String = "") throws {
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("bromelia-fake-\(UUID().uuidString.prefix(8))", isDirectory: true)
@@ -66,6 +69,7 @@ private struct FakeMakeMKV {
         \(mkv)
           ;;
           backup) for a in "$@"; do dest="$a"; done
+            if [ -e "$dest" ]; then \(Self.refusesExisting); exit 0; fi
         \(backup)
           ;;
         esac
@@ -568,13 +572,14 @@ struct ReliabilityTests {
         #expect(DiskSpace.available(at: root) ?? 0 > 0)
     }
 
-    private func backupJob(_ fake: FakeMakeMKV, mode: RipMode) async -> RipJob {
+    private func backupJob(_ fake: FakeMakeMKV, mode: RipMode, format: BackupFormat = .iso, fileNameTemplate: String? = nil) async -> RipJob {
         var config = AppConfig()
         config.outputRoot = root.path
         var drive = DriveConfig()
         drive.automation.notify = false
         drive.automation.ejectWhenDone = false
-        drive.rip.backupFormat = .iso
+        drive.rip.backupFormat = format
+        if let t = fileNameTemplate { drive.output.fileNameTemplate = t }
         let job = RipJob(source: .drive(index: 0, devicePath: ""), drive: drive, laneKey: "drive:test", sourceLabel: "test", discLabel: "", mode: mode)
         await JobRunner(job: job, config: config, makemkvcon: fake.executable, mkvmerge: nil).run()
         return job
@@ -590,6 +595,37 @@ struct ReliabilityTests {
         let job = await backupJob(fake, mode: .backupDecrypted)
         #expect(job.state == .succeeded, "\(job.errorMessage ?? "")")
         #expect(job.producedFiles.first?.pathExtension == "iso")
+    }
+
+    @Test func folderBackupsLeaveTheFolderToMakeMKV() async throws {
+        // makemkvcon refuses a folder that exists, even an empty one; the stand-in does the same.
+        let backup = #"""
+            mkdir -p "$dest/BDMV" && printf x > "$dest/BDMV/index.bdmv"
+            echo 'MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"'
+        """#
+        for template in [nil, ""] {
+            let fake = try FakeMakeMKV(listing: listing(titles: [("0:00:10", 1)]), mkv: writesFile(saved), backup: backup)
+            let job = await backupJob(fake, mode: .backupThenMkv, format: .folder, fileNameTemplate: template)
+            #expect(job.state == .succeeded, "\(template ?? "default"): \(job.errorMessage ?? "")")
+            let folder = try #require(job.producedFiles.first { JobRunner.isDirectory($0) })
+            #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("BDMV/index.bdmv").path))
+            #expect(fake.calls.contains("mkv file:"), "the MKV step must read the folder: \(fake.calls)")
+        }
+    }
+
+    @Test func dvdImageWrittenForAFolderBackupGetsItsExtension() async throws {
+        // MakeMKV writes DVD backups as ISO images, even when asked for a folder.
+        let backup = #"""
+            head -c 40000 /dev/zero > "$dest"
+            printf 'BEA01' | dd of="$dest" bs=1 seek=32769 conv=notrunc 2>/dev/null
+            echo 'MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"'
+        """#
+        let fake = try FakeMakeMKV(listing: listing(titles: [("0:00:10", 1)]), mkv: writesFile(saved), backup: backup)
+        let job = await backupJob(fake, mode: .backupThenMkv, format: .folder)
+        #expect(job.state == .succeeded, "\(job.errorMessage ?? "")")
+        let image = try #require(job.producedFiles.first { $0.pathExtension == "iso" }, "\(job.producedFiles)")
+        #expect(!JobRunner.isDirectory(image))
+        #expect(fake.calls.contains("mkv iso:"), "the MKV step must read the image: \(fake.calls)")
     }
 
     @Test func folderWrittenInsteadOfAnISOIsKeptAsAFolder() async throws {

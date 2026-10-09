@@ -1098,6 +1098,14 @@
       },
       "today": "JobRunner.backup"
     },
+    "backup.imageForFolder": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string"
+      },
+      "today": "JobRunner.backup"
+    },
     "backup.renamed": {
       "kind": "log",
       "severity": "info",

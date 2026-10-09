@@ -1,0 +1,99 @@
+{
+  "title": "A drive without its own configuration rips every disc inserted, one after another, with the automation defaults",
+  "from": [
+    "macos DriveDetectionTests.reinsertedDiscStartsARipWhenTheEmptyDriveHadNoDevicePath",
+    "windows DriveDetectionTests.ReinsertedDiscStartsARipWhenTheEmptyDriveHadNoDevicePath",
+    "linux /state/reinsert-without-device-path",
+    "docs/architecture.md#makemkvcon",
+    "docs/configuration.md#top-level"
+  ],
+  "given": {
+    "configPatch": {
+      "automation": {
+        "defaults": {
+          "ripOnInsert": true,
+          "delaySeconds": 0
+        }
+      }
+    },
+    "drives": [
+      {
+        "id": "left",
+        "identification": "BD-RE TEST DRIVE 1.00 SERIAL1",
+        "device": "/dev/rdisk12"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "insert": {
+        "drive": "left",
+        "disc": {
+          "volume": "FIRST",
+          "type": "bluray",
+          "titles": [
+            {
+              "duration": "0:30:00",
+              "source": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "jobs": {
+          "count": 1,
+          "outcomes": [
+            "succeeded"
+          ]
+        }
+      }
+    },
+    {
+      "remove": {
+        "drive": "left"
+      }
+    },
+    {
+      "insert": {
+        "drive": "left",
+        "disc": {
+          "volume": "SECOND",
+          "type": "bluray",
+          "titles": [
+            {
+              "duration": "0:30:00",
+              "source": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "note": "Today's apps keyed drives by device path, which a macOS drive loses while it is empty (MakeMKV lists it as disc:N), so a disc that came back under the same /dev/rdiskN didn't count as inserted. The engine identifies drives by DriveId, from the identification.",
+        "jobs": {
+          "count": 2,
+          "outcomes": [
+            "succeeded",
+            "succeeded"
+          ]
+        },
+        "events": {
+          "include": [
+            {
+              "type": "jobChanged",
+              "data": {
+                "job": {
+                  "automatic": true,
+                  "title": "SECOND"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

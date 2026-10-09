@@ -173,6 +173,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case backupCheckFailed = "backup.checkFailed"
     case backupSaved = "backup.saved"
     case backupFolderInsteadOfIso = "backup.folderInsteadOfIso"
+    case backupImageForFolder = "backup.imageForFolder"
     case backupRenamed = "backup.renamed"
     case backupRemoved = "backup.removed"
     case structureNotCreated = "structure.notCreated"
