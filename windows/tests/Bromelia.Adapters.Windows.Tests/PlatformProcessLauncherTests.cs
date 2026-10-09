@@ -176,7 +176,9 @@ public sealed class PlatformProcessLauncherTests : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return;
         var marker = Path.Combine(_dir, "done.txt");
-        var script = Script("many.ps1", "1..50000 | % { [Console]::Out.WriteLine($_) }; Set-Content -Path '" + marker + "' -Value done\n");
+        // cmd.exe, not PowerShell: PowerShell can take longer than the 2 s stall timeout just to start on a busy runner
+        // (CI, 2026-10-09), and the timeout is only meant to cover the reader holding the tool.
+        var script = Script("many.cmd", "@echo off\nfor /L %%i in (1,1,50000) do echo %%i\necho done> \"" + marker + "\"\n");
         var p = _launcher.Start(Spec(script) with { StallTimeout = new Duration(2) });
         Thread.Sleep(TimeSpan.FromSeconds(3));
         Assert.False(File.Exists(marker)); // waiting to write: at most 10000 lines (and the pipe) wait to be read
