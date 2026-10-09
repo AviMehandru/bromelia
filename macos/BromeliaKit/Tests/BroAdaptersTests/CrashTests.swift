@@ -59,6 +59,48 @@ import Testing
         #expect(lines.count == reported)
         #expect((0..<8).filter { !fm.fileExists(atPath: dir + "/from/f\($0).mkv") }.count == 3)
     }
+
+    static func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
+
+    static func pid(_ path: String) -> pid_t? {
+        (try? String(contentsOfFile: path, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    /// The engine killed while a tool runs: the tool and its process group end within a few seconds (Lifeline; on
+    /// Windows KILL_ON_JOB_CLOSE), so a crash never leaves makemkvcon reading the disc into a folder marked INCOMPLETE.
+    @Test func aToolDoesNotOutliveAKilledEngine() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (reason, status) = try run("tool-then-die", dir)
+        #expect(reason == .uncaughtSignal && status == SIGKILL)
+        let tool = try #require(Self.pid(dir + "/tool.pid")), child = try #require(Self.pid(dir + "/child.pid"))
+        let deadline = Date().addingTimeInterval(10)
+        while (Self.alive(tool) || Self.alive(child)) && Date() < deadline { usleep(100_000) }
+        #expect(!Self.alive(tool), "the tool still runs")
+        #expect(!Self.alive(child), "the tool's background child still runs")
+        if Self.alive(child) { kill(child, SIGKILL) }
+        if Self.alive(tool) { kill(tool, SIGKILL) }
+    }
+
+    /// A tool that exited normally takes its watcher with it: what it left running is left alone, even after the engine
+    /// is killed.
+    @Test func whatAFinishedToolLeftRunningIsLeftAlone() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (reason, status) = try run("tool-exits-then-die", dir)
+        #expect(reason == .uncaughtSignal && status == SIGKILL)
+        let tool = try #require(Self.pid(dir + "/tool.pid")), child = try #require(Self.pid(dir + "/child.pid"))
+        defer { kill(child, SIGKILL) }
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = ["-f", "bromelia-lifeline \(tool)$"]
+        pgrep.standardOutput = FileHandle.nullDevice
+        try pgrep.run()
+        pgrep.waitUntilExit()
+        #expect(pgrep.terminationStatus == 1, "the watcher is still there")
+        sleep(1)
+        #expect(Self.alive(child))
+    }
 }
 
 /// Finds this test bundle, and next to it the probe.

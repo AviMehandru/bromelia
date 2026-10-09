@@ -2046,6 +2046,8 @@ main (int argc, char **argv)
   g_test_add_func ("/data-imager/cases", test_data_imager);
   g_test_add_func ("/crash/data-imager", test_crash_data_imager);
   g_test_add_func ("/crash/move-merging", test_crash_move_merging);
+  g_test_add_func ("/crash/tool-with-engine", test_crash_tool_with_engine);
+  g_test_add_func ("/crash/after-tool-exited", test_crash_after_tool_exited);
   g_test_add_func ("/failure/read-only-destination", test_read_only_destination);
   g_test_add_func ("/full-disk/data-imager", test_full_disk_data_imager);
   g_test_add_func ("/full-disk/write-atomically", test_full_disk_write_atomically);

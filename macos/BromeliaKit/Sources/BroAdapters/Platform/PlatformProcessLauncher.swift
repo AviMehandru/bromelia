@@ -12,7 +12,8 @@ import Foundation
 /// group.
 ///
 /// Signals go to the whole group. Once a stopped process has ended, whatever is left of its group is killed (a
-/// background child of a shell ignores SIGINT). A process left running after a normal exit is left alone.
+/// background child of a shell ignores SIGINT). A process left running after a normal exit is left alone. If the
+/// engine ends while a process runs (a crash, kill -9), the process's group is stopped too (`Lifeline`).
 public final class PlatformProcessLauncher: ProcessLauncher {
     /// How many lines, and how much of their text, may wait to be read before the reading waits: long lines for a
     /// reader that has stopped can't hold more than about 16 MiB.
@@ -40,10 +41,66 @@ public final class PlatformProcessLauncher: ProcessLauncher {
     }
 }
 
+/// So that a crashed engine leaves no tools behind (as KILL_ON_JOB_CLOSE does on Windows), each process gets a
+/// watcher: /bin/sh in its own process group, reading a pipe that nothing writes to. The engine holds the pipe's write
+/// end (close-on-exec, never closed); when the engine ends, however it ends, the kernel closes it, the watcher's read
+/// returns, and it stops the process's group: TERM, then KILL 5 s later. When the process ends first, its watcher is
+/// killed and reaped before the process is reaped, so it can never signal a reused process group.
+enum Lifeline {
+    static let script = #"read -r _; kill -s TERM -- "-$1" 2>/dev/null; sleep 5; kill -s KILL -- "-$1" 2>/dev/null"#
+
+    /// The pipe's read end; -1 when it couldn't be made.
+    static let readEnd: Int32 = {
+        var fds: [Int32] = [-1, -1]
+        guard pipe(&fds) == 0 else { return -1 }
+        _ = fcntl(fds[0], F_SETFD, FD_CLOEXEC)
+        _ = fcntl(fds[1], F_SETFD, FD_CLOEXEC)
+        return fds[0]   // fds[1] stays open until the engine ends
+    }()
+
+    /// Starts the watcher of process group `group`; nil when it couldn't start (a crash then leaves the process running).
+    static func watch(_ group: pid_t) -> pid_t? {
+        guard readEnd >= 0 else { return nil }
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_adddup2(&actions, readEnd, 0)
+        posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
+        posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        posix_spawnattr_setpgroup(&attr, 0)   // out of the engine's group: a terminal's ^C doesn't reach it
+        var defaults = sigset_t(), empty = sigset_t()
+        sigfillset(&defaults)
+        sigemptyset(&empty)
+        posix_spawnattr_setsigdefault(&attr, &defaults)
+        posix_spawnattr_setsigmask(&attr, &empty)
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        let words: [String] = ["/bin/sh", "-c", script, "bromelia-lifeline", String(group)], environment: [String] = ["PATH=/usr/bin:/bin"]
+        let argv = words.map { strdup($0) } + [nil]
+        let envp = environment.map { strdup($0) } + [nil]
+        defer {
+            argv.forEach { free($0) }
+            envp.forEach { free($0) }
+        }
+        var pid: pid_t = 0
+        return posix_spawn(&pid, "/bin/sh", &actions, &attr, argv, envp) == 0 ? pid : nil
+    }
+
+    /// Kills and reaps a watcher whose process has ended.
+    static func end(_ watcher: pid_t) {
+        kill(watcher, SIGKILL)
+        var status: Int32 = 0
+        while waitpid(watcher, &status, 0) == -1 && errno == EINTR {}
+    }
+}
+
 /// One started process: two reader threads (stdout, stderr), a thread blocked in waitpid and a watchdog thread that
 /// ticks every 250 ms. All state is behind `cond`.
 private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
     private let pid: pid_t
+    private var watcher: pid_t?   // set before the threads start
     private let spec: ProcessSpec
     private let transcript: Transcript?
     private let cond = NSCondition()
@@ -144,6 +201,7 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
             throw fail(String(cString: strerror(rc)))
         }
         let process = SpawnedProcess(pid: pid, spec: spec, transcript: transcript)
+        process.watcher = Lifeline.watch(pid)
         process.begin(stdout: out[0], stderr: err[0])
         return process
     }
@@ -157,6 +215,7 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         Thread.detachNewThread { [self] in
             var info = siginfo_t()
             while waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == -1 && errno == EINTR {}
+            if let w = watcher { Lifeline.end(w) }   // before the pid can be reused
             cond.lock()
             if reason != nil { kill(-pid, SIGKILL) }   // what is left of a stopped process's group
             var status: Int32 = 0

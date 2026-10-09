@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <gio/gio.h>
 #include <gio/gunixinputstream.h>
+#include <glib-unix.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -103,6 +104,7 @@ struct _BroSpawnedProcess {
   int signals_sent;
   gboolean finished;
   BroProcessExit result;
+  GPid watcher; /* its lifeline watcher, or 0 */
 };
 
 static void bro_spawned_process_iface_init (BroRunningProcessInterface *iface);
@@ -323,6 +325,60 @@ reader_thread (gpointer data)
 
 /* Waits for the process to end without reaping it, so its pid (and process group) can't be reused while the
  * watchdog may still signal it; marks it ended; then reaps it. A process that never ends keeps this thread. */
+/* So that a crashed engine leaves no tools behind (as KILL_ON_JOB_CLOSE does on Windows), each process gets a watcher:
+ * /bin/sh in its own process group, reading a pipe that nothing writes to. The engine holds the pipe's write end
+ * (close-on-exec, never closed); when the engine ends, however it ends, the kernel closes it, the watcher's read
+ * returns, and it stops the process's group: TERM, then KILL 5 s later. When the process ends first, its watcher is
+ * killed and reaped before the process is reaped, so it can never signal a reused process group. (PR_SET_PDEATHSIG
+ * isn't used: it fires when the thread that started the child ends, not the engine.) */
+static const char lifeline_script[] = "read -r _; kill -s TERM -- \"-$1\" 2>/dev/null; sleep 5; kill -s KILL -- \"-$1\" 2>/dev/null";
+
+static void child_setup (gpointer data);
+
+/* The pipe's read end; -1 when it couldn't be made. */
+static int
+lifeline_read_end (void)
+{
+  static gsize once;
+  static int read_end = -1;
+  if (g_once_init_enter (&once))
+    {
+      int fds[2];
+      if (g_unix_open_pipe (fds, FD_CLOEXEC, NULL))
+        read_end = fds[0]; /* fds[1] stays open until the engine ends */
+      g_once_init_leave (&once, 1);
+    }
+  return read_end;
+}
+
+/* Starts the watcher of process group @group; 0 when it couldn't start (a crash then leaves the process running). */
+static GPid
+lifeline_watch (GPid group)
+{
+  int read_end = lifeline_read_end ();
+  g_autofree char *arg = g_strdup_printf ("%d", (int) group);
+  const char *argv[] = { "/bin/sh", "-c", lifeline_script, "bromelia-lifeline", arg, NULL };
+  const char *envp[] = { "PATH=/usr/bin:/bin", NULL };
+  GPid pid = 0;
+  if (read_end < 0)
+    return 0;
+  if (!g_spawn_async_with_pipes_and_fds (NULL, argv, envp,
+                                         G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                                         child_setup, NULL, read_end, -1, -1, NULL, NULL, 0, &pid, NULL, NULL, NULL, NULL))
+    return 0;
+  return pid;
+}
+
+/* Kills and reaps a watcher whose process has ended. */
+static void
+lifeline_end (GPid watcher)
+{
+  int status;
+  kill (watcher, SIGKILL);
+  while (waitpid (watcher, &status, 0) == -1 && errno == EINTR)
+    ;
+}
+
 static gpointer
 waiter_thread (gpointer data)
 {
@@ -331,6 +387,8 @@ waiter_thread (gpointer data)
   int status = 0;
   while (waitid (P_PID, (id_t) self->pid, &info, WEXITED | WNOWAIT) == -1 && errno == EINTR)
     ;
+  if (self->watcher > 0)
+    lifeline_end (self->watcher); /* before the pid can be reused */
   g_mutex_lock (&self->lock);
   if (self->stopping)
     kill (-self->pid, SIGKILL); /* what is left of a stopped process's group */
@@ -595,6 +653,7 @@ bro_platform_process_launcher_start (BroPlatformProcessLauncher *self, const Bro
   p->has_stall_timeout = spec->has_stall_timeout;
   p->stall_seconds = spec->stall_timeout.seconds;
   p->last_output = g_get_monotonic_time ();
+  p->watcher = lifeline_watch (pid);
 
   r = g_new0 (Reader, 1);
   *r = (Reader) { g_object_ref (p), out_fd, BRO_OUTPUT_SOURCE_STDOUT };

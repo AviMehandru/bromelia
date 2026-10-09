@@ -158,3 +158,108 @@ test_read_only_destination (void)
   chmod (dir, 0755);
   remove_tree (dir);
 }
+
+static gboolean
+pid_alive (GPid pid)
+{
+  return kill (pid, 0) == 0 || errno == EPERM;
+}
+
+static GPid
+read_pid (const char *dir, const char *name)
+{
+  g_autofree char *path = g_build_filename (dir, name, NULL), *text = NULL;
+  return g_file_get_contents (path, &text, NULL, NULL) ? (GPid) atoi (text) : 0;
+}
+
+/* The subprocess of the two tests below: starts a shell with a background child (their pids in tool.pid and
+ * child.pid), waits for it when BROMELIA_CRASH_WHEN is "exited", else until it runs, then kills itself. */
+static void
+crash_with_a_tool (const char *dir, gboolean exited)
+{
+  g_autoptr (BroPlatformProcessLauncher) launcher = bro_platform_process_launcher_new ();
+  g_autofree char *script = g_strdup_printf ("sleep 60 & echo $! > child.pid; echo $$ > tool.pid%s", exited ? "" : "; exec sleep 60");
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/sh", "-c", script, NULL);
+  g_autoptr (BroRunningProcess) tool = NULL;
+  g_autofree char *child = g_build_filename (dir, "child.pid", NULL);
+  spec->working_directory = g_strdup (dir);
+  spec->stop_policy = BRO_STOP_POLICY_TERMINATE_FIRST;
+  tool = bro_process_launcher_start (BRO_PROCESS_LAUNCHER (launcher), spec, NULL);
+  g_assert_nonnull (tool);
+  if (exited)
+    bro_running_process_wait (tool);
+  else
+    for (int i = 0; i < 100 && !g_file_test (child, G_FILE_TEST_EXISTS); i++)
+      g_usleep (50000);
+  kill (getpid (), SIGKILL);
+}
+
+/* The engine killed while a tool runs: the tool and its process group end within a few seconds (the launcher's
+ * lifeline; on Windows KILL_ON_JOB_CLOSE), so a crash never leaves makemkvcon reading the disc into a folder marked
+ * INCOMPLETE. */
+static void
+test_crash_tool_with_engine (void)
+{
+  if (g_test_subprocess ())
+    {
+      crash_with_a_tool (g_getenv ("BROMELIA_CRASH_DIR"), FALSE);
+      g_assert_not_reached ();
+    }
+  {
+    g_autofree char *where = g_build_filename (scratch, "crash-tool", NULL);
+    GPid tool, child;
+    gint64 deadline;
+    remove_tree (where);
+    g_mkdir_with_parents (where, 0755);
+    g_setenv ("BROMELIA_CRASH_DIR", where, TRUE);
+    g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_DEFAULT);
+    g_test_trap_assert_failed ();
+    tool = read_pid (where, "tool.pid");
+    child = read_pid (where, "child.pid");
+    g_assert_cmpint (tool, >, 0);
+    g_assert_cmpint (child, >, 0);
+    deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+    while ((pid_alive (tool) || pid_alive (child)) && g_get_monotonic_time () < deadline)
+      g_usleep (100000);
+    if (pid_alive (child) || pid_alive (tool))
+      {
+        kill (child, SIGKILL);
+        kill (tool, SIGKILL);
+        g_error ("the tool (%d) or its child (%d) outlived the killed engine", (int) tool, (int) child);
+      }
+    remove_tree (where);
+  }
+}
+
+/* A tool that exited normally takes its watcher with it: what it left running is left alone, even after the engine is
+ * killed. */
+static void
+test_crash_after_tool_exited (void)
+{
+  if (g_test_subprocess ())
+    {
+      crash_with_a_tool (g_getenv ("BROMELIA_CRASH_DIR"), TRUE);
+      g_assert_not_reached ();
+    }
+  {
+    g_autofree char *where = g_build_filename (scratch, "crash-tool-exited", NULL);
+    g_autofree char *pattern = NULL, *out = NULL;
+    GPid tool, child;
+    int status = 0;
+    remove_tree (where);
+    g_mkdir_with_parents (where, 0755);
+    g_setenv ("BROMELIA_CRASH_DIR", where, TRUE);
+    g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_DEFAULT);
+    g_test_trap_assert_failed ();
+    tool = read_pid (where, "tool.pid");
+    child = read_pid (where, "child.pid");
+    g_assert_cmpint (child, >, 0);
+    pattern = g_strdup_printf ("pgrep -f 'bromelia-lifeline %d$'", (int) tool);
+    g_spawn_command_line_sync (pattern, &out, NULL, &status, NULL);
+    g_usleep (G_USEC_PER_SEC);
+    g_assert_true (pid_alive (child));
+    kill (child, SIGKILL);
+    g_assert_cmpstr (out, ==, ""); /* no watcher left */
+    remove_tree (where);
+  }
+}
