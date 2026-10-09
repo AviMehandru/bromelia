@@ -1,0 +1,67 @@
+{
+  "title": "Two backups of discs with the same name, started at once, get different names; MakeMKV creates each folder itself, so the name is held until it has",
+  "from": [
+    "macos ReliabilityTests.aBackupNameIsHeldUntilMakeMKVCreatesIt",
+    "windows ReliabilityTests.ABackupNameIsHeldUntilMakeMkvCreatesIt",
+    "linux /reliability/backup-name-held",
+    "docs/architecture.md#makemkvcon"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "left",
+        "name": "Left drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN1",
+        "device": "/dev/test0",
+        "disc": "sample-movie-one-title"
+      },
+      {
+        "id": "right",
+        "name": "Right drive",
+        "identification": "BD-RE TEST DRIVE 1.00 SN2",
+        "device": "/dev/test1",
+        "disc": "sample-movie-one-title"
+      }
+    ],
+    "profile": {
+      "backup": {
+        "format": "folder"
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "drive": "left",
+        "mode": "backup",
+        "as": "first"
+      }
+    },
+    {
+      "rip": {
+        "drive": "right",
+        "mode": "backup",
+        "as": "second"
+      }
+    },
+    {
+      "expect": {
+        "note": "Every scripted makemkvcon refuses a backup destination that exists (see README, \"Tool scripts\"), so two jobs that picked the same name would fail the second. Today's apps hold the name with a hidden marker next to it (.<name>.bromelia) until MakeMKV has created it.",
+        "jobs": {
+          "count": 2,
+          "outcomes": [
+            "succeeded",
+            "succeeded"
+          ]
+        },
+        "calls": {
+          "makemkvcon": {
+            "counts": {
+              "backup disc:": 2
+            }
+          }
+        }
+      }
+    }
+  ]
+}

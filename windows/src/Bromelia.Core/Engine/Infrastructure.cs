@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Bromelia.Core.Config;
@@ -134,6 +135,35 @@ public static class Paths
         return null;
     }
 
+    /// <summary>A free name for something another program will create (MakeMKV makes a backup's destination itself, so
+    /// nothing holds the name until it has): <c>&lt;stem&gt;&lt;ext&gt;</c>, else <c>&lt;stem&gt; (2)&lt;ext&gt;</c> and
+    /// so on, held meanwhile by a hidden marker next to it (<c>.&lt;name&gt;.bromelia</c>, created exclusively), so that
+    /// two backups started together can't pick the same one. Delete the marker once the thing has its name. No marker
+    /// when the folder can't take one.</summary>
+    public static (string Path, string? Marker) ReserveUnique(string dir, string stem, string ext)
+    {
+        for (int n = 1; ; n++)
+        {
+            var leaf = n == 1 ? stem + ext : $"{stem} ({n}){ext}";
+            var path = Path.Combine(dir, leaf);
+            var marker = Path.Combine(dir, $".{leaf}.bromelia");
+            if (File.Exists(path) || Directory.Exists(path) || File.Exists(marker)) continue;
+            try
+            {
+                using (new FileStream(marker, FileMode.CreateNew, FileAccess.Write)) { }
+                try { File.SetAttributes(marker, File.GetAttributes(marker) | FileAttributes.Hidden); } catch (IOException) { }
+            }
+            catch (IOException) when (File.Exists(marker)) { continue; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return (path, null); }
+            if (File.Exists(path) || Directory.Exists(path))
+            {
+                try { File.Delete(marker); } catch (IOException) { }
+                continue;
+            }
+            return (path, marker);
+        }
+    }
+
     public static string UniquePath(string path)
     {
         if (!File.Exists(path) && !Directory.Exists(path)) return path;
@@ -183,6 +213,11 @@ public sealed class ProcessRunner
 
     public string CommandLine => string.Join(" ", new[] { _psi.FileName }.Concat(_psi.ArgumentList).Select(ArgumentSplitter.Quote));
 
+    IntPtr _job;
+
+    /// <summary>Whether the running process is in its kill-on-close job (<see cref="ToolJob"/>; tests).</summary>
+    public bool InToolJob => _process is { } p && ToolJob.Holds(_job, p);
+
     /// <summary>Raised on a thread-pool thread once the process has started.</summary>
     public event Action? Started;
 
@@ -193,6 +228,7 @@ public sealed class ProcessRunner
         var p = new Process { StartInfo = _psi };
         _process = p;
         p.Start();
+        _job = ToolJob.Add(p);
         p.StandardInput.Close();
         Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
         Started?.Invoke();
@@ -211,7 +247,9 @@ public sealed class ProcessRunner
         var exited = p.WaitForExitAsync();
         var abandon = _killed.Task.ContinueWith(_ => Task.Delay(TimeSpan.FromSeconds(30)), TaskScheduler.Default).Unwrap();
         if (await Task.WhenAny(exited, abandon).ConfigureAwait(false) != exited)
-            return new Result(-1, _cancelled, _timedOut, _stalled, Abandoned: true);
+            return new Result(-1, _cancelled, _timedOut, _stalled, Abandoned: true); // its job stays: a crash still ends it
+        ToolJob.Release(_job);
+        _job = IntPtr.Zero;
         // Output normally ends with the process. A child it left behind may keep the pipes open, so don't wait long.
         await Task.WhenAny(Task.WhenAll(readOut, readErr), Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
         return new Result(p.ExitCode, _cancelled, _timedOut, _stalled);
@@ -245,6 +283,112 @@ public sealed class ProcessRunner
         }
         catch (InvalidOperationException) { }
         catch (System.ComponentModel.Win32Exception) { }
+    }
+}
+
+/// <summary>So that a crash (or a forced quit) of Bromelia leaves no tools behind, every process ProcessRunner starts
+/// joins a Job Object of its own with KILL_ON_JOB_CLOSE. Bromelia holds the only handle; when Bromelia ends, however it
+/// ends, Windows closes it and ends the process (with what it started). makemkvcon otherwise went on reading the disc
+/// into a folder recovery had marked INCOMPLETE. Once the process has ended, the job lets go of what it left running and
+/// is closed, as macOS and Linux leave a finished tool's leftovers alone. Windows only; best effort (a process that
+/// can't join is left as before).</summary>
+public static class ToolJob
+{
+    /// <summary>Puts a started process in a new job; the job's handle, or zero (not Windows, or Windows refused).</summary>
+    public static IntPtr Add(Process p)
+    {
+        if (!OperatingSystem.IsWindows()) return IntPtr.Zero;
+        var job = Create();
+        if (job == IntPtr.Zero) return IntPtr.Zero;
+        try
+        {
+            if (Native.AssignProcessToJobObject(job, p.Handle)) return job;
+        }
+        catch (InvalidOperationException) { }
+        catch (Win32Exception) { }
+        Native.CloseHandle(job);
+        return IntPtr.Zero;
+    }
+
+    /// <summary>After the process has ended: clears KILL_ON_JOB_CLOSE (what it left running is left alone) and closes the
+    /// job.</summary>
+    public static void Release(IntPtr job)
+    {
+        if (job == IntPtr.Zero) return;
+        var info = new Native.ExtendedLimits();
+        Native.SetInformationJobObject(job, Native.JobObjectExtendedLimitInformation, ref info, (uint)Marshal.SizeOf<Native.ExtendedLimits>());
+        Native.CloseHandle(job);
+    }
+
+    /// <summary>Whether <paramref name="p"/> is in <paramref name="job"/>.</summary>
+    public static bool Holds(IntPtr job, Process p)
+    {
+        if (!OperatingSystem.IsWindows() || job == IntPtr.Zero) return false;
+        try { return Native.IsProcessInJob(p.Handle, job, out var inJob) && inJob; }
+        catch (Exception e) when (e is InvalidOperationException or Win32Exception) { return false; }
+    }
+
+    static IntPtr Create()
+    {
+        var job = Native.CreateJobObjectW(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) return IntPtr.Zero;
+        var info = new Native.ExtendedLimits();
+        info.BasicLimitInformation.LimitFlags = Native.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (Native.SetInformationJobObject(job, Native.JobObjectExtendedLimitInformation, ref info, (uint)Marshal.SizeOf<Native.ExtendedLimits>())) return job;
+        Native.CloseHandle(job);
+        return IntPtr.Zero;
+    }
+
+    static class Native
+    {
+        public const int JobObjectExtendedLimitInformation = 9;
+        public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BasicLimits
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct IoCounters
+        {
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount, ReadTransferCount, WriteTransferCount, OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct ExtendedLimits
+        {
+            public BasicLimits BasicLimitInformation;
+            public IoCounters IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr CreateJobObjectW(IntPtr attributes, string? name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimits info, uint length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr handle);
     }
 }
 

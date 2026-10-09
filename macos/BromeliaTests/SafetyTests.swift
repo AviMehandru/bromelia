@@ -549,6 +549,54 @@ struct ReliabilityTests {
         #expect(out.exitCode == 0)
     }
 
+    /// The pids of the Lifeline watchers of process `pid`.
+    private func lifelines(of pid: String) async throws -> [String] {
+        let lines = LineCollector()
+        _ = try await ProcessRunner(executable: URL(fileURLWithPath: "/usr/bin/pgrep"), arguments: ["-f", "bromelia-lifeline \(pid)$"]).run { lines.append($0) }
+        return lines.all
+    }
+
+    /// A running tool has a Lifeline watcher, and it goes when the tool ends: what a finished tool left running is left
+    /// alone, and no watcher can signal a reused pid.
+    @Test func aToolHasALifelineWhileItRuns() async throws {
+        let runner = ProcessRunner(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo $$; sleep 1"])
+        let lines = LineCollector()
+        let run = Task { try await runner.run(timeout: 30) { lines.append($0) } }
+        var pid: String?
+        for _ in 0..<100 where pid == nil {
+            pid = lines.all.first
+            if pid == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        let tool = try #require(pid)
+        #expect(try await lifelines(of: tool).count == 1)
+        #expect(try await run.value.exitCode == 0)
+        #expect(try await lifelines(of: tool).isEmpty)
+    }
+
+    /// When Bromelia ends (here: the write end of a pipe of the test's own, closed), the watcher stops the tool.
+    @Test func aLifelineStopsItsToolWhenBromeliaEnds() async throws {
+        var fds: [Int32] = [-1, -1]
+        #expect(pipe(&fds) == 0)
+        _ = fcntl(fds[0], F_SETFD, FD_CLOEXEC)
+        _ = fcntl(fds[1], F_SETFD, FD_CLOEXEC)
+        defer { close(fds[0]) }
+        let tool = Process()
+        tool.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        tool.arguments = ["60"]
+        try tool.run()
+        let watcher = try #require(Lifeline.watch(tool.processIdentifier, readEnd: fds[0]))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(tool.isRunning)
+        close(fds[1])
+        let start = Date()
+        while tool.isRunning && Date().timeIntervalSince(start) < 10 { try await Task.sleep(nanoseconds: 50_000_000) }
+        let stopped = !tool.isRunning
+        if !stopped { tool.terminate() }
+        Lifeline.end(watcher)
+        #expect(stopped)
+        #expect(tool.terminationStatus == SIGTERM)
+    }
+
     @Test func notEnoughFreeSpaceStopsBeforeRipping() async throws {
         var text = listing(titles: [("0:00:10", 1)])
         text += "TINFO:0,11,0,\"\(Int64(1) << 60)\"\n"   // an exabyte
@@ -610,6 +658,7 @@ struct ReliabilityTests {
             let folder = try #require(job.producedFiles.first { JobRunner.isDirectory($0) })
             #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("BDMV/index.bdmv").path))
             #expect(fake.calls.contains("mkv file:"), "the MKV step must read the folder: \(fake.calls)")
+            #expect(try markers(in: folder.deletingLastPathComponent()).isEmpty)
         }
     }
 
@@ -626,6 +675,28 @@ struct ReliabilityTests {
         let image = try #require(job.producedFiles.first { $0.pathExtension == "iso" }, "\(job.producedFiles)")
         #expect(!JobRunner.isDirectory(image))
         #expect(fake.calls.contains("mkv iso:"), "the MKV step must read the image: \(fake.calls)")
+        #expect(try markers(in: image.deletingLastPathComponent()).isEmpty)
+    }
+
+    private func markers(in dir: URL) throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".bromelia") }
+    }
+
+    /// MakeMKV creates a backup's destination itself; until it has, a marker holds the name, so two backups of discs
+    /// with the same name, started together, get different names.
+    @Test func aBackupNameIsHeldUntilMakeMKVCreatesIt() throws {
+        let dir = root.appendingPathComponent("reserve", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let first = Paths.reserveUnique(in: dir, stem: "Movie", ext: "")
+        let second = Paths.reserveUnique(in: dir, stem: "Movie", ext: "")
+        #expect(first.url.lastPathComponent == "Movie")
+        #expect(second.url.lastPathComponent == "Movie (2)")
+        #expect(try markers(in: dir).sorted() == [".Movie (2).bromelia", ".Movie.bromelia"])
+        try FileManager.default.createDirectory(at: first.url, withIntermediateDirectories: false)
+        try FileManager.default.removeItem(at: try #require(first.marker))
+        #expect(Paths.reserveUnique(in: dir, stem: "Movie", ext: "").url.lastPathComponent == "Movie (3)")
+        try FileManager.default.removeItem(at: try #require(second.marker))
+        #expect(Paths.reserveUnique(in: dir, stem: "Movie", ext: ".iso").url.lastPathComponent == "Movie.iso")
     }
 
     @Test func folderWrittenInsteadOfAnISOIsKeptAsAFolder() async throws {

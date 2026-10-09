@@ -9,6 +9,7 @@
 #include <glib/gstdio.h>
 #include <json-glib/json-glib.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -126,6 +127,56 @@ bro_unique_path (const char *path)
         return cand;
       g_free (cand);
     }
+}
+
+char *
+bro_reserve_unique_path (const char *dir, const char *stem, const char *ext, char **marker)
+{
+  *marker = NULL;
+  for (int n = 1;; n++)
+    {
+      g_autofree char *leaf = n == 1 ? g_strconcat (stem, ext, NULL) : g_strdup_printf ("%s (%d)%s", stem, n, ext);
+      g_autofree char *hidden = g_strdup_printf (".%s.bromelia", leaf);
+      g_autofree char *path = g_build_filename (dir, leaf, NULL);
+      g_autofree char *mark = g_build_filename (dir, hidden, NULL);
+      int fd;
+      if (g_file_test (path, G_FILE_TEST_EXISTS) || g_file_test (mark, G_FILE_TEST_EXISTS))
+        continue;
+      fd = g_open (mark, O_CREAT | O_EXCL | O_WRONLY, 0644);
+      if (fd < 0)
+        {
+          if (errno == EEXIST)
+            continue;
+          return g_steal_pointer (&path);
+        }
+      close (fd);
+      if (g_file_test (path, G_FILE_TEST_EXISTS))
+        {
+          g_unlink (mark);
+          continue;
+        }
+      *marker = g_steal_pointer (&mark);
+      return g_steal_pointer (&path);
+    }
+}
+
+/* Removes the markers of bro_reserve_unique_path. */
+static void
+markers_release (GPtrArray *markers)
+{
+  for (guint i = 0; i < markers->len; i++)
+    g_unlink (markers->pdata[i]);
+  g_ptr_array_unref (markers);
+}
+
+typedef GPtrArray Markers;
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (Markers, markers_release)
+
+static void
+markers_add (Markers *markers, char *marker)
+{
+  if (marker)
+    g_ptr_array_add (markers, marker);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -2903,6 +2954,7 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
   BroSource *src = c->req->source;
   g_autofree char *dest = g_strdup (out_dir);
   g_autoptr (GPtrArray) args = NULL;
+  g_autoptr (Markers) markers = g_ptr_array_new_with_free_func (g_free);
   Summary *s;
   gboolean exists;
 
@@ -2932,14 +2984,16 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
     }
   g_mkdir_with_parents (dest, 0755);
   {
-    /* MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it. */
+    /* MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it; a
+     * marker holds the name until then. */
     g_autofree char *templ_name = backup_name (c, decrypt);
     g_autofree char *name = *templ_name ? g_strdup (templ_name)
                                          : bro_sanitize_component (c->res->disc_label && *c->res->disc_label ? c->res->disc_label : "disc");
-    g_autofree char *leaf = c->req->drive->rip.backup_format == BRO_BACKUP_ISO ? g_strconcat (name, ".iso", NULL) : g_strdup (name);
-    g_autofree char *want = g_build_filename (dest, leaf, NULL);
+    char *marker = NULL;
+    char *reserved = bro_reserve_unique_path (dest, name, c->req->drive->rip.backup_format == BRO_BACKUP_ISO ? ".iso" : "", &marker);
+    markers_add (markers, marker);
     g_free (dest);
-    dest = bro_unique_path (want);
+    dest = reserved;
   }
   phase (c, decrypt ? "Backing up disc (decrypted)" : "Backing up disc");
   update (c, BRO_UPDATE_PROGRESS, BRO_SEV_INFO, NULL, 0, 0);
@@ -2972,8 +3026,11 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
       g_autofree char *problem = bro_backup_problem (dest, FALSE);
       if (!problem && g_str_has_suffix (dest, ".iso"))
         {
-          g_autofree char *want = g_strndup (dest, strlen (dest) - 4);
-          char *folder = bro_unique_path (want);
+          g_autofree char *parent = g_path_get_dirname (dest), *base = g_path_get_basename (dest);
+          g_autofree char *stem = g_strndup (base, strlen (base) - 4);
+          char *marker = NULL;
+          char *folder = bro_reserve_unique_path (parent, stem, "", &marker);
+          markers_add (markers, marker);
           if (g_rename (dest, folder) == 0)
             {
               g_autofree char *name = g_path_get_basename (folder);
@@ -2991,8 +3048,10 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
       g_autofree char *lower = g_ascii_strdown (dest, -1);
       if (!g_str_has_suffix (lower, ".iso"))
         {
-          g_autofree char *want = g_strconcat (dest, ".iso", NULL);
-          char *image = bro_unique_path (want);
+          g_autofree char *parent = g_path_get_dirname (dest), *base = g_path_get_basename (dest);
+          char *marker = NULL;
+          char *image = bro_reserve_unique_path (parent, base, ".iso", &marker);
+          markers_add (markers, marker);
           if (g_rename (dest, image) == 0)
             {
               g_autofree char *name = g_path_get_basename (image);

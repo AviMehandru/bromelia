@@ -1395,8 +1395,11 @@ public sealed class JobRunner
         Directory.CreateDirectory(dest);
         var name = BackupName(decrypt);
         if (name.Length == 0) name = TemplateRenderer.SanitizeComponent(_job.DiscLabel.Length == 0 ? "disc" : _job.DiscLabel);
-        // MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it.
-        dest = Paths.UniquePath(Path.Combine(dest, _job.Drive.Rip.BackupFormat == BackupFormat.Iso ? name + ".iso" : name));
+        // MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it; a
+        // marker holds the name until then.
+        var reserved = Paths.ReserveUnique(dest, name, _job.Drive.Rip.BackupFormat == BackupFormat.Iso ? ".iso" : "");
+        dest = reserved.Path;
+        var markers = new List<string?> { reserved.Marker };
         _job.Phase = decrypt ? "Backing up disc (decrypted)" : "Backing up disc";
         _job.TotalProgress = 0;
         _expectedDrive = (drive.Index, drive.DevicePath);
@@ -1411,7 +1414,9 @@ public sealed class JobRunner
             // complete but isn't an image: keep it as a folder backup rather than failing the job.
             if (_job.Drive.Rip.BackupFormat == BackupFormat.Iso && Directory.Exists(dest) && BackupVerifier.Problem(dest, false) == null)
             {
-                var folder = Paths.UniquePath(Path.Combine(Path.GetDirectoryName(dest)!, Path.GetFileNameWithoutExtension(dest)));
+                var r = Paths.ReserveUnique(Path.GetDirectoryName(dest)!, Path.GetFileNameWithoutExtension(dest), "");
+                markers.Add(r.Marker);
+                var folder = r.Path;
                 try
                 {
                     Directory.Move(dest, folder);
@@ -1424,7 +1429,9 @@ public sealed class JobRunner
             else if (_job.Drive.Rip.BackupFormat == BackupFormat.Folder && File.Exists(dest)
                      && !dest.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
             {
-                var image = Paths.UniquePath(dest + ".iso");
+                var r = Paths.ReserveUnique(Path.GetDirectoryName(dest)!, Path.GetFileName(dest), ".iso");
+                markers.Add(r.Marker);
+                var image = r.Path;
                 try
                 {
                     File.Move(dest, image);
@@ -1436,7 +1443,12 @@ public sealed class JobRunner
             if (_job.Drive.Archive.VerifyRips && BackupVerifier.Problem(dest, !Directory.Exists(dest)) is { } problem)
                 throw new JobException($"Backup failed the check: {problem}");
         }
-        finally { _expectedDrive = null; }
+        finally
+        {
+            _expectedDrive = null;
+            foreach (var m in markers.OfType<string>())
+                try { File.Delete(m); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
         _job.AppendLog($"Backup saved to {dest}");
         // Without a disc listing a UHD disc looks like a plain Blu-ray; the backup's index.bdmv tells them apart.
         if (Directory.Exists(dest) && DiscFormatExtensions.DetectBackupFolder(dest) is { } found && found != _job.Identity?.Format)

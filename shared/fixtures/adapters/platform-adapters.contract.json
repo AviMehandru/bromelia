@@ -234,7 +234,12 @@
       "id": "engine-dies",
       "from": [
         "real-drive test, 2026-10-08: kill -9 of Bromelia --headless mid-rip left makemkvcon (it ignores SIGPIPE) reading the disc into the folder recovery had marked INCOMPLETE",
-        "docs/architecture.md#unfinished-jobs"
+        "docs/architecture.md#unfinished-jobs",
+        "macos ReliabilityTests.aToolHasALifelineWhileItRuns",
+        "macos ReliabilityTests.aLifelineStopsItsToolWhenBromeliaEnds",
+        "windows ReliabilityTests.ToolsJoinTheKillOnCloseJob",
+        "linux /reliability/crash-stops-the-tool",
+        "linux /reliability/lifeline-ends-with-the-tool"
       ],
       "given": {
         "command": [
@@ -249,7 +254,7 @@
         "groupEnds": true,
         "within": 10,
         "afterNormalExit": "A tool that exited normally takes its watcher with it: what it left running is left alone, even when the engine is killed later (as process-group).",
-        "macos": "A watcher per process: /bin/sh in its own process group, its stdin the read end of a pipe whose write end only the engine holds (close-on-exec). When the engine ends, however it ends, the read returns and the watcher sends TERM to the tool's group, then KILL 5 s later. The watcher is killed and reaped when the tool ends, before the tool is reaped (so it never signals a reused group).",
+        "macos": "A watcher per process: /bin/sh in its own process group, its stdin the read end of a pipe whose write end only the engine holds (close-on-exec). When the engine ends, however it ends, the read returns and the watcher sends TERM to the tool's group, then KILL if the group is still there 5 s later (it stops watching as soon as the group is gone, so it never signals one used again). The watcher is killed and reaped when the tool ends, before the tool is reaped (so it never signals a reused group).",
         "linux": "As macOS (PR_SET_PDEATHSIG isn't used: it fires when the thread that started the child ends).",
         "windows": "The Job Object has KILL_ON_JOB_CLOSE until the process has ended: the engine's handle closes with it and the job's processes end."
       }
@@ -386,7 +391,8 @@
       "from": [
         "macos TemplateTests.postProcessInvocation",
         "windows TemplateTests.PostProcessInvocation",
-        "docs/architecture.md#post-processing (scripts run through an interpreter)"
+        "docs/architecture.md#post-processing (scripts run through an interpreter)",
+        "windows TemplateTests.ScriptsRunThroughWindowsOwnPowerShellByFullPath"
       ],
       "given": {
         "cases": [
@@ -399,12 +405,13 @@
         "interpreter": "<interpreter> <script> <arguments>",
         "noExecuteBit": "/bin/sh <script> <arguments>",
         "windows": {
-          ".ps1": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>",
-          ".bat": "%ComSpec% /c <script>",
-          ".cmd": "%ComSpec% /c <script>",
+          ".ps1": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>",
+          ".bat": "%ComSpec% (else %SystemRoot%\\System32\\cmd.exe) /c <script>",
+          ".cmd": "%ComSpec% (else %SystemRoot%\\System32\\cmd.exe) /c <script>",
           ".py": "py.exe <script>"
         },
-        "function": "PlatformProcessLauncher.invocation"
+        "function": "PlatformProcessLauncher.invocation",
+        "windowsFullPaths": "Windows' own programs by full path: a bare name is looked up in the engine's current folder before System32."
       }
     },
     {

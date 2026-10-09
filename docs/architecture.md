@@ -44,7 +44,8 @@ Everything goes through `makemkvcon -r` (robot mode) with `--progress=-same`:
   and the job stops if the disc changed or a chosen title is gone.
 - **Backup:** `backup [--decrypt] disc:<N> <folder or .iso>`. MakeMKV refuses a folder that exists, even an
   empty one (“already contains a backup”), so Bromelia picks a name that is free and leaves creating it to
-  MakeMKV. MakeMKV only accepts `disc:N` for backups, so Bromelia checks the `DRV:` lines the job prints to
+  MakeMKV. Until MakeMKV has created it, a hidden marker next to it (`.<name>.bromelia`) holds the name, so two
+  backups of discs with the same name started at once don't pick the same one. MakeMKV only accepts `disc:N` for backups, so Bromelia checks the `DRV:` lines the job prints to
   make sure drive *N* is still the expected device.
 
 Drives are addressed by device (`dev:`) wherever possible because MakeMKV's drive numbers can change.
@@ -170,6 +171,13 @@ nothing for the stall timeout. Once a process has ended, its output is read for 
 child it left behind may keep the pipe open), and a process that is still there 30 s after SIGKILL — stuck
 in the kernel on a hung drive — is abandoned so the job can end. On Linux all of this runs on a watchdog
 thread per process, so it doesn't depend on a main loop.
+
+If Bromelia itself ends while a tool runs (a crash, `kill -9`, a forced quit), the tool is stopped too, so
+`makemkvcon` can't go on writing into a folder that recovery marks INCOMPLETE. On macOS and Linux each process
+gets a small `/bin/sh` watcher (`bromelia-lifeline <pid>` in `ps`), reading a pipe that only Bromelia holds
+open; when Bromelia ends, the watcher sends SIGTERM, then SIGKILL if the tool is still there 5 s later. The
+watcher ends with its tool. On Windows every tool joins a Job Object that ends its processes when Bromelia's
+handle to it closes.
 
 The robot messages that decide a job's outcome were checked against real `makemkvcon` 2.0 output recorded
 in `shared/fixtures`: a full disk (`rip-disk-full`: exit status 0, message 5038, write error 2018, the

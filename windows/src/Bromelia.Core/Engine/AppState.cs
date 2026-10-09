@@ -169,7 +169,10 @@ public sealed class AppState : ObservableObject
     readonly Dictionary<Guid, JobRunner> _runners = new();
     bool _betaKeyTried;
     readonly Dictionary<string, DriveState> _knownStates = new();
-    /// <summary>Drives asked to close their tray, and when: the first scan 4 s later tells whether the tray moved.</summary>
+    /// <summary>The drive (MakeMKV index and name) each known lane was last listed for.</summary>
+    readonly Dictionary<string, (int Index, string Name)> _knownDrives = new();
+    /// <summary>Lanes whose drive was asked to close its tray, and when: the first scan 4 s later tells whether the tray
+    /// moved. By lane, not drive name: two drives of the same model share a name.</summary>
     readonly Dictionary<string, DateTime> _trayCloseRequests = new();
     bool _firstScanDone;
     bool _isScanning;
@@ -237,7 +240,7 @@ public sealed class AppState : ObservableObject
     public async Task CloseTrayAsync(string lane)
     {
         if (EntryForLane(lane) is not { DevicePath.Length: > 0 } e) return;
-        ExpectTrayClosed(new[] { e.DriveName });
+        ExpectTrayClosed(new[] { e.LaneKey });
         if (!await Platform.CloseTrayAsync(e.DevicePath)) LastError = $"Could not close the tray of {DriveItem.ShortModel(e.DriveName)}";
         await Task.Delay(5000);
         await RefreshDrivesAsync(true);
@@ -246,19 +249,19 @@ public sealed class AppState : ObservableObject
     public async Task CloseAllTraysAsync()
     {
         var drives = ScannedDrives.Where(d => d.IsPresent && d.State != DriveState.Inserted && d.DevicePath.Length > 0).ToList();
-        ExpectTrayClosed(drives.Select(d => d.DriveName));
+        ExpectTrayClosed(drives.Select(d => d.LaneKey));
         foreach (var e in drives)
             await Platform.CloseTrayAsync(e.DevicePath);
         await Task.Delay(5000);
         await RefreshDrivesAsync(true);
     }
 
-    /// <summary>Checks, in the first scan at least 4 s after <paramref name="at"/>, that these drives' trays closed. A drive
-    /// without a tray motor (most slim drives) accepts the command and leaves the tray open, and the OS can't tell;
-    /// MakeMKV's scan can.</summary>
-    public void ExpectTrayClosed(IEnumerable<string> driveNames, DateTime? at = null)
+    /// <summary>Checks, in the first scan at least 4 s after <paramref name="at"/>, that the trays of the drives in these
+    /// lanes closed. A drive without a tray motor (most slim drives) accepts the command and leaves the tray open, and
+    /// the OS can't tell; MakeMKV's scan can.</summary>
+    public void ExpectTrayClosed(IEnumerable<string> lanes, DateTime? at = null)
     {
-        foreach (var n in driveNames) _trayCloseRequests[n] = at ?? DateTime.UtcNow;
+        foreach (var lane in lanes) _trayCloseRequests[lane] = at ?? DateTime.UtcNow;
     }
 
     public static string TrayStillOpen(string driveName) =>
@@ -267,10 +270,10 @@ public sealed class AppState : ObservableObject
     void CheckTrayCloseRequests(IReadOnlyList<DriveScanEntry> entries)
     {
         var now = DateTime.UtcNow;
-        foreach (var (name, asked) in _trayCloseRequests.Where(r => (now - r.Value).TotalSeconds >= 4).ToList())
+        foreach (var (lane, asked) in _trayCloseRequests.Where(r => (now - r.Value).TotalSeconds >= 4).ToList())
         {
-            _trayCloseRequests.Remove(name);
-            if (entries.FirstOrDefault(e => e.DriveName == name) is { State: DriveState.EmptyOpen }) LastError = TrayStillOpen(name);
+            _trayCloseRequests.Remove(lane);
+            if (entries.FirstOrDefault(e => e.LaneKey == lane) is { State: DriveState.EmptyOpen } e) LastError = TrayStillOpen(e.DriveName);
         }
     }
 
@@ -629,13 +632,18 @@ public sealed class AppState : ObservableObject
         EnsureSessions(merged);
         CheckTrayCloseRequests(merged);
 
-        // A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed as
-        // disc:N until the next disc comes (often under the same device), which must count as inserted again.
+        // A lane whose drive is now listed under another lane lost its disc: on macOS an empty drive has no device path,
+        // so it is listed as disc:N until the next disc comes (often under the same device), which must count as
+        // inserted again. A drive left out of a scan altogether keeps its state, so that it isn't taken for a new disc
+        // when it is listed again.
         var lanes = merged.Select(e => e.LaneKey).ToHashSet();
+        var drives = merged.Select(e => (e.Index, e.DriveName)).ToHashSet();
         foreach (var (lane, state) in _knownStates.Where(k => !lanes.Contains(k.Key)).ToList())
         {
+            if (!_knownDrives.TryGetValue(lane, out var drive) || !drives.Contains(drive)) continue;
             if (state == DriveState.Inserted) Sessions.GetValueOrDefault(lane)?.Reset();
             _knownStates.Remove(lane);
+            _knownDrives.Remove(lane);
         }
 
         foreach (var e in merged)
@@ -643,6 +651,7 @@ public sealed class AppState : ObservableObject
             _knownStates.TryGetValue(e.LaneKey, out var previous);
             bool hadPrevious = _knownStates.ContainsKey(e.LaneKey);
             _knownStates[e.LaneKey] = e.State;
+            _knownDrives[e.LaneKey] = (e.Index, e.DriveName);
             if (!_firstScanDone) continue;
             if (e.State == DriveState.Inserted && (!hadPrevious || previous != DriveState.Inserted)) DiscInserted(e);
             else if (e.State != DriveState.Inserted && previous == DriveState.Inserted) Sessions.GetValueOrDefault(e.LaneKey)?.Reset();

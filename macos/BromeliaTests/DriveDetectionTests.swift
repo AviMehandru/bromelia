@@ -85,18 +85,39 @@ struct DriveDetectionTests {
         let model = AppModel(persistent: false)
         let name = "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112"
         model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
-        model.expectTrayClosed(driveNames: [name])
+        model.expectTrayClosed(lanes: ["disc:0"])
         model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
         #expect(model.lastError == nil, "too soon: the tray may still be moving")
-        model.expectTrayClosed(driveNames: [name], at: Date().addingTimeInterval(-10))
+        model.expectTrayClosed(lanes: ["disc:0"], at: Date().addingTimeInterval(-10))
         model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
         #expect(model.lastError == AppModel.trayStillOpen(name))
         model.lastError = nil
         model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
         #expect(model.lastError == nil, "checked once per request")
-        model.expectTrayClosed(driveNames: [name], at: Date().addingTimeInterval(-10))
+        model.expectTrayClosed(lanes: ["disc:0"], at: Date().addingTimeInterval(-10))
         model.debugApplyScan([entry(0, .emptyClosed, name: name, dev: "")])
         #expect(model.lastError == nil)
+        // Two drives of the same model share a name: a request for one doesn't replace the other's.
+        model.expectTrayClosed(lanes: ["disc:0"], at: Date().addingTimeInterval(-10))
+        model.expectTrayClosed(lanes: ["disc:1"])
+        model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: ""), entry(1, .emptyOpen, name: name, dev: "")])
+        #expect(model.lastError == AppModel.trayStillOpen(name))
+    }
+
+    @Test func aDriveLeftOutOfOneScanIsNotANewDisc() {
+        // A USB reset, or a busy drive MakeMKV doesn't list: the disc is still the same one when the drive is back.
+        let model = AppModel(persistent: false)
+        model.config.defaultDrive.automation.autoRipOnInsert = true
+        model.config.defaultDrive.automation.autoRipDelaySeconds = 60
+        let name = "BD-RE TEST DRIVE 1.00 SERIAL1"
+        model.debugApplyScan([entry(0, .inserted, name: name, dev: "/dev/rdisk12", disc: "FIRST")])
+        model.debugApplyScan([])
+        model.debugApplyScan([entry(0, .inserted, name: name, dev: "/dev/rdisk12", disc: "FIRST")])
+        #expect(model.jobs.isEmpty)
+        // Another drive listed at the old one's index doesn't make it forget its disc either.
+        model.debugApplyScan([entry(0, .emptyClosed, name: "DVD+-RW OTHER DRIVE 1.00 SERIAL2", dev: "")])
+        model.debugApplyScan([entry(0, .inserted, name: name, dev: "/dev/rdisk12", disc: "FIRST")])
+        #expect(model.jobs.isEmpty)
     }
 
     @Test func disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults() {

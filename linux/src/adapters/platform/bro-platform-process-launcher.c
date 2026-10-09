@@ -323,15 +323,15 @@ reader_thread (gpointer data)
   return NULL;
 }
 
-/* Waits for the process to end without reaping it, so its pid (and process group) can't be reused while the
- * watchdog may still signal it; marks it ended; then reaps it. A process that never ends keeps this thread. */
 /* So that a crashed engine leaves no tools behind (as KILL_ON_JOB_CLOSE does on Windows), each process gets a watcher:
  * /bin/sh in its own process group, reading a pipe that nothing writes to. The engine holds the pipe's write end
  * (close-on-exec, never closed); when the engine ends, however it ends, the kernel closes it, the watcher's read
- * returns, and it stops the process's group: TERM, then KILL 5 s later. When the process ends first, its watcher is
- * killed and reaped before the process is reaped, so it can never signal a reused process group. (PR_SET_PDEATHSIG
- * isn't used: it fires when the thread that started the child ends, not the engine.) */
-static const char lifeline_script[] = "read -r _; kill -s TERM -- \"-$1\" 2>/dev/null; sleep 5; kill -s KILL -- \"-$1\" 2>/dev/null";
+ * returns, and it stops the process's group: TERM, then KILL if the group is still there 5 s later. The watcher stops
+ * as soon as the group is gone, so it never signals one used again. When the process ends first, its watcher is killed
+ * and reaped before the process is reaped, so it can never signal a reused process group. (PR_SET_PDEATHSIG isn't
+ * used: it fires when the thread that started the child ends, not the engine.) */
+static const char lifeline_script[] = "read -r _; kill -s TERM -- \"-$1\" 2>/dev/null || exit 0; i=0; while [ $i -lt 50 ]; do sleep 0.1; "
+                                      "kill -0 -- \"-$1\" 2>/dev/null || exit 0; i=$((i+1)); done; kill -s KILL -- \"-$1\" 2>/dev/null";
 
 static void child_setup (gpointer data);
 
@@ -379,6 +379,8 @@ lifeline_end (GPid watcher)
     ;
 }
 
+/* Waits for the process to end without reaping it, so its pid (and process group) can't be reused while the
+ * watchdog may still signal it; marks it ended; then reaps it. A process that never ends keeps this thread. */
 static gpointer
 waiter_thread (gpointer data)
 {

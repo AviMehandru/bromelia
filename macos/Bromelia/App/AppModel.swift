@@ -69,8 +69,11 @@ final class AppModel {
     @ObservationIgnored private var watcher: OpticalMediaWatcher?
     @ObservationIgnored private var scanRunner: ProcessRunner?
     @ObservationIgnored private var knownStates: [String: DriveState] = [:]
+    /// The drive (MakeMKV index and name) each known lane was last listed for.
+    @ObservationIgnored private var knownDrives: [String: String] = [:]
     @ObservationIgnored private var firstScanDone = false
-    /// Drives asked to close their tray, and when: the first scan 4 s later tells whether the tray moved.
+    /// Lanes whose drive was asked to close its tray, and when: the first scan 4 s later tells whether the tray moved. By
+    /// lane, not drive name: two drives of the same model share a name.
     @ObservationIgnored private var trayCloseRequests: [String: Date] = [:]
     @ObservationIgnored private var pendingRescan: Task<Void, Never>?
 
@@ -291,18 +294,24 @@ final class AppModel {
         ensureSessions(merged)
         checkTrayCloseRequests(merged)
 
-        // A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed
-        // as disc:N until the next disc comes (often under the same /dev/rdiskN), which must count as inserted again.
+        // A lane whose drive is now listed under another lane lost its disc: on macOS an empty drive has no device
+        // path, so it is listed as disc:N until the next disc comes (often under the same /dev/rdiskN), which must count
+        // as inserted again. A drive left out of a scan altogether keeps its state, so that it isn't taken for a new
+        // disc when it is listed again.
         let lanes = Set(merged.map(DriveItem.laneKey(for:)))
+        let drives = Set(merged.map(Self.driveIdentity))
         for (lane, state) in knownStates where !lanes.contains(lane) {
+            guard let drive = knownDrives[lane], drives.contains(drive) else { continue }
             if state == .inserted { sessions[lane]?.reset() }
             knownStates[lane] = nil
+            knownDrives[lane] = nil
         }
 
         for e in merged {
             let lane = DriveItem.laneKey(for: e)
             let previous = knownStates[lane]
             knownStates[lane] = e.state
+            knownDrives[lane] = Self.driveIdentity(e)
             guard firstScanDone else { continue }
             if e.state == .inserted && previous != .inserted {
                 discInserted(e)
@@ -312,6 +321,8 @@ final class AppModel {
         }
         firstScanDone = true
     }
+
+    private static func driveIdentity(_ e: DriveScanEntry) -> String { "\(e.index)\u{1F}\(e.driveName)" }
 
     private func discInserted(_ e: DriveScanEntry) {
         let lane = DriveItem.laneKey(for: e)
@@ -367,7 +378,7 @@ final class AppModel {
 
     func closeTray(lane: String) {
         guard let e = entry(forLane: lane) else { return }
-        expectTrayClosed(driveNames: [e.driveName])
+        expectTrayClosed(lanes: [lane])
         Task {
             if !(await DriveControl.closeTray(driveName: e.driveName)) { self.lastError = "Could not close the tray of \(DriveItem.shortModel(e.driveName))" }
             self.scheduleRescan(after: 5)
@@ -375,17 +386,18 @@ final class AppModel {
     }
 
     func closeAllTrays() {
-        expectTrayClosed(driveNames: scannedDrives.filter { $0.isPresent && $0.state != .inserted }.map(\.driveName))
+        expectTrayClosed(lanes: scannedDrives.filter { $0.isPresent && $0.state != .inserted }.map(DriveItem.laneKey(for:)))
         Task {
             if !(await DriveControl.closeTray(driveName: "")) { self.lastError = "Could not close the trays" }
             self.scheduleRescan(after: 5)
         }
     }
 
-    /// Checks, in the first scan at least 4 s after `date`, that these drives' trays closed. A drive without a tray motor
-    /// (most slim drives) accepts the command and leaves the tray open, and the OS can't tell; MakeMKV's scan can.
-    func expectTrayClosed(driveNames: [String], at date: Date = Date()) {
-        for n in driveNames { trayCloseRequests[n] = date }
+    /// Checks, in the first scan at least 4 s after `date`, that the trays of the drives in these lanes closed. A drive
+    /// without a tray motor (most slim drives) accepts the command and leaves the tray open, and the OS can't tell;
+    /// MakeMKV's scan can.
+    func expectTrayClosed(lanes: [String], at date: Date = Date()) {
+        for lane in lanes { trayCloseRequests[lane] = date }
     }
 
     static func trayStillOpen(_ driveName: String) -> String {
@@ -393,9 +405,9 @@ final class AppModel {
     }
 
     private func checkTrayCloseRequests(_ entries: [DriveScanEntry], now: Date = Date()) {
-        for (name, asked) in trayCloseRequests where now.timeIntervalSince(asked) >= 4 {
-            trayCloseRequests[name] = nil
-            if let e = entries.first(where: { $0.driveName == name }), e.state == .emptyOpen { lastError = Self.trayStillOpen(name) }
+        for (lane, asked) in trayCloseRequests where now.timeIntervalSince(asked) >= 4 {
+            trayCloseRequests[lane] = nil
+            if let e = entries.first(where: { DriveItem.laneKey(for: $0) == lane }), e.state == .emptyOpen { lastError = Self.trayStillOpen(e.driveName) }
         }
     }
 
