@@ -214,6 +214,8 @@ public sealed class ProcessRunner
     public string CommandLine => string.Join(" ", new[] { _psi.FileName }.Concat(_psi.ArgumentList).Select(ArgumentSplitter.Quote));
 
     IntPtr _job;
+    /// <summary>Guards <see cref="_job"/>: a stop never uses the handle once the run has closed it.</summary>
+    readonly object _jobGate = new();
 
     /// <summary>Whether the running process is in its kill-on-close job (<see cref="ToolJob"/>; tests).</summary>
     public bool InToolJob => _process is { } p && ToolJob.Holds(_job, p);
@@ -248,8 +250,11 @@ public sealed class ProcessRunner
         var abandon = _killed.Task.ContinueWith(_ => Task.Delay(TimeSpan.FromSeconds(30)), TaskScheduler.Default).Unwrap();
         if (await Task.WhenAny(exited, abandon).ConfigureAwait(false) != exited)
             return new Result(-1, _cancelled, _timedOut, _stalled, Abandoned: true); // its job stays: a crash still ends it
-        ToolJob.Release(_job);
-        _job = IntPtr.Zero;
+        lock (_jobGate)
+        {
+            ToolJob.Release(_job);
+            _job = IntPtr.Zero;
+        }
         // Output normally ends with the process. A child it left behind may keep the pipes open, so don't wait long.
         await Task.WhenAny(Task.WhenAll(readOut, readErr), Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
         return new Result(p.ExitCode, _cancelled, _timedOut, _stalled);
@@ -278,6 +283,7 @@ public sealed class ProcessRunner
             if (_process is { HasExited: false } p)
             {
                 p.Kill(entireProcessTree: true);
+                lock (_jobGate) ToolJob.Terminate(_job); // and what it started whose parent has already gone
                 _killed.TrySetResult();
             }
         }
@@ -318,6 +324,13 @@ public static class ToolJob
         var info = new Native.ExtendedLimits();
         Native.SetInformationJobObject(job, Native.JobObjectExtendedLimitInformation, ref info, (uint)Marshal.SizeOf<Native.ExtendedLimits>());
         Native.CloseHandle(job);
+    }
+
+    /// <summary>Ends every process in the job: a stopped tool and everything it started, even what a process that has
+    /// already ended left behind.</summary>
+    public static void Terminate(IntPtr job)
+    {
+        if (job != IntPtr.Zero) Native.TerminateJobObject(job, unchecked((uint)-1));
     }
 
     /// <summary>Whether <paramref name="p"/> is in <paramref name="job"/>.</summary>
@@ -386,6 +399,9 @@ public static class ToolJob
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool TerminateJobObject(IntPtr job, uint exitCode);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool CloseHandle(IntPtr handle);

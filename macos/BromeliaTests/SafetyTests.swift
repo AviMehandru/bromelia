@@ -573,28 +573,62 @@ struct ReliabilityTests {
         #expect(try await lifelines(of: tool).isEmpty)
     }
 
-    /// When Bromelia ends (here: the write end of a pipe of the test's own, closed), the watcher stops the tool.
+    /// The first `count` lines a running process prints.
+    private func firstLines(_ lines: LineCollector, _ count: Int) async throws -> [String] {
+        for _ in 0..<250 where lines.all.count < count { try await Task.sleep(nanoseconds: 20_000_000) }
+        return Array(lines.all.prefix(count))
+    }
+
+    private func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
+
+    private func gone(_ pid: pid_t, within seconds: TimeInterval) async throws -> Bool {
+        let start = Date()
+        while alive(pid) && Date().timeIntervalSince(start) < seconds { try await Task.sleep(nanoseconds: 50_000_000) }
+        return !alive(pid)
+    }
+
+    /// When Bromelia ends (here: the write end of a pipe of the test's own, closed), the watcher stops the tool and what
+    /// it started (its process group).
     @Test func aLifelineStopsItsToolWhenBromeliaEnds() async throws {
         var fds: [Int32] = [-1, -1]
         #expect(pipe(&fds) == 0)
         _ = fcntl(fds[0], F_SETFD, FD_CLOEXEC)
         _ = fcntl(fds[1], F_SETFD, FD_CLOEXEC)
         defer { close(fds[0]) }
-        let tool = Process()
-        tool.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        tool.arguments = ["60"]
-        try tool.run()
-        let watcher = try #require(Lifeline.watch(tool.processIdentifier, readEnd: fds[0]))
-        try await Task.sleep(nanoseconds: 300_000_000)
-        #expect(tool.isRunning)
+        let runner = ProcessRunner(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo $$; sleep 60 & echo $!; exec sleep 60"])
+        let lines = LineCollector()
+        let run = Task { try await runner.run(timeout: 60) { lines.append($0) } }
+        let pids = try await firstLines(lines, 2).compactMap { pid_t($0) }
+        try #require(pids.count == 2)
+        let watcher = try #require(Lifeline.watch(pids[0], readEnd: fds[0]))
         close(fds[1])
-        let start = Date()
-        while tool.isRunning && Date().timeIntervalSince(start) < 10 { try await Task.sleep(nanoseconds: 50_000_000) }
-        let stopped = !tool.isRunning
-        if !stopped { tool.terminate() }
+        let out = try await run.value
         Lifeline.end(watcher)
-        #expect(stopped)
-        #expect(tool.terminationStatus == SIGTERM)
+        #expect(out.exitCode == SIGTERM)
+        let childGone = try await gone(pids[1], within: 5)
+        if !childGone { kill(pids[1], SIGKILL) }
+        #expect(childGone)
+    }
+
+    /// Stopping a tool stops what it started too (its process group), as a shell's background child would otherwise go
+    /// on; a tool that ends by itself leaves what it started alone.
+    @Test func stoppingAToolStopsWhatItStarted() async throws {
+        let stuck = ProcessRunner(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 60 & echo $!; sleep 60"], stopSignal: SIGTERM)
+        let lines = LineCollector()
+        let out = try await stuck.run(stallTimeout: 2) { lines.append($0) }
+        #expect(out.stalled)
+        let child = try #require(lines.all.first.flatMap { pid_t($0) })
+        let childGone = try await gone(child, within: 5)
+        if !childGone { kill(child, SIGKILL) }
+        #expect(childGone)
+
+        let quick = ProcessRunner(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 60 & echo $!"])
+        let quickLines = LineCollector()
+        let done = try await quick.run(stallTimeout: 2) { quickLines.append($0) }
+        #expect(done.exitCode == 0 && !done.stalled)
+        let left = try #require(quickLines.all.first.flatMap { pid_t($0) })
+        #expect(alive(left))
+        kill(left, SIGKILL)
     }
 
     @Test func notEnoughFreeSpaceStopsBeforeRipping() async throws {

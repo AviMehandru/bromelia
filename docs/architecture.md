@@ -166,16 +166,20 @@ alone. The jobs themselves are not queued again: the disc in the drive may have 
 ## Stopping processes
 
 `makemkvcon` ignores SIGINT, so it is stopped with SIGTERM (other tools get SIGINT first), then SIGKILL
-after 5 s (Windows kills the process tree at once). A watchdog stops a `makemkvcon` run that prints
-nothing for the stall timeout. Once a process has ended, its output is read for at most 5 more seconds (a
-child it left behind may keep the pipe open), and a process that is still there 30 s after SIGKILL — stuck
-in the kernel on a hung drive — is abandoned so the job can end. On Linux all of this runs on a watchdog
+after 5 s (Windows kills the process tree at once). A stop reaches what the tool started too: on macOS and
+Linux each tool runs in a process group of its own and the signals go to the whole group (what is left of
+it is killed once the tool has ended); on Windows the tool's Job Object is ended with it. What a tool that
+ended by itself left running is left alone. A watchdog stops a `makemkvcon` run that prints nothing for
+the stall timeout, but only while the tool itself still runs. Once a process has ended, its output is read
+for at most 5 more seconds (a child it left behind may keep the pipe open), and a process that is still
+there 30 s after SIGKILL — stuck in the kernel on a hung drive — is abandoned so the job can end. On Linux all of this runs on a watchdog
 thread per process, so it doesn't depend on a main loop.
 
 If Bromelia itself ends while a tool runs (a crash, `kill -9`, a forced quit), the tool is stopped too, so
 `makemkvcon` can't go on writing into a folder that recovery marks INCOMPLETE. On macOS and Linux each process
 gets a small `/bin/sh` watcher (`bromelia-lifeline <pid>` in `ps`), reading a pipe that only Bromelia holds
-open; when Bromelia ends, the watcher sends SIGTERM, then SIGKILL if the tool is still there 5 s later. The
+open; when Bromelia ends, the watcher sends SIGTERM to the tool's process group, then SIGKILL if it is still
+there 5 s later. The
 watcher ends with its tool. On Windows every tool joins a Job Object that ends its processes when Bromelia's
 handle to it closes.
 
