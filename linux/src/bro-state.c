@@ -479,6 +479,7 @@ bro_state_finalize (GObject *obj)
   g_free (self->config_path);
   g_ptr_array_unref (self->drives);
   g_hash_table_unref (self->known_states);
+  g_hash_table_unref (self->tray_close_requests);
   g_hash_table_unref (self->sessions);
   g_ptr_array_unref (self->file_sessions);
   g_ptr_array_unref (self->jobs);
@@ -527,6 +528,7 @@ bro_state_init (BroState *self)
   self->automation_fd = -1;
   self->drives = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_drive_entry_free);
   self->known_states = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->tray_close_requests = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   self->sessions = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
   self->file_sessions = g_ptr_array_new_with_free_func (g_object_unref);
   self->jobs = g_ptr_array_new_with_free_func (g_object_unref);
@@ -909,6 +911,43 @@ bro_state_set_error (BroState *self, const char *error)
 }
 
 void
+bro_state_expect_tray_closed (BroState *self, const char *drive_name, gint64 at)
+{
+  g_hash_table_replace (self->tray_close_requests, g_strdup (drive_name ? drive_name : ""), g_memdup2 (&at, sizeof at));
+}
+
+char *
+bro_state_tray_still_open (const char *drive_name)
+{
+  g_autofree char *model = bro_drive_short_model (drive_name);
+  return g_strdup_printf ("The tray of %s is still open: this drive can't close it by itself (slim drives have no tray motor), so push it in by hand", model);
+}
+
+static void
+check_tray_close_requests (BroState *self)
+{
+  GHashTableIter it;
+  gpointer key, value;
+  gint64 now = g_get_monotonic_time ();
+  g_hash_table_iter_init (&it, self->tray_close_requests);
+  while (g_hash_table_iter_next (&it, &key, &value))
+    {
+      if (now - *(gint64 *) value < 4 * G_USEC_PER_SEC)
+        continue;
+      for (guint i = 0; i < self->drives->len; i++)
+        {
+          BroDriveEntry *e = self->drives->pdata[i];
+          if (g_strcmp0 (e->drive_name, key) == 0 && e->state == BRO_DRIVE_EMPTY_OPEN)
+            {
+              g_autofree char *msg = bro_state_tray_still_open (key);
+              bro_state_set_error (self, msg);
+            }
+        }
+      g_hash_table_iter_remove (&it);
+    }
+}
+
+void
 bro_state_import_settings (BroState *self, GHashTable *settings)
 {
   BroCatalog *cat = bro_catalog_get ();
@@ -1190,6 +1229,8 @@ bro_state_apply_scan (BroState *self, GPtrArray *entries)
   g_ptr_array_unref (self->drives);
   self->drives = merged;
   ensure_sessions (self);
+
+  check_tray_close_requests (self);
 
   /* A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed as
    * disc:N until the next disc comes (often under the same device), which must count as inserted again. */
@@ -3134,7 +3175,10 @@ bro_state_close_tray (BroState *self, const char *lane)
   BroDriveEntry *e = bro_state_entry_for_lane (self, lane);
   GPtrArray *devices = g_ptr_array_new_with_free_func (g_free);
   if (e && e->device && *e->device)
-    g_ptr_array_add (devices, g_strdup (e->device));
+    {
+      g_ptr_array_add (devices, g_strdup (e->device));
+      bro_state_expect_tray_closed (self, e->drive_name, g_get_monotonic_time ());
+    }
   close_trays (self, devices);
 }
 
@@ -3146,7 +3190,10 @@ bro_state_close_all_trays (BroState *self)
     {
       BroDriveEntry *e = self->drives->pdata[i];
       if (bro_drive_entry_present (e) && e->state != BRO_DRIVE_INSERTED && e->device && *e->device)
-        g_ptr_array_add (devices, g_strdup (e->device));
+        {
+          g_ptr_array_add (devices, g_strdup (e->device));
+          bro_state_expect_tray_closed (self, e->drive_name, g_get_monotonic_time ());
+        }
     }
   close_trays (self, devices);
 }

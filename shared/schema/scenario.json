@@ -105,6 +105,9 @@
               },
               "makemkvIndex": {
                 "type": "integer"
+              },
+              "trayMotor": {
+                "type": "boolean"
               }
             },
             "required": [

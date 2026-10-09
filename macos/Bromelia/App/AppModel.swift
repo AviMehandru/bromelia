@@ -70,6 +70,8 @@ final class AppModel {
     @ObservationIgnored private var scanRunner: ProcessRunner?
     @ObservationIgnored private var knownStates: [String: DriveState] = [:]
     @ObservationIgnored private var firstScanDone = false
+    /// Drives asked to close their tray, and when: the first scan 4 s later tells whether the tray moved.
+    @ObservationIgnored private var trayCloseRequests: [String: Date] = [:]
     @ObservationIgnored private var pendingRescan: Task<Void, Never>?
 
     let catalog = SettingsCatalog.load()
@@ -287,6 +289,7 @@ final class AppModel {
         }
         scannedDrives = merged
         ensureSessions(merged)
+        checkTrayCloseRequests(merged)
 
         // A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed
         // as disc:N until the next disc comes (often under the same /dev/rdiskN), which must count as inserted again.
@@ -364,6 +367,7 @@ final class AppModel {
 
     func closeTray(lane: String) {
         guard let e = entry(forLane: lane) else { return }
+        expectTrayClosed(driveNames: [e.driveName])
         Task {
             if !(await DriveControl.closeTray(driveName: e.driveName)) { self.lastError = "Could not close the tray of \(DriveItem.shortModel(e.driveName))" }
             self.scheduleRescan(after: 5)
@@ -371,9 +375,27 @@ final class AppModel {
     }
 
     func closeAllTrays() {
+        expectTrayClosed(driveNames: scannedDrives.filter { $0.isPresent && $0.state != .inserted }.map(\.driveName))
         Task {
             if !(await DriveControl.closeTray(driveName: "")) { self.lastError = "Could not close the trays" }
             self.scheduleRescan(after: 5)
+        }
+    }
+
+    /// Checks, in the first scan at least 4 s after `date`, that these drives' trays closed. A drive without a tray motor
+    /// (most slim drives) accepts the command and leaves the tray open, and the OS can't tell; MakeMKV's scan can.
+    func expectTrayClosed(driveNames: [String], at date: Date = Date()) {
+        for n in driveNames { trayCloseRequests[n] = date }
+    }
+
+    static func trayStillOpen(_ driveName: String) -> String {
+        "The tray of \(DriveItem.shortModel(driveName)) is still open: this drive can't close it by itself (slim drives have no tray motor), so push it in by hand"
+    }
+
+    private func checkTrayCloseRequests(_ entries: [DriveScanEntry], now: Date = Date()) {
+        for (name, asked) in trayCloseRequests where now.timeIntervalSince(asked) >= 4 {
+            trayCloseRequests[name] = nil
+            if let e = entries.first(where: { $0.driveName == name }), e.state == .emptyOpen { lastError = Self.trayStillOpen(name) }
         }
     }
 

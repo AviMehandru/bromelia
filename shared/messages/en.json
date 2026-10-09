@@ -190,6 +190,7 @@
   "drive.ejectFailed": "Could not eject {device}",
   "drive.closeTrayFailed": "Could not close the tray of {drive}",
   "drive.closeTraysFailed": "Could not close the trays",
+  "drive.trayStillOpen": "The tray of {drive} is still open: this drive can't close it by itself (slim drives have no tray motor), so push it in by hand",
   "drive.notFound": "No such drive",
   "drive.noDisc": "There is no disc in the drive",
   "drive.busy": "The drive is busy",

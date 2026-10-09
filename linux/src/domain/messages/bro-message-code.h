@@ -198,6 +198,7 @@ typedef enum {
   BRO_MSG_DRIVE_EJECT_FAILED, /* drive.ejectFailed */
   BRO_MSG_DRIVE_CLOSE_TRAY_FAILED, /* drive.closeTrayFailed */
   BRO_MSG_DRIVE_CLOSE_TRAYS_FAILED, /* drive.closeTraysFailed */
+  BRO_MSG_DRIVE_TRAY_STILL_OPEN, /* drive.trayStillOpen */
   BRO_MSG_DRIVE_NOT_FOUND, /* drive.notFound */
   BRO_MSG_DRIVE_NO_DISC, /* drive.noDisc */
   BRO_MSG_DRIVE_BUSY, /* drive.busy */

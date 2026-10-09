@@ -195,6 +195,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "drive.ejectFailed",
   "drive.closeTrayFailed",
   "drive.closeTraysFailed",
+  "drive.trayStillOpen",
   "drive.notFound",
   "drive.noDisc",
   "drive.busy",
