@@ -5,9 +5,10 @@ import BroPorts
 import Foundation
 import Testing
 
-/// The platform adapters with a real optical drive holding a video DVD: only when BROMELIA_TEST_DRIVE is set (the owner
-/// attaches the drive and asks). The drive list, the content probe, raw reads, VIDEO_TS on the mounted disc, MakeMKV's
-/// drive list and listing, and last of all eject (and close tray, which a slim drive can't do) with the monitor watching.
+/// The platform adapters with a real optical drive holding a video DVD or Blu-ray: only when BROMELIA_TEST_DRIVE is set (the
+/// owner attaches the drive and asks). The drive list, the content probe, raw reads, VIDEO_TS (DVD) or index.bdmv (Blu-ray)
+/// on the mounted disc, MakeMKV's drive list and listing, and last of all eject (and close tray, which a slim drive can't
+/// do) with the monitor watching.
 /// BROMELIA_TEST_DRIVE_IMAGE also images the whole disc with DataImager and reads the image back.
 @Suite(.serialized) struct RealDriveTests {
     static let enabled = !(ProcessInfo.processInfo.environment["BROMELIA_TEST_DRIVE"] ?? "").isEmpty
@@ -66,13 +67,19 @@ import Testing
         print("volume descriptors: \(ids)")
         #expect(ids.contains("CD001") || ids.contains("BEA01"))
 
-        // VIDEO_TS: the same files through the mount and through the raw disc (as an image).
-        let mounted = try #require(VideoTsByteSource.open(path))
-        let analysis = try #require(DvdNav.analyse(mounted))
-        print("VIDEO_TS: \(mounted.files().count) files, \(analysis.titles.count) titles, \(analysis.stills.count) menu stills")
-        #expect(mounted.files().contains { $0.name == "VIDEO_TS.IFO" })
-        let ifo = mounted.read("VIDEO_TS.IFO", offset: 0, length: 2048)
-        #expect(String(decoding: ifo.prefix(12), as: UTF8.self) == "DVDVIDEO-VMG")
+        // A DVD's VIDEO_TS through the mount; a Blu-ray's BDMV/index.bdmv.
+        if FileManager.default.fileExists(atPath: path + "/VIDEO_TS") {
+            let mounted = try #require(VideoTsByteSource.open(path))
+            let analysis = try #require(DvdNav.analyse(mounted))
+            print("VIDEO_TS: \(mounted.files().count) files, \(analysis.titles.count) titles, \(analysis.stills.count) menu stills")
+            #expect(mounted.files().contains { $0.name == "VIDEO_TS.IFO" })
+            let ifo = mounted.read("VIDEO_TS.IFO", offset: 0, length: 2048)
+            #expect(String(decoding: ifo.prefix(12), as: UTF8.self) == "DVDVIDEO-VMG")
+        } else {
+            let index = try #require(FileManager.default.contents(atPath: path + "/BDMV/index.bdmv"))
+            print("BDMV: index.bdmv \(index.count) bytes")
+            #expect(String(decoding: index.prefix(4), as: UTF8.self) == "INDX")
+        }
 
         // MakeMKV sees the same drive and lists the disc.
         let fs = PlatformFileSystem()

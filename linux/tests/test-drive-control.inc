@@ -113,7 +113,8 @@ test_drive_control_empty_drives (void)
 
 /* A real optical drive holding a disc, only when BROMELIA_TEST_DRIVE names its content (video, data, audio; 1 means
  * video; connect the drive or an image to the VM first): the drive list, the content probe, raw reads, VIDEO_TS for a
- * video disc; with BROMELIA_TEST_DRIVE_EJECT also eject (and close tray) with the monitor watching. */
+ * DVD and index.bdmv for a Blu-ray; with BROMELIA_TEST_DRIVE_EJECT also eject (and close tray) with the monitor
+ * watching. */
 static void
 test_real_drive (void)
 {
@@ -127,6 +128,7 @@ test_real_drive (void)
   g_autoptr (BroVideoTsByteSource) source = NULL;
   g_autoptr (GPtrArray) events = g_ptr_array_new_with_free_func (g_free);
   g_autofree char *mount = NULL;
+  g_autofree char *video_ts = NULL;
   BroOsDriveState *state = NULL;
   BroNavAnalysis *analysis;
   const guint8 *d;
@@ -156,7 +158,7 @@ test_real_drive (void)
   d = g_bytes_get_data (descriptors, NULL);
   g_assert_true (memcmp (d + 1, "CD001", 5) == 0 || memcmp (d + 2048 + 1, "BEA01", 5) == 0 || memcmp (d + 4096 + 1, "BEA01", 5) == 0);
   bro_sector_reader_close (reader);
-  if (g_str_equal (expected, "video"))
+  if (g_str_equal (expected, "video") && g_file_test (video_ts = g_build_filename (mount, "VIDEO_TS", NULL), G_FILE_TEST_IS_DIR))
     {
       source = bro_video_ts_byte_source_open (mount);
       g_assert_nonnull (source);
@@ -164,6 +166,16 @@ test_real_drive (void)
       g_assert_nonnull (analysis);
       g_test_message ("VIDEO_TS: %u titles", analysis->titles->len);
       bro_nav_analysis_free (analysis);
+    }
+  else if (g_str_equal (expected, "video")) /* a Blu-ray */
+    {
+      g_autofree char *index_path = g_build_filename (mount, "BDMV", "index.bdmv", NULL);
+      g_autofree char *index = NULL;
+      gsize length = 0;
+      g_assert_true (g_file_get_contents (index_path, &index, &length, NULL));
+      g_assert_cmpuint (length, >=, 4);
+      g_assert_true (memcmp (index, "INDX", 4) == 0);
+      g_test_message ("BDMV: index.bdmv %" G_GSIZE_FORMAT " bytes", length);
     }
   if (g_getenv ("BROMELIA_TEST_DRIVE_EJECT"))
     {
