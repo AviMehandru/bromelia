@@ -15,7 +15,12 @@ namespace Bromelia.Adapters;
 /// accumulator says so (MakeMKV's space warning, a renumbered drive) or when cancelled, and classifies the run with
 /// the names that are new in the destination (RunOutcome.Products picks what counts). A destination that can't be
 /// listed before or after the run fails the call: every name in it would otherwise look new, or none. Holds no state
-/// between calls.</summary>
+/// between calls.
+///
+/// A backup's destination must not exist yet: makemkvcon refuses one that does, even an empty folder ("already
+/// contains a backup", exit 0), so the call fails with fs.alreadyExists before anything runs. A backup that comes out
+/// as one file at the destination is classified as RunProduct.Image, whatever it is called: MakeMKV writes DVD backups
+/// as ISO images even when a folder was asked for, and naming the image is the caller's job.</summary>
 public sealed class MakemkvTool
 {
     readonly IProcessLauncher _launcher;
@@ -57,11 +62,13 @@ public sealed class MakemkvTool
         Isolated(invocation, options => MakemkvArgs.Mkv(source, title, destination, options), new RunAccumulator(readsData: true), RunProduct.Titles,
             destination, sink, cancel, null);
 
-    /// <summary>disc:N only (backup.needsDrive otherwise). Stops at once when a DRV line shows the index now names
-    /// another device.</summary>
+    /// <summary>disc:N only (backup.needsDrive otherwise), to a destination that doesn't exist yet (fs.alreadyExists
+    /// otherwise). Stops at once when a DRV line shows the index now names another device.</summary>
     public Task<MakemkvRun> Backup(MakemkvSource source, bool decrypt, string destination, MakemkvInvocation invocation, IRunSink sink, CancellationToken cancel)
     {
         MakemkvArgs.Backup(source, decrypt, destination, invocation.Options); // backup.needsDrive before anything runs
+        if (_fs.Exists(destination))
+            throw new BroFailure(new BroMessage(MessageCode.FsAlreadyExists, Severity.Error, ("path", JsonValue.Of(destination))).ToError());
         var drive = (MakemkvSource.Drive)source;
         return Isolated(invocation, options => MakemkvArgs.Backup(source, decrypt, destination, options),
             new RunAccumulator(readsData: true, expectedIndex: drive.Index, expectedDevice: drive.Device), RunProduct.Backup, destination, sink, cancel, null);
@@ -100,7 +107,9 @@ public sealed class MakemkvTool
                 sink.Event(e);
                 return accumulator.StopReason is null ? null : StopReason.Policy;
             }, started => process = started).ConfigureAwait(false);
-            var outcome = RunOutcome.Classify(accumulator, exit, product, destination is null ? Array.Empty<string>() : NewNames(destination, before!));
+            var newNames = destination is null ? Array.Empty<string>() : NewNames(destination, before!);
+            if (product == RunProduct.Backup && destination is not null && IsFile(destination)) product = RunProduct.Image;
+            var outcome = RunOutcome.Classify(accumulator, exit, product, newNames);
             return new MakemkvRun(outcome, accumulator.Problem, accumulator.LibreDrive, accumulator.MakemkvVersion, process?.TranscriptProblem());
         }
         finally
@@ -120,8 +129,10 @@ public sealed class MakemkvTool
         catch (BroFailure f) when (f.Error.Code == MessageCode.Wire(MessageCode.FsNotFound)) { return new HashSet<string>(StringComparer.Ordinal); }
     }
 
+    bool IsFile(string destination) => _fs.Exists(destination) && !_fs.Stat(destination).IsDirectory;
+
     /// <summary>The names in the destination that weren't there before; the destination's own name when the run made it
-    /// a file (a backup to an .iso image).</summary>
+    /// a file (a backup as an image).</summary>
     IReadOnlyList<string> NewNames(string destination, HashSet<string> before)
     {
         if (!_fs.Exists(destination)) return Array.Empty<string>();

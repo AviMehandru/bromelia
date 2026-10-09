@@ -4385,11 +4385,12 @@
         {
           "name": "RunProduct",
           "kind": "enum",
-          "doc": "What a makemkvcon run should leave in its destination: nothing (a listing), titles (MKV files of a rip) or a backup (a disc structure or an ISO image).",
+          "doc": "What a makemkvcon run should leave in its destination: nothing (a listing), titles (MKV files of a rip), a backup (a disc structure or an ISO image in a folder), or an image: a backup that came out as one file at the destination itself, whatever it is called (MakeMKV writes DVD backups as ISO images even when a folder was asked for).",
           "cases": [
             "nothing",
             "titles",
-            "backup"
+            "backup",
+            "image"
           ],
           "swift": {
             "name": "RunProduct",
@@ -4397,7 +4398,8 @@
             "cases": [
               ".nothing",
               ".titles",
-              ".backup"
+              ".backup",
+              ".image"
             ]
           },
           "cs": {
@@ -4406,7 +4408,8 @@
             "cases": [
               "Nothing",
               "Titles",
-              "Backup"
+              "Backup",
+              "Image"
             ]
           },
           "c": {
@@ -4415,7 +4418,8 @@
             "cases": [
               "BRO_RUN_PRODUCT_NOTHING",
               "BRO_RUN_PRODUCT_TITLES",
-              "BRO_RUN_PRODUCT_BACKUP"
+              "BRO_RUN_PRODUCT_BACKUP",
+              "BRO_RUN_PRODUCT_IMAGE"
             ]
           }
         },

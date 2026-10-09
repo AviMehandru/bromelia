@@ -37,8 +37,8 @@ BroRunOutcome *bro_run_outcome_classify (const BroRunAccumulator *accumulator, c
 
 /* The new names (char *) a run of this kind produced, in the order given: MKV files for a rip (a name ending in .mkv,
  * in any case, that isn't hidden), the disc structure for a backup (a BDMV, VIDEO_TS or HVDVD_TS folder, or an .iso
- * image), nothing for a listing. Anything else (.DS_Store, Thumbs.db, a partial file) doesn't count. Free with
- * g_ptr_array_unref. */
+ * image), the file itself for an image (any name that isn't hidden), nothing for a listing. Anything else (.DS_Store,
+ * Thumbs.db, a partial file) doesn't count. Free with g_ptr_array_unref. */
 GPtrArray *bro_run_outcome_products (BroRunProduct product, GPtrArray *new_names);
 void bro_run_outcome_free (BroRunOutcome *outcome);
 

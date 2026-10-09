@@ -59,13 +59,16 @@ public struct RunOutcome: Sendable, Equatable {
 
     /// The new names a run of this kind produced, in the order given: MKV files for a rip (a name ending in .mkv, in any
     /// case, that isn't hidden), the disc structure for a backup (a BDMV, VIDEO_TS or HVDVD_TS folder, or an .iso
-    /// image), nothing for a listing. Anything else (.DS_Store, Thumbs.db, a partial file) doesn't count.
+    /// image), the file itself for an image (any name that isn't hidden), nothing for a listing. Anything else
+    /// (.DS_Store, Thumbs.db, a partial file) doesn't count.
     public static func products(_ product: RunProduct, newNames: [String]) -> [String] {
         switch product {
         case .titles:
             return newNames.filter { !$0.hasPrefix(".") && $0.lowercased().hasSuffix(".mkv") }
         case .backup:
             return newNames.filter { !$0.hasPrefix(".") && (["BDMV", "VIDEO_TS", "HVDVD_TS"].contains($0.uppercased()) || $0.lowercased().hasSuffix(".iso")) }
+        case .image:
+            return newNames.filter { !$0.hasPrefix(".") }
         case .nothing:
             return []
         }

@@ -52,6 +52,8 @@ bro_run_outcome_products (BroRunProduct product, GPtrArray *new_names)
       else if (product == BRO_RUN_PRODUCT_BACKUP)
         counts = g_ascii_strcasecmp (name, "BDMV") == 0 || g_ascii_strcasecmp (name, "VIDEO_TS") == 0 || g_ascii_strcasecmp (name, "HVDVD_TS") == 0
                  || has_suffix_ignoring_case (name, ".iso");
+      else if (product == BRO_RUN_PRODUCT_IMAGE)
+        counts = TRUE;
       if (counts)
         g_ptr_array_add (out, g_strdup (name));
     }

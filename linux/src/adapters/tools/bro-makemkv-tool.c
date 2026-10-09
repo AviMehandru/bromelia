@@ -125,7 +125,7 @@ names_before (BroMakemkvTool *self, const char *destination, BroBroError **error
 }
 
 /* The names (char *) in the destination that weren't there before; the destination's own name when the run made it a
- * file (a backup to an .iso image). NULL and @error set when it can't be listed. */
+ * file (a backup as an image). NULL and @error set when it can't be listed. */
 static GPtrArray *
 new_names (BroMakemkvTool *self, const char *destination, GHashTable *before, BroBroError **error)
 {
@@ -243,6 +243,12 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   produced = destination ? new_names (self, destination, before, error) : g_ptr_array_new_with_free_func (g_free);
   if (!produced)
     return NULL;
+  if (product == BRO_RUN_PRODUCT_BACKUP && destination && bro_file_system_exists (self->fs, destination))
+    {
+      g_autoptr (BroFileInfo) info = bro_file_system_stat (self->fs, destination, NULL);
+      if (info && !info->is_directory)
+        product = BRO_RUN_PRODUCT_IMAGE;
+    }
   run = bro_makemkv_run_new ();
   run->outcome = bro_run_outcome_classify (accumulator, &exit, product, produced);
   run->notice = accumulator->problem ? bro_makemkv_notice_copy (accumulator->problem) : NULL;
@@ -290,6 +296,13 @@ bro_makemkv_tool_backup (BroMakemkvTool *self, const BroMakemkvSource *source, g
   BroMakemkvRun *run;
   if (!check)
     return NULL; /* backup.needsDrive, before anything runs */
+  if (bro_file_system_exists (self->fs, destination))
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "path", bro_json_value_new_string (destination));
+      bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_FS_ALREADY_EXISTS), params);
+      return NULL;
+    }
   accumulator = bro_run_accumulator_new (TRUE, source->index, source->device);
   run = isolated (self, CALL_BACKUP, BRO_RUN_PRODUCT_BACKUP, source, NULL, decrypt, destination, invocation, accumulator, NULL, sink, cancel, error);
   bro_run_accumulator_free (accumulator);

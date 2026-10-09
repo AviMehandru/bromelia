@@ -7,6 +7,7 @@ static const char *const names[] = {
   "nothing",
   "titles",
   "backup",
+  "image",
 };
 
 const char *
