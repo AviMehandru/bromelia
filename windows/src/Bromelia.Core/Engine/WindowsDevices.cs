@@ -9,9 +9,9 @@ public class WindowsDeviceServices : IPlatformServices
 {
     public virtual void Notify(string title, string body, bool sound) { }
 
-    public Task<bool> EjectAsync(string devicePath) => Task.Run(() => DeviceControl(devicePath, NativeMethods.IOCTL_STORAGE_EJECT_MEDIA));
+    public Task<bool> EjectAsync(string devicePath) => Task.Run(() => Tray(devicePath, load: false));
 
-    public Task<bool> CloseTrayAsync(string devicePath) => Task.Run(() => DeviceControl(devicePath, NativeMethods.IOCTL_STORAGE_LOAD_MEDIA));
+    public Task<bool> CloseTrayAsync(string devicePath) => Task.Run(() => Tray(devicePath, load: true));
 
     /// <summary>Keeps the system (not the display) awake while jobs run. Called on the UI thread, which lives as long as the app.</summary>
     public void KeepAwake(bool on)
@@ -75,13 +75,50 @@ public class WindowsDeviceServices : IPlatformServices
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    static bool DeviceControl(string device, uint code)
+    /// <summary>Opens (eject) or closes (load) the tray: IOCTL_STORAGE_EJECT_MEDIA / IOCTL_STORAGE_LOAD_MEDIA, and when
+    /// Windows refuses them, the same request sent to the drive as SCSI commands. Windows' CD-ROM driver answers
+    /// "Incorrect function" to an eject for some drives that eject fine (an LG BP50NB40 slim USB drive, which can't load).
+    /// Before that, an eject locks and dismounts the volume if nothing holds it.</summary>
+    static bool Tray(string device, bool load)
     {
         var path = Win32DevicePath(device);
         if (path == null || !OperatingSystem.IsWindows()) return false;
-        using var handle = NativeMethods.CreateFile(path, NativeMethods.GENERIC_READ, NativeMethods.FILE_SHARE_READ | NativeMethods.FILE_SHARE_WRITE,
-            IntPtr.Zero, NativeMethods.OPEN_EXISTING, 0, IntPtr.Zero);
-        return !handle.IsInvalid && NativeMethods.DeviceIoControl(handle, code, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+        using var handle = Open(path, NativeMethods.GENERIC_READ | NativeMethods.GENERIC_WRITE) ?? Open(path, NativeMethods.GENERIC_READ);
+        if (handle == null) return false;
+        if (Control(handle, load ? NativeMethods.IOCTL_STORAGE_LOAD_MEDIA : NativeMethods.IOCTL_STORAGE_EJECT_MEDIA)) return true;
+        if (!load && Control(handle, NativeMethods.FSCTL_LOCK_VOLUME)) Control(handle, NativeMethods.FSCTL_DISMOUNT_VOLUME);
+        // PREVENT ALLOW MEDIUM REMOVAL (allow), then START STOP UNIT: immediate, LoEj, and Start to load.
+        return Scsi(handle, new byte[] { 0x1E, 0, 0, 0, 0, 0 }) && Scsi(handle, new byte[] { 0x1B, 0x01, 0, 0, (byte)(load ? 0x03 : 0x02), 0 });
+    }
+
+    static SafeFileHandle? Open(string path, uint access)
+    {
+        var handle = NativeMethods.CreateFile(path, access, NativeMethods.FILE_SHARE_READ | NativeMethods.FILE_SHARE_WRITE, IntPtr.Zero,
+            NativeMethods.OPEN_EXISTING, 0, IntPtr.Zero);
+        if (!handle.IsInvalid) return handle;
+        handle.Dispose();
+        return null;
+    }
+
+    static bool Control(SafeFileHandle handle, uint code) => NativeMethods.DeviceIoControl(handle, code, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+
+    /// <summary>A SCSI command without data through IOCTL_SCSI_PASS_THROUGH (the handle needs read and write access);
+    /// true when the drive answered GOOD.</summary>
+    static bool Scsi(SafeFileHandle handle, byte[] cdb)
+    {
+        // SCSI_PASS_THROUGH: ULONG_PTR DataBufferOffset sits after two ULONGs, so the layout follows the pointer size.
+        int dataOffsetField = IntPtr.Size == 8 ? 24 : 20, senseOffsetField = dataOffsetField + IntPtr.Size, cdbField = senseOffsetField + 4;
+        int size = (cdbField + 16 + IntPtr.Size - 1) / IntPtr.Size * IntPtr.Size, senseLength = 32;
+        var buffer = new byte[size + senseLength];
+        BitConverter.GetBytes((ushort)size).CopyTo(buffer, 0);
+        buffer[6] = (byte)cdb.Length;
+        buffer[7] = (byte)senseLength;
+        buffer[8] = NativeMethods.SCSI_IOCTL_DATA_UNSPECIFIED;
+        BitConverter.GetBytes(30).CopyTo(buffer, 16); // TimeOutValue, seconds
+        BitConverter.GetBytes(size).CopyTo(buffer, senseOffsetField);
+        cdb.CopyTo(buffer, cdbField);
+        return NativeMethods.DeviceIoControl(handle, NativeMethods.IOCTL_SCSI_PASS_THROUGH, buffer, (uint)buffer.Length, buffer, (uint)buffer.Length, out _,
+                   IntPtr.Zero) && buffer[2] == 0;
     }
 
     /// <summary>What the optical drives hold, cheaply (no makemkvcon): it changes when a disc goes in or out.</summary>
@@ -103,12 +140,17 @@ public class WindowsDeviceServices : IPlatformServices
     static class NativeMethods
     {
         public const uint GENERIC_READ = 0x80000000;
+        public const uint GENERIC_WRITE = 0x40000000;
         public const uint FILE_SHARE_READ = 0x1;
         public const uint FILE_SHARE_WRITE = 0x2;
         public const uint OPEN_EXISTING = 3;
         public const uint IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808;
         public const uint IOCTL_STORAGE_LOAD_MEDIA = 0x2D480C;
         public const uint IOCTL_CDROM_READ_TOC = 0x24000;
+        public const uint IOCTL_SCSI_PASS_THROUGH = 0x4D004;
+        public const uint FSCTL_LOCK_VOLUME = 0x90018;
+        public const uint FSCTL_DISMOUNT_VOLUME = 0x90020;
+        public const byte SCSI_IOCTL_DATA_UNSPECIFIED = 2;
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
@@ -116,6 +158,11 @@ public class WindowsDeviceServices : IPlatformServices
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool DeviceIoControl(SafeFileHandle device, uint code, IntPtr inBuffer, uint inSize, IntPtr outBuffer, uint outSize,
+            out uint returned, IntPtr overlapped);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool DeviceIoControl(SafeFileHandle device, uint code, byte[] inBuffer, uint inSize, byte[] outBuffer, uint outSize,
             out uint returned, IntPtr overlapped);
 
         [DllImport("kernel32.dll")]

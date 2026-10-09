@@ -44,13 +44,16 @@ fs_failed (BroBroError **error, const char *operation, const char *path, int cod
   bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_FS_FAILED), params);
 }
 
-/* The eject tool's exit status; -1 when it can't start. */
+/* The eject tool's exit status; -1 when it can't start. @reason (optional) gets why it failed: its last error line, or
+ * its exit status. */
 static int
-run_eject (BroPlatformDriveControl *self, const char *const *arguments)
+run_eject (BroPlatformDriveControl *self, const char *const *arguments, char **reason)
 {
   g_autoptr (BroProcessSpec) spec = bro_process_spec_new ();
   g_autoptr (BroRunningProcess) process = NULL;
+  g_autofree char *last_error = NULL;
   BroOutputLine *line;
+  int status;
   spec->executable = g_strdup ("eject");
   g_strfreev (spec->arguments);
   spec->arguments = g_strdupv ((char **) arguments);
@@ -59,21 +62,39 @@ run_eject (BroPlatformDriveControl *self, const char *const *arguments)
   spec->stall_timeout.seconds = 60;
   process = bro_process_launcher_start (self->launcher, spec, NULL);
   if (!process)
-    return -1;
+    {
+      if (reason)
+        *reason = g_strdup ("eject could not be started");
+      return -1;
+    }
   while ((line = bro_running_process_lines (process)) != NULL)
-    bro_output_line_free (line);
-  return bro_running_process_wait (process).status;
+    {
+      if (line->stream == BRO_OUTPUT_SOURCE_STDERR && line->text && *line->text)
+        {
+          g_free (last_error);
+          last_error = g_strdup (line->text);
+        }
+      bro_output_line_free (line);
+    }
+  status = bro_running_process_wait (process).status;
+  if (status != 0 && reason)
+    *reason = last_error ? g_steal_pointer (&last_error) : g_strdup_printf ("eject exited with status %d", status);
+  return status;
 }
 
 gboolean
 bro_platform_drive_control_eject (BroPlatformDriveControl *self, const char *device, BroBroError **error)
 {
   const char *args[] = { device, NULL };
+  g_autofree char *reason = NULL;
   BroJsonValue *params;
-  if (is_drive (device) && run_eject (self, args) == 0)
+  if (!is_drive (device))
+    reason = g_strdup ("not a drive");
+  else if (run_eject (self, args, &reason) == 0)
     return TRUE;
   params = bro_json_value_new_object ();
   bro_json_value_set (params, "device", bro_json_value_new_string (device));
+  bro_json_value_set (params, "reason", bro_json_value_new_string (reason));
   bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_DRIVE_EJECT_FAILED), params);
   return FALSE;
 }
@@ -83,7 +104,7 @@ bro_platform_drive_control_close_tray (BroPlatformDriveControl *self, const char
 {
   const char *args[] = { "-t", device, NULL };
   BroJsonValue *params;
-  if (is_drive (device) && run_eject (self, args) == 0)
+  if (is_drive (device) && run_eject (self, args, NULL) == 0)
     return TRUE;
   params = bro_json_value_new_object ();
   bro_json_value_set (params, "drive", bro_json_value_new_string (device));

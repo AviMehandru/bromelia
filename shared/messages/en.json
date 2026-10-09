@@ -188,7 +188,7 @@
   "drive.renumbered": "MakeMKV drive {index} is now {now}, expected {expected}. The job was stopped to avoid reading the wrong disc; rescan drives and retry.",
   "drive.ejecting": "Ejecting",
   "drive.ejected": "Disc ejected",
-  "drive.ejectFailed": "Could not eject {device}",
+  "drive.ejectFailed": "Could not eject {device}: {reason}",
   "drive.closeTrayFailed": "Could not close the tray of {drive}",
   "drive.closeTraysFailed": "Could not close the trays",
   "drive.trayStillOpen": "The tray of {drive} is still open: this drive can't close it by itself (slim drives have no tray motor), so push it in by hand",

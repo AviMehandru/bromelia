@@ -32,13 +32,14 @@ public sealed class PlatformDriveControl : IDriveControl
 
     public Task Eject(string device) => Task.Run(() =>
     {
-        if (!Control(device, IOCTL_STORAGE_EJECT_MEDIA))
-            throw new BroFailure(new BroMessage(MessageCode.DriveEjectFailed, Severity.Error, ("device", JsonValue.Of(device))).ToError());
+        if (Tray(device, load: false) is { } reason)
+            throw new BroFailure(new BroMessage(MessageCode.DriveEjectFailed, Severity.Error, ("device", JsonValue.Of(device)),
+                ("reason", JsonValue.Of(reason))).ToError());
     });
 
     public Task CloseTray(string device) => Task.Run(() =>
     {
-        if (!Control(device, IOCTL_STORAGE_LOAD_MEDIA))
+        if (Tray(device, load: true) is not null)
             throw new BroFailure(new BroMessage(MessageCode.DriveCloseTrayFailed, Severity.Error, ("drive", JsonValue.Of(device))).ToError());
     });
 
@@ -127,19 +128,54 @@ public sealed class PlatformDriveControl : IDriveControl
         catch (Exception) { return false; }
     }
 
-    static SafeFileHandle? Open(string device)
+    static SafeFileHandle? Open(string device, uint access = GENERIC_READ)
     {
         if (Root(device) is null) return null;
-        var handle = CreateFileW(DevicePath(device, true), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+        var handle = CreateFileW(DevicePath(device, true), access, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
         if (!handle.IsInvalid) return handle;
         handle.Dispose();
         return null;
     }
 
-    static bool Control(string device, uint code)
+    /// <summary>Opens (eject) or closes (load) the tray: IOCTL_STORAGE_EJECT_MEDIA / IOCTL_STORAGE_LOAD_MEDIA, and when
+    /// Windows refuses them, the same request sent to the drive as SCSI commands. Windows' CD-ROM driver answers
+    /// "Incorrect function" to an eject for some drives that eject fine (an LG BP50NB40 slim USB drive, which can't load),
+    /// while macOS and Linux eject them. Before that, an eject locks and dismounts the volume if nothing holds it.
+    /// None when it's done, otherwise why not.</summary>
+    static string? Tray(string device, bool load)
     {
-        using var handle = Open(device);
-        return handle is not null && DeviceIoControl(handle, code, null, 0, null, 0, out _, IntPtr.Zero);
+        if (Root(device) is null) return "not a drive letter";
+        using var handle = Open(device, GENERIC_READ | GENERIC_WRITE) ?? Open(device, GENERIC_READ);
+        if (handle is null) return "can't open the drive: " + LastError();
+        if (DeviceIoControl(handle, load ? IOCTL_STORAGE_LOAD_MEDIA : IOCTL_STORAGE_EJECT_MEDIA, null, 0, null, 0, out _, IntPtr.Zero)) return null;
+        var windows = LastError();
+        if (!load && DeviceIoControl(handle, FSCTL_LOCK_VOLUME, null, 0, null, 0, out _, IntPtr.Zero))
+            DeviceIoControl(handle, FSCTL_DISMOUNT_VOLUME, null, 0, null, 0, out _, IntPtr.Zero);
+        // PREVENT ALLOW MEDIUM REMOVAL (allow), then START STOP UNIT: immediate, LoEj, and Start to load.
+        var scsi = Scsi(handle, new byte[] { 0x1E, 0, 0, 0, 0, 0 }) ?? Scsi(handle, new byte[] { 0x1B, 0x01, 0, 0, (byte)(load ? 0x03 : 0x02), 0 });
+        return scsi is null ? null : $"Windows: {windows}; the drive: {scsi}";
+    }
+
+    static string LastError() => new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()).Message;
+
+    /// <summary>A SCSI command without data through IOCTL_SCSI_PASS_THROUGH (the handle needs read and write access);
+    /// none when the drive answered GOOD, otherwise why not (Windows' error, or the drive's status and sense).</summary>
+    static string? Scsi(SafeFileHandle handle, byte[] cdb)
+    {
+        // SCSI_PASS_THROUGH: ULONG_PTR DataBufferOffset sits after two ULONGs, so the layout follows the pointer size.
+        int dataOffsetField = IntPtr.Size == 8 ? 24 : 20, senseOffsetField = dataOffsetField + IntPtr.Size, cdbField = senseOffsetField + 4;
+        int size = (cdbField + 16 + IntPtr.Size - 1) / IntPtr.Size * IntPtr.Size, senseLength = 32;
+        var buffer = new byte[size + senseLength];
+        BitConverter.GetBytes((ushort)size).CopyTo(buffer, 0);
+        buffer[6] = (byte)cdb.Length;
+        buffer[7] = (byte)senseLength;
+        buffer[8] = SCSI_IOCTL_DATA_UNSPECIFIED;
+        BitConverter.GetBytes(30).CopyTo(buffer, 16); // TimeOutValue, seconds
+        BitConverter.GetBytes(size).CopyTo(buffer, senseOffsetField);
+        cdb.CopyTo(buffer, cdbField);
+        if (!DeviceIoControl(handle, IOCTL_SCSI_PASS_THROUGH, buffer, buffer.Length, buffer, buffer.Length, out _, IntPtr.Zero)) return LastError();
+        return buffer[2] == 0 ? null
+            : $"SCSI status 0x{buffer[2]:X2}, sense key 0x{buffer[size + 2] & 0x0F:X}, ASC 0x{buffer[size + 12]:X2}, ASCQ 0x{buffer[size + 13]:X2}";
     }
 
     static long DiskLength(SafeFileHandle handle)
@@ -187,9 +223,10 @@ public sealed class PlatformDriveControl : IDriveControl
         public void Close() => _stream.Dispose();
     }
 
-    const uint GENERIC_READ = 0x80000000, FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
+    const uint GENERIC_READ = 0x80000000, GENERIC_WRITE = 0x40000000, FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
     const uint IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808, IOCTL_STORAGE_LOAD_MEDIA = 0x2D480C, IOCTL_CDROM_READ_TOC = 0x24000,
-        IOCTL_DISK_GET_LENGTH_INFO = 0x7405C;
+        IOCTL_DISK_GET_LENGTH_INFO = 0x7405C, IOCTL_SCSI_PASS_THROUGH = 0x4D004, FSCTL_LOCK_VOLUME = 0x90018, FSCTL_DISMOUNT_VOLUME = 0x90020;
+    const byte SCSI_IOCTL_DATA_UNSPECIFIED = 2;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
