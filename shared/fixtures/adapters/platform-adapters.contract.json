@@ -231,6 +231,30 @@
       }
     },
     {
+      "id": "engine-dies",
+      "from": [
+        "real-drive test, 2026-10-08: kill -9 of Bromelia --headless mid-rip left makemkvcon (it ignores SIGPIPE) reading the disc into the folder recovery had marked INCOMPLETE",
+        "docs/architecture.md#unfinished-jobs"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "sleep 60 & echo $! > child.pid; echo $$ > tool.pid; exec sleep 60"
+        ],
+        "then": "the engine process is killed (SIGKILL; TerminateProcess) while the tool runs, with no chance to stop it"
+      },
+      "expect": {
+        "toolEnds": true,
+        "groupEnds": true,
+        "within": 10,
+        "afterNormalExit": "A tool that exited normally takes its watcher with it: what it left running is left alone, even when the engine is killed later (as process-group).",
+        "macos": "A watcher per process: /bin/sh in its own process group, its stdin the read end of a pipe whose write end only the engine holds (close-on-exec). When the engine ends, however it ends, the read returns and the watcher sends TERM to the tool's group, then KILL 5 s later. The watcher is killed and reaped when the tool ends, before the tool is reaped (so it never signals a reused group).",
+        "linux": "As macOS (PR_SET_PDEATHSIG isn't used: it fires when the thread that started the child ends).",
+        "windows": "The Job Object has KILL_ON_JOB_CLOSE until the process has ended: the engine's handle closes with it and the job's processes end."
+      }
+    },
+    {
       "id": "transcript",
       "from": [
         "docs/architecture.md#per-drive-makemkv-settings (every line, headed by the command line, followed by the exit status)"

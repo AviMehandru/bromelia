@@ -6,6 +6,11 @@
 //                             moveMerging of <folder>\from into <folder>\to (eight files), killed around its third
 //                             report, just before or just after it; reports go to <folder>\report.txt
 //   registry <folder> <name>  a registry swap of HKCU\Software\MakeMKV\<name> ("user" → "run"), killed while held
+//   tool-then-die <folder>    starts "tool <folder> run" with PlatformProcessLauncher, killed while it runs
+//   tool-exits-then-die <folder>
+//                             starts "tool <folder> exit" and waits for it to end, then is killed
+//   tool <folder> run|exit    starts "sleep" (pids in <folder>\tool.pid and child.pid), then sleeps or exits
+//   sleep                     sleeps for a minute
 // "Killed" is TerminateProcess on itself: no finally, no Dispose, like a crash or a power cut.
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -76,6 +81,32 @@ switch (args[0])
         });
         return 1;
     }
+    case "tool-then-die":
+    case "tool-exits-then-die":
+    {
+        var runs = args[0] == "tool-then-die";
+        var spec = new ProcessSpec(Environment.ProcessPath!, new[] { typeof(NoSink).Assembly.Location, "tool", args[1], runs ? "run" : "exit" },
+            new Dictionary<string, string>(), args[1], StopPolicy.TerminateFirst);
+        var tool = new PlatformProcessLauncher().Start(spec);
+        if (runs)
+            for (var i = 0; i < 200 && !File.Exists(Path.Combine(args[1], "child.pid")); i++) Thread.Sleep(50);
+        else
+            tool.Wait().GetAwaiter().GetResult();
+        Die();
+        return 1;
+    }
+    case "tool":
+    {
+        var sleeper = Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false, CreateNoWindow = true,
+            ArgumentList = { typeof(NoSink).Assembly.Location, "sleep" } })!;
+        File.WriteAllText(Path.Combine(args[1], "tool.pid"), Environment.ProcessId.ToString());
+        File.WriteAllText(Path.Combine(args[1], "child.pid"), sleeper.Id.ToString());
+        if (args[2] == "run") Thread.Sleep(TimeSpan.FromSeconds(60));
+        return 0;
+    }
+    case "sleep":
+        Thread.Sleep(TimeSpan.FromSeconds(60));
+        return 0;
     case "registry":
     {
         var registry = new CurrentUserMakemkvRegistry();

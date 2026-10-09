@@ -3,6 +3,9 @@
 //   image <folder>                    a DataImager copy into <folder>, killed after two of four chunks
 //   move-before|move-after <folder>   moveMerging of <folder>/from into <folder>/to, killed around its third report,
 //                                     just before or just after it; reports go to <folder>/report.txt
+//   tool-then-die <folder>            starts a tool with PlatformProcessLauncher (a shell with a background child,
+//                                     their pids in <folder>/tool.pid and child.pid), killed while it runs
+//   tool-exits-then-die <folder>      the same tool without its wait: it exits (its child stays), then the probe is killed
 import BroAdapters
 import BroDomain
 import BroFoundation
@@ -33,6 +36,18 @@ struct Probe {
                 try? h.close()
                 if seen == 3 { die() }
             }
+        case "tool-then-die", "tool-exits-then-die":
+            let runs = args[1] == "tool-then-die"
+            let script = "sleep 60 & echo $! > child.pid; echo $$ > tool.pid" + (runs ? "; exec sleep 60" : "")
+            let spec = ProcessSpec(executable: "/bin/sh", arguments: ["-c", script], environment: [:], workingDirectory: folder,
+                                   stopPolicy: .terminateFirst)
+            guard let tool = try? PlatformProcessLauncher().start(spec) else { exit(1) }
+            if runs {
+                for _ in 0..<100 where !FileManager.default.fileExists(atPath: folder + "/child.pid") { usleep(50_000) }
+            } else {
+                _ = await tool.wait()
+            }
+            die()
         default:
             exit(2)
         }

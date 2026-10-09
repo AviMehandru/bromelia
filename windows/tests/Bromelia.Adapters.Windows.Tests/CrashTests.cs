@@ -70,4 +70,44 @@ public sealed class CrashTests : IDisposable
         }
         finally { registry.Remove(name); }
     }
+
+    static bool Alive(int pid)
+    {
+        try { using var p = System.Diagnostics.Process.GetProcessById(pid); return !p.HasExited; }
+        catch (ArgumentException) { return false; }
+    }
+
+    int Pid(string name) => int.Parse(File.ReadAllText(Path.Combine(_dir, name)).Trim());
+
+    /// <summary>The engine killed while a tool runs: the tool and what it started end too (KILL_ON_JOB_CLOSE; on macOS and
+    /// Linux the launcher's lifeline), so a crash never leaves makemkvcon reading the disc into a folder marked
+    /// INCOMPLETE.</summary>
+    [Fact]
+    public void AToolDoesNotOutliveAKilledEngine()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_dir);
+        Assert.NotEqual(0, TestProbe.Run("tool-then-die", _dir));
+        int tool = Pid("tool.pid"), child = Pid("child.pid");
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while ((Alive(tool) || Alive(child)) && DateTime.UtcNow < deadline) Thread.Sleep(100);
+        var left = (Alive(tool), Alive(child));
+        foreach (var pid in new[] { tool, child })
+            try { using var p = System.Diagnostics.Process.GetProcessById(pid); p.Kill(); } catch (ArgumentException) { }
+        Assert.Equal((false, false), left);
+    }
+
+    /// <summary>A tool that exited normally: what it left running is left alone, even after the engine is killed.</summary>
+    [Fact]
+    public void WhatAFinishedToolLeftRunningIsLeftAlone()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_dir);
+        Assert.NotEqual(0, TestProbe.Run("tool-exits-then-die", _dir));
+        var child = Pid("child.pid");
+        Thread.Sleep(1000);
+        var alive = Alive(child);
+        try { using var p = System.Diagnostics.Process.GetProcessById(child); p.Kill(); } catch (ArgumentException) { }
+        Assert.True(alive);
+    }
 }
