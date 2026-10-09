@@ -57,7 +57,7 @@ Bromelia is not affiliated with MakeMKV. You need MakeMKV installed (and registe
 - **Rip modes per drive**: MKV; encrypted backup; decrypted backup; backup then MKV from the backup (one
   fast sequential read, safest for damaged discs); or scan only. Backups can be folders or ISO images
   (MakeMKV writes an ISO when the destination ends in `.iso`; if it writes a folder instead, the checked
-  folder is kept). The *Archive everything* preset sets up backup then MKV with every track and all checks.
+  folder is kept; DVDs always come out as ISO images, which get the `.iso` extension). The *Archive everything* preset sets up backup then MKV with every track and all checks.
 - **Title rules** for unattended rips: all titles, the longest *N* (main feature), or an index pattern
   such as `0,2-4,7-` or `last`, matching MakeMKV title numbers or source playlist/VTS numbers. Filters
   cover duration, chapter count and size ranges, include/exclude regular expressions (title name, source

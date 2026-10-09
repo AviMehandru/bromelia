@@ -444,6 +444,34 @@ public class DriveDetectionTests
         new(i, s, s == DriveState.Inserted ? DiscFlags.BlurayFiles : DiscFlags.None, name, disc, dev);
 
     [Fact]
+    public void ReinsertedDiscStartsARipWhenTheEmptyDriveHadNoDevicePath()
+    {
+        // As MakeMKV lists a drive on macOS: no device path while it is empty, then often the same device again.
+        var dir = Path.Combine(Path.GetTempPath(), "bromelia-dd-" + Guid.NewGuid().ToString("N")[..6]);
+        Paths.DataOverride = dir;
+        try
+        {
+            var state = new AppState(new NullPlatformServices(), Path.Combine(dir, "config.json"), new SettingsCatalog());
+            state.Config.DefaultDrive.Automation.AutoRipOnInsert = true;
+            state.Config.DefaultDrive.Automation.AutoRipDelaySeconds = 60;
+            const string name = "BD-RE TEST DRIVE 1.00 SERIAL1";
+            state.ApplyScan(new[] { E(0, DriveState.Inserted, name, "/dev/rdisk12", "FIRST") });
+            state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "") });
+            state.ApplyScan(new[] { E(0, DriveState.Loading, name, "") });
+            Assert.Empty(state.Jobs);
+            state.ApplyScan(new[] { E(0, DriveState.Inserted, name, "/dev/rdisk12", "SECOND") });
+            var job = Assert.Single(state.Jobs);
+            Assert.Equal("SECOND", job.DiscLabel);
+            state.Cancel(job);
+        }
+        finally
+        {
+            Paths.DataOverride = null;
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void AutoRipQueuesOnInsertOnly()
     {
         var dir = Path.Combine(Path.GetTempPath(), "bromelia-dd-" + Guid.NewGuid().ToString("N")[..6]);

@@ -53,6 +53,11 @@ sealed class FakeMakeMkv
     public string Executable => Path.Combine(Dir, "makemkvcon");
     public string Calls => File.Exists(Path.Combine(Dir, "calls.txt")) ? File.ReadAllText(Path.Combine(Dir, "calls.txt")) : "";
 
+    /// <summary>What makemkvcon 2.0 prints (exiting with 0) when the backup's folder exists, even empty.</summary>
+    public const string RefusesExisting =
+        "echo \"MSG:5068,516,1,\\\"Folder $dest already contains a backup, please choose another folder\\\",\\\"Folder %1 already contains a backup, please choose another folder\\\",\\\"$dest\\\"\"; " +
+        "echo 'MSG:5069,128,0,\"Backup failed\",\"Backup failed\"'; echo 'MSG:5080,516,0,\"Backup failed.\",\"Backup failed.\"'";
+
     public FakeMakeMkv(string listing, string mkv, string backup = "")
     {
         Directory.CreateDirectory(Dir);
@@ -66,7 +71,8 @@ sealed class FakeMakeMkv
             "case \"$cmd\" in\n" +
             $"  info) cat '{listingPath}' ;;\n" +
             "  mkv) title=\"$2\"; dest=\"$3\"\n" + mkv + "\n  ;;\n" +
-            "  backup) for a in \"$@\"; do dest=\"$a\"; done\n" + backup + "\n  ;;\nesac\nexit 0\n");
+            "  backup) for a in \"$@\"; do dest=\"$a\"; done\n" +
+            "    if [ -e \"$dest\" ]; then " + RefusesExisting + "; exit 0; fi\n" + backup + "\n  ;;\nesac\nexit 0\n");
         // Tests that never start makemkvcon (data discs) also run on Windows, which has no Unix file modes.
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(Executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -512,7 +518,7 @@ public class ReliabilityTests
         Assert.Equal(0, r.ExitCode);
     }
 
-    RipJob Run(FakeMakeMkv fake, RipMode mode, DiscSource source, List<int>? titles = null)
+    RipJob Run(FakeMakeMkv fake, RipMode mode, DiscSource source, List<int>? titles = null, Action<DriveConfig>? setup = null)
     {
         Directory.CreateDirectory(_root);
         Paths.DataOverride = Path.Combine(Path.GetTempPath(), "bromelia-test-data");
@@ -521,6 +527,7 @@ public class ReliabilityTests
         drive.Automation.Notify = false;
         drive.Automation.EjectWhenDone = false;
         drive.Rip.BackupFormat = BackupFormat.Iso;
+        setup?.Invoke(drive);
         var job = new RipJob(source, drive, "lane", "test", "", mode) { ManualTitles = titles };
         SingleThreadContext.Run(async () =>
             await new JobRunner(job, config, fake.Executable, null, new UiDispatcher(), new NullPlatformServices(), new[] { "dvd_MinimumTitleLength" }).RunAsync());
@@ -558,6 +565,41 @@ public class ReliabilityTests
         var job = Run(fake, RipMode.BackupDecrypted, new DiscSource.Drive(0, ""));
         Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
         Assert.EndsWith(".iso", job.ProducedFiles[0]);
+    }
+
+    [Fact]
+    public void FolderBackupsLeaveTheFolderToMakeMkv()
+    {
+        // makemkvcon refuses a folder that exists, even an empty one; the stand-in does the same.
+        if (OperatingSystem.IsWindows()) return;
+        foreach (var template in new string?[] { null, "" })
+        {
+            var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1)), FakeMakeMkv.WritesFile(Listing.Saved),
+                "mkdir -p \"$dest/BDMV\" && printf x > \"$dest/BDMV/index.bdmv\"\n" + SavedLine);
+            var job = Run(fake, RipMode.BackupThenMkv, new DiscSource.Drive(0, ""), setup: d =>
+            {
+                d.Rip.BackupFormat = BackupFormat.Folder;
+                if (template != null) d.Output.FileNameTemplate = template;
+            });
+            Assert.True(job.State == JobState.Succeeded, $"{template ?? "default"}: {job.ErrorMessage}");
+            var folder = Assert.Single(job.ProducedFiles, Directory.Exists);
+            Assert.True(File.Exists(Path.Combine(folder, "BDMV", "index.bdmv")));
+            Assert.Contains("mkv file:", fake.Calls);
+        }
+    }
+
+    [Fact]
+    public void DvdImageWrittenForAFolderBackupGetsItsExtension()
+    {
+        // MakeMKV writes DVD backups as ISO images, even when asked for a folder.
+        if (OperatingSystem.IsWindows()) return;
+        var fake = new FakeMakeMkv(Listing.Make(("0:00:10", 1)), FakeMakeMkv.WritesFile(Listing.Saved),
+            "head -c 40000 /dev/zero > \"$dest\"\nprintf 'BEA01' | dd of=\"$dest\" bs=1 seek=32769 conv=notrunc 2>/dev/null\n" + SavedLine);
+        var job = Run(fake, RipMode.BackupThenMkv, new DiscSource.Drive(0, ""), setup: d => d.Rip.BackupFormat = BackupFormat.Folder);
+        Assert.True(job.State == JobState.Succeeded, job.ErrorMessage);
+        var image = Assert.Single(job.ProducedFiles, f => f.EndsWith(".iso"));
+        Assert.True(File.Exists(image));
+        Assert.Contains("mkv iso:", fake.Calls);
     }
 
     [Fact]

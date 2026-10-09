@@ -26,6 +26,9 @@ Everything goes through `makemkvcon -r` (robot mode) with `--progress=-same`:
 - **Drive scan:** `makemkvcon -r --cache=1 info disc:9999` lists drives (`DRV:` lines) without opening
   a disc. It runs at startup, every *N* seconds when idle, and a few seconds after the OS reports a
   media change (DiskArbitration on macOS, drive polling on Windows, GIO's volume monitor on Linux).
+  Each drive is a *lane* (`dev:<device>`, or `disc:<N>` without a device path, as on macOS when the drive is
+  empty). A disc counts as inserted when its lane wasn't *inserted* in the previous scan; a lane missing from a
+  scan is forgotten, so a disc that comes back under the same device starts an automatic rip again.
 - **Open disc:** `info dev:<device>` (or `iso:` / `file:`) produces `CINFO` / `TINFO` / `SINFO`
   attribute lines, which become a disc → titles → tracks model.
 - **Rip:** `mkv <source> <title|all> <folder>` per selected title (a single `all` when every title is
@@ -39,8 +42,10 @@ Everything goes through `makemkvcon -r` (robot mode) with `--progress=-same`:
 - **Listing:** every job runs `info` again, even when the disc was opened before. Choices made on the
   opened listing are moved to the new title numbers (matched by source title, length and segment map),
   and the job stops if the disc changed or a chosen title is gone.
-- **Backup:** `backup [--decrypt] disc:<N> <folder or .iso>`. MakeMKV only accepts `disc:N` for backups,
-  so Bromelia checks the `DRV:` lines the job prints to make sure drive *N* is still the expected device.
+- **Backup:** `backup [--decrypt] disc:<N> <folder or .iso>`. MakeMKV refuses a folder that exists, even an
+  empty one (“already contains a backup”), so Bromelia picks a name that is free and leaves creating it to
+  MakeMKV. MakeMKV only accepts `disc:N` for backups, so Bromelia checks the `DRV:` lines the job prints to
+  make sure drive *N* is still the expected device.
 
 Drives are addressed by device (`dev:`) wherever possible because MakeMKV's drive numbers can change.
 

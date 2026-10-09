@@ -64,6 +64,22 @@ struct DriveDetectionTests {
         #expect(model.history.first?.id == job.id)
     }
 
+    @Test func reinsertedDiscStartsARipWhenTheEmptyDriveHadNoDevicePath() {
+        // As MakeMKV lists a drive on macOS: no device path while it is empty, then often the same /dev/rdiskN again.
+        let model = AppModel(persistent: false)
+        model.config.defaultDrive.automation.autoRipOnInsert = true
+        model.config.defaultDrive.automation.autoRipDelaySeconds = 60
+        let name = "BD-RE TEST DRIVE 1.00 SERIAL1"
+        model.debugApplyScan([entry(0, .inserted, name: name, dev: "/dev/rdisk12", disc: "FIRST")])
+        model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
+        model.debugApplyScan([entry(0, .loading, name: name, dev: "")])
+        #expect(model.jobs.isEmpty)
+        model.debugApplyScan([entry(0, .inserted, name: name, dev: "/dev/rdisk12", disc: "SECOND")])
+        #expect(model.jobs.count == 1)
+        #expect(model.jobs.first?.discLabel == "SECOND")
+        if let job = model.jobs.first { model.cancel(job) }
+    }
+
     @Test func disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults() {
         let model = AppModel(persistent: false)
         model.config.defaultDrive.rip.titleSelection.strategy = .longest

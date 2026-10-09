@@ -1394,13 +1394,9 @@ public sealed class JobRunner
         }
         Directory.CreateDirectory(dest);
         var name = BackupName(decrypt);
-        if (_job.Drive.Rip.BackupFormat == BackupFormat.Iso)
-            dest = Paths.UniquePath(Path.Combine(dest, (name.Length > 0 ? name : TemplateRenderer.SanitizeComponent(_job.DiscLabel.Length == 0 ? "disc" : _job.DiscLabel)) + ".iso"));
-        else if (name.Length > 0)
-        {
-            dest = Paths.UniquePath(Path.Combine(dest, name));
-            Directory.CreateDirectory(dest);
-        }
+        if (name.Length == 0) name = TemplateRenderer.SanitizeComponent(_job.DiscLabel.Length == 0 ? "disc" : _job.DiscLabel);
+        // MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it.
+        dest = Paths.UniquePath(Path.Combine(dest, _job.Drive.Rip.BackupFormat == BackupFormat.Iso ? name + ".iso" : name));
         _job.Phase = decrypt ? "Backing up disc (decrypted)" : "Backing up disc";
         _job.TotalProgress = 0;
         _expectedDrive = (drive.Index, drive.DevicePath);
@@ -1421,6 +1417,19 @@ public sealed class JobRunner
                     Directory.Move(dest, folder);
                     _job.AppendLog($"MakeMKV wrote a folder instead of an ISO image; kept the backup as the folder {Path.GetFileName(folder)}", Severity.Warning);
                     dest = folder;
+                }
+                catch (IOException) { }
+            }
+            // MakeMKV writes DVD backups as ISO images whatever the destination is called: give the image its extension.
+            else if (_job.Drive.Rip.BackupFormat == BackupFormat.Folder && File.Exists(dest)
+                     && !dest.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
+            {
+                var image = Paths.UniquePath(dest + ".iso");
+                try
+                {
+                    File.Move(dest, image);
+                    _job.AppendLog($"MakeMKV wrote an ISO image (as it does for DVDs); kept the backup as {Path.GetFileName(image)}");
+                    dest = image;
                 }
                 catch (IOException) { }
             }

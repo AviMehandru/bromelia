@@ -521,6 +521,26 @@ test_auto_rip (void)
   g_assert_cmpstr (((BroHistoryRecord *) st->history->pdata[0])->id, ==, job->id);
 }
 
+static void
+test_reinsert_without_device_path (void)
+{
+  /* As MakeMKV lists a drive on macOS: no device path while it is empty, then often the same device again. */
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  const char *name = "BD-RE TEST DRIVE 1.00 SERIAL1";
+  BroJob *job;
+  st->config->default_drive->automation.auto_rip_on_insert = TRUE;
+  st->config->default_drive->automation.auto_rip_delay_seconds = 60;
+  scan (st, entry (0, BRO_DRIVE_INSERTED, name, "/dev/rdisk12", "FIRST"), NULL);
+  scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "", ""), NULL);
+  scan (st, entry (0, BRO_DRIVE_LOADING, name, "", ""), NULL);
+  g_assert_cmpuint (st->jobs->len, ==, 0);
+  scan (st, entry (0, BRO_DRIVE_INSERTED, name, "/dev/rdisk12", "SECOND"), NULL);
+  g_assert_cmpuint (st->jobs->len, ==, 1);
+  job = st->jobs->pdata[0];
+  g_assert_cmpstr (job->disc_label, ==, "SECOND");
+  bro_state_cancel_job (st, job);
+}
+
 /* ---- integration ---- */
 
 static void
@@ -1129,6 +1149,12 @@ typedef struct {
   char *dir, *exe, *root;
 } Fake;
 
+/* What makemkvcon 2.0 prints (exiting with 0) when the backup's folder exists, even empty. */
+#define REFUSES_EXISTING                                                                                                  \
+  "echo \"MSG:5068,516,1,\\\"Folder $dest already contains a backup, please choose another folder\\\",\\\"Folder %%1 "    \
+  "already contains a backup, please choose another folder\\\",\\\"$dest\\\"\"; "                                          \
+  "echo 'MSG:5069,128,0,\"Backup failed\",\"Backup failed\"'; echo 'MSG:5080,516,0,\"Backup failed.\",\"Backup failed.\"'"
+
 /* A stand-in for makemkvcon: info prints the listing, mkv runs the shell code with $title and $dest set. */
 static Fake *
 fake_new_full (const char *listing_text, const char *mkv, const char *backup)
@@ -1146,7 +1172,8 @@ fake_new_full (const char *listing_text, const char *mkv, const char *backup)
   script = g_strdup_printf ("#!/bin/sh\necho \"$@\" >> '%s/calls.txt'\n"
                             "while [ $# -gt 0 ]; do\n  case \"$1\" in info|mkv|backup) cmd=\"$1\"; shift; break;; esac\n  shift\ndone\n"
                             "case \"$cmd\" in\n  info) cat '%s' ;;\n  mkv) title=\"$2\"; dest=\"$3\"\n%s\n  ;;\n"
-                            "  backup) for a in \"$@\"; do dest=\"$a\"; done\n%s\n  ;;\nesac\nexit 0\n",
+                            "  backup) for a in \"$@\"; do dest=\"$a\"; done\n"
+                            "    if [ -e \"$dest\" ]; then " REFUSES_EXISTING "; exit 0; fi\n%s\n  ;;\nesac\nexit 0\n",
                             f->dir, list, body, backup ? backup : ":");
   g_assert_true (g_file_set_contents (f->exe, script, -1, NULL));
   g_chmod (f->exe, 0755);
@@ -1685,9 +1712,9 @@ fixture_path (const char *name)
   return abs;
 }
 
-/* Runs a job of any mode against the fake. */
+/* Runs a job of any mode against the fake; file_template replaces the default file name template unless NULL. */
 static BroRunResult *
-run_job (Fake *f, BroRipMode mode, BroSource *source, const char *titles, gboolean iso_backup)
+run_job_full (Fake *f, BroRipMode mode, BroSource *source, const char *titles, gboolean iso_backup, const char *file_template)
 {
   BroRunRequest *req = bro_run_request_new ();
   BroRunResult *res;
@@ -1699,6 +1726,11 @@ run_job (Fake *f, BroRipMode mode, BroSource *source, const char *titles, gboole
   req->drive = bro_drive_config_new ();
   req->drive->automation.notify = FALSE;
   req->drive->rip.backup_format = iso_backup ? BRO_BACKUP_ISO : BRO_BACKUP_FOLDER;
+  if (file_template)
+    {
+      g_free (req->drive->output.file_name_template);
+      req->drive->output.file_name_template = g_strdup (file_template);
+    }
   req->source = source;
   req->mode = mode;
   if (titles)
@@ -1712,6 +1744,12 @@ run_job (Fake *f, BroRipMode mode, BroSource *source, const char *titles, gboole
   res = bro_run_job (req);
   bro_run_request_free (req);
   return res;
+}
+
+static BroRunResult *
+run_job (Fake *f, BroRipMode mode, BroSource *source, const char *titles, gboolean iso_backup)
+{
+  return run_job_full (f, mode, source, titles, iso_backup, NULL);
 }
 
 /* shared/fixtures/rip-outcomes.json: how a job must end for each recorded makemkvcon run. The same file is replayed
@@ -1887,6 +1925,50 @@ test_iso_backups (void)
       g_assert_true (has_name (items, "bromelia-log.txt"));
       g_assert_true (has_name (items, "makemkv-log.txt"));
     }
+    fake_free (f);
+  }
+}
+
+static void
+test_folder_backups (void)
+{
+  /* makemkvcon refuses a folder that exists, even an empty one; the stand-in does the same. */
+  g_autofree char *l = listing ("SAMPLE_MOVIE", "0:00:10,1");
+  g_autofree char *m = writes_file (SAVED);
+  const char *templates[] = { NULL, "" };
+  for (guint t = 0; t < G_N_ELEMENTS (templates); t++)
+    {
+      Fake *f = fake_new_full (l, m, "mkdir -p \"$dest/BDMV\" && printf x > \"$dest/BDMV/index.bdmv\"\n" SAVED_LINE);
+      g_autoptr (BroRunResult) res = run_job_full (f, BRO_MODE_BACKUP_THEN_MKV, bro_source_new_drive (0, ""), NULL, FALSE, templates[t]);
+      g_autofree char *calls = fake_calls (f);
+      const char *folder = NULL;
+      if (res->status != BRO_JOB_SUCCEEDED)
+        g_error ("folder backup (%s template): %s", templates[t] ? "empty" : "default", res->error);
+      for (guint i = 0; i < res->files->len; i++)
+        if (g_file_test (res->files->pdata[i], G_FILE_TEST_IS_DIR))
+          folder = res->files->pdata[i];
+      g_assert_nonnull (folder);
+      {
+        g_autofree char *index = g_build_filename (folder, "BDMV", "index.bdmv", NULL);
+        g_assert_true (g_file_test (index, G_FILE_TEST_EXISTS));
+      }
+      g_assert_nonnull (strstr (calls, "mkv file:"));
+      fake_free (f);
+    }
+  {
+    /* MakeMKV writes DVD backups as ISO images, even when asked for a folder. */
+    Fake *f = fake_new_full (l, m, "head -c 40000 /dev/zero > \"$dest\"\nprintf 'BEA01' | dd of=\"$dest\" bs=1 seek=32769 conv=notrunc 2>/dev/null\n" SAVED_LINE);
+    g_autoptr (BroRunResult) res = run_job (f, BRO_MODE_BACKUP_THEN_MKV, bro_source_new_drive (0, ""), NULL, FALSE);
+    g_autofree char *calls = fake_calls (f);
+    const char *image = NULL;
+    if (res->status != BRO_JOB_SUCCEEDED)
+      g_error ("DVD image for a folder backup: %s", res->error);
+    for (guint i = 0; i < res->files->len; i++)
+      if (g_str_has_suffix (res->files->pdata[i], ".iso"))
+        image = res->files->pdata[i];
+    g_assert_nonnull (image);
+    g_assert_true (g_file_test (image, G_FILE_TEST_IS_REGULAR));
+    g_assert_nonnull (strstr (calls, "mkv iso:"));
     fake_free (f);
   }
 }
@@ -4041,6 +4123,7 @@ main (int argc, char **argv)
   g_test_add_func ("/config/json", test_config_json);
   g_test_add_func ("/runner/remux-args", test_remux_args);
   g_test_add_func ("/state/auto-rip", test_auto_rip);
+  g_test_add_func ("/state/reinsert-without-device-path", test_reinsert_without_device_path);
   g_test_add_func ("/runner/integration", test_integration);
   g_test_add_func ("/identity/labels", test_labels);
   g_test_add_func ("/identity/resolve", test_identity);
@@ -4071,6 +4154,7 @@ main (int argc, char **argv)
   g_test_add_func ("/reliability/cancel-without-main-loop", test_cancel_without_main_loop);
   g_test_add_func ("/reliability/free-space", test_free_space);
   g_test_add_func ("/reliability/iso-backups", test_iso_backups);
+  g_test_add_func ("/reliability/folder-backups", test_folder_backups);
   g_test_add_func ("/reliability/archive-everything", test_archive_everything);
   g_test_add_func ("/parity/notices", test_notices);
   g_test_add_func ("/parity/beta-key", test_beta_key_parse);

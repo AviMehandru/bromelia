@@ -602,6 +602,15 @@ public sealed class AppState : ObservableObject
         foreach (var e in merged) ScannedDrives.Add(e);
         EnsureSessions(merged);
 
+        // A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed as
+        // disc:N until the next disc comes (often under the same device), which must count as inserted again.
+        var lanes = merged.Select(e => e.LaneKey).ToHashSet();
+        foreach (var (lane, state) in _knownStates.Where(k => !lanes.Contains(k.Key)).ToList())
+        {
+            if (state == DriveState.Inserted) Sessions.GetValueOrDefault(lane)?.Reset();
+            _knownStates.Remove(lane);
+        }
+
         foreach (var e in merged)
         {
             _knownStates.TryGetValue(e.LaneKey, out var previous);
@@ -633,7 +642,9 @@ public sealed class AppState : ObservableObject
     void DiscInserted(DriveScanEntry e)
     {
         Sessions.GetValueOrDefault(e.LaneKey)?.Reset();
-        if (!OwnsAutomation || Config.DriveConfigFor(e) is not { Enabled: true, Automation.AutoRipOnInsert: true } cfg) return;
+        // Drives without their own configuration use the default one, as everywhere else.
+        var cfg = Config.DriveConfigFor(e) ?? Config.DefaultDrive;
+        if (!OwnsAutomation || !cfg.Enabled || !cfg.Automation.AutoRipOnInsert) return;
         if (Jobs.Any(j => j.LaneKey == e.LaneKey && !j.State.IsFinished())) return;
         if (DiscContentRules.ModeFor(e.Flags, () => Platform.ProbeDisc(e.DevicePath), cfg) is not { } mode) return;
         var job = MakeJob(e, cfg, mode);

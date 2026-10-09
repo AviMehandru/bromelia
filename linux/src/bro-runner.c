@@ -2932,23 +2932,14 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
     }
   g_mkdir_with_parents (dest, 0755);
   {
+    /* MakeMKV refuses a folder that exists, even an empty one ("already contains a backup"), so it creates it. */
     g_autofree char *templ_name = backup_name (c, decrypt);
-    if (c->req->drive->rip.backup_format == BRO_BACKUP_ISO)
-      {
-        g_autofree char *name = *templ_name ? g_strdup (templ_name)
-                                             : bro_sanitize_component (c->res->disc_label && *c->res->disc_label ? c->res->disc_label : "disc");
-        g_autofree char *iso_name = g_strconcat (name, ".iso", NULL);
-        g_autofree char *iso = g_build_filename (dest, iso_name, NULL);
-        g_free (dest);
-        dest = bro_unique_path (iso);
-      }
-    else if (*templ_name)
-      {
-        g_autofree char *folder = g_build_filename (dest, templ_name, NULL);
-        g_free (dest);
-        dest = bro_unique_path (folder);
-        g_mkdir_with_parents (dest, 0755);
-      }
+    g_autofree char *name = *templ_name ? g_strdup (templ_name)
+                                         : bro_sanitize_component (c->res->disc_label && *c->res->disc_label ? c->res->disc_label : "disc");
+    g_autofree char *leaf = c->req->drive->rip.backup_format == BRO_BACKUP_ISO ? g_strconcat (name, ".iso", NULL) : g_strdup (name);
+    g_autofree char *want = g_build_filename (dest, leaf, NULL);
+    g_free (dest);
+    dest = bro_unique_path (want);
   }
   phase (c, decrypt ? "Backing up disc (decrypted)" : "Backing up disc");
   update (c, BRO_UPDATE_PROGRESS, BRO_SEV_INFO, NULL, 0, 0);
@@ -2992,6 +2983,25 @@ backup (Ctx *c, gboolean decrypt, const char *out_dir, gboolean in_subfolder, GE
             }
           else
             g_free (folder);
+        }
+    }
+  /* MakeMKV writes DVD backups as ISO images whatever the destination is called: give the image its extension. */
+  else if (c->req->drive->rip.backup_format == BRO_BACKUP_FOLDER && g_file_test (dest, G_FILE_TEST_IS_REGULAR))
+    {
+      g_autofree char *lower = g_ascii_strdown (dest, -1);
+      if (!g_str_has_suffix (lower, ".iso"))
+        {
+          g_autofree char *want = g_strconcat (dest, ".iso", NULL);
+          char *image = bro_unique_path (want);
+          if (g_rename (dest, image) == 0)
+            {
+              g_autofree char *name = g_path_get_basename (image);
+              log_line (c, BRO_SEV_INFO, "MakeMKV wrote an ISO image (as it does for DVDs); kept the backup as %s", name);
+              g_free (dest);
+              dest = image;
+            }
+          else
+            g_free (image);
         }
     }
   if (c->req->drive->archive.verify_rips)

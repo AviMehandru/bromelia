@@ -288,6 +288,14 @@ final class AppModel {
         scannedDrives = merged
         ensureSessions(merged)
 
+        // A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed
+        // as disc:N until the next disc comes (often under the same /dev/rdiskN), which must count as inserted again.
+        let lanes = Set(merged.map(DriveItem.laneKey(for:)))
+        for (lane, state) in knownStates where !lanes.contains(lane) {
+            if state == .inserted { sessions[lane]?.reset() }
+            knownStates[lane] = nil
+        }
+
         for e in merged {
             let lane = DriveItem.laneKey(for: e)
             let previous = knownStates[lane]
@@ -305,7 +313,9 @@ final class AppModel {
     private func discInserted(_ e: DriveScanEntry) {
         let lane = DriveItem.laneKey(for: e)
         sessions[lane]?.reset()
-        guard ownsAutomation, let cfg = config.driveConfig(for: e), cfg.enabled, cfg.automation.autoRipOnInsert else { return }
+        // Drives without their own configuration use the default one, as everywhere else.
+        let cfg = config.driveConfig(for: e) ?? config.defaultDrive
+        guard ownsAutomation, cfg.enabled, cfg.automation.autoRipOnInsert else { return }
         guard !jobs.contains(where: { $0.laneKey == lane && !$0.state.isFinished }) else { return }
         guard let mode = DiscContent.mode(flags: e.flags, content: { DiscContentProbe.probe(device: e.devicePath) }, drive: cfg) else { return }
         let job = makeJob(for: e, config: cfg, mode: mode)

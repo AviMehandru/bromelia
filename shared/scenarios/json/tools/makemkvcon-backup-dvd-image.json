@@ -1,0 +1,38 @@
+{
+  "tool": "makemkvcon",
+  "note": "As real makemkvcon 2.0 does with a DVD, the backup is an ISO image whatever the destination is called (seen 2026-10-08).",
+  "rules": [
+    {
+      "when": {
+        "command": "info"
+      },
+      "print": [
+        "listing"
+      ]
+    },
+    {
+      "when": {
+        "command": "backup"
+      },
+      "writeIso": {
+        "bytes": 40000,
+        "descriptor": "BEA01"
+      },
+      "print": [
+        "backupDone",
+        "backupDoneSummary"
+      ]
+    },
+    {
+      "when": {
+        "command": "mkv"
+      },
+      "writeTitles": {
+        "content": "mkv data {title}"
+      },
+      "print": [
+        "saved"
+      ]
+    }
+  ]
+}
