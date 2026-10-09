@@ -1,0 +1,59 @@
+{
+  "title": "A drive without a tray motor accepts \"close tray\" and leaves the tray open; the next scan shows it, and a problem says to push it in by hand",
+  "from": [
+    "macos DriveDetectionTests.aTrayThatStaysOpenAfterCloseIsReported",
+    "windows DriveDetectionTests.ATrayThatStaysOpenAfterCloseIsReported",
+    "linux /state/tray-stays-open",
+    "docs/configuration.md#web-page (Close tray)"
+  ],
+  "given": {
+    "drives": [
+      {
+        "id": "slim",
+        "identification": "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112",
+        "device": "/dev/slim",
+        "trayMotor": false
+      }
+    ]
+  },
+  "steps": [
+    {
+      "openTray": {
+        "drive": "slim"
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/drives/{driveId:slim}/close-tray",
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "close"
+      }
+    },
+    {
+      "advance": 5
+    },
+    {
+      "expect": {
+        "note": "The OS can't tell an open tray from a closed empty one (drutil on macOS); MakeMKV's drive scan can.",
+        "response": {
+          "as": "close",
+          "status": 204
+        },
+        "drives": [
+          {
+            "id": "slim",
+            "state": "trayOpen"
+          }
+        ],
+        "problems": {
+          "active": [
+            "drive.trayStillOpen"
+          ]
+        }
+      }
+    }
+  ]
+}

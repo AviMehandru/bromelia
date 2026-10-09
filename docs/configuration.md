@@ -530,7 +530,7 @@ The same data is available as JSON:
 | | `opened` (a disc opened here or on the disc page): `{loading, error, name, titles[{index, name, duration, chapters, size, selected}]}` |
 | `POST /api/drives/<lane>/open` | Read the disc's titles; 204, or 400 with the reason |
 | `POST /api/drives/<lane>/rip` | Rip with the drive's mode and title rules; `?titles=0,2,5` rips those titles of the opened disc as MKV files. 204, or 400 with the reason (`Open the disc first`, `No titles chosen`, …) |
-| `POST /api/drives/<lane>/eject` · `close` | 204, or 400 with the reason |
+| `POST /api/drives/<lane>/eject` · `close` | 204, or 400 with the reason. A tray that is still open at the first drive scan 4 s after `close` (a drive without a tray motor, as most slim drives) is reported by the app |
 | `POST /api/jobs/<id>/cancel` | 204, or 400 (`No such job`) |
 | `GET /api/jobs/<id>/log` | The end of the job's log (a running job or one in the history; at most 256 KB, from a line start), or 404 |
 | `POST /api/settings/<configuration id>/set?autoRip=1&mode=backup` | Change `automation.autoRipOnInsert` and / or `rip.mode` (`mkv`, `backup`, `backupDecrypted`, `backupThenMkv`, `infoOnly`) of a drive configuration (the ids are in `settings`; the default configuration is the first); 204, or 400 |

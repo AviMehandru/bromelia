@@ -522,6 +522,28 @@ test_auto_rip (void)
 }
 
 static void
+test_tray_stays_open (void)
+{
+  /* A slim drive has no tray motor: the close command succeeds, and only MakeMKV's next scan shows the tray open. */
+  g_autoptr (BroState) st = bro_state_new (NULL);
+  const char *name = "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112";
+  g_autofree char *want = bro_state_tray_still_open (name);
+  scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
+  bro_state_expect_tray_closed (st, name, g_get_monotonic_time ());
+  scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
+  g_assert_null (st->last_error); /* too soon: the tray may still be moving */
+  bro_state_expect_tray_closed (st, name, g_get_monotonic_time () - 10 * G_USEC_PER_SEC);
+  scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
+  g_assert_cmpstr (st->last_error, ==, want);
+  bro_state_set_error (st, NULL);
+  scan (st, entry (0, BRO_DRIVE_EMPTY_OPEN, name, "/dev/sr0", ""), NULL);
+  g_assert_null (st->last_error); /* checked once per request */
+  bro_state_expect_tray_closed (st, name, g_get_monotonic_time () - 10 * G_USEC_PER_SEC);
+  scan (st, entry (0, BRO_DRIVE_EMPTY_CLOSED, name, "/dev/sr0", ""), NULL);
+  g_assert_null (st->last_error);
+}
+
+static void
 test_reinsert_without_device_path (void)
 {
   /* As MakeMKV lists a drive on macOS: no device path while it is empty, then often the same device again. */
@@ -4124,6 +4146,7 @@ main (int argc, char **argv)
   g_test_add_func ("/runner/remux-args", test_remux_args);
   g_test_add_func ("/state/auto-rip", test_auto_rip);
   g_test_add_func ("/state/reinsert-without-device-path", test_reinsert_without_device_path);
+  g_test_add_func ("/state/tray-stays-open", test_tray_stays_open);
   g_test_add_func ("/runner/integration", test_integration);
   g_test_add_func ("/identity/labels", test_labels);
   g_test_add_func ("/identity/resolve", test_identity);

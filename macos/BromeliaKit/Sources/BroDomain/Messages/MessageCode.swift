@@ -193,6 +193,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case driveEjectFailed = "drive.ejectFailed"
     case driveCloseTrayFailed = "drive.closeTrayFailed"
     case driveCloseTraysFailed = "drive.closeTraysFailed"
+    case driveTrayStillOpen = "drive.trayStillOpen"
     case driveNotFound = "drive.notFound"
     case driveNoDisc = "drive.noDisc"
     case driveBusy = "drive.busy"

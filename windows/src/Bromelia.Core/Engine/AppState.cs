@@ -169,6 +169,8 @@ public sealed class AppState : ObservableObject
     readonly Dictionary<Guid, JobRunner> _runners = new();
     bool _betaKeyTried;
     readonly Dictionary<string, DriveState> _knownStates = new();
+    /// <summary>Drives asked to close their tray, and when: the first scan 4 s later tells whether the tray moved.</summary>
+    readonly Dictionary<string, DateTime> _trayCloseRequests = new();
     bool _firstScanDone;
     bool _isScanning;
     string _makemkvVersion = "";
@@ -235,6 +237,7 @@ public sealed class AppState : ObservableObject
     public async Task CloseTrayAsync(string lane)
     {
         if (EntryForLane(lane) is not { DevicePath.Length: > 0 } e) return;
+        ExpectTrayClosed(new[] { e.DriveName });
         if (!await Platform.CloseTrayAsync(e.DevicePath)) LastError = $"Could not close the tray of {DriveItem.ShortModel(e.DriveName)}";
         await Task.Delay(5000);
         await RefreshDrivesAsync(true);
@@ -242,10 +245,33 @@ public sealed class AppState : ObservableObject
 
     public async Task CloseAllTraysAsync()
     {
-        foreach (var e in ScannedDrives.Where(d => d.IsPresent && d.State != DriveState.Inserted && d.DevicePath.Length > 0).ToList())
+        var drives = ScannedDrives.Where(d => d.IsPresent && d.State != DriveState.Inserted && d.DevicePath.Length > 0).ToList();
+        ExpectTrayClosed(drives.Select(d => d.DriveName));
+        foreach (var e in drives)
             await Platform.CloseTrayAsync(e.DevicePath);
         await Task.Delay(5000);
         await RefreshDrivesAsync(true);
+    }
+
+    /// <summary>Checks, in the first scan at least 4 s after <paramref name="at"/>, that these drives' trays closed. A drive
+    /// without a tray motor (most slim drives) accepts the command and leaves the tray open, and the OS can't tell;
+    /// MakeMKV's scan can.</summary>
+    public void ExpectTrayClosed(IEnumerable<string> driveNames, DateTime? at = null)
+    {
+        foreach (var n in driveNames) _trayCloseRequests[n] = at ?? DateTime.UtcNow;
+    }
+
+    public static string TrayStillOpen(string driveName) =>
+        $"The tray of {DriveItem.ShortModel(driveName)} is still open: this drive can't close it by itself (slim drives have no tray motor), so push it in by hand";
+
+    void CheckTrayCloseRequests(IReadOnlyList<DriveScanEntry> entries)
+    {
+        var now = DateTime.UtcNow;
+        foreach (var (name, asked) in _trayCloseRequests.Where(r => (now - r.Value).TotalSeconds >= 4).ToList())
+        {
+            _trayCloseRequests.Remove(name);
+            if (entries.FirstOrDefault(e => e.DriveName == name) is { State: DriveState.EmptyOpen }) LastError = TrayStillOpen(name);
+        }
     }
 
     static string WebState(JobState s) => s switch
@@ -601,6 +627,7 @@ public sealed class AppState : ObservableObject
         ScannedDrives.Clear();
         foreach (var e in merged) ScannedDrives.Add(e);
         EnsureSessions(merged);
+        CheckTrayCloseRequests(merged);
 
         // A lane that is no longer listed lost its disc: on macOS an empty drive has no device path, so it is listed as
         // disc:N until the next disc comes (often under the same device), which must count as inserted again.

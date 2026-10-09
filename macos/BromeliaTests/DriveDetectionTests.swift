@@ -80,6 +80,25 @@ struct DriveDetectionTests {
         if let job = model.jobs.first { model.cancel(job) }
     }
 
+    @Test func aTrayThatStaysOpenAfterCloseIsReported() {
+        // A slim drive has no tray motor: drutil succeeds, and only MakeMKV's next scan shows the tray still open.
+        let model = AppModel(persistent: false)
+        let name = "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112"
+        model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
+        model.expectTrayClosed(driveNames: [name])
+        model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
+        #expect(model.lastError == nil, "too soon: the tray may still be moving")
+        model.expectTrayClosed(driveNames: [name], at: Date().addingTimeInterval(-10))
+        model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
+        #expect(model.lastError == AppModel.trayStillOpen(name))
+        model.lastError = nil
+        model.debugApplyScan([entry(0, .emptyOpen, name: name, dev: "")])
+        #expect(model.lastError == nil, "checked once per request")
+        model.expectTrayClosed(driveNames: [name], at: Date().addingTimeInterval(-10))
+        model.debugApplyScan([entry(0, .emptyClosed, name: name, dev: "")])
+        #expect(model.lastError == nil)
+    }
+
     @Test func disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults() {
         let model = AppModel(persistent: false)
         model.config.defaultDrive.rip.titleSelection.strategy = .longest

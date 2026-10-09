@@ -444,6 +444,37 @@ public class DriveDetectionTests
         new(i, s, s == DriveState.Inserted ? DiscFlags.BlurayFiles : DiscFlags.None, name, disc, dev);
 
     [Fact]
+    public void ATrayThatStaysOpenAfterCloseIsReported()
+    {
+        // A slim drive has no tray motor: the close command succeeds, and only MakeMKV's next scan shows the tray open.
+        var dir = Path.Combine(Path.GetTempPath(), "bromelia-dd-" + Guid.NewGuid().ToString("N")[..6]);
+        Paths.DataOverride = dir;
+        try
+        {
+            var state = new AppState(new NullPlatformServices(), Path.Combine(dir, "config.json"), new SettingsCatalog());
+            const string name = "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112";
+            state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
+            state.ExpectTrayClosed(new[] { name });
+            state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
+            Assert.Null(state.LastError); // too soon: the tray may still be moving
+            state.ExpectTrayClosed(new[] { name }, DateTime.UtcNow.AddSeconds(-10));
+            state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
+            Assert.Equal(AppState.TrayStillOpen(name), state.LastError);
+            state.LastError = null;
+            state.ApplyScan(new[] { E(0, DriveState.EmptyOpen, name, "E:") });
+            Assert.Null(state.LastError); // checked once per request
+            state.ExpectTrayClosed(new[] { name }, DateTime.UtcNow.AddSeconds(-10));
+            state.ApplyScan(new[] { E(0, DriveState.EmptyClosed, name, "E:") });
+            Assert.Null(state.LastError);
+        }
+        finally
+        {
+            Paths.DataOverride = null;
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void ReinsertedDiscStartsARipWhenTheEmptyDriveHadNoDevicePath()
     {
         // As MakeMKV lists a drive on macOS: no device path while it is empty, then often the same device again.

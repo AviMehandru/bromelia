@@ -62,7 +62,8 @@ Unless `given` says otherwise:
 - **Clock.** `2026-10-02T20:00:00.000Z`. It moves on `advance` steps, and in an `expect` step without `when` while
   every unsettled job is waiting only on the clock (a countdown, a mount wait, a stall timeout): the runner then
   moves it to the next timer. An `expect` with `when` never moves it.
-- **Drives.** None. `given.drives` adds fake drives: `{id, name, identification, device, disc}`. `id` is the
+- **Drives.** None. `given.drives` adds fake drives: `{id, name, identification, device, disc}`. `trayMotor: false`
+  makes one like a slim drive: closing its tray succeeds but the tray stays open. `id` is the
   scenario's name for the drive (`left`); the engine's DriveId is computed from `identification` as usual.
 - **Tools.** Every external program is scripted: launching one runs its script from `given.tools` (or the
   default below) instead of a process. A tool with no script is *not installed* (ToolLocator finds nothing).

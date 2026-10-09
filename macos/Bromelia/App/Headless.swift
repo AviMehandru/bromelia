@@ -220,6 +220,7 @@ enum Headless {
         say("makemkvcon: \(m.makemkvcon?.path ?? "not found — install MakeMKV or set makemkvconPath")")
         say("Output folder: \(m.config.outputRoot)")
         if let e = m.lastError { say(e) }
+        lastError = m.lastError
         m.start()
         if !m.ownsAutomation {
             say("Another Bromelia (\(m.automationLock.holder)) rips inserted discs; this one takes over when it quits")

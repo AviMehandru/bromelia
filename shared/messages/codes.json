@@ -1235,6 +1235,13 @@
       "http": 500,
       "today": "AppModel.closeAllTrays"
     },
+    "drive.trayStillOpen": {
+      "kind": "problem",
+      "params": {
+        "drive": "string"
+      },
+      "today": "AppModel.checkTrayCloseRequests (a drive without a tray motor, seen 2026-10-08)"
+    },
     "drive.notFound": {
       "kind": "error",
       "data": {
