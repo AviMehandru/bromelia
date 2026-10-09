@@ -8042,7 +8042,9 @@
           "params": [],
           "swift": "IsolationLease.release()",
           "cs": "IsolationLease.Release",
-          "c": "bro_isolation_lease_release"
+          "c": "bro_isolation_lease_release",
+          "returns": "BroMessage?",
+          "doc": "Gives the settings back once the run has ended: why they couldn't all be cleaned up (makemkv.keyNotRemoved: the registration key left in the job's folder; makemkv.registryNotRestored: the user's registry values not back yet), or nil."
         },
         {
           "name": "IsolationLease.profilePath",
@@ -10014,6 +10016,17 @@
           "swift": "HomeDirIsolation.prepare(_:)",
           "cs": "HomeDirIsolation.Prepare",
           "c": "bro_home_dir_isolation_prepare"
+        },
+        {
+          "name": "HomeDirIsolation.scrubKey",
+          "params": [
+            "workDirectory"
+          ],
+          "returns": "BroMessage?",
+          "doc": "Removes the app_Key line from the settings.conf of a run's home, as release does: for the home of a run the engine never released (it crashed). Startup recovery calls it for interrupted jobs.",
+          "swift": "HomeDirIsolation.scrubKey(_:)",
+          "cs": "HomeDirIsolation.ScrubKey",
+          "c": "bro_home_dir_isolation_scrub_key"
         }
       ]
     },
@@ -10256,9 +10269,10 @@
             "notice",
             "libreDrive",
             "version",
-            "transcriptProblem"
+            "transcriptProblem",
+            "settingsProblem"
           ],
-          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, MakeMKV's version, and the warning when its transcript couldn't be written.",
+          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, MakeMKV's version, the warning when its transcript couldn't be written, and what giving its settings back reported (IsolationLease.release).",
           "swift": {
             "name": "MakemkvRun",
             "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/MakemkvRun.swift"

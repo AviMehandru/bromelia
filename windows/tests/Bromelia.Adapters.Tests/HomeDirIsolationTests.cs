@@ -1,3 +1,4 @@
+using Bromelia.Domain;
 using Bromelia.Foundation;
 using Bromelia.Ports;
 using Xunit;
@@ -43,6 +44,11 @@ public sealed class HomeDirIsolationTests : IDisposable
             var lease = new HomeDirIsolation(new DiskFileSystem(), layout).Prepare(run);
             lease.FirstOutput();
             foreach (var m in given["duringRun"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()) File.WriteAllText(P(m.Key), m.Value.AsString);
+            foreach (var f in given["unreadableDuringRun"]?.AsArray ?? new List<JsonValue>())
+            {
+                File.Delete(P(f.AsString!));
+                Directory.CreateDirectory(P(f.AsString!));
+            }
             var work = P(given["workDirectory"]!.AsString!);
             void SameFiles(JsonValue want, string when)
             {
@@ -52,8 +58,12 @@ public sealed class HomeDirIsolationTests : IDisposable
                 foreach (var m in want.AsObject!) Assert.True(m.Value.AsString == File.ReadAllText(P(m.Key)), when + ": " + m.Key);
             }
             SameFiles(expect["files"]!, "while running");
-            lease.Release();
+            // "scrubKey": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs the home.
+            var problem = given["call"]?.AsString == "scrubKey"
+                ? new HomeDirIsolation(new DiskFileSystem(), layout).ScrubKey(work)
+                : lease.Release();
             SameFiles(expect["afterRelease"] ?? expect["files"]!, "after release");
+            Assert.Equal(expect["releaseProblem"]?.AsString, problem is null ? null : MessageCode.Wire(problem.Code));
 
             var env = lease.Environment();
             foreach (var m in expect["environment"]!.AsObject!) Assert.Equal(m.Value.AsString, Shown(env[m.Key]));

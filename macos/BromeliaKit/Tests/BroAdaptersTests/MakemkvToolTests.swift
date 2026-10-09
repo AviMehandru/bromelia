@@ -64,6 +64,10 @@ struct MakemkvToolTests {
             launcher.afterLine = { n in if n == Int(gone) { try? FileManager.default.removeItem(atPath: destination) } }
         }
         let isolation = RecordingIsolation()
+        if let reason = given["releaseProblem"]?.string {
+            isolation.releaseProblem = BroMessage(.makemkvKeyNotRemoved, [("path", .string("<work>/.MakeMKV/settings.conf")), ("reason", .string(reason))],
+                                                  severity: .warning)
+        }
         let makemkvcon: String? = given["makemkvcon"]?.isNull == true ? nil : "/opt/makemkvcon"
         let tool = MakemkvTool(launcher: launcher, fs: PlatformFileSystem(), isolation: isolation, locator: FixedLocator(makemkvcon: makemkvcon))
         let options = MakemkvOptions(minLengthSeconds: given["options"]?["minLengthSeconds"]?.int.map { Int($0) })
@@ -121,6 +125,7 @@ struct MakemkvToolTests {
         if let log = expect["debugLog"]?.string { try Fixtures.same(log, run?.outcome.debugLog, "debugLog") }
         if let produced = expect["produced"]?.array { try Fixtures.same(produced.map { $0.string! }, run?.outcome.produced, "produced") }
         try Fixtures.same(expect["transcriptProblem"]?.string, run?.transcriptProblem?.code.rawValue, "transcriptProblem")
+        try Fixtures.same(expect["settingsProblem"]?.string, run?.settingsProblem?.code.rawValue, "settingsProblem")
         if run != nil { try Fixtures.check(sink.events > 0, "the sink heard something") }
     }
 

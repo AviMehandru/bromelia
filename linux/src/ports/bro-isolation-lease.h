@@ -2,6 +2,7 @@
  * makemkvcon has read them. */
 #pragma once
 
+#include "bro-bro-message.h"
 #include <glib-object.h>
 
 G_BEGIN_DECLS
@@ -15,7 +16,7 @@ struct _BroIsolationLeaseInterface {
   GHashTable *(*environment) (BroIsolationLease *self);
   char *(*profile_path) (BroIsolationLease *self);
   void (*first_output) (BroIsolationLease *self);
-  void (*release) (BroIsolationLease *self);
+  BroBroMessage *(*release) (BroIsolationLease *self);
 };
 
 /* Variables to add to the process's environment (HOME). */
@@ -27,6 +28,9 @@ char *bro_isolation_lease_profile_path (BroIsolationLease *self);
 /* makemkvcon has read its settings (its first output line). */
 void bro_isolation_lease_first_output (BroIsolationLease *self);
 
-void bro_isolation_lease_release (BroIsolationLease *self);
+/* Gives the settings back once the run has ended: why they couldn't all be cleaned up (makemkv.keyNotRemoved: the
+ * registration key left in the job's folder; makemkv.registryNotRestored: the user's registry values not back yet), or
+ * NULL. Free with bro_bro_message_free. */
+BroBroMessage *bro_isolation_lease_release (BroIsolationLease *self);
 
 G_END_DECLS

@@ -86,6 +86,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "makemkv.savedMismatch",
   "makemkv.registryFailed",
   "makemkv.registryNotRestored",
+  "makemkv.keyNotRemoved",
   "makemkv.titleProgress",
   "disc.op.reading",
   "disc.readingAgain",

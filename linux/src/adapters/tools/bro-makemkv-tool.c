@@ -194,6 +194,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   g_autoptr (GHashTable) before = NULL;
   g_autoptr (GPtrArray) produced = NULL;
   g_autoptr (BroBroMessage) transcript_problem = NULL;
+  g_autoptr (BroBroMessage) settings_problem = NULL;
   g_autoptr (BroIsolationLease) lease = NULL;
   g_autoptr (BroProcessSpec) spec = NULL;
   g_autofree char *profile = NULL;
@@ -236,10 +237,10 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   st = (RunState) { lease, TRUE, accumulator, builder, sink };
   if (!feed (self, spec, cancel, on_event, &st, &exit, &transcript_problem, error))
     {
-      bro_isolation_lease_release (lease);
+      g_autoptr (BroBroMessage) ignored = bro_isolation_lease_release (lease);
       return NULL;
     }
-  bro_isolation_lease_release (lease);
+  settings_problem = bro_isolation_lease_release (lease);
   produced = destination ? new_names (self, destination, before, error) : g_ptr_array_new_with_free_func (g_free);
   if (!produced)
     return NULL;
@@ -255,6 +256,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   run->libre_drive = g_strdup (accumulator->libre_drive);
   run->version = g_strdup (accumulator->makemkv_version);
   run->transcript_problem = g_steal_pointer (&transcript_problem);
+  run->settings_problem = g_steal_pointer (&settings_problem);
   return run;
 }
 

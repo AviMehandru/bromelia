@@ -88,6 +88,8 @@ public sealed class MakemkvTool
         var exe = Executable();
         var before = destination is null ? null : NamesBefore(destination);
         var lease = _isolation.Prepare(invocation.Settings);
+        MakemkvRun run;
+        BroMessage? settingsProblem;
         try
         {
             var options = invocation.Options with { ProfilePath = lease.ProfilePath() ?? invocation.Options.ProfilePath };
@@ -110,12 +112,13 @@ public sealed class MakemkvTool
             var newNames = destination is null ? Array.Empty<string>() : NewNames(destination, before!);
             if (product == RunProduct.Backup && destination is not null && IsFile(destination)) product = RunProduct.Image;
             var outcome = RunOutcome.Classify(accumulator, exit, product, newNames);
-            return new MakemkvRun(outcome, accumulator.Problem, accumulator.LibreDrive, accumulator.MakemkvVersion, process?.TranscriptProblem());
+            run = new MakemkvRun(outcome, accumulator.Problem, accumulator.LibreDrive, accumulator.MakemkvVersion, process?.TranscriptProblem());
         }
         finally
         {
-            lease.Release();
+            settingsProblem = lease.Release();
         }
+        return run with { SettingsProblem = settingsProblem };
     }
 
     /// <summary>Feeds the process's lines as robot events; <paramref name="onEvent"/> returns a reason to stop it.</summary>

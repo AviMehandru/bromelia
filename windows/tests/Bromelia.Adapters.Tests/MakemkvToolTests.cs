@@ -71,6 +71,9 @@ public sealed class MakemkvToolTests : IDisposable
             if (given["deleteDestinationAfterLines"]?.AsInteger is { } gone && destination != null)
                 launcher.AfterLine = n => { if (n == gone && Directory.Exists(destination)) Directory.Delete(destination, true); };
             var isolation = new RecordingIsolation();
+            if (given["releaseProblem"]?.AsString is { } rp)
+                isolation.ReleaseProblem = new BroMessage(MessageCode.MakemkvKeyNotRemoved, Severity.Warning, ("path", JsonValue.Of("<work>/.MakeMKV/settings.conf")),
+                    ("reason", JsonValue.Of(rp)));
             var makemkvcon = given["makemkvcon"] is { IsNull: true } ? null : "/opt/makemkvcon";
             var tool = new MakemkvTool(launcher, new DiskFileSystem(), isolation, new FixedLocator(makemkvcon));
             var options = new MakemkvOptions(MinLengthSeconds: (int?)given["options"]?["minLengthSeconds"]?.AsInteger);
@@ -130,6 +133,8 @@ public sealed class MakemkvToolTests : IDisposable
             if (expect["debugLog"]?.AsString is { } log) Assert.Equal(log, run!.Outcome.DebugLog);
             if (expect["transcriptProblem"]?.AsString is { } tp) Assert.Equal(tp, run!.TranscriptProblem is { } m ? MessageCode.Wire(m.Code) : null);
             else if (run != null) Assert.Null(run.TranscriptProblem);
+            if (expect["settingsProblem"]?.AsString is { } wantSettings) Assert.Equal(wantSettings, run!.SettingsProblem is { } got ? MessageCode.Wire(got.Code) : null);
+            else if (run != null) Assert.Null(run.SettingsProblem);
             if (expect["produced"] is { } produced) Assert.Equal(produced.AsArray!.Select(n => n.AsString), run!.Outcome.Produced);
             if (run != null) Assert.True(sink.Events > 0);
             return true;

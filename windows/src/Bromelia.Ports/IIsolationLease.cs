@@ -19,5 +19,8 @@ public interface IIsolationLease
     /// <summary>makemkvcon has read its settings (its first output line).</summary>
     void FirstOutput();
 
-    void Release();
+    /// <summary>Gives the settings back once the run has ended: why they couldn't all be cleaned up
+    /// (makemkv.keyNotRemoved: the registration key left in the job's folder; makemkv.registryNotRestored: the user's
+    /// registry values not back yet), or null.</summary>
+    BroMessage? Release();
 }

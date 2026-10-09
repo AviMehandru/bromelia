@@ -1,6 +1,7 @@
 /* bro-home-dir-isolation.c */
 #include "bro-home-dir-isolation.h"
 
+#include "bro-message-code.h"
 #include "bro-settings-conf.h"
 #include <string.h>
 
@@ -52,20 +53,32 @@ is_key_line (const char *line)
   return t[strspn (t, " \t")] == '=';
 }
 
-/* Removes the app_Key line from settings.conf, whatever wrote it: the registration key shouldn't wait in the job's
- * folder for retention. Best effort: the file is 0600 and pruned with the job. */
-static void
-lease_release (BroIsolationLease *lease)
+static BroBroMessage *
+key_not_removed (const char *conf, BroBroError *failure)
 {
-  BroHomeLease *self = BRO_HOME_LEASE (lease);
+  BroJsonValue *params = bro_json_value_new_object ();
+  const char *reason = failure ? bro_json_value_get_string (bro_json_value_member (failure->params, "reason"), failure->code) : "";
+  bro_json_value_set (params, "path", bro_json_value_new_string (conf));
+  bro_json_value_set (params, "reason", bro_json_value_new_string (reason));
+  return bro_bro_message_new (BRO_MSG_MAKEMKV_KEY_NOT_REMOVED, params, BRO_SEVERITY_WARNING);
+}
+
+/* Removes the app_Key line from @conf (a settings.conf), whatever wrote it: the registration key shouldn't wait in the
+ * job's folder for retention. makemkv.keyNotRemoved when the file is there but can't be rewritten; NULL otherwise. */
+static BroBroMessage *
+scrub (BroFileSystem *fs, const char *conf)
+{
   g_autoptr (GBytes) bytes = NULL;
+  g_autoptr (BroBroError) failure = NULL;
   g_autofree char *text = NULL;
   g_auto (GStrv) lines = NULL;
   g_autoptr (GString) kept = g_string_new (NULL);
   gboolean changed = FALSE, first = TRUE;
   gsize n = 0;
-  if (!bro_file_system_exists (self->fs, self->conf) || !(bytes = bro_file_system_read (self->fs, self->conf, NULL)))
-    return;
+  if (!bro_file_system_exists (fs, conf))
+    return NULL;
+  if (!(bytes = bro_file_system_read (fs, conf, &failure)))
+    return key_not_removed (conf, failure);
   text = g_strndup (g_bytes_get_data (bytes, &n), g_bytes_get_size (bytes));
   lines = g_strsplit (text, "\n", -1);
   for (guint i = 0; lines[i]; i++)
@@ -83,8 +96,17 @@ lease_release (BroIsolationLease *lease)
   if (changed)
     {
       g_autoptr (GBytes) out = g_bytes_new (kept->str, kept->len);
-      bro_file_system_write_atomically (self->fs, self->conf, out, 0600, NULL);
+      if (!bro_file_system_write_atomically (fs, conf, out, 0600, &failure))
+        return key_not_removed (conf, failure);
     }
+  return NULL;
+}
+
+static BroBroMessage *
+lease_release (BroIsolationLease *lease)
+{
+  BroHomeLease *self = BRO_HOME_LEASE (lease);
+  return scrub (self->fs, self->conf);
 }
 
 static void
@@ -131,6 +153,19 @@ static void bro_home_dir_isolation_iface_init (BroSettingsIsolationInterface *if
 G_DEFINE_FINAL_TYPE_WITH_CODE (BroHomeDirIsolation, bro_home_dir_isolation, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_SETTINGS_ISOLATION, bro_home_dir_isolation_iface_init))
 
+static char *
+conf_path (BroHomeDirIsolation *self, const char *home)
+{
+  return g_strconcat (home, self->layout == BRO_HOME_LAYOUT_MACOS ? "/Library/MakeMKV" : "/.MakeMKV", "/settings.conf", NULL);
+}
+
+BroBroMessage *
+bro_home_dir_isolation_scrub_key (BroHomeDirIsolation *self, const char *work_directory)
+{
+  g_autofree char *conf = conf_path (self, work_directory);
+  return scrub (self->fs, conf);
+}
+
 static gboolean
 write_text (BroFileSystem *fs, const char *path, const char *text, int mode, BroBroError **error)
 {
@@ -143,15 +178,15 @@ bro_home_dir_isolation_prepare (BroHomeDirIsolation *self, const BroMakemkvRunSe
 {
   const char *home = settings->work_directory;
   g_autofree char *folder = g_strconcat (home, self->layout == BRO_HOME_LAYOUT_MACOS ? "/Library/MakeMKV" : "/.MakeMKV", NULL);
-  g_autofree char *conf_path = g_strconcat (folder, "/settings.conf", NULL);
+  g_autofree char *conf_file = conf_path (self, home);
   g_autofree char *conf = bro_settings_conf_render (settings->settings, "Written by Bromelia for one makemkvcon run");
   BroHomeLease *lease;
-  if (!bro_file_system_create_directory (self->fs, folder, FALSE, error) || !write_text (self->fs, conf_path, conf, 0600, error))
+  if (!bro_file_system_create_directory (self->fs, folder, FALSE, error) || !write_text (self->fs, conf_file, conf, 0600, error))
     return NULL;
   lease = g_object_new (BRO_TYPE_HOME_LEASE, NULL);
   lease->fs = g_object_ref (self->fs);
   lease->home = g_strdup (home);
-  lease->conf = g_strdup (conf_path);
+  lease->conf = g_strdup (conf_file);
   if (settings->profile_xml)
     {
       lease->profile = g_strconcat (home, "/profile.mmcp.xml", NULL);

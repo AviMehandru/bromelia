@@ -78,7 +78,8 @@ public final class MakemkvTool: Sendable {
         let exe = try executable()
         let before = try destination.map { (d: String) throws(BroError) in try namesBefore(d) }
         let lease = try isolation.prepare(invocation.settings)
-        defer { lease.release() }
+        var released = false
+        defer { if !released { lease.release() } }
         var options = invocation.options
         options.profilePath = lease.profilePath() ?? options.profilePath
         let spec = ProcessSpec(executable: exe, arguments: arguments(options), environment: lease.environment(),
@@ -101,9 +102,11 @@ public final class MakemkvTool: Sendable {
         let newNames = try destination.map { (d: String) throws(BroError) in try self.newNames(d, before: before ?? []) } ?? []
         var product = product
         if product == .backup, let d = destination, fs.exists(d), try !fs.stat(d).isDirectory { product = .image }
-        return MakemkvRun(outcome: RunOutcome.classify(accumulator, exit: exit, product: product, newNames: newNames),
-                          notice: accumulator.problem, libreDrive: accumulator.libreDrive, version: accumulator.makemkvVersion,
-                          transcriptProblem: started.process?.transcriptProblem())
+        let outcome = RunOutcome.classify(accumulator, exit: exit, product: product, newNames: newNames)
+        released = true
+        let settingsProblem = lease.release()
+        return MakemkvRun(outcome: outcome, notice: accumulator.problem, libreDrive: accumulator.libreDrive, version: accumulator.makemkvVersion,
+                          transcriptProblem: started.process?.transcriptProblem(), settingsProblem: settingsProblem)
     }
 
     /// Feeds the process's lines as robot events; `handle` returns a reason to stop it.

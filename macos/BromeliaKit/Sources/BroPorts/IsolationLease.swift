@@ -12,5 +12,9 @@ public protocol IsolationLease: Sendable {
     /// makemkvcon has read its settings (its first output line).
     func firstOutput()
 
-    func release()
+    /// Gives the settings back once the run has ended: why they couldn't all be cleaned up (makemkv.keyNotRemoved: the
+    /// registration key left in the job's folder; makemkv.registryNotRestored: the user's registry values not back yet),
+    /// or nil.
+    @discardableResult
+    func release() -> BroMessage?
 }

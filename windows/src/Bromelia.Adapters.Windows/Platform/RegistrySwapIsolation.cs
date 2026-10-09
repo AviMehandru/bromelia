@@ -157,6 +157,7 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
         readonly string? _profile;
         readonly Timer _timer;
         int _restored;
+        volatile bool _notRestored;
 
         public Lease(RegistrySwapIsolation owner, Dictionary<string, string?> snapshot, string? profile)
         {
@@ -172,13 +173,19 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
 
         public void FirstOutput() => GiveBack();
 
-        public void Release() => GiveBack();
+        public BroMessage? Release()
+        {
+            GiveBack();
+            return _notRestored
+                ? new BroMessage(MessageCode.MakemkvRegistryNotRestored, Severity.Warning, ("path", JsonValue.Of(_owner._snapshotFile)))
+                : null;
+        }
 
         void GiveBack()
         {
             if (Interlocked.Exchange(ref _restored, 1) != 0) return;
             _timer.Dispose();
-            _owner.Restore(_snapshot);
+            _notRestored = !_owner.Restore(_snapshot);
             Launch.Release();
         }
     }
