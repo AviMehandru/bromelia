@@ -33,10 +33,10 @@ public final class PlatformDriveControl: DriveControl, @unchecked Sendable {
     }
 
     public func eject(_ device: String) async throws(BroError) {
-        guard let bsd = Self.bsd(device) else { throw ejectFailed(device) }
-        if await Self.daEject(bsd) { return }
+        guard let bsd = Self.bsd(device) else { throw ejectFailed(device, "not a drive") }
+        guard let refused = await Self.daEject(bsd) else { return }
         let (status, _) = await run("/usr/sbin/diskutil", ["eject", "/dev/" + bsd], stall: 60)
-        if status != 0 { throw ejectFailed(device) }
+        if status != 0 { throw ejectFailed(device, "\(refused); diskutil eject exited with status \(status)") }
     }
 
     public func closeTray(_ device: String) async throws(BroError) {
@@ -133,16 +133,19 @@ public final class PlatformDriveControl: DriveControl, @unchecked Sendable {
         return DADiskCopyDescription(disk) as? [CFString: Any]
     }
 
-    /// Unmounts (MakeMKV may have left it mounted), then ejects; whether DiskArbitration did.
-    private static func daEject(_ bsd: String) async -> Bool {
-        guard let session = DASessionCreate(kCFAllocatorDefault), let disk = DADiskCreateFromBSDName(kCFAllocatorDefault, session, bsd) else { return false }
+    /// Unmounts (MakeMKV may have left it mounted), then ejects; nil when DiskArbitration did, otherwise why not.
+    private static func daEject(_ bsd: String) async -> String? {
+        guard let session = DASessionCreate(kCFAllocatorDefault), let disk = DADiskCreateFromBSDName(kCFAllocatorDefault, session, bsd) else {
+            return "DiskArbitration doesn't know \(bsd)"
+        }
         DASessionSetDispatchQueue(session, DispatchQueue.global())
         defer { DASessionSetDispatchQueue(session, nil) }
-        final class Box: @unchecked Sendable { var continuation: CheckedContinuation<Bool, Never>? }
+        final class Box: @unchecked Sendable { var continuation: CheckedContinuation<String?, Never>? }
         let box = Box()
         let callback: DADiskEjectCallback = { _, dissenter, context in
             guard let context else { return }
-            Unmanaged<Box>.fromOpaque(context).takeRetainedValue().continuation?.resume(returning: dissenter == nil)
+            let reason = dissenter.map { "DiskArbitration refused (0x\(String(UInt32(bitPattern: DADissenterGetStatus($0)), radix: 16)))" }
+            Unmanaged<Box>.fromOpaque(context).takeRetainedValue().continuation?.resume(returning: reason)
         }
         return await withCheckedContinuation { c in
             box.continuation = c
@@ -161,8 +164,8 @@ public final class PlatformDriveControl: DriveControl, @unchecked Sendable {
         return (await process.wait().status, lines)
     }
 
-    private func ejectFailed(_ device: String) -> BroError {
-        BroMessage(.driveEjectFailed, [("device", .string(device))], severity: .error).toError()
+    private func ejectFailed(_ device: String, _ reason: String) -> BroError {
+        BroMessage(.driveEjectFailed, [("device", .string(device)), ("reason", .string(reason))], severity: .error).toError()
     }
 
     fileprivate static func failed(_ operation: String, _ path: String, _ reason: String) -> BroError {

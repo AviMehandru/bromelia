@@ -1226,7 +1226,8 @@
       "kind": "error",
       "severity": "warning",
       "params": {
-        "device": "string"
+        "device": "string",
+        "reason": "string"
       },
       "http": 500,
       "today": "JobRunner.run / AppModel.eject"
