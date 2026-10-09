@@ -95,13 +95,16 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         var reg = new FakeRegistry();
         reg.Values["dvd_MinimumTitleLength"] = "120";
         var iso = Isolation(reg, new Duration(0.5));
+        // The second launch keeps its values until its first output: with the same 0.5 s, its own timer could put the
+        // user's back before the checks below on a slow runner (CI, 2026-10-09). The launch lock is shared.
+        var patient = Isolation(reg, new Duration(60));
         var started = DateTime.UtcNow;
         var first = iso.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "1" }));
         IIsolationLease? second = null;
         var secondAt = DateTime.MinValue;
         var t = Task.Run(() =>
         {
-            second = iso.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "2" }));
+            second = patient.Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "2" }));
             secondAt = DateTime.UtcNow;
         });
         Assert.Same(t, await Task.WhenAny(t, Task.Delay(TimeSpan.FromSeconds(10))));
