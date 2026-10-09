@@ -317,6 +317,45 @@
       }
     },
     {
+      "id": "run-backup-image-any-name",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "image",
+        "newNames": [
+          "Movie"
+        ]
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": [
+          "Movie"
+        ]
+      }
+    },
+    {
+      "id": "run-backup-image-hidden",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "image",
+        "newNames": [
+          ".Movie"
+        ]
+      },
+      "expect": {
+        "statusWord": "failed",
+        "failed": true,
+        "readErrors": false,
+        "errorContains": "makemkvcon saved nothing",
+        "errorCode": "process.savedNothing",
+        "produced": []
+      }
+    },
+    {
       "id": "decide-succeeded",
       "from": [
         "macos JobRunner.run (today's chain of flags); rearchitecture-plan §20.3"

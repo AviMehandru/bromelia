@@ -4,7 +4,12 @@
  * first line, stops it when the accumulator says so (MakeMKV's space warning, a renumbered drive) or when cancelled,
  * and classifies the run with the names that are new in the destination (bro_run_outcome_products picks what counts).
  * A destination that can't be listed before or after the run fails the call: every name in it would otherwise look
- * new, or none. Holds no state between calls. Synchronous: call it from a worker thread (plan §6). */
+ * new, or none. Holds no state between calls. Synchronous: call it from a worker thread (plan §6).
+ *
+ * A backup's destination must not exist yet: makemkvcon refuses one that does, even an empty folder ("already contains
+ * a backup", exit 0), so the call fails with fs.alreadyExists before anything runs. A backup that comes out as one file
+ * at the destination is classified as BRO_RUN_PRODUCT_IMAGE, whatever it is called: MakeMKV writes DVD backups as ISO
+ * images even when a folder was asked for, and naming the image is the caller's job. */
 #pragma once
 
 #include "bro-cancellation-token.h"
@@ -41,7 +46,8 @@ BroMakemkvRun *bro_makemkv_tool_rip (BroMakemkvTool *self, const BroMakemkvSourc
                                      const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel,
                                      BroBroError **error);
 
-/* disc:N only (backup.needsDrive otherwise). Stops at once when a DRV line shows the index now names another device. */
+/* disc:N only (backup.needsDrive otherwise), to a destination that doesn't exist yet (fs.alreadyExists otherwise).
+ * Stops at once when a DRV line shows the index now names another device. */
 BroMakemkvRun *bro_makemkv_tool_backup (BroMakemkvTool *self, const BroMakemkvSource *source, gboolean decrypt, const char *destination,
                                         const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel,
                                         BroBroError **error);

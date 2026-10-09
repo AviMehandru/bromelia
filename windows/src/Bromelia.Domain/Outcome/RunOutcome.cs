@@ -66,13 +66,14 @@ public sealed record RunOutcome(
 
     /// <summary>The new names a run of this kind produced, in the order given: MKV files for a rip (a name ending in
     /// .mkv, in any case, that isn't hidden), the disc structure for a backup (a BDMV, VIDEO_TS or HVDVD_TS folder, or
-    /// an .iso image), nothing for a listing. Anything else (.DS_Store, Thumbs.db, a partial file) doesn't
-    /// count.</summary>
+    /// an .iso image), the file itself for an image (any name that isn't hidden), nothing for a listing. Anything else
+    /// (.DS_Store, Thumbs.db, a partial file) doesn't count.</summary>
     public static IReadOnlyList<string> Products(RunProduct product, IReadOnlyList<string> newNames) => product switch
     {
         RunProduct.Titles => newNames.Where(n => !n.StartsWith('.') && n.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase)).ToList(),
         RunProduct.Backup => newNames.Where(n => !n.StartsWith('.') && (DiscFolders.Contains(n.ToUpperInvariant())
             || n.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))).ToList(),
+        RunProduct.Image => newNames.Where(n => !n.StartsWith('.')).ToList(),
         _ => Array.Empty<string>(),
     };
 
