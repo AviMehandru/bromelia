@@ -130,6 +130,8 @@ test_real_drive (void)
   g_autofree char *mount = NULL;
   g_autofree char *video_ts = NULL;
   BroOsDriveState *state = NULL;
+  gboolean found;
+  guint sector;
   BroNavAnalysis *analysis;
   const guint8 *d;
   const char *expected = g_strcmp0 (g_getenv ("BROMELIA_TEST_DRIVE"), "1") == 0 ? "video" : g_getenv ("BROMELIA_TEST_DRIVE");
@@ -156,7 +158,10 @@ test_real_drive (void)
   descriptors = bro_sector_reader_read (reader, 16, 3, NULL);
   g_assert_cmpuint (g_bytes_get_size (descriptors), ==, 3 * 2048);
   d = g_bytes_get_data (descriptors, NULL);
-  g_assert_true (memcmp (d + 1, "CD001", 5) == 0 || memcmp (d + 2048 + 1, "BEA01", 5) == 0 || memcmp (d + 4096 + 1, "BEA01", 5) == 0);
+  /* ISO 9660 (CD001) or UDF (BEA01) in any of the three: a DVD has CD001 first, a Blu-ray only UDF from sector 16. */
+  for (found = FALSE, sector = 0; sector < 3 && !found; sector++)
+    found = memcmp (d + sector * 2048 + 1, "CD001", 5) == 0 || memcmp (d + sector * 2048 + 1, "BEA01", 5) == 0;
+  g_assert_true (found);
   bro_sector_reader_close (reader);
   if (g_str_equal (expected, "video") && g_file_test (video_ts = g_build_filename (mount, "VIDEO_TS", NULL), G_FILE_TEST_IS_DIR))
     {
