@@ -27,7 +27,12 @@ public sealed class PlatformDeviceMonitorTests
         if (!OperatingSystem.IsWindows()) return;
         var monitor = new PlatformDeviceMonitor(new SystemClock());
         var states = monitor.Snapshot();
-        Assert.Equal(Wmi(), states.Select(s => s.Drive.Device + " " + s.Drive.Identification).ToList());
+        // WMI's caption is a display name: the vendor and product, then the bus for some drives ("… USB Device").
+        var wmi = Wmi();
+        Assert.Equal(wmi.Count, states.Count);
+        foreach (var (line, s) in wmi.Zip(states))
+            Assert.True(line == s.Drive.Device + " " + s.Drive.Identification || line.StartsWith(s.Drive.Device + " " + s.Drive.Identification + " ", StringComparison.Ordinal),
+                $"{line} | {s.Drive.Device} {s.Drive.Identification}");
         foreach (var s in states) Assert.Equal(s.Media, s.Drive.MountPath is not null);
         Assert.Equal(states.Select(s => s.Drive), monitor.CurrentDrives());
     }
