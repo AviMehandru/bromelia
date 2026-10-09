@@ -11,7 +11,7 @@ namespace Bromelia.Adapters.Windows.Tests;
 /// <summary>The platform adapters with a real optical drive holding a disc: only when BROMELIA_TEST_DRIVE names the
 /// disc's content (video, data, audio; connect the drive or an image to the VM first). The drive list, the content probe,
 /// raw reads of \\.\E:, VIDEO_TS for a video disc; with BROMELIA_TEST_DRIVE_EJECT also eject (and close tray) with the
-/// monitor watching.</summary>
+/// monitor watching, at the end.</summary>
 [SupportedOSPlatform("windows")]
 public sealed class RealDriveTests
 {
@@ -48,18 +48,19 @@ public sealed class RealDriveTests
         }
         finally { reader.Close(); }
 
-        if (Expected != "video") return;
-        using var source = VideoTsByteSource.Open(mount!)!;
-        Assert.NotNull(DvdNav.Analyse(source));
-        Assert.Equal("DVDVIDEO-VMG", Encoding.ASCII.GetString(source.Read("VIDEO_TS.IFO", 0, 12)));
+        if (Expected == "video")
+        {
+            using var source = VideoTsByteSource.Open(mount!)!;
+            Assert.NotNull(DvdNav.Analyse(source));
+            Assert.Equal("DVDVIDEO-VMG", Encoding.ASCII.GetString(source.Read("VIDEO_TS.IFO", 0, 12)));
+        }
+
+        // Last, in the same test: xUnit doesn't order the tests of a class, and the disc is gone afterwards.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("BROMELIA_TEST_DRIVE_EJECT"))) EjectAndCloseTray(state, control);
     }
 
-    [Fact]
-    public void EjectAndCloseTray()
+    static void EjectAndCloseTray(OsDriveState state, PlatformDriveControl control)
     {
-        if (!Enabled || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("BROMELIA_TEST_DRIVE_EJECT"))) return;
-        var state = Drive();
-        var control = new PlatformDriveControl(new SystemClock());
         var monitor = new PlatformDeviceMonitor(new SystemClock(), new Duration(0.5));
         var seen = new List<DeviceEvent>();
         monitor.Start(e => { lock (seen) seen.Add(e); });
