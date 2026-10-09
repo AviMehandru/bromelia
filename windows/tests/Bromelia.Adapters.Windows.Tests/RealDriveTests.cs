@@ -10,8 +10,8 @@ namespace Bromelia.Adapters.Windows.Tests;
 
 /// <summary>The platform adapters with a real optical drive holding a disc: only when BROMELIA_TEST_DRIVE names the
 /// disc's content (video, data, audio; connect the drive or an image to the VM first). The drive list, the content probe,
-/// raw reads of \\.\E:, VIDEO_TS for a video disc; with BROMELIA_TEST_DRIVE_EJECT also eject (and close tray) with the
-/// monitor watching, at the end.</summary>
+/// raw reads of \\.\E:, VIDEO_TS for a DVD and index.bdmv for a Blu-ray; with BROMELIA_TEST_DRIVE_EJECT also eject (and
+/// close tray) with the monitor watching, at the end.</summary>
 [SupportedOSPlatform("windows")]
 public sealed class RealDriveTests
 {
@@ -48,12 +48,14 @@ public sealed class RealDriveTests
         }
         finally { reader.Close(); }
 
-        if (Expected == "video")
+        if (Expected == "video" && Directory.Exists(Path.Combine(mount!, "VIDEO_TS")))
         {
             using var source = VideoTsByteSource.Open(mount!)!;
             Assert.NotNull(DvdNav.Analyse(source));
             Assert.Equal("DVDVIDEO-VMG", Encoding.ASCII.GetString(source.Read("VIDEO_TS.IFO", 0, 12)));
         }
+        else if (Expected == "video") // a Blu-ray
+            Assert.Equal("INDX", Encoding.ASCII.GetString(File.ReadAllBytes(Path.Combine(mount!, "BDMV", "index.bdmv")), 0, 4));
 
         // Last, in the same test: xUnit doesn't order the tests of a class, and the disc is gone afterwards.
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("BROMELIA_TEST_DRIVE_EJECT"))) EjectAndCloseTray(state, control);
