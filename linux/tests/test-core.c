@@ -1911,6 +1911,47 @@ read_tool_pid (const char *dir)
   return g_file_get_contents (path, &text, NULL, NULL) ? (GPid) atoi (text) : 0;
 }
 
+static GPid
+read_child_pid (const char *dir)
+{
+  g_autofree char *path = g_build_filename (dir, "child.pid", NULL), *text = NULL;
+  return g_file_get_contents (path, &text, NULL, NULL) ? (GPid) atoi (text) : 0;
+}
+
+/* Stopping a tool stops what it started too (its process group), as a shell's background child would otherwise go on;
+ * a tool that ends by itself leaves what it started alone. */
+static void
+test_stop_reaches_the_tools_children (void)
+{
+  g_autofree char *dir = g_dir_make_tmp ("bromelia-group-XXXXXX", NULL);
+  const char *stuck[] = { "/bin/sh", "-c", "sleep 60 & echo $! > child.pid; echo started; sleep 60", NULL };
+  const char *quick[] = { "/bin/sh", "-c", "sleep 60 & echo $! > child.pid", NULL };
+  BroRunOptions opt = { 0, 2, SIGTERM };
+  BroRunStatus st = { 0 };
+  gint64 deadline;
+  GPid child;
+  g_assert_true (bro_process_run_ex (stuck, NULL, dir, &opt, NULL, NULL, NULL, &st, NULL));
+  g_assert_true (st.stalled);
+  child = read_child_pid (dir);
+  g_assert_cmpint (child, >, 0);
+  deadline = g_get_monotonic_time () + 5 * G_USEC_PER_SEC;
+  while (pid_alive (child) && g_get_monotonic_time () < deadline)
+    g_usleep (50000);
+  if (pid_alive (child))
+    {
+      kill (child, SIGKILL);
+      g_error ("the stopped tool's child (%d) is still running", (int) child);
+    }
+  memset (&st, 0, sizeof st);
+  g_assert_true (bro_process_run_ex (quick, NULL, dir, &opt, NULL, NULL, NULL, &st, NULL));
+  g_assert_cmpint (st.exit_status, ==, 0);
+  child = read_child_pid (dir);
+  g_assert_cmpint (child, >, 0);
+  g_assert_true (pid_alive (child));
+  kill (child, SIGKILL);
+  rm_rf (dir);
+}
+
 /* Bromelia killed (kill -9) while a tool runs: the tool's lifeline stops it within a few seconds, so a crash never
  * leaves makemkvcon reading the disc into a folder recovery marked INCOMPLETE. */
 static void
@@ -4349,6 +4390,7 @@ main (int argc, char **argv)
   g_test_add_func ("/reliability/stuck-process", test_stuck_process);
   g_test_add_func ("/reliability/cancel-without-main-loop", test_cancel_without_main_loop);
   g_test_add_func ("/reliability/crash-stops-the-tool", test_crash_stops_the_tool);
+  g_test_add_func ("/reliability/stop-reaches-the-tools-children", test_stop_reaches_the_tools_children);
   g_test_add_func ("/reliability/lifeline-ends-with-the-tool", test_lifeline_ends_with_the_tool);
   g_test_add_func ("/reliability/free-space", test_free_space);
   g_test_add_func ("/reliability/iso-backups", test_iso_backups);

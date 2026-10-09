@@ -607,6 +607,7 @@ typedef struct {
   gboolean finished;       /* the reading thread is done */
   gboolean cancelled;      /* the caller's cancellable fired */
   gboolean timed_out, stalled, abandoned;
+  gboolean stopped;        /* the watchdog started stopping it */
   BroRunOptions opt;
   gint64 last_output;      /* monotonic */
   GCancellable *read_cancel;  /* stops reading output */
@@ -623,9 +624,24 @@ process_gone (RunState *st)
 #endif
 }
 
-/* Watches one process: the overall timeout, output stalls, cancellation (stop signal, then SIGKILL after 5 s), a
- * process that ended but whose output pipe stays open (a child it left behind: stop reading after 5 s), and a
- * process that doesn't die even after SIGKILL (stuck in the kernel on a hung drive: abandoned after 30 s). */
+/* Sends @sig to the process's group: the tool and whatever it started (each tool leads a process group of its own,
+ * tool_child_setup), as a shell's background child would otherwise be left running. */
+static void
+signal_group (RunState *st, int sig)
+{
+#ifdef G_OS_UNIX
+  if (st->pid > 0 && kill (-st->pid, sig) == 0)
+    return;
+  g_subprocess_send_signal (st->proc, sig);
+#else
+  g_subprocess_force_exit (st->proc);
+#endif
+}
+
+/* Watches one process: the overall timeout, output stalls, cancellation (stop signal, then SIGKILL after 5 s, to the
+ * process's whole group), a process that ended but whose output pipe stays open (a child it left behind: stop reading
+ * after 5 s), and a process that doesn't die even after SIGKILL (stuck in the kernel on a hung drive: abandoned after
+ * 30 s). */
 static gpointer
 watchdog_thread (gpointer data)
 {
@@ -635,11 +651,15 @@ watchdog_thread (gpointer data)
   while (!st->finished)
     {
       gint64 now = g_get_monotonic_time ();
-      gboolean stop = FALSE;
+      gboolean stop = FALSE, gone = process_gone (st);
+      /* Only a process that is still running is stopped: once it has ended, what it left running (holding the output
+       * pipe) is left alone, and reading just ends 5 s later. */
+      if (gone && !stop_at)
+        stop_at = killed_at = -1;
       if (!stop_at && st->opt.timeout_seconds > 0 && now - start >= (gint64) st->opt.timeout_seconds * G_USEC_PER_SEC)
         {
-          st->timed_out = TRUE;
-          g_subprocess_force_exit (st->proc);
+          st->timed_out = st->stopped = TRUE;
+          signal_group (st, SIGKILL);
           stop_at = killed_at = now;
         }
       if (!stop_at && st->opt.stall_seconds > 0 && now - st->last_output >= (gint64) st->opt.stall_seconds * G_USEC_PER_SEC)
@@ -648,27 +668,28 @@ watchdog_thread (gpointer data)
         stop = TRUE;
       if (stop)
         {
+          st->stopped = TRUE;
 #ifdef G_OS_UNIX
-          g_subprocess_send_signal (st->proc, st->opt.stop_signal > 0 ? st->opt.stop_signal : SIGINT);
+          signal_group (st, st->opt.stop_signal > 0 ? st->opt.stop_signal : SIGINT);
 #else
           g_subprocess_force_exit (st->proc);
           killed_at = now;
 #endif
           stop_at = now;
         }
-      if (stop_at && !killed_at && now - stop_at >= 5 * G_USEC_PER_SEC)
+      if (stop_at > 0 && !killed_at && now - stop_at >= 5 * G_USEC_PER_SEC)
         {
-          g_subprocess_force_exit (st->proc);
+          signal_group (st, SIGKILL);
           killed_at = now;
         }
-      if (killed_at && !process_gone (st) && now - killed_at >= 30 * G_USEC_PER_SEC)
+      if (killed_at > 0 && !gone && now - killed_at >= 30 * G_USEC_PER_SEC)
         {
           st->abandoned = TRUE;
           g_cancellable_cancel (st->read_cancel);
           g_cancellable_cancel (st->wait_cancel);
           break;
         }
-      if (!gone_at && process_gone (st))
+      if (!gone_at && gone)
         gone_at = now;
       if (gone_at && now - gone_at >= 5 * G_USEC_PER_SEC)
         g_cancellable_cancel (st->read_cancel);
@@ -682,14 +703,22 @@ watchdog_thread (gpointer data)
 /* So that a crash (or kill -9) of Bromelia leaves no tools behind, each process gets a watcher: /bin/sh in its own
  * process group, reading a pipe that nothing writes to. Bromelia holds the pipe's write end (close-on-exec, never
  * closed); when Bromelia ends, however it ends, the kernel closes it, the watcher's read returns, and it stops the
- * process: TERM, then KILL if it is still there 5 s later. The watcher stops as soon as the process is gone, so it never
- * signals a pid used again. When the process ends first, its watcher is killed and reaped at once.
+ * process's group: TERM, then KILL if the group is still there 5 s later. The watcher stops as soon as the group is
+ * gone, so it never signals one used again. When the process ends first, its watcher is killed and reaped at once.
  * (makemkvcon ignores SIGPIPE, so without this it went on reading the disc into a folder recovery had marked
  * INCOMPLETE.) GSubprocess reaps the process just before the wait returns, so for that moment a watcher outlives it;
  * Bromelia would have to die in that moment, and the pid be reused, for a stray signal. No PR_SET_PDEATHSIG: it fires
  * when the thread that started the child ends. */
-static const char lifeline_script[] = "read -r _; kill -s TERM \"$1\" 2>/dev/null || exit 0; i=0; while [ $i -lt 50 ]; do sleep 0.1; "
-                                      "kill -0 \"$1\" 2>/dev/null || exit 0; i=$((i+1)); done; kill -s KILL \"$1\" 2>/dev/null";
+static const char lifeline_script[] = "read -r _; kill -s TERM -- \"-$1\" 2>/dev/null || exit 0; i=0; while [ $i -lt 50 ]; do sleep 0.1; "
+                                      "kill -0 -- \"-$1\" 2>/dev/null || exit 0; i=$((i+1)); done; kill -s KILL -- \"-$1\" 2>/dev/null";
+
+/* In the tool, before exec: a process group of its own, so that stopping it reaches what it starts too, and a
+ * terminal's ^C reaches Bromelia, which stops its jobs, rather than the tools directly. */
+static void
+tool_child_setup (gpointer data)
+{
+  setpgid (0, 0);
+}
 
 static void
 lifeline_child_setup (gpointer data)
@@ -810,6 +839,9 @@ bro_process_run_ex (const char *const *argv, const char *const *envp, const char
     g_subprocess_launcher_set_environ (launcher, (char **) envp);
   if (cwd && g_file_test (cwd, G_FILE_TEST_IS_DIR))
     g_subprocess_launcher_set_cwd (launcher, cwd);
+#ifdef G_OS_UNIX
+  g_subprocess_launcher_set_child_setup (launcher, tool_child_setup, NULL, NULL);
+#endif
   if (g_cancellable_is_cancelled (cancellable))
     {
       if (out)
@@ -851,6 +883,10 @@ bro_process_run_ex (const char *const *argv, const char *const *envp, const char
     }
   waited = g_subprocess_wait (st.proc, st.wait_cancel, NULL);
 #ifdef G_OS_UNIX
+  g_mutex_lock (&st.lock);
+  if (waited && st.stopped && st.pid > 0)
+    kill (-st.pid, SIGKILL); /* what is left of a stopped process's group; a finished one's is left alone */
+  g_mutex_unlock (&st.lock);
   if (waited)
     bro_lifeline_end (watcher);
   else if (watcher > 0)

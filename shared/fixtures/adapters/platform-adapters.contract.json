@@ -215,7 +215,10 @@
     {
       "id": "process-group",
       "from": [
-        "rearchitecture-plan §10.3 (posix_spawn + process group; Job Object; setpgid)"
+        "rearchitecture-plan §10.3 (posix_spawn + process group; Job Object; setpgid)",
+        "macos ReliabilityTests.stoppingAToolStopsWhatItStarted",
+        "windows ReliabilityTests.StoppingAToolStopsWhatItStarted",
+        "linux /reliability/stop-reaches-the-tools-children"
       ],
       "given": {
         "command": [

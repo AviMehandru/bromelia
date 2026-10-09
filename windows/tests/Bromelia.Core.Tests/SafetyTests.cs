@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Bromelia.Core.Config;
 using Bromelia.Core.Engine;
@@ -530,6 +531,58 @@ public class ReliabilityTests
         var r = runner.RunAsync(_ => { }, TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
         Assert.Equal(0, r.ExitCode);
         Assert.True(held);
+    }
+
+    /// <summary>Stopping a tool stops what it started too (its whole job), as macOS and Linux stop its process group; a
+    /// tool that ends by itself leaves what it started alone.</summary>
+    [Fact]
+    public void StoppingAToolStopsWhatItStarted()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_root);
+        try
+        {
+            void StartedChild(string pidFile, string then)
+            {
+                var script = Path.Combine(_root, Path.GetFileNameWithoutExtension(pidFile) + ".cmd");
+                File.WriteAllText(script, "@echo off\r\nstart /b powershell -NoProfile -Command \"$PID | Out-File -Encoding ascii '" + pidFile
+                                          + "'; Start-Sleep 60\"\r\necho started\r\n" + then);
+            }
+            string ReadPid(string pidFile)
+            {
+                try { return File.Exists(pidFile) ? File.ReadAllText(pidFile).Trim() : ""; }
+                catch (IOException) { return ""; } // PowerShell still has it open
+            }
+            int WaitForPid(string pidFile)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                while (ReadPid(pidFile).Length == 0 && DateTime.UtcNow < deadline) Thread.Sleep(100);
+                return int.Parse(ReadPid(pidFile));
+            }
+
+            var stuckPid = Path.Combine(_root, "stuck.pid");
+            StartedChild(stuckPid, "ping -n 60 127.0.0.1 >nul\r\n");
+            var stuck = new ProcessRunner("cmd.exe", new[] { "/c", Path.Combine(_root, "stuck.cmd") })
+                .RunAsync(_ => { }, stallTimeout: TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
+            Assert.True(stuck.Stalled);
+            var child = WaitForPid(stuckPid);
+            Thread.Sleep(500);
+            Assert.Throws<ArgumentException>(() => Process.GetProcessById(child));
+
+            var quickPid = Path.Combine(_root, "quick.pid");
+            StartedChild(quickPid, "");
+            var quick = new ProcessRunner("cmd.exe", new[] { "/c", Path.Combine(_root, "quick.cmd") }).RunAsync(_ => { }, stallTimeout: TimeSpan.FromSeconds(2))
+                .GetAwaiter().GetResult();
+            Assert.Equal(0, quick.ExitCode);
+            using var left = Process.GetProcessById(WaitForPid(quickPid));
+            Assert.False(left.HasExited);
+            left.Kill();
+        }
+        finally
+        {
+            Thread.Sleep(500);
+            try { Directory.Delete(_root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     RipJob Run(FakeMakeMkv fake, RipMode mode, DiscSource source, List<int>? titles = null, Action<DriveConfig>? setup = null)
