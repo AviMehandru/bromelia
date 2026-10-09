@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using Bromelia.Domain;
 using Bromelia.Foundation;
 using Bromelia.Ports;
 using Xunit;
@@ -177,13 +178,13 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         reg.Values["dvd_MinimumTitleLength"] = "120";
         var lease = Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30" }));
         reg.Fails = true;
-        lease.Release();
+        Assert.Equal("makemkv.registryNotRestored", lease.Release() is { } problem ? MessageCode.Wire(problem.Code) : null);
         Assert.True(File.Exists(Snapshot));
         var failure = Assert.Throws<BroFailure>(() => Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "45" })));
         Assert.Equal("makemkv.registryNotRestored", failure.Error.Code);
         Assert.Equal("30", reg.Get("dvd_MinimumTitleLength"));
         reg.Fails = false;
-        Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "45" })).Release();
+        Assert.Null(Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "45" })).Release());
         Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
         Assert.False(File.Exists(Snapshot));
     }

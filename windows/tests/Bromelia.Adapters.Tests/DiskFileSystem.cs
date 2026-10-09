@@ -19,7 +19,17 @@ internal sealed class DiskFileSystem : IFileSystem
             throw new Bromelia.Foundation.BroFailure(new Bromelia.Foundation.BroError(File.Exists(directory) ? "fs.failed" : "fs.notFound"));
         return new DirectoryInfo(directory).EnumerateFileSystemInfos().Select(e => new DirectoryEntry(e.Name, e is DirectoryInfo)).ToList();
     }
-    public byte[] Read(string path) => File.ReadAllBytes(path);
+    /// <summary>As PlatformFileSystem: fs.failed when it can't be read (a folder, no permission).</summary>
+    public byte[] Read(string path)
+    {
+        try { return File.ReadAllBytes(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new Bromelia.Foundation.BroFailure(new Bromelia.Domain.BroMessage(Bromelia.Domain.MessageCode.FsFailed, Bromelia.Domain.Severity.Error,
+                ("operation", Bromelia.Foundation.JsonValue.Of("read")), ("path", Bromelia.Foundation.JsonValue.Of(path)),
+                ("reason", Bromelia.Foundation.JsonValue.Of(e.Message))).ToError());
+        }
+    }
     public byte[] ReadRange(string path, long offset, int length) => throw new NotSupportedException();
     public void CreateDirectory(string path, bool parentsMustExist) => Directory.CreateDirectory(path);
 

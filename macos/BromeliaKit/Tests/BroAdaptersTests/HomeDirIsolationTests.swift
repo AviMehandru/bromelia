@@ -30,6 +30,10 @@ struct HomeDirIsolationTests {
             let lease = try HomeDirIsolation(fs: PlatformFileSystem(), layout: HomeLayout(rawValue: given["layout"]!.string!)!).prepare(run)
             lease.firstOutput()
             for (name, text) in given["duringRun"]?.members ?? [] { try Data((text.string ?? "").utf8).write(to: URL(fileURLWithPath: p(name))) }
+            for name in given["unreadableDuringRun"]?.array ?? [] {
+                try FileManager.default.removeItem(atPath: p(name.string!))
+                try FileManager.default.createDirectory(atPath: p(name.string!), withIntermediateDirectories: false)
+            }
             func sameFiles(_ want: JsonValue, _ when: String) throws {
                 var files: [String] = []
                 let e = FileManager.default.enumerator(atPath: work)!
@@ -45,8 +49,12 @@ struct HomeDirIsolationTests {
                 }
             }
             try sameFiles(expect["files"]!, "while running")
-            lease.release()
+            // "scrubKey": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs the home.
+            let problem = given["call"]?.string == "scrubKey"
+                ? HomeDirIsolation(fs: PlatformFileSystem(), layout: HomeLayout(rawValue: given["layout"]!.string!)!).scrubKey(work)
+                : lease.release()
             try sameFiles(expect["afterRelease"] ?? expect["files"]!, "after release")
+            try Fixtures.same(expect["releaseProblem"]?.string, problem?.code.rawValue, "releaseProblem")
 
             for (k, v) in expect["environment"]?.members ?? [] { try Fixtures.same(v.string!, shown(lease.environment()[k]), k) }
             try Fixtures.same(expect["profilePath"]?.string ?? "(none)", shown(lease.profilePath()), "profilePath")

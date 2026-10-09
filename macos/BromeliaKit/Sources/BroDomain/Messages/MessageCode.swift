@@ -84,6 +84,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case makemkvSavedMismatch = "makemkv.savedMismatch"
     case makemkvRegistryFailed = "makemkv.registryFailed"
     case makemkvRegistryNotRestored = "makemkv.registryNotRestored"
+    case makemkvKeyNotRemoved = "makemkv.keyNotRemoved"
     case makemkvTitleProgress = "makemkv.titleProgress"
     case discOpReading = "disc.op.reading"
     case discReadingAgain = "disc.readingAgain"

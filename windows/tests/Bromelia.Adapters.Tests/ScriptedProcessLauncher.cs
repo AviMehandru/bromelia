@@ -106,6 +106,8 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
 internal sealed class RecordingIsolation : ISettingsIsolation
 {
     public readonly List<string> Log = new();
+    /// <summary>What release reports.</summary>
+    public BroMessage? ReleaseProblem;
 
     public IIsolationLease Prepare(MakemkvRunSettings settings)
     {
@@ -121,7 +123,11 @@ internal sealed class RecordingIsolation : ISettingsIsolation
         public IReadOnlyDictionary<string, string> Environment() => new Dictionary<string, string> { ["HOME"] = _settings.WorkDirectory };
         public string? ProfilePath() => _settings.ProfileXml is null ? null : _settings.WorkDirectory + "/profile.mmcp.xml";
         public void FirstOutput() => _owner.Log.Add("firstOutput");
-        public void Release() => _owner.Log.Add("release");
+        public BroMessage? Release()
+        {
+            _owner.Log.Add("release");
+            return _owner.ReleaseProblem;
+        }
     }
 }
 

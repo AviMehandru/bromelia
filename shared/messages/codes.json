@@ -481,6 +481,15 @@
       },
       "today": "new: RegistrySwapIsolation (the user's values are kept in a snapshot file until they are back)"
     },
+    "makemkv.keyNotRemoved": {
+      "kind": "log",
+      "severity": "warning",
+      "params": {
+        "path": "path",
+        "reason": "string"
+      },
+      "today": "new: HomeDirIsolation (the registration key is removed from a run's settings.conf when the run ends, or by startup recovery after a crash)"
+    },
     "makemkv.titleProgress": {
       "kind": "log",
       "severity": "info",

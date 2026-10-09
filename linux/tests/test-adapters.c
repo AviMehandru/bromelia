@@ -957,6 +957,7 @@ isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
   g_autofree char *profile = NULL;
   g_autofree char *shown = NULL;
   BroJsonValue *before = bro_json_value_member (given, "before");
+  g_autoptr (BroBroMessage) problem = NULL;
   BroJsonValue *settings = bro_json_value_member (given, "settings");
   BroJsonValue *want_env = bro_json_value_member (expect, "environment");
   BroJsonValue *want_files = bro_json_value_member (expect, "files");
@@ -993,9 +994,25 @@ isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
         g_autofree char *path = fs_path (during->keys->pdata[i]);
         g_file_set_contents (path, bro_json_value_get_string (bro_json_value_at (during, i), ""), -1, NULL);
       }
+    during = bro_json_value_member (given, "unreadableDuringRun");
+    for (guint i = 0; during && i < bro_json_value_length (during); i++)
+      {
+        g_autofree char *path = fs_path (bro_json_value_get_string (bro_json_value_at (during, i), ""));
+        g_unlink (path);
+        g_mkdir (path, 0755);
+      }
   }
   home_same_files (failures, id, run->work_directory, want_files, "while running");
-  bro_isolation_lease_release (lease);
+  /* "scrubKey": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs the home. */
+  if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (given, "call"), NULL), "scrubKey") == 0)
+    {
+      g_autoptr (BroHomeDirIsolation) again = bro_home_dir_isolation_new (BRO_FILE_SYSTEM (fs), layout);
+      problem = bro_home_dir_isolation_scrub_key (again, run->work_directory);
+    }
+  else
+    problem = bro_isolation_lease_release (lease);
+  bro_test_same_string (failures, id, "releaseProblem", bro_json_value_get_string (bro_json_value_member (expect, "releaseProblem"), NULL),
+                        problem ? bro_message_code_wire (problem->code) : NULL);
   home_same_files (failures, id, run->work_directory, bro_json_value_member (expect, "afterRelease") ? bro_json_value_member (expect, "afterRelease") : want_files,
                    "after release");
   env = bro_isolation_lease_environment (lease);
@@ -1397,6 +1414,7 @@ G_DECLARE_FINAL_TYPE (TestRecordingIsolation, test_recording_isolation, TEST, RE
 struct _TestRecordingIsolation {
   GObject parent_instance;
   GPtrArray *log;
+  char *release_problem; /* the reason release reports in makemkv.keyNotRemoved, or NULL */
 };
 
 #define TEST_TYPE_RECORDING_LEASE (test_recording_lease_get_type ())
@@ -1423,7 +1441,19 @@ rl_environment (BroIsolationLease *l)
 
 static char *rl_profile (BroIsolationLease *l) { return g_strdup (TEST_RECORDING_LEASE (l)->profile); }
 static void rl_first (BroIsolationLease *l) { g_ptr_array_add (TEST_RECORDING_LEASE (l)->owner->log, g_strdup ("firstOutput")); }
-static void rl_release (BroIsolationLease *l) { g_ptr_array_add (TEST_RECORDING_LEASE (l)->owner->log, g_strdup ("release")); }
+static BroBroMessage *
+rl_release (BroIsolationLease *l)
+{
+  TestRecordingIsolation *owner = TEST_RECORDING_LEASE (l)->owner;
+  BroJsonValue *params;
+  g_ptr_array_add (owner->log, g_strdup ("release"));
+  if (!owner->release_problem)
+    return NULL;
+  params = bro_json_value_new_object ();
+  bro_json_value_set (params, "path", bro_json_value_new_string ("<work>/.MakeMKV/settings.conf"));
+  bro_json_value_set (params, "reason", bro_json_value_new_string (owner->release_problem));
+  return bro_bro_message_new (BRO_MSG_MAKEMKV_KEY_NOT_REMOVED, params, BRO_SEVERITY_WARNING);
+}
 
 static void
 test_recording_lease_finalize (GObject *o)
@@ -1467,6 +1497,7 @@ static void
 test_recording_isolation_finalize (GObject *o)
 {
   g_ptr_array_unref (TEST_RECORDING_ISOLATION (o)->log);
+  g_free (TEST_RECORDING_ISOLATION (o)->release_problem);
   G_OBJECT_CLASS (test_recording_isolation_parent_class)->finalize (o);
 }
 
@@ -1652,6 +1683,7 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
   launcher->delete_after = (int) bro_json_value_get_integer (bro_json_value_member (given, "deleteDestinationAfterLines"), -1);
   launcher->delete_dir = g_strdup (destination);
   launcher->transcript_fails = bro_json_value_get_bool (bro_json_value_member (given, "transcriptFails"), FALSE);
+  isolation->release_problem = g_strdup (bro_json_value_get_string (bro_json_value_member (given, "releaseProblem"), NULL));
   launcher->cancel = cancel_source;
   locator->path = mk && mk->kind == BRO_JSON_VALUE_NULL ? NULL : g_strdup ("/opt/makemkvcon");
   tool = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), BRO_FILE_SYSTEM (fs), BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
@@ -1782,6 +1814,8 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     bro_test_same_string (failures, id, "debugLog", bro_json_value_get_string (v, ""), run ? run->outcome->debug_log : NULL);
   bro_test_same_string (failures, id, "transcriptProblem", bro_json_value_get_string (bro_json_value_member (expect, "transcriptProblem"), NULL),
                         run && run->transcript_problem ? bro_message_code_wire (run->transcript_problem->code) : NULL);
+  bro_test_same_string (failures, id, "settingsProblem", bro_json_value_get_string (bro_json_value_member (expect, "settingsProblem"), NULL),
+                        run && run->settings_problem ? bro_message_code_wire (run->settings_problem->code) : NULL);
   if ((v = bro_json_value_member (expect, "produced")))
     {
       g_autofree char *want = joined_strings (v);

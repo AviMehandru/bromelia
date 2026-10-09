@@ -5,7 +5,8 @@ import BroPorts
 /// SettingsIsolation for macOS and Linux (plan §10.3): each makemkvcon run gets HOME set to the job's home folder,
 /// holding its own settings.conf (0600: it may hold the registration key) and the generated profile. The files stay
 /// with the job, except the key: release removes the app_Key line from settings.conf, whatever wrote it, so the key
-/// doesn't wait in the job's folder for retention.
+/// doesn't wait in the job's folder for retention. A run that never released its lease (the engine crashed) leaves the
+/// key there; startup recovery removes it with `scrubKey(_:)`.
 public final class HomeDirIsolation: SettingsIsolation {
     private let fs: any FileSystem
     private let layout: HomeLayout
@@ -26,7 +27,28 @@ public final class HomeDirIsolation: SettingsIsolation {
             profile = home + "/profile.mmcp.xml"
             try fs.writeAtomically(profile!, bytes: Array(xml.utf8), mode: 0o644)
         }
-        return Lease(fs: fs, home: home, conf: folder + "/settings.conf", profile: profile)
+        return Lease(fs: fs, home: home, conf: confPath(home), profile: profile)
+    }
+
+    private func confPath(_ home: String) -> String { home + (layout == .macos ? "/Library/MakeMKV" : "/.MakeMKV") + "/settings.conf" }
+
+    /// Removes the app_Key line from the settings.conf of a run's home (`workDirectory`), as release does: for the home
+    /// of a run the engine never released (it crashed). makemkv.keyNotRemoved when the file is there but can't be
+    /// rewritten; nil otherwise.
+    @discardableResult
+    public func scrubKey(_ workDirectory: String) -> BroMessage? { Self.scrub(fs, confPath(workDirectory)) }
+
+    static func scrub(_ fs: any FileSystem, _ conf: String) -> BroMessage? {
+        guard fs.exists(conf) else { return nil }
+        do throws(BroError) {
+            let text = String(decoding: try fs.read(conf), as: UTF8.self)
+            let kept = text.split(separator: "\n", omittingEmptySubsequences: false).filter { !isKeyLine($0) }.joined(separator: "\n")
+            if kept != text { try fs.writeAtomically(conf, bytes: Array(kept.utf8), mode: 0o600) }
+            return nil
+        } catch {
+            let reason = error.params.first { $0.key == "reason" }?.value.string ?? error.code
+            return BroMessage(.makemkvKeyNotRemoved, [("path", .string(conf)), ("reason", .string(reason))], severity: .warning)
+        }
     }
 
     /// A settings.conf line that sets app_Key.
@@ -45,12 +67,7 @@ public final class HomeDirIsolation: SettingsIsolation {
         func profilePath() -> String? { profile }
         func firstOutput() {}
 
-        func release() {
-            // Best effort: the file is 0600 and pruned with the job.
-            guard fs.exists(conf), let bytes = try? fs.read(conf) else { return }
-            let text = String(decoding: bytes, as: UTF8.self)
-            let kept = text.split(separator: "\n", omittingEmptySubsequences: false).filter { !HomeDirIsolation.isKeyLine($0) }.joined(separator: "\n")
-            if kept != text { try? fs.writeAtomically(conf, bytes: Array(kept.utf8), mode: 0o600) }
-        }
+        @discardableResult
+        func release() -> BroMessage? { HomeDirIsolation.scrub(fs, conf) }
     }
 }

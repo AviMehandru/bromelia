@@ -17,5 +17,6 @@ bro_makemkv_run_free (BroMakemkvRun *x)
   g_free (x->libre_drive);
   g_free (x->version);
   g_clear_pointer (&x->transcript_problem, bro_bro_message_free);
+  g_clear_pointer (&x->settings_problem, bro_bro_message_free);
   g_free (x);
 }

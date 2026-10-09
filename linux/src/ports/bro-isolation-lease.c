@@ -29,9 +29,9 @@ bro_isolation_lease_first_output (BroIsolationLease *self)
   BRO_ISOLATION_LEASE_GET_IFACE (self)->first_output (self);
 }
 
-void
+BroBroMessage *
 bro_isolation_lease_release (BroIsolationLease *self)
 {
-  g_return_if_fail (BRO_IS_ISOLATION_LEASE (self));
-  BRO_ISOLATION_LEASE_GET_IFACE (self)->release (self);
+  g_return_val_if_fail (BRO_IS_ISOLATION_LEASE (self), NULL);
+  return BRO_ISOLATION_LEASE_GET_IFACE (self)->release (self);
 }
