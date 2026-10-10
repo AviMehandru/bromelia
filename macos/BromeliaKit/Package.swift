@@ -11,12 +11,14 @@ let package = Package(
         .library(name: "BroDomain", targets: ["BroDomain"]),
         .library(name: "BroPorts", targets: ["BroPorts"]),
         .library(name: "BroAdapters", targets: ["BroAdapters"]),
+        .library(name: "BroEngine", targets: ["BroEngine"]),
     ],
     targets: [
         .target(name: "BroFoundation"),
         .target(name: "BroDomain", dependencies: ["BroFoundation"]),
         .target(name: "BroPorts", dependencies: ["BroFoundation", "BroDomain"]),
         .target(name: "BroAdapters", dependencies: ["BroFoundation", "BroDomain", "BroPorts"]),
+        .target(name: "BroEngine", dependencies: ["BroFoundation", "BroDomain", "BroPorts"]),
         // Reads shared/fixtures for the tests; not part of any layer.
         .target(name: "BroTestSupport", dependencies: ["BroFoundation"], path: "Tests/BroTestSupport"),
         .testTarget(name: "BroFoundationTests", dependencies: ["BroFoundation", "BroTestSupport"]),
@@ -26,6 +28,7 @@ let package = Package(
         .executableTarget(name: "BroTestProbe", dependencies: ["BroFoundation", "BroDomain", "BroPorts", "BroAdapters"],
                           path: "Tests/BroTestProbe"),
         .testTarget(name: "BroAdaptersTests", dependencies: ["BroAdapters", "BroTestSupport", "BroTestProbe"]),
+        .testTarget(name: "BroEngineTests", dependencies: ["BroEngine", "BroTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

@@ -1,0 +1,95 @@
+{
+  "description": "EngineClock (plan §3.2, §8): the Clock port as engine code sees it. now and monotonic are the clock's; timer(schedule, handler) asks the clock for a timer whose handler, on whatever thread the clock fires it, posts the real handler to the engine executor, so handlers always run there. EngineTimer.cancel (on the executor) stops the timer: a handler already posted but not yet run doesn't run either. A handler may cancel its own timer. Cancelling twice, or after an 'at' timer fired, does nothing. The harness uses a real EngineExecutor and a manual clock that starts at 2026-10-02T20:00:00.000Z; advance <ms> moves it, firing each due timer in due order (an 'every' timer once per interval passed) from the test's thread and waiting for the executor to settle after each one. Ops: timer {as, at: <ms from the start> | every: <seconds>, cancelSelfAfter: <n fires>}; advance <ms>; cancel <as> (run on the executor); onExecutor [ops] (runs the ops inside one action on the executor, then waits for it to settle). Expect: fired (the timers' names in the order their handlers ran), allOnExecutor (every handler ran on the executor).",
+  "functions": ["EngineClock.now", "EngineClock.monotonic", "EngineClock.timer", "EngineTimer.cancel"],
+  "cases": [
+    {
+      "id": "at-fires-once",
+      "given": {
+        "ops": [
+          {"timer": {"as": "t", "at": 5000}},
+          {"advance": 4000},
+          {"advance": 1000},
+          {"advance": 10000}
+        ]
+      },
+      "expect": {"fired": ["t"], "allOnExecutor": true}
+    },
+    {
+      "id": "every-repeats",
+      "given": {
+        "ops": [
+          {"timer": {"as": "t", "every": 2}},
+          {"advance": 7000}
+        ]
+      },
+      "expect": {"fired": ["t", "t", "t"], "allOnExecutor": true}
+    },
+    {
+      "id": "due-order",
+      "given": {
+        "ops": [
+          {"timer": {"as": "late", "at": 3000}},
+          {"timer": {"as": "early", "at": 1000}},
+          {"timer": {"as": "tick", "every": 2}},
+          {"advance": 5000}
+        ]
+      },
+      "expect": {"fired": ["early", "tick", "late", "tick"]}
+    },
+    {
+      "id": "cancel-stops-it",
+      "given": {
+        "ops": [
+          {"timer": {"as": "t", "every": 1}},
+          {"advance": 2000},
+          {"cancel": "t"},
+          {"advance": 5000}
+        ]
+      },
+      "expect": {"fired": ["t", "t"]}
+    },
+    {
+      "id": "cancel-wins-over-a-posted-handler",
+      "given": {
+        "ops": [
+          {"timer": {"as": "t", "at": 1000}},
+          {"timer": {"as": "other", "at": 1000}},
+          {"onExecutor": [{"advance": 1000}, {"cancel": "t"}]}
+        ]
+      },
+      "expect": {"fired": ["other"]}
+    },
+    {
+      "id": "handler-cancels-itself",
+      "given": {
+        "ops": [
+          {"timer": {"as": "t", "every": 1, "cancelSelfAfter": 2}},
+          {"advance": 5000}
+        ]
+      },
+      "expect": {"fired": ["t", "t"]}
+    },
+    {
+      "id": "cancel-after-firing-does-nothing",
+      "given": {
+        "ops": [
+          {"timer": {"as": "t", "at": 1000}},
+          {"advance": 1000},
+          {"cancel": "t"},
+          {"cancel": "t"},
+          {"advance": 1000}
+        ]
+      },
+      "expect": {"fired": ["t"]}
+    },
+    {
+      "id": "now-and-monotonic",
+      "given": {
+        "ops": [
+          {"advance": 1500}
+        ]
+      },
+      "expect": {"now": "2026-10-02T20:00:01.500Z", "monotonicSeconds": 1.5, "fired": []}
+    }
+  ]
+}

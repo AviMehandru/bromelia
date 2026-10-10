@@ -1,0 +1,1048 @@
+{
+  "description": "EventBus (plan §11.2, §25): lives on the engine executor. publish(type, data) gives the event the next seq (firstSeq, firstSeq + 1, …; lastSeq is firstSeq - 1 before the first) and the clock's now as 'at', keeps the last 'retain' events for replays, hands it to every in-engine subscriber whose types include it (all types when none are given, internal ones too) and queues it on every stream that wants it. Delivery is in seq order for every subscriber: an event published by a handler is delivered once the current event has reached every subscriber. A subscriber added during a delivery gets only events published after it subscribed; one removed during a delivery gets nothing more, even the event being delivered. Streams (the server's SSE) carry client-visible events only (never leaseChanged or stepFinished, whatever their types ask for). stream(after, types): with after null only events published from now on; otherwise first the retained events with seq > after; when after is beyond lastSeq (an id from an earlier engine), or events after it are no longer retained, or there are more of them than the stream's capacity, the stream starts with one resync item instead (the reader then sends a snapshot). A stream holds at most 'streamCapacity' items: when an event doesn't fit, everything queued is replaced by one resync item. Whenever a resync item waits on a stream, the events published until the reader takes it are dropped: the snapshot the reader then sends covers them. close() ends a stream: what was queued is dropped and the reader sees its end. The harness runs the ops in order on a manual clock that starts at 2026-10-02T20:00:00.000Z. Ops: publish {type, data (default {})}; advance <ms> (the clock); subscribe {as, types, onReceive: {type, do: [ops]}} (onReceive runs its ops each time that subscriber receives an event of that type); unsubscribe <as>; stream {as, after, types}; read <as> (takes every item queued on the stream, without waiting: 'resync', '<seq> <type>', or 'end' once closed); close <as>. Expect: received {<as>: ['<seq> <type>', …]}, read {<as>: […]} (everything read from it, in order), lastSeq, events (EngineEvent.json of every published event, in order).",
+  "functions": [
+    "EventBus.publish",
+    "EventBus.subscribe",
+    "EventBus.stream",
+    "EventBus.lastSeq",
+    "Subscription.cancel",
+    "EventStream.poll",
+    "EventStream.close",
+    "EngineEvent.json"
+  ],
+  "cases": [
+    {
+      "id": "envelope",
+      "given": {
+        "ops": [
+          {
+            "publish": {
+              "type": "jobChanged",
+              "data": {
+                "job": {
+                  "id": "0b9a7f60-0000-4000-8000-000000000001",
+                  "state": "queued"
+                }
+              }
+            }
+          },
+          {
+            "advance": 1500
+          },
+          {
+            "publish": {
+              "type": "problemCleared",
+              "data": {
+                "id": "library.offline:lib"
+              }
+            }
+          }
+        ]
+      },
+      "expect": {
+        "lastSeq": 2,
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "jobChanged",
+            "data": {
+              "job": {
+                "id": "0b9a7f60-0000-4000-8000-000000000001",
+                "state": "queued"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:01.500Z",
+            "type": "problemCleared",
+            "data": {
+              "id": "library.offline:lib"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "first-seq",
+      "given": {
+        "firstSeq": 1000,
+        "ops": [
+          {
+            "stream": {
+              "as": "s",
+              "after": 999
+            }
+          },
+          {
+            "publish": {
+              "type": "configChanged",
+              "data": {
+                "version": 2
+              }
+            }
+          },
+          {
+            "publish": {
+              "type": "configChanged",
+              "data": {
+                "version": 3
+              }
+            }
+          },
+          {
+            "read": "s"
+          }
+        ]
+      },
+      "expect": {
+        "lastSeq": 1001,
+        "read": {
+          "s": [
+            "1000 configChanged",
+            "1001 configChanged"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nothing-published",
+      "given": {
+        "firstSeq": 50,
+        "ops": []
+      },
+      "expect": {
+        "lastSeq": 49,
+        "events": []
+      }
+    },
+    {
+      "id": "subscribers-filter-by-type",
+      "given": {
+        "ops": [
+          {
+            "subscribe": {
+              "as": "all"
+            }
+          },
+          {
+            "subscribe": {
+              "as": "finished",
+              "types": [
+                "jobFinished"
+              ]
+            }
+          },
+          {
+            "subscribe": {
+              "as": "two",
+              "types": [
+                "leaseChanged",
+                "jobChanged"
+              ]
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "publish": {
+              "type": "leaseChanged"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "received": {
+          "all": [
+            "1 jobChanged",
+            "2 jobFinished",
+            "3 leaseChanged"
+          ],
+          "finished": [
+            "2 jobFinished"
+          ],
+          "two": [
+            "1 jobChanged",
+            "3 leaseChanged"
+          ]
+        }
+      }
+    },
+    {
+      "id": "published-during-delivery-comes-after",
+      "given": {
+        "ops": [
+          {
+            "subscribe": {
+              "as": "a",
+              "onReceive": {
+                "type": "jobFinished",
+                "do": [
+                  {
+                    "publish": {
+                      "type": "problemRaised"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "subscribe": {
+              "as": "b"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "received": {
+          "a": [
+            "1 jobFinished",
+            "2 problemRaised",
+            "3 jobChanged"
+          ],
+          "b": [
+            "1 jobFinished",
+            "2 problemRaised",
+            "3 jobChanged"
+          ]
+        },
+        "lastSeq": 3
+      }
+    },
+    {
+      "id": "chained-publishes-keep-order",
+      "given": {
+        "ops": [
+          {
+            "subscribe": {
+              "as": "a",
+              "onReceive": {
+                "type": "jobFinished",
+                "do": [
+                  {
+                    "publish": {
+                      "type": "problemRaised"
+                    }
+                  },
+                  {
+                    "publish": {
+                      "type": "queueChanged"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "subscribe": {
+              "as": "b",
+              "onReceive": {
+                "type": "problemRaised",
+                "do": [
+                  {
+                    "publish": {
+                      "type": "toolsChanged"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "subscribe": {
+              "as": "c"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "received": {
+          "a": [
+            "1 jobFinished",
+            "2 problemRaised",
+            "3 queueChanged",
+            "4 toolsChanged"
+          ],
+          "b": [
+            "1 jobFinished",
+            "2 problemRaised",
+            "3 queueChanged",
+            "4 toolsChanged"
+          ],
+          "c": [
+            "1 jobFinished",
+            "2 problemRaised",
+            "3 queueChanged",
+            "4 toolsChanged"
+          ]
+        }
+      }
+    },
+    {
+      "id": "subscribed-during-delivery-gets-later-events",
+      "given": {
+        "ops": [
+          {
+            "subscribe": {
+              "as": "a",
+              "onReceive": {
+                "type": "jobFinished",
+                "do": [
+                  {
+                    "subscribe": {
+                      "as": "late"
+                    }
+                  },
+                  {
+                    "publish": {
+                      "type": "problemRaised"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "subscribe": {
+              "as": "b"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "received": {
+          "a": [
+            "1 jobFinished",
+            "2 problemRaised"
+          ],
+          "b": [
+            "1 jobFinished",
+            "2 problemRaised"
+          ],
+          "late": [
+            "2 problemRaised"
+          ]
+        }
+      }
+    },
+    {
+      "id": "unsubscribed-during-delivery-gets-nothing-more",
+      "given": {
+        "ops": [
+          {
+            "subscribe": {
+              "as": "a",
+              "onReceive": {
+                "type": "jobChanged",
+                "do": [
+                  {
+                    "unsubscribe": "b"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "subscribe": {
+              "as": "b"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "received": {
+          "a": [
+            "1 jobChanged",
+            "2 jobFinished"
+          ],
+          "b": []
+        }
+      }
+    },
+    {
+      "id": "unsubscribe",
+      "given": {
+        "ops": [
+          {
+            "subscribe": {
+              "as": "a"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "unsubscribe": "a"
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "unsubscribe": "a"
+          }
+        ]
+      },
+      "expect": {
+        "received": {
+          "a": [
+            "1 jobChanged"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-live-only",
+      "given": {
+        "ops": [
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "stream": {
+              "as": "s"
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "read": "s"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "s": [
+            "3 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-never-carries-internal-events",
+      "given": {
+        "ops": [
+          {
+            "stream": {
+              "as": "all"
+            }
+          },
+          {
+            "stream": {
+              "as": "asked",
+              "types": [
+                "leaseChanged",
+                "stepFinished",
+                "jobChanged"
+              ]
+            }
+          },
+          {
+            "publish": {
+              "type": "leaseChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "stepFinished"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "stream": {
+              "as": "replay",
+              "after": 0
+            }
+          },
+          {
+            "read": "all"
+          },
+          {
+            "read": "asked"
+          },
+          {
+            "read": "replay"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "all": [
+            "3 jobChanged"
+          ],
+          "asked": [
+            "3 jobChanged"
+          ],
+          "replay": [
+            "3 jobChanged"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-filters-by-type",
+      "given": {
+        "ops": [
+          {
+            "stream": {
+              "as": "s",
+              "types": [
+                "jobFinished",
+                "jobLog"
+              ]
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobLog"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "publish": {
+              "type": "driveChanged"
+            }
+          },
+          {
+            "read": "s"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "s": [
+            "2 jobLog",
+            "3 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-replays-after",
+      "given": {
+        "ops": [
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobLog"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "stream": {
+              "as": "s",
+              "after": 2
+            }
+          },
+          {
+            "stream": {
+              "as": "f",
+              "after": 2,
+              "types": [
+                "jobFinished"
+              ]
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "publish": {
+              "type": "queueChanged"
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "read": "f"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "s": [
+            "3 jobLog",
+            "4 jobChanged",
+            "5 jobFinished",
+            "6 queueChanged"
+          ],
+          "f": [
+            "5 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-after-last-seq-replays-nothing",
+      "given": {
+        "ops": [
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "stream": {
+              "as": "s",
+              "after": 2
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "read": "s"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "s": [
+            "3 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-after-from-another-engine",
+      "given": {
+        "ops": [
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "stream": {
+              "as": "s",
+              "after": 41
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "read": "s"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "s": [
+            "resync",
+            "3 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-after-no-longer-retained",
+      "given": {
+        "retain": 3,
+        "ops": [
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "stream": {
+              "as": "gap",
+              "after": 2
+            }
+          },
+          {
+            "stream": {
+              "as": "kept",
+              "after": 3
+            }
+          },
+          {
+            "read": "gap"
+          },
+          {
+            "read": "kept"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "gap": [
+            "resync"
+          ],
+          "kept": [
+            "4 jobChanged",
+            "5 jobChanged",
+            "6 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stream-replay-larger-than-capacity",
+      "given": {
+        "streamCapacity": 2,
+        "ops": [
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "stream": {
+              "as": "s",
+              "after": 0
+            }
+          },
+          {
+            "stream": {
+              "as": "fits",
+              "after": 1
+            }
+          },
+          {
+            "read": "fits"
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "read": "fits"
+          },
+          {
+            "publish": {
+              "type": "queueChanged"
+            }
+          },
+          {
+            "read": "s"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "s": [
+            "resync",
+            "5 queueChanged"
+          ],
+          "fits": [
+            "2 jobChanged",
+            "3 jobChanged",
+            "4 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "slow-reader-gets-resync",
+      "given": {
+        "streamCapacity": 3,
+        "ops": [
+          {
+            "stream": {
+              "as": "slow"
+            }
+          },
+          {
+            "stream": {
+              "as": "quick"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "read": "quick"
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "read": "quick"
+          },
+          {
+            "read": "slow"
+          },
+          {
+            "publish": {
+              "type": "jobFinished"
+            }
+          },
+          {
+            "read": "slow"
+          },
+          {
+            "read": "quick"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "slow": [
+            "resync",
+            "6 jobFinished"
+          ],
+          "quick": [
+            "1 jobChanged",
+            "2 jobChanged",
+            "3 jobChanged",
+            "4 jobChanged",
+            "5 jobChanged",
+            "6 jobFinished"
+          ]
+        }
+      }
+    },
+    {
+      "id": "close-ends-a-stream",
+      "given": {
+        "ops": [
+          {
+            "stream": {
+              "as": "s"
+            }
+          },
+          {
+            "stream": {
+              "as": "other"
+            }
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "close": "s"
+          },
+          {
+            "publish": {
+              "type": "jobChanged"
+            }
+          },
+          {
+            "read": "s"
+          },
+          {
+            "read": "other"
+          },
+          {
+            "close": "s"
+          }
+        ]
+      },
+      "expect": {
+        "read": {
+          "s": [
+            "end"
+          ],
+          "other": [
+            "1 jobChanged",
+            "2 jobChanged"
+          ]
+        }
+      }
+    },
+    {
+      "id": "event-types",
+      "given": {},
+      "expect": {
+        "clientVisible": [
+          "snapshot",
+          "driveChanged",
+          "driveRemoved",
+          "mediumArrived",
+          "mediumRemoved",
+          "sessionChanged",
+          "sessionClosed",
+          "jobChanged",
+          "jobFinished",
+          "jobLog",
+          "queueChanged",
+          "problemRaised",
+          "problemCleared",
+          "libraryChanged",
+          "maintenanceProgress",
+          "configChanged",
+          "automationCountdown",
+          "toolsChanged"
+        ],
+        "internal": [
+          "leaseChanged",
+          "stepFinished"
+        ],
+        "asInSchema": "schema/events.json"
+      }
+    }
+  ]
+}

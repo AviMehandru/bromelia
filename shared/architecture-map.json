@@ -107,6 +107,10 @@
       {
         "symbol": "EnumWire",
         "why": "C# enums have no raw values: EnumWire gives a case's camelCase wire form and parses it (Swift: String raw values; C: bro_<enum>_to_wire / _from_wire)."
+      },
+      {
+        "symbol": "EngineEventTypes",
+        "why": "C# enums can't have methods: EngineEventType.IsInternal is an extension method in this static class (Swift: a property of the enum; C: bro_engine_event_type_is_internal)."
       }
     ],
     "c": [
@@ -11480,6 +11484,543 @@
           ],
           "why": "macOS's drutil tray close (platform-adapters.contract.json#drutil-match).",
           "swift": "PlatformDriveControl.drutilIndices(_:matching:)"
+        }
+      ]
+    },
+    "engine/core": {
+      "layer": "engine",
+      "folder": "Core",
+      "cFolder": "core",
+      "doc": "The engine's core (plan §3.2, §8, §11.2): the executor that owns all service state, the event bus, the clock as engine code sees it, and the coalescing of progress. shared/fixtures/engine/*.cases.json.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "EngineExecutor",
+          "kind": "class",
+          "doc": "The one thread (C#, C: a thread running a single-thread SynchronizationContext / a GMainLoop on its own GMainContext) or actor (Swift: EngineActor) that owns all service state. Actions posted from any thread run one at a time, in order; workers do the blocking work and post their results back.",
+          "swift": {
+            "name": "EngineExecutor",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EngineExecutor.swift"
+          },
+          "cs": {
+            "name": "EngineExecutor",
+            "file": "windows/src/Bromelia.Engine/Core/EngineExecutor.cs"
+          },
+          "c": {
+            "name": "BroEngineExecutor",
+            "file": "linux/src/engine/core/bro-engine-executor.h"
+          }
+        },
+        {
+          "name": "EngineActor",
+          "kind": "class",
+          "only": [
+            "swift"
+          ],
+          "why": "Swift checks executor isolation at compile time with a global actor; C# and C assert EngineExecutor.isCurrent instead.",
+          "doc": "Swift's global actor for engine code (plan §6): services and the core's executor-bound types are isolated to it, which the compiler checks.",
+          "swift": {
+            "name": "EngineActor",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EngineActor.swift"
+          }
+        },
+        {
+          "name": "EngineClock",
+          "kind": "class",
+          "doc": "The Clock port for engine code: now and monotonic as the clock says; timers whose handlers run on the executor and never after they are cancelled.",
+          "swift": {
+            "name": "EngineClock",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EngineClock.swift"
+          },
+          "cs": {
+            "name": "EngineClock",
+            "file": "windows/src/Bromelia.Engine/Core/EngineClock.cs"
+          },
+          "c": {
+            "name": "BroEngineClock",
+            "file": "linux/src/engine/core/bro-engine-clock.h"
+          }
+        },
+        {
+          "name": "EngineTimer",
+          "kind": "class",
+          "doc": "A timer of EngineClock; cancel (on the executor) stops it, even a handler already posted.",
+          "swift": {
+            "name": "EngineTimer",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EngineTimer.swift"
+          },
+          "cs": {
+            "name": "EngineTimer",
+            "file": "windows/src/Bromelia.Engine/Core/EngineTimer.cs"
+          },
+          "c": {
+            "name": "BroEngineTimer",
+            "file": "linux/src/engine/core/bro-engine-timer.h"
+          }
+        },
+        {
+          "name": "EventBus",
+          "kind": "class",
+          "doc": "publish/subscribe for engine events (plan §11.2), on the executor: seq numbers, in-order delivery to in-engine subscribers, a replay buffer and bounded streams for the server.",
+          "swift": {
+            "name": "EventBus",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EventBus.swift"
+          },
+          "cs": {
+            "name": "EventBus",
+            "file": "windows/src/Bromelia.Engine/Core/EventBus.cs"
+          },
+          "c": {
+            "name": "BroEventBus",
+            "file": "linux/src/engine/core/bro-event-bus.h"
+          }
+        },
+        {
+          "name": "EngineEvent",
+          "kind": "struct",
+          "fields": [
+            "seq",
+            "at",
+            "type",
+            "data"
+          ],
+          "doc": "{seq, at, type, data}: one event; data is the event's DTO as JSON (shared/schema/events.json). json(event) is the wire envelope.",
+          "swift": {
+            "name": "EngineEvent",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EngineEvent.swift"
+          },
+          "cs": {
+            "name": "EngineEvent",
+            "file": "windows/src/Bromelia.Engine/Core/EngineEvent.cs"
+          },
+          "c": {
+            "name": "BroEngineEvent",
+            "file": "linux/src/engine/core/bro-engine-event.h"
+          }
+        },
+        {
+          "name": "EngineEventType",
+          "kind": "enum",
+          "doc": "Every event type: the client-visible ones of shared/schema/events.json, then the internal ones, which are never streamed.",
+          "cases": [
+            "snapshot",
+            "driveChanged",
+            "driveRemoved",
+            "mediumArrived",
+            "mediumRemoved",
+            "sessionChanged",
+            "sessionClosed",
+            "jobChanged",
+            "jobFinished",
+            "jobLog",
+            "queueChanged",
+            "problemRaised",
+            "problemCleared",
+            "libraryChanged",
+            "maintenanceProgress",
+            "configChanged",
+            "automationCountdown",
+            "toolsChanged",
+            "leaseChanged",
+            "stepFinished"
+          ],
+          "swift": {
+            "name": "EngineEventType",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EngineEventType.swift",
+            "cases": [
+              ".snapshot",
+              ".driveChanged",
+              ".driveRemoved",
+              ".mediumArrived",
+              ".mediumRemoved",
+              ".sessionChanged",
+              ".sessionClosed",
+              ".jobChanged",
+              ".jobFinished",
+              ".jobLog",
+              ".queueChanged",
+              ".problemRaised",
+              ".problemCleared",
+              ".libraryChanged",
+              ".maintenanceProgress",
+              ".configChanged",
+              ".automationCountdown",
+              ".toolsChanged",
+              ".leaseChanged",
+              ".stepFinished"
+            ]
+          },
+          "cs": {
+            "name": "EngineEventType",
+            "file": "windows/src/Bromelia.Engine/Core/EngineEventType.cs",
+            "cases": [
+              "Snapshot",
+              "DriveChanged",
+              "DriveRemoved",
+              "MediumArrived",
+              "MediumRemoved",
+              "SessionChanged",
+              "SessionClosed",
+              "JobChanged",
+              "JobFinished",
+              "JobLog",
+              "QueueChanged",
+              "ProblemRaised",
+              "ProblemCleared",
+              "LibraryChanged",
+              "MaintenanceProgress",
+              "ConfigChanged",
+              "AutomationCountdown",
+              "ToolsChanged",
+              "LeaseChanged",
+              "StepFinished"
+            ]
+          },
+          "c": {
+            "name": "BroEngineEventType",
+            "file": "linux/src/engine/core/bro-engine-event-type.h",
+            "cases": [
+              "BRO_ENGINE_EVENT_TYPE_SNAPSHOT",
+              "BRO_ENGINE_EVENT_TYPE_DRIVE_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_DRIVE_REMOVED",
+              "BRO_ENGINE_EVENT_TYPE_MEDIUM_ARRIVED",
+              "BRO_ENGINE_EVENT_TYPE_MEDIUM_REMOVED",
+              "BRO_ENGINE_EVENT_TYPE_SESSION_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_SESSION_CLOSED",
+              "BRO_ENGINE_EVENT_TYPE_JOB_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_JOB_FINISHED",
+              "BRO_ENGINE_EVENT_TYPE_JOB_LOG",
+              "BRO_ENGINE_EVENT_TYPE_QUEUE_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_PROBLEM_RAISED",
+              "BRO_ENGINE_EVENT_TYPE_PROBLEM_CLEARED",
+              "BRO_ENGINE_EVENT_TYPE_LIBRARY_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_MAINTENANCE_PROGRESS",
+              "BRO_ENGINE_EVENT_TYPE_CONFIG_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_AUTOMATION_COUNTDOWN",
+              "BRO_ENGINE_EVENT_TYPE_TOOLS_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_LEASE_CHANGED",
+              "BRO_ENGINE_EVENT_TYPE_STEP_FINISHED"
+            ]
+          }
+        },
+        {
+          "name": "Subscription",
+          "kind": "class",
+          "doc": "An in-engine subscriber of the EventBus; cancel stops its deliveries at once.",
+          "swift": {
+            "name": "Subscription",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/Subscription.swift"
+          },
+          "cs": {
+            "name": "Subscription",
+            "file": "windows/src/Bromelia.Engine/Core/Subscription.cs"
+          },
+          "c": {
+            "name": "BroSubscription",
+            "file": "linux/src/engine/core/bro-subscription.h"
+          }
+        },
+        {
+          "name": "EventStream",
+          "kind": "class",
+          "doc": "One reader's bounded queue of StreamItems (the server's SSE connection). Read from any thread; next waits, poll doesn't.",
+          "swift": {
+            "name": "EventStream",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/EventStream.swift"
+          },
+          "cs": {
+            "name": "EventStream",
+            "file": "windows/src/Bromelia.Engine/Core/EventStream.cs"
+          },
+          "c": {
+            "name": "BroEventStream",
+            "file": "linux/src/engine/core/bro-event-stream.h"
+          }
+        },
+        {
+          "name": "StreamItem",
+          "kind": "enum",
+          "doc": "What a stream yields: an event, or resync (events were lost: send a snapshot).",
+          "cases": [
+            "event",
+            "resync"
+          ],
+          "swift": {
+            "name": "StreamItem",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/StreamItem.swift",
+            "cases": [
+              ".event",
+              ".resync"
+            ]
+          },
+          "cs": {
+            "name": "StreamItem",
+            "file": "windows/src/Bromelia.Engine/Core/StreamItem.cs",
+            "cases": [
+              "Event",
+              "Resync"
+            ]
+          },
+          "c": {
+            "name": "BroStreamItem",
+            "file": "linux/src/engine/core/bro-stream-item.h",
+            "cases": [
+              "BRO_STREAM_ITEM_EVENT",
+              "BRO_STREAM_ITEM_RESYNC"
+            ]
+          }
+        },
+        {
+          "name": "Coalescer",
+          "kind": "class",
+          "doc": "At most one value per interval per key (plan §8 rule 5): progress before it becomes an event or is stored.",
+          "swift": {
+            "name": "Coalescer",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/Coalescer.swift"
+          },
+          "cs": {
+            "name": "Coalescer",
+            "file": "windows/src/Bromelia.Engine/Core/Coalescer.cs"
+          },
+          "c": {
+            "name": "BroCoalescer",
+            "file": "linux/src/engine/core/bro-coalescer.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "EngineExecutor.post",
+          "params": [
+            "action"
+          ],
+          "returns": "Bool",
+          "doc": "Runs action on the executor after everything posted before it; never inside post. False (and the action never runs) once stopped.",
+          "swift": "EngineExecutor.post(_:)",
+          "cs": "EngineExecutor.Post",
+          "c": "bro_engine_executor_post"
+        },
+        {
+          "name": "EngineExecutor.isCurrent",
+          "params": [],
+          "returns": "Bool",
+          "doc": "True on the executor's thread.",
+          "only": [
+            "cs",
+            "c"
+          ],
+          "why": "Swift checks isolation to EngineActor at compile time (and EngineActor.assertIsolated at run time).",
+          "cs": "EngineExecutor.IsCurrent",
+          "c": "bro_engine_executor_is_current"
+        },
+        {
+          "name": "EngineExecutor.worker",
+          "params": [
+            "work"
+          ],
+          "returns": "T",
+          "doc": "Runs work on a worker thread; its result or BroError comes back on the executor.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "work",
+            "done"
+          ],
+          "swift": "EngineExecutor.worker(_:)",
+          "cs": "EngineExecutor.Worker",
+          "c": "bro_engine_executor_worker"
+        },
+        {
+          "name": "EngineExecutor.barrier",
+          "params": [],
+          "doc": "Waits until every action posted before it has run. Not on the executor.",
+          "async": true,
+          "swift": "EngineExecutor.barrier()",
+          "cs": "EngineExecutor.Barrier",
+          "c": "bro_engine_executor_barrier"
+        },
+        {
+          "name": "EngineExecutor.stop",
+          "params": [],
+          "doc": "Runs what is queued, then ends; later posts don't run. Waits for the end (not on the executor).",
+          "swift": "EngineExecutor.stop()",
+          "cs": "EngineExecutor.Stop",
+          "c": "bro_engine_executor_stop"
+        },
+        {
+          "name": "EngineClock.now",
+          "params": [],
+          "returns": "Instant",
+          "swift": "EngineClock.now()",
+          "cs": "EngineClock.Now",
+          "c": "bro_engine_clock_now"
+        },
+        {
+          "name": "EngineClock.monotonic",
+          "params": [],
+          "returns": "Duration",
+          "swift": "EngineClock.monotonic()",
+          "cs": "EngineClock.Monotonic",
+          "c": "bro_engine_clock_monotonic"
+        },
+        {
+          "name": "EngineClock.timer",
+          "params": [
+            "schedule",
+            "handler"
+          ],
+          "returns": "EngineTimer",
+          "doc": "handler runs on the executor.",
+          "swift": "EngineClock.timer(_:handler:)",
+          "cs": "EngineClock.Timer",
+          "c": "bro_engine_clock_timer"
+        },
+        {
+          "name": "EngineTimer.cancel",
+          "params": [],
+          "doc": "On the executor; a handler already posted doesn't run.",
+          "swift": "EngineTimer.cancel()",
+          "cs": "EngineTimer.Cancel",
+          "c": "bro_engine_timer_cancel"
+        },
+        {
+          "name": "EventBus.publish",
+          "params": [
+            "type",
+            "data"
+          ],
+          "returns": "EngineEvent",
+          "doc": "The next seq and the clock's now; delivered to subscribers in seq order, queued on streams.",
+          "swift": "EventBus.publish(_:data:)",
+          "cs": "EventBus.Publish",
+          "c": "bro_event_bus_publish"
+        },
+        {
+          "name": "EventBus.subscribe",
+          "params": [
+            "types:types",
+            "handler"
+          ],
+          "returns": "Subscription",
+          "doc": "handler runs on the executor for each event of those types (all, internal ones too, when types is empty) published after this call.",
+          "swift": "EventBus.subscribe(types:handler:)",
+          "cs": "EventBus.Subscribe",
+          "c": "bro_event_bus_subscribe"
+        },
+        {
+          "name": "EventBus.stream",
+          "params": [
+            "after:after",
+            "types"
+          ],
+          "returns": "EventStream",
+          "doc": "Client-visible events only; replays the retained events after 'after' (null: none), or starts with resync when it can't.",
+          "swift": "EventBus.stream(after:types:)",
+          "cs": "EventBus.Stream",
+          "c": "bro_event_bus_stream"
+        },
+        {
+          "name": "EventBus.lastSeq",
+          "params": [],
+          "returns": "Int64",
+          "doc": "The last seq published (firstSeq - 1 before the first).",
+          "swift": "EventBus.lastSeq()",
+          "cs": "EventBus.LastSeq",
+          "c": "bro_event_bus_last_seq"
+        },
+        {
+          "name": "Subscription.cancel",
+          "params": [],
+          "swift": "Subscription.cancel()",
+          "cs": "Subscription.Cancel",
+          "c": "bro_subscription_cancel"
+        },
+        {
+          "name": "EventStream.next",
+          "params": [],
+          "returns": "StreamItem?",
+          "doc": "Waits for the next item; null once closed.",
+          "async": true,
+          "swift": "EventStream.next()",
+          "cs": "EventStream.Next",
+          "c": "bro_event_stream_next"
+        },
+        {
+          "name": "EventStream.poll",
+          "params": [],
+          "returns": "StreamItem?",
+          "doc": "The next item if one is queued; never waits.",
+          "swift": "EventStream.poll()",
+          "cs": "EventStream.Poll",
+          "c": "bro_event_stream_poll"
+        },
+        {
+          "name": "EventStream.close",
+          "params": [],
+          "doc": "Ends the stream (from any thread): the bus forgets it, what was queued is dropped, next returns null.",
+          "swift": "EventStream.close()",
+          "cs": "EventStream.Close",
+          "c": "bro_event_stream_close"
+        },
+        {
+          "name": "EventStream.isClosed",
+          "params": [],
+          "returns": "Bool",
+          "swift": "EventStream.isClosed()",
+          "cs": "EventStream.IsClosed",
+          "c": "bro_event_stream_is_closed"
+        },
+        {
+          "name": "EngineEvent.json",
+          "params": [
+            "event"
+          ],
+          "returns": "JsonValue",
+          "doc": "{seq, at, type, data}: the envelope of shared/schema/events.json.",
+          "swift": "EngineEvent.json(_:)",
+          "cs": "EngineEvent.Json",
+          "c": "bro_engine_event_json"
+        },
+        {
+          "name": "EngineEventType.isInternal",
+          "params": [
+            "type"
+          ],
+          "returns": "Bool",
+          "doc": "leaseChanged and stepFinished: never streamed.",
+          "swift": "EngineEventType.isInternal(_:)",
+          "cs": "EngineEventType.IsInternal",
+          "c": "bro_engine_event_type_is_internal"
+        },
+        {
+          "name": "Coalescer.offer",
+          "params": [
+            "key",
+            "value"
+          ],
+          "swift": "Coalescer.offer(_:value:)",
+          "cs": "Coalescer.Offer",
+          "c": "bro_coalescer_offer"
+        },
+        {
+          "name": "Coalescer.flush",
+          "params": [
+            "key"
+          ],
+          "doc": "Sends a waiting value at once.",
+          "swift": "Coalescer.flush(_:)",
+          "cs": "Coalescer.Flush",
+          "c": "bro_coalescer_flush"
+        },
+        {
+          "name": "Coalescer.drop",
+          "params": [
+            "key"
+          ],
+          "doc": "Throws a waiting value away and forgets when the key last went out.",
+          "swift": "Coalescer.drop(_:)",
+          "cs": "Coalescer.Drop",
+          "c": "bro_coalescer_drop"
         }
       ]
     }

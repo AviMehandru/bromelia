@@ -14,3 +14,4 @@ test('domain', executable('test-domain', 'test-domain.c', dependencies: [bro_tes
 test('ports', executable('test-ports', 'test-ports.c', dependencies: [bro_test_support_dep, bro_ports_dep]), env: test_env)
 test('adapters', executable('test-adapters', 'test-adapters.c', dependencies: [bro_test_support_dep, bro_adapters_dep]), env: test_env,
   timeout: 180)
+test('engine', executable('test-engine', 'test-engine.c', dependencies: [bro_test_support_dep, bro_engine_dep]), env: test_env)

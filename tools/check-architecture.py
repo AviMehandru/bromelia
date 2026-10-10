@@ -223,7 +223,7 @@ class Checker:
 
         def known(name, pool):
             return name in pool or any(fnmatch.fnmatchcase(name, i) for i in idioms)
-        for lname in ("foundation", "domain", "ports", "adapters"):
+        for lname in ("foundation", "domain", "ports", "adapters", "engine"):
             roots = layers[lname][platform]
             for root in roots if isinstance(roots, list) else [roots]:
                 base = ROOT / root

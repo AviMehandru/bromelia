@@ -1,0 +1,135 @@
+{
+  "description": "Coalescer (plan §8 rule 5, review L3-4): progress from workers becomes at most one update per interval per key (a job) before it becomes an event or is stored. Used on the engine executor; its timers are EngineClock timers. offer(key, value): when nothing for that key went out in the last interval (monotonic) and nothing waits, the value goes out at once; otherwise it waits, replacing any value already waiting, and goes out one interval after the last one went out. flush(key) sends a waiting value at once (a step's last progress before it ends); with nothing waiting it does nothing. drop(key) throws a waiting value away and forgets when the key last went out. Keys don't affect each other. The harness uses a real EngineExecutor, an EngineClock over a manual clock that fires due timers in order and waits for the executor after each one, and an interval of 100 ms. Ops: offer {key, value}; advance <ms>; flush <key>; drop <key>. Expect: emitted ['<ms since the start> <key> <value>', …].",
+  "functions": ["Coalescer.offer", "Coalescer.flush", "Coalescer.drop"],
+  "cases": [
+    {
+      "id": "first-goes-out-at-once",
+      "given": {"ops": [{"offer": {"key": "a", "value": "1"}}]},
+      "expect": {"emitted": ["0 a 1"]}
+    },
+    {
+      "id": "a-burst-sends-its-last-value",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 10},
+          {"offer": {"key": "a", "value": "2"}},
+          {"advance": 40},
+          {"offer": {"key": "a", "value": "3"}},
+          {"advance": 150}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "100 a 3"]}
+    },
+    {
+      "id": "after-a-quiet-interval-at-once",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 150},
+          {"offer": {"key": "a", "value": "2"}}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "150 a 2"]}
+    },
+    {
+      "id": "exactly-one-interval-later-at-once",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 100},
+          {"offer": {"key": "a", "value": "2"}}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "100 a 2"]}
+    },
+    {
+      "id": "the-interval-counts-from-the-last-sent",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 10},
+          {"offer": {"key": "a", "value": "2"}},
+          {"advance": 110},
+          {"offer": {"key": "a", "value": "3"}},
+          {"advance": 200}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "100 a 2", "200 a 3"]}
+    },
+    {
+      "id": "keys-are-independent",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 10},
+          {"offer": {"key": "b", "value": "1"}},
+          {"advance": 10},
+          {"offer": {"key": "a", "value": "2"}},
+          {"offer": {"key": "b", "value": "2"}},
+          {"advance": 200}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "10 b 1", "100 a 2", "110 b 2"]}
+    },
+    {
+      "id": "flush-sends-what-waits",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 30},
+          {"offer": {"key": "a", "value": "2"}},
+          {"advance": 10},
+          {"flush": "a"},
+          {"advance": 200},
+          {"flush": "a"}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "40 a 2"]}
+    },
+    {
+      "id": "flush-restarts-the-interval",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 30},
+          {"offer": {"key": "a", "value": "2"}},
+          {"flush": "a"},
+          {"advance": 20},
+          {"offer": {"key": "a", "value": "3"}},
+          {"advance": 200}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "30 a 2", "130 a 3"]}
+    },
+    {
+      "id": "drop-throws-away-what-waits",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 30},
+          {"offer": {"key": "a", "value": "2"}},
+          {"advance": 10},
+          {"drop": "a"},
+          {"advance": 200},
+          {"offer": {"key": "a", "value": "3"}}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "240 a 3"]}
+    },
+    {
+      "id": "drop-forgets-the-last-sent",
+      "given": {
+        "ops": [
+          {"offer": {"key": "a", "value": "1"}},
+          {"advance": 10},
+          {"drop": "a"},
+          {"advance": 10},
+          {"offer": {"key": "a", "value": "2"}},
+          {"drop": "b"}
+        ]
+      },
+      "expect": {"emitted": ["0 a 1", "20 a 2"]}
+    }
+  ]
+}
