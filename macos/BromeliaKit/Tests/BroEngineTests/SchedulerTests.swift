@@ -10,7 +10,7 @@ final class SchedulerHarness {
     let bus: EventBus
     let scheduler: Scheduler
     var jobs: [String: Id] = [:]
-    var granted: [String] = []
+    var granted: [(name: String, seq: Int64)] = []
     var states: [String: String] = [:]
     var waits: [String: [String]] = [:]
     var leases: [String: Lease] = [:]
@@ -90,7 +90,7 @@ final class SchedulerHarness {
                         self.states[label] = text
                     }, cancel: cancel.token)
                     self.leases[label] = lease
-                    self.granted.append(label)
+                    self.granted.append((label, lease.seq))
                     self.states[label] = "granted"
                 } catch {
                     self.states[label] = error.code == "job.cancelled" ? "cancelled" : "failed " + error.code
@@ -156,7 +156,7 @@ struct SchedulerTests {
                     try await h.run(op)
                     await h.world.executor.barrier()
                 }
-                let (granted, states, waits, queues, leases, events) = await (h.granted, h.states, h.waits, h.queuesJson(),
+                let (granted, states, waits, queues, leases, events) = await (h.granted.sorted { $0.seq < $1.seq }.map(\.name), h.states, h.waits, h.queuesJson(),
                                                                                LeaseSnapshot.json(h.scheduler.leases()),
                                                                                JsonValue.array(h.events.map(EngineEvent.json)))
                 if let want = expect["granted"] { try Fixtures.same(SchedulerHarness.strings(want), granted, "granted") }

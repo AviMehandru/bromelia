@@ -3,8 +3,11 @@ import BroFoundation
 /// How a job ended, from its steps' results (plan §20.3): one pure function instead of today's chain of flags in
 /// three run() methods.
 public enum JobOutcome {
-    /// Steps after the archive is committed: their failures never fail a job.
-    static let afterCommit: Set<StepKind> = [.publish, .protect, .postProcess, .notify, .runCommand, .transcode]
+    static let afterCommitKinds: Set<StepKind> = [.publish, .protect, .postProcess, .notify, .runCommand, .transcode]
+
+    /// Steps after the archive is committed (publish, protect, postProcess, notify, runCommand, transcode): their
+    /// failures never fail a job, and the PipelineRunner goes on after them.
+    public static func afterCommit(_ kind: StepKind) -> Bool { afterCommitKinds.contains(kind) }
 
     /// In order: cancelled (job.cancelledByUser); interrupted (recovery.interrupted); skipped (the skip reason); a
     /// failed step that isn't after the commit fails the job with its error, or with the MakeMKV problem that
@@ -17,7 +20,7 @@ public enum JobOutcome {
                                                                     severity: .warning).toError())
         }
         if let skip = stepResults.first(where: { $0.skip != nil })?.skip { return Decided(outcome: .skipped, error: skip.toError()) }
-        if let failed = stepResults.first(where: { $0.state == .failed && !afterCommit.contains($0.kind) }) {
+        if let failed = stepResults.first(where: { $0.state == .failed && !afterCommitKinds.contains($0.kind) }) {
             var error = failed.error ?? BroMessage(.internalUnexpected, severity: .error).toError()
             if let notice = failed.notice, let problem = problemCode(notice) {
                 error = BroMessage(problem, severity: .error).toError(cause: error)

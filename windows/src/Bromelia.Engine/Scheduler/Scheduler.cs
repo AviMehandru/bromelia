@@ -57,6 +57,7 @@ public sealed class Scheduler
     readonly Dictionary<(Id Job, string Volume), long> _reserved = new();
     LeaseSnapshot _published = LeaseSnapshot.Empty;
     long _nextOrder;
+    long _granted;
 
     public Scheduler(EngineExecutor executor, EventBus bus, SchedulerLimits limits)
     {
@@ -317,7 +318,7 @@ public sealed class Scheduler
         r.CancelRegistration?.Dispose();
         foreach (var d in r.Resources.Drives) _driveHolder[d] = r.Job;
         foreach (var (key, n) in needs) _held[key] = _held.GetValueOrDefault(key) + n;
-        var lease = new Lease(r.Job, needs);
+        var lease = new Lease(r.Job, ++_granted, needs);
         if (!_leases.TryGetValue(r.Job, out var list)) _leases[r.Job] = list = new List<Lease>();
         list.Add(lease);
         r.Done.TrySetResult(lease);

@@ -17,6 +17,7 @@ typedef struct {
 
 BroJobPlan *bro_job_plan_new (void);
 void bro_job_plan_free (BroJobPlan *plan);
+BroJobPlan *bro_job_plan_copy (const BroJobPlan *plan);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroJobPlan, bro_job_plan_free)
 

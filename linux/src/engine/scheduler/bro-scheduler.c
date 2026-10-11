@@ -53,6 +53,7 @@ struct _BroScheduler {
   GPtrArray *reserved;        /* of Reservation */
   BroJsonValue *published;    /* the last leaseChanged data */
   guint64 next_order;
+  gint64 granted;
 };
 
 G_DEFINE_FINAL_TYPE (BroScheduler, bro_scheduler, G_TYPE_OBJECT)
@@ -613,7 +614,7 @@ compare_requests (gconstpointer a, gconstpointer b, gpointer data)
 static void
 grant (BroScheduler *self, Request *r, GArray *needs)
 {
-  BroLease *lease = bro_lease_new (&r->job);
+  BroLease *lease = bro_lease_new (&r->job, ++self->granted);
   GPtrArray *list = g_hash_table_lookup (self->leases, r->job.value);
   for (guint i = 0; r->resources->drives && r->resources->drives[i]; i++)
     g_hash_table_replace (self->drive_holder, g_strdup (r->resources->drives[i]), g_strdup (r->job.value));

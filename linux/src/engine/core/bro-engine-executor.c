@@ -18,6 +18,7 @@ struct _BroEngineExecutor {
   GMainLoop *loop;
   GThread *thread;
   GThreadPool *workers;
+  int working; /* workers whose result isn't posted yet, under the lock */
 };
 
 G_DEFINE_FINAL_TYPE (BroEngineExecutor, bro_engine_executor, G_TYPE_OBJECT)
@@ -99,6 +100,16 @@ bro_engine_executor_post (BroEngineExecutor *self, BroExecutorAction action, gpo
   return TRUE;
 }
 
+int
+bro_engine_executor_activity (BroEngineExecutor *self)
+{
+  int n;
+  g_mutex_lock (&self->lock);
+  n = (int) self->queue.length + self->working;
+  g_mutex_unlock (&self->lock);
+  return n;
+}
+
 gboolean
 bro_engine_executor_is_current (BroEngineExecutor *self)
 {
@@ -138,9 +149,14 @@ static void
 job_run (gpointer data, gpointer unused)
 {
   Job *job = data;
+  BroEngineExecutor *executor = g_object_ref (job->executor);
   if (!job->work (job->data, &job->error) && !job->error)
     job->error = bro_bro_error_new ("internal.unexpected", NULL, NULL);
-  bro_engine_executor_post (job->executor, job_done, job, job_free);
+  bro_engine_executor_post (executor, job_done, job, job_free); /* counted as queued before it stops counting below */
+  g_mutex_lock (&executor->lock);
+  executor->working--;
+  g_mutex_unlock (&executor->lock);
+  g_object_unref (executor);
 }
 
 void
@@ -153,6 +169,9 @@ bro_engine_executor_worker (BroEngineExecutor *self, BroWorkerFunc work, BroWork
   job->done = done;
   job->data = data;
   job->destroy = destroy;
+  g_mutex_lock (&self->lock);
+  self->working++;
+  g_mutex_unlock (&self->lock);
   g_thread_pool_push (self->workers, job, NULL);
 }
 

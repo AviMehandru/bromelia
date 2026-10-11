@@ -20,3 +20,11 @@ bro_step_output_free (BroStepOutput *output)
   bro_bro_message_free (output->summary);
   g_free (output);
 }
+
+BroStepOutput *
+bro_step_output_copy (const BroStepOutput *output)
+{
+  if (!output)
+    return NULL;
+  return bro_step_output_new (output->kind, bro_json_value_ref (output->data), output->summary ? bro_bro_message_copy (output->summary) : NULL);
+}

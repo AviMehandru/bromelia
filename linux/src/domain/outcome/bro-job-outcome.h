@@ -15,4 +15,8 @@ G_BEGIN_DECLS
  * succeeded. */
 BroDecided *bro_job_outcome_decide (GPtrArray *step_results, gboolean cancelled, const BroOutcomePolicy *policy);
 
+/* Steps after the archive is committed (publish, protect, postProcess, notify, runCommand, transcode): their failures
+ * never fail a job, and the PipelineRunner goes on after them. */
+gboolean bro_job_outcome_after_commit (BroStepKind kind);
+
 G_END_DECLS

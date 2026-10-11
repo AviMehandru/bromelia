@@ -10,13 +10,14 @@ typedef struct _BroLease BroLease;
 
 struct _BroLease {
   BroId job_id;
+  gint64 seq; /* leases are numbered in the order they were granted */
   /* private */
   GPtrArray *counted_keys; /* char *, parallel to counted_counts */
   GArray *counted_counts;  /* int */
   gboolean released;
 };
 
-BroLease *bro_lease_new (const BroId *job_id);
+BroLease *bro_lease_new (const BroId *job_id, gint64 seq);
 BroLease *bro_lease_ref (BroLease *lease);
 void bro_lease_unref (BroLease *lease);
 

@@ -18,3 +18,16 @@ bro_step_record_free (BroStepRecord *x)
   g_clear_pointer (&x->checkpoint, bro_json_value_unref);
   g_free (x);
 }
+
+BroStepRecord *
+bro_step_record_copy (const BroStepRecord *v)
+{
+  BroStepRecord *x;
+  if (!v)
+    return NULL;
+  x = g_memdup2 (v, sizeof *v);
+  x->output = bro_step_output_copy (v->output);
+  x->error = bro_bro_error_copy (v->error);
+  x->checkpoint = v->checkpoint ? bro_json_value_ref (v->checkpoint) : NULL;
+  return x;
+}

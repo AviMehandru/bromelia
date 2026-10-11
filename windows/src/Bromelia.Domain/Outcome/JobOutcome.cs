@@ -9,10 +9,14 @@ namespace Bromelia.Domain;
 public static class JobOutcome
 {
     /// <summary>Steps after the archive is committed: their failures never fail a job.</summary>
-    private static readonly HashSet<StepKind> AfterCommit = new()
+    private static readonly HashSet<StepKind> AfterCommitKinds = new()
     {
         StepKind.Publish, StepKind.Protect, StepKind.PostProcess, StepKind.Notify, StepKind.RunCommand, StepKind.Transcode,
     };
+
+    /// <summary>Steps after the archive is committed (publish, protect, postProcess, notify, runCommand, transcode):
+    /// their failures never fail a job, and the PipelineRunner goes on after them.</summary>
+    public static bool AfterCommit(StepKind kind) => AfterCommitKinds.Contains(kind);
 
     /// <summary>In order: cancelled (job.cancelledByUser); interrupted (recovery.interrupted); skipped (the skip
     /// reason); a failed step that isn't after the commit fails the job with its error, or with the MakeMKV
@@ -26,7 +30,7 @@ public static class JobOutcome
             return new(Outcome.Interrupted, new BroMessage(MessageCode.RecoveryInterrupted, Severity.Warning,
                 ("step", JsonValue.Of(EnumWire.Name(interrupted.Kind)))).ToError());
         if (stepResults.FirstOrDefault(s => s.Skip != null) is { Skip: { } skip }) return new(Outcome.Skipped, skip.ToError());
-        if (stepResults.FirstOrDefault(s => s.State == StepState.Failed && !AfterCommit.Contains(s.Kind)) is { } failed)
+        if (stepResults.FirstOrDefault(s => s.State == StepState.Failed && !AfterCommitKinds.Contains(s.Kind)) is { } failed)
         {
             var error = failed.Error ?? new BroMessage(MessageCode.InternalUnexpected, Severity.Error).ToError();
             if (failed.Notice is { } notice && ProblemCode(notice) is { } problem)

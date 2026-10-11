@@ -16,6 +16,7 @@ typedef struct {
 /* Takes ownership of @data and @summary. */
 BroStepOutput *bro_step_output_new (BroStepKind kind, BroJsonValue *data, BroBroMessage *summary);
 void bro_step_output_free (BroStepOutput *output);
+BroStepOutput *bro_step_output_copy (const BroStepOutput *output);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroStepOutput, bro_step_output_free)
 

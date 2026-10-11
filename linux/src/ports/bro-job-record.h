@@ -49,6 +49,7 @@ typedef struct {
 /* Everything zero. */
 BroJobRecord *bro_job_record_new (void);
 void bro_job_record_free (BroJobRecord *value);
+BroJobRecord *bro_job_record_copy (const BroJobRecord *value);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroJobRecord, bro_job_record_free)
 

@@ -1,0 +1,12 @@
+{
+  "description": "JobPlanner.initial(request) (plan §15.2, §20.1): the steps a job starts with; PlanStep appends the rest. A video disc: awaitMedia when the rip is automatic and from a drive, probe, reconcile when a session made the choices, identify, plan. (readNavigation joins with the episode steps in phase 5.) Kinds whose steps aren't built yet get no steps (the runner then fails the job with internal.unexpected).",
+  "functions": ["JobPlanner.initial"],
+  "cases": [
+    {"id": "a-disc-by-hand", "given": {"request": {"kind": "videoDisc", "title": "Disc", "driveId": "drv-0123456789abcdef"}}, "expect": {"steps": ["probe", "identify", "plan"]}},
+    {"id": "an-automatic-rip", "given": {"request": {"kind": "videoDisc", "title": "Disc", "driveId": "drv-0123456789abcdef", "automatic": true}}, "expect": {"steps": ["awaitMedia", "probe", "identify", "plan"]}},
+    {"id": "automatic-without-a-drive", "given": {"request": {"kind": "videoDisc", "title": "Disc", "automatic": true}}, "expect": {"steps": ["probe", "identify", "plan"]}},
+    {"id": "from-an-opened-disc", "given": {"request": {"kind": "videoDisc", "title": "Disc", "driveId": "drv-0123456789abcdef", "sessionId": "00000000-0000-4000-8000-0000000000aa"}}, "expect": {"steps": ["probe", "reconcile", "identify", "plan"]}},
+    {"id": "an-image", "given": {"request": {"kind": "videoDisc", "title": "Disc"}}, "expect": {"steps": ["probe", "identify", "plan"]}},
+    {"id": "not-built-yet", "given": {"request": {"kind": "verify", "title": "Library"}}, "expect": {"steps": []}}
+  ]
+}

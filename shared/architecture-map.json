@@ -4557,6 +4557,17 @@
           "swift": "JobOutcome.decide(_:cancelled:policy:)",
           "cs": "JobOutcome.Decide",
           "c": "bro_job_outcome_decide"
+        },
+        {
+          "name": "JobOutcome.afterCommit",
+          "params": [
+            "kind"
+          ],
+          "returns": "Bool",
+          "doc": "Steps after the archive is committed (publish, protect, postProcess, notify, runCommand, transcode): their failures never fail a job, and the runner goes on after them.",
+          "swift": "JobOutcome.afterCommit(_:)",
+          "cs": "JobOutcome.AfterCommit",
+          "c": "bro_job_outcome_after_commit"
         }
       ]
     },
@@ -11736,6 +11747,15 @@
           "c": "bro_engine_executor_worker"
         },
         {
+          "name": "EngineExecutor.activity",
+          "params": [],
+          "returns": "Int",
+          "doc": "Work not done yet: actions waiting to run (not the one running) and workers whose result hasn't come back. Settled when it is down to the workers known to be parked (a step waiting for an answer): for tests and scenario runners.",
+          "swift": "EngineExecutor.activity()",
+          "cs": "EngineExecutor.Activity",
+          "c": "bro_engine_executor_activity"
+        },
+        {
           "name": "EngineExecutor.barrier",
           "params": [],
           "doc": "Waits until every action posted before it has run. Not on the executor.",
@@ -11980,9 +12000,10 @@
           "name": "Lease",
           "kind": "class",
           "fields": [
-            "jobId"
+            "jobId",
+            "seq"
           ],
-          "doc": "What one acquire gave a step. Release gives back everything but the drives, which stay with the job until releaseDrives or finish.",
+          "doc": "What one acquire gave a step; seq numbers leases in the order they were granted. Release gives back everything but the drives, which stay with the job until releaseDrives or finish.",
           "swift": {
             "name": "Lease",
             "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/Lease.swift"
@@ -12607,6 +12628,678 @@
           "swift": "Matroska.chapterTimes(_:cancel:)",
           "cs": "Matroska.ChapterTimes",
           "c": "bro_matroska_chapter_times"
+        }
+      ]
+    },
+    "engine/api": {
+      "layer": "engine",
+      "folder": "API",
+      "cFolder": "api",
+      "doc": "The data the engine sends out (plan §13.1: DTOs from shared/schema/api/dtos.json), as typed containers with their JSON (owner, 2026-10-11: events carry JSON built from typed containers at the source). The jobs' DTOs come first, with the PipelineRunner; the rest come with LocalEngine.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "JobDto",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "kind",
+            "state",
+            "outcome",
+            "queue",
+            "position",
+            "parentId",
+            "driveId",
+            "sessionId",
+            "title",
+            "mode",
+            "automatic",
+            "createdAt",
+            "startedAt",
+            "finishedAt",
+            "progress",
+            "blockedBy",
+            "decision",
+            "error",
+            "unitId",
+            "outputPath",
+            "fingerprint",
+            "counts"
+          ],
+          "doc": "A job, as clients see it (dtos.json Job).",
+          "swift": {
+            "name": "JobDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/JobDto.swift"
+          },
+          "cs": {
+            "name": "JobDto",
+            "file": "windows/src/Bromelia.Engine/API/JobDto.cs"
+          },
+          "c": {
+            "name": "BroJobDto",
+            "file": "linux/src/engine/api/bro-job-dto.h"
+          }
+        },
+        {
+          "name": "ProgressDto",
+          "kind": "struct",
+          "fields": [
+            "step",
+            "stepIndex",
+            "stepCount",
+            "fraction",
+            "currentFraction",
+            "operation",
+            "current",
+            "secondsLeft"
+          ],
+          "doc": "A running job's progress (dtos.json Progress): fraction of the whole job, currentFraction of the step.",
+          "swift": {
+            "name": "ProgressDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/ProgressDto.swift"
+          },
+          "cs": {
+            "name": "ProgressDto",
+            "file": "windows/src/Bromelia.Engine/API/ProgressDto.cs"
+          },
+          "c": {
+            "name": "BroProgressDto",
+            "file": "linux/src/engine/api/bro-progress-dto.h"
+          }
+        },
+        {
+          "name": "DecisionDto",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "question",
+            "answers"
+          ],
+          "doc": "A question a job waits on (dtos.json Decision).",
+          "swift": {
+            "name": "DecisionDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/DecisionDto.swift"
+          },
+          "cs": {
+            "name": "DecisionDto",
+            "file": "windows/src/Bromelia.Engine/API/DecisionDto.cs"
+          },
+          "c": {
+            "name": "BroDecisionDto",
+            "file": "linux/src/engine/api/bro-decision-dto.h"
+          }
+        },
+        {
+          "name": "DecisionAnswer",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "label"
+          ],
+          "doc": "One answer of a decision.",
+          "swift": {
+            "name": "DecisionAnswer",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/DecisionAnswer.swift"
+          },
+          "cs": {
+            "name": "DecisionAnswer",
+            "file": "windows/src/Bromelia.Engine/API/DecisionAnswer.cs"
+          },
+          "c": {
+            "name": "BroDecisionAnswer",
+            "file": "linux/src/engine/api/bro-decision-answer.h"
+          }
+        },
+        {
+          "name": "LogLineDto",
+          "kind": "struct",
+          "fields": [
+            "seq",
+            "t",
+            "severity",
+            "code",
+            "params"
+          ],
+          "doc": "A line of a job's log (dtos.json LogLine; log.jsonl holds the same objects without seq).",
+          "swift": {
+            "name": "LogLineDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/LogLineDto.swift"
+          },
+          "cs": {
+            "name": "LogLineDto",
+            "file": "windows/src/Bromelia.Engine/API/LogLineDto.cs"
+          },
+          "c": {
+            "name": "BroLogLineDto",
+            "file": "linux/src/engine/api/bro-log-line-dto.h"
+          }
+        },
+        {
+          "name": "JobTotals",
+          "kind": "struct",
+          "fields": [
+            "files",
+            "warnings",
+            "errors",
+            "readErrors"
+          ],
+          "doc": "A job's counts (dtos.json Job.counts).",
+          "swift": {
+            "name": "JobTotals",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/JobTotals.swift"
+          },
+          "cs": {
+            "name": "JobTotals",
+            "file": "windows/src/Bromelia.Engine/API/JobTotals.cs"
+          },
+          "c": {
+            "name": "BroJobTotals",
+            "file": "linux/src/engine/api/bro-job-totals.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "JobDto.json",
+          "params": [
+            "job"
+          ],
+          "returns": "JsonValue",
+          "doc": "Optional members left out when absent.",
+          "swift": "JobDto.json(_:)",
+          "cs": "JobDto.Json",
+          "c": "bro_job_dto_json"
+        },
+        {
+          "name": "ProgressDto.json",
+          "params": [
+            "progress"
+          ],
+          "returns": "JsonValue",
+          "swift": "ProgressDto.json(_:)",
+          "cs": "ProgressDto.Json",
+          "c": "bro_progress_dto_json"
+        },
+        {
+          "name": "DecisionDto.json",
+          "params": [
+            "decision"
+          ],
+          "returns": "JsonValue",
+          "swift": "DecisionDto.json(_:)",
+          "cs": "DecisionDto.Json",
+          "c": "bro_decision_dto_json"
+        },
+        {
+          "name": "LogLineDto.json",
+          "params": [
+            "line"
+          ],
+          "returns": "JsonValue",
+          "swift": "LogLineDto.json(_:)",
+          "cs": "LogLineDto.Json",
+          "c": "bro_log_line_dto_json"
+        }
+      ]
+    },
+    "engine/pipeline": {
+      "layer": "engine",
+      "folder": "Pipeline",
+      "cFolder": "pipeline",
+      "doc": "The pipeline (plan §12): the Step interface, the StepContext a step gets on its worker and the capability ports in it, the registry of steps, the planner, and the PipelineRunner that moves jobs between states. shared/fixtures/engine/pipeline-runner.cases.json, job-planner.cases.json.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "Step",
+          "kind": "protocol",
+          "doc": "One step of a job (plan §12.1): its kind, how it resumes, the resources it needs, and its run on a worker.",
+          "swift": {
+            "name": "Step",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/Step.swift"
+          },
+          "cs": {
+            "name": "IStep",
+            "file": "windows/src/Bromelia.Engine/Pipeline/IStep.cs"
+          },
+          "c": {
+            "name": "BroStep",
+            "file": "linux/src/engine/pipeline/bro-step.h"
+          }
+        },
+        {
+          "name": "StepReport",
+          "kind": "struct",
+          "fields": [
+            "data",
+            "summary",
+            "appendSteps",
+            "skipped",
+            "readErrors",
+            "quarantined",
+            "notice",
+            "skipJob",
+            "error",
+            "affectsOutcome"
+          ],
+          "doc": "What a step's run says: its output data, the steps it appends (Plan), whether it skipped, what the outcome needs (read errors, quarantine, MakeMKV notice, a reason to skip the job), and its error when it failed.",
+          "swift": {
+            "name": "StepReport",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepReport.swift"
+          },
+          "cs": {
+            "name": "StepReport",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepReport.cs"
+          },
+          "c": {
+            "name": "BroStepReport",
+            "file": "linux/src/engine/pipeline/bro-step-report.h"
+          }
+        },
+        {
+          "name": "StepContext",
+          "kind": "struct",
+          "fields": [
+            "job",
+            "cancel",
+            "progress",
+            "log",
+            "decisions",
+            "tools",
+            "fs",
+            "clock",
+            "drives",
+            "library",
+            "catalog",
+            "jobDirectory"
+          ],
+          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe.",
+          "swift": {
+            "name": "StepContext",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
+          },
+          "cs": {
+            "name": "StepContext",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepContext.cs"
+          },
+          "c": {
+            "name": "BroStepContext",
+            "file": "linux/src/engine/pipeline/bro-step-context.h"
+          }
+        },
+        {
+          "name": "StepEnvironment",
+          "kind": "struct",
+          "fields": [
+            "tools",
+            "fs",
+            "clock",
+            "drives",
+            "library",
+            "catalog",
+            "dataDirectory"
+          ],
+          "doc": "The parts of a StepContext that every job shares; the composition root builds it.",
+          "swift": {
+            "name": "StepEnvironment",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepEnvironment.swift"
+          },
+          "cs": {
+            "name": "StepEnvironment",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepEnvironment.cs"
+          },
+          "c": {
+            "name": "BroStepEnvironment",
+            "file": "linux/src/engine/pipeline/bro-step-environment.h"
+          }
+        },
+        {
+          "name": "ToolSet",
+          "kind": "struct",
+          "fields": [
+            "makemkv",
+            "matroska"
+          ],
+          "doc": "The tools a step may run (more join with their steps in phase 5).",
+          "swift": {
+            "name": "ToolSet",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/ToolSet.swift"
+          },
+          "cs": {
+            "name": "ToolSet",
+            "file": "windows/src/Bromelia.Engine/Pipeline/ToolSet.cs"
+          },
+          "c": {
+            "name": "BroToolSet",
+            "file": "linux/src/engine/pipeline/bro-tool-set.h"
+          }
+        },
+        {
+          "name": "ProgressReporter",
+          "kind": "protocol",
+          "doc": "How a step reports its progress (coalesced by the runner).",
+          "swift": {
+            "name": "ProgressReporter",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/ProgressReporter.swift"
+          },
+          "cs": {
+            "name": "IProgressReporter",
+            "file": "windows/src/Bromelia.Engine/Pipeline/IProgressReporter.cs"
+          },
+          "c": {
+            "name": "BroProgressReporter",
+            "file": "linux/src/engine/pipeline/bro-progress-reporter.h"
+          }
+        },
+        {
+          "name": "JobLogger",
+          "kind": "protocol",
+          "doc": "How a step logs (jobLog events at once, jobs/<id>/log.jsonl when the step ends).",
+          "swift": {
+            "name": "JobLogger",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/JobLogger.swift"
+          },
+          "cs": {
+            "name": "IJobLogger",
+            "file": "windows/src/Bromelia.Engine/Pipeline/IJobLogger.cs"
+          },
+          "c": {
+            "name": "BroJobLogger",
+            "file": "linux/src/engine/pipeline/bro-job-logger.h"
+          }
+        },
+        {
+          "name": "DecisionPort",
+          "kind": "protocol",
+          "doc": "How a step asks the user (the job is awaitingDecision until answered).",
+          "swift": {
+            "name": "DecisionPort",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/DecisionPort.swift"
+          },
+          "cs": {
+            "name": "IDecisionPort",
+            "file": "windows/src/Bromelia.Engine/Pipeline/IDecisionPort.cs"
+          },
+          "c": {
+            "name": "BroDecisionPort",
+            "file": "linux/src/engine/pipeline/bro-decision-port.h"
+          }
+        },
+        {
+          "name": "LibraryPort",
+          "kind": "protocol",
+          "doc": "What a step may do with a library (implemented by LibraryService).",
+          "swift": {
+            "name": "LibraryPort",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/LibraryPort.swift"
+          },
+          "cs": {
+            "name": "ILibraryPort",
+            "file": "windows/src/Bromelia.Engine/Pipeline/ILibraryPort.cs"
+          },
+          "c": {
+            "name": "BroLibraryPort",
+            "file": "linux/src/engine/pipeline/bro-library-port.h"
+          }
+        },
+        {
+          "name": "LibraryHandle",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "path"
+          ],
+          "doc": "An online library.",
+          "swift": {
+            "name": "LibraryHandle",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/LibraryHandle.swift"
+          },
+          "cs": {
+            "name": "LibraryHandle",
+            "file": "windows/src/Bromelia.Engine/Pipeline/LibraryHandle.cs"
+          },
+          "c": {
+            "name": "BroLibraryHandle",
+            "file": "linux/src/engine/pipeline/bro-library-handle.h"
+          }
+        },
+        {
+          "name": "CatalogQueries",
+          "kind": "protocol",
+          "doc": "Read-only questions about the archive (implemented over the catalogue).",
+          "swift": {
+            "name": "CatalogQueries",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/CatalogQueries.swift"
+          },
+          "cs": {
+            "name": "ICatalogQueries",
+            "file": "windows/src/Bromelia.Engine/Pipeline/ICatalogQueries.cs"
+          },
+          "c": {
+            "name": "BroCatalogQueries",
+            "file": "linux/src/engine/pipeline/bro-catalog-queries.h"
+          }
+        },
+        {
+          "name": "StepRegistry",
+          "kind": "class",
+          "doc": "The steps by kind.",
+          "swift": {
+            "name": "StepRegistry",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepRegistry.swift"
+          },
+          "cs": {
+            "name": "StepRegistry",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepRegistry.cs"
+          },
+          "c": {
+            "name": "BroStepRegistry",
+            "file": "linux/src/engine/pipeline/bro-step-registry.h"
+          }
+        },
+        {
+          "name": "JobPlanner",
+          "kind": "namespace",
+          "doc": "The steps a job starts with.",
+          "swift": {
+            "name": "JobPlanner",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/JobPlanner.swift"
+          },
+          "cs": {
+            "name": "JobPlanner",
+            "file": "windows/src/Bromelia.Engine/Pipeline/JobPlanner.cs"
+          },
+          "c": {
+            "name": "BroJobPlanner",
+            "file": "linux/src/engine/pipeline/bro-job-planner.h"
+          }
+        },
+        {
+          "name": "PipelineRunner",
+          "kind": "class",
+          "doc": "Runs jobs step by step (plan §12.3), on the executor.",
+          "swift": {
+            "name": "PipelineRunner",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/PipelineRunner.swift"
+          },
+          "cs": {
+            "name": "PipelineRunner",
+            "file": "windows/src/Bromelia.Engine/Pipeline/PipelineRunner.cs"
+          },
+          "c": {
+            "name": "BroPipelineRunner",
+            "file": "linux/src/engine/pipeline/bro-pipeline-runner.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "Step.kind",
+          "params": [],
+          "returns": "StepKind",
+          "swift": "Step.kind()",
+          "cs": "Step.Kind",
+          "c": "bro_step_kind"
+        },
+        {
+          "name": "Step.resumability",
+          "params": [],
+          "returns": "Resumability",
+          "swift": "Step.resumability()",
+          "cs": "Step.Resumability",
+          "c": "bro_step_resumability"
+        },
+        {
+          "name": "Step.resources",
+          "params": [
+            "job"
+          ],
+          "returns": "ResourceSet",
+          "doc": "What the step holds while it runs.",
+          "swift": "Step.resources(_:)",
+          "cs": "Step.Resources",
+          "c": "bro_step_resources"
+        },
+        {
+          "name": "Step.run",
+          "params": [
+            "context"
+          ],
+          "returns": "StepReport",
+          "doc": "On a worker; throws (or reports) its failure.",
+          "throws": true,
+          "async": true,
+          "swift": "Step.run(_:)",
+          "cs": "Step.Run",
+          "c": "bro_step_run"
+        },
+        {
+          "name": "ProgressReporter.report",
+          "params": [
+            "fraction",
+            "operation",
+            "current"
+          ],
+          "doc": "fraction of the step (0–1), what it does, the item it works on.",
+          "swift": "ProgressReporter.report(_:operation:current:)",
+          "cs": "ProgressReporter.Report",
+          "c": "bro_progress_reporter_report"
+        },
+        {
+          "name": "JobLogger.log",
+          "params": [
+            "message"
+          ],
+          "swift": "JobLogger.log(_:)",
+          "cs": "JobLogger.Log",
+          "c": "bro_job_logger_log"
+        },
+        {
+          "name": "DecisionPort.ask",
+          "params": [
+            "decision"
+          ],
+          "returns": "String",
+          "doc": "Waits for one of the decision's answers (its id); job.cancelled when the job is cancelled.",
+          "throws": true,
+          "async": true,
+          "swift": "DecisionPort.ask(_:)",
+          "cs": "DecisionPort.Ask",
+          "c": "bro_decision_port_ask"
+        },
+        {
+          "name": "LibraryPort.require",
+          "params": [
+            "libraryId"
+          ],
+          "returns": "LibraryHandle",
+          "doc": "library.offline when its marker is missing.",
+          "throws": true,
+          "swift": "LibraryPort.require(_:)",
+          "cs": "LibraryPort.Require",
+          "c": "bro_library_port_require"
+        },
+        {
+          "name": "LibraryPort.stagingDirectory",
+          "params": [
+            "libraryId",
+            "jobId"
+          ],
+          "returns": "String",
+          "doc": "Where the job's files are made: <library>/.bromelia/staging/<job> (same file system, so the commit is a rename).",
+          "throws": true,
+          "swift": "LibraryPort.stagingDirectory(_:jobId:)",
+          "cs": "LibraryPort.StagingDirectory",
+          "c": "bro_library_port_staging_directory"
+        },
+        {
+          "name": "CatalogQueries.archivedBefore",
+          "params": [
+            "fingerprint"
+          ],
+          "returns": "[UnitRecord]",
+          "doc": "Committed units of a disc with this fingerprint.",
+          "throws": true,
+          "async": true,
+          "swift": "CatalogQueries.archivedBefore(_:)",
+          "cs": "CatalogQueries.ArchivedBefore",
+          "c": "bro_catalog_queries_archived_before"
+        },
+        {
+          "name": "StepRegistry.step",
+          "params": [
+            "kind"
+          ],
+          "returns": "Step?",
+          "swift": "StepRegistry.step(_:)",
+          "cs": "StepRegistry.Step",
+          "c": "bro_step_registry_step"
+        },
+        {
+          "name": "JobPlanner.initial",
+          "params": [
+            "request"
+          ],
+          "returns": "[StepKind]",
+          "swift": "JobPlanner.initial(_:)",
+          "cs": "JobPlanner.Initial",
+          "c": "bro_job_planner_initial"
+        },
+        {
+          "name": "PipelineRunner.run",
+          "params": [
+            "jobId"
+          ],
+          "returns": "Decided",
+          "doc": "Runs the job to its end (or until it is cancelled).",
+          "async": true,
+          "swift": "PipelineRunner.run(_:)",
+          "cs": "PipelineRunner.Run",
+          "c": "bro_pipeline_runner_run",
+          "cNames": [
+            "job_id",
+            "done"
+          ]
+        },
+        {
+          "name": "PipelineRunner.cancel",
+          "params": [
+            "jobId"
+          ],
+          "swift": "PipelineRunner.cancel(_:)",
+          "cs": "PipelineRunner.Cancel",
+          "c": "bro_pipeline_runner_cancel"
+        },
+        {
+          "name": "PipelineRunner.decide",
+          "params": [
+            "jobId",
+            "answer"
+          ],
+          "doc": "job.notAwaitingDecision; server.badRequest for an answer the question doesn't offer.",
+          "throws": true,
+          "swift": "PipelineRunner.decide(_:answer:)",
+          "cs": "PipelineRunner.Decide",
+          "c": "bro_pipeline_runner_decide"
         }
       ]
     }

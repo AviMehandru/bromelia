@@ -2,10 +2,11 @@
 #include "bro-lease.h"
 
 BroLease *
-bro_lease_new (const BroId *job_id)
+bro_lease_new (const BroId *job_id, gint64 seq)
 {
   BroLease *l = g_atomic_rc_box_new0 (BroLease);
   l->job_id = *job_id;
+  l->seq = seq;
   l->counted_keys = g_ptr_array_new_with_free_func (g_free);
   l->counted_counts = g_array_new (FALSE, FALSE, sizeof (int));
   return l;

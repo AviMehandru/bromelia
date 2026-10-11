@@ -36,6 +36,11 @@ gboolean bro_engine_executor_is_current (BroEngineExecutor *self);
 void bro_engine_executor_worker (BroEngineExecutor *self, BroWorkerFunc work, BroWorkerDone done, gpointer data,
                                  GDestroyNotify destroy);
 
+/* Work not done yet: actions waiting to run (not the one running) and workers whose result hasn't been posted back.
+ * A test (or a scenario runner) knows the engine has settled when this is down to the workers it knows are parked (a
+ * step waiting for an answer). */
+int bro_engine_executor_activity (BroEngineExecutor *self);
+
 /* Waits until every action posted before it has run (at once when stopped). Not on the executor. */
 void bro_engine_executor_barrier (BroEngineExecutor *self);
 

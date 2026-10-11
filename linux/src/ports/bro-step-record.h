@@ -30,6 +30,7 @@ typedef struct {
 /* Everything zero. */
 BroStepRecord *bro_step_record_new (void);
 void bro_step_record_free (BroStepRecord *value);
+BroStepRecord *bro_step_record_copy (const BroStepRecord *value);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroStepRecord, bro_step_record_free)
 

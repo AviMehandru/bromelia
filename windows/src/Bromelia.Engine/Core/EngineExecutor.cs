@@ -18,6 +18,7 @@ public sealed class EngineExecutor
     readonly Thread _thread;
     readonly Action<Exception>? _unexpected;
     bool _stopping;
+    int _workers; // started, result not yet posted back
 
     /// <param name="unexpected">Gets an exception an action let out (a bug); the executor goes on. Without it the
     /// exception ends the process, as an unhandled exception does.</param>
@@ -30,6 +31,17 @@ public sealed class EngineExecutor
 
     /// <summary>True on the executor's thread.</summary>
     public bool IsCurrent => Thread.CurrentThread == _thread;
+
+    /// <summary>Work not done yet: actions waiting to run (not the one running) and workers whose result hasn't been
+    /// posted back. A test (or a scenario runner) knows the engine has settled when this is down to the workers it
+    /// knows are parked (a step waiting for an answer).</summary>
+    public int Activity
+    {
+        get
+        {
+            lock (_lock) return _queue.Count + _workers;
+        }
+    }
 
     /// <summary>Runs <paramref name="action"/> on the executor after everything posted before it. False, and the
     /// action never runs, once the executor is stopping.</summary>
@@ -49,19 +61,60 @@ public sealed class EngineExecutor
     public Task<T> Worker<T>(Func<T> work)
     {
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_lock) _workers++;
         Task.Run(() =>
         {
             try
             {
                 var result = work();
-                Post(() => done.SetResult(result));
+                Deliver(() => done.SetResult(result));
             }
             catch (Exception e)
             {
-                Post(() => done.SetException(e));
+                Deliver(() => done.SetException(e));
             }
         });
         return done.Task;
+    }
+
+    /// <summary>The same for work that is asynchronous itself (a step, a store call): it starts on a worker thread,
+    /// never on the executor.</summary>
+    public Task<T> Worker<T>(Func<Task<T>> work)
+    {
+        var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_lock) _workers++;
+        Task.Run(async () =>
+        {
+            try
+            {
+                var result = await work().ConfigureAwait(false);
+                Deliver(() => done.SetResult(result));
+            }
+            catch (Exception e)
+            {
+                Deliver(() => done.SetException(e));
+            }
+        });
+        return done.Task;
+    }
+
+    /// <summary>The same for asynchronous work without a result.</summary>
+    public Task Worker(Func<Task> work) => Worker(async () =>
+    {
+        await work().ConfigureAwait(false);
+        return true;
+    });
+
+    /// <summary>Posts a worker's result: from then on it counts as a queued action instead of a worker.</summary>
+    void Deliver(Action action)
+    {
+        lock (_lock)
+        {
+            _workers--;
+            if (_stopping) return;
+            _queue.Enqueue(action);
+            Monitor.Pulse(_lock);
+        }
     }
 
     /// <summary>Completes once every action posted before it has run (at once when stopped). Waiting for it

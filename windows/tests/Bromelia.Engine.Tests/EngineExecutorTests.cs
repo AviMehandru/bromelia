@@ -125,7 +125,8 @@ public sealed class EngineExecutorTests
                         {
                             try
                             {
-                                await exec.Worker<int>(() => throw new BroFailure(new BroError(want["code"]!.AsString!, (JsonValue.Object)want["params"]!)));
+                                int Fail() => throw new BroFailure(new BroError(want["code"]!.AsString!, (JsonValue.Object)want["params"]!));
+                                await exec.Worker(Fail);
                             }
                             catch (BroFailure f)
                             {
@@ -173,6 +174,35 @@ public sealed class EngineExecutorTests
                         });
                         Wait(exec.Barrier());
                         Same(expect["slowActionDoneFirst"]!.AsBool, (bool?)slowDone, "slow action done first");
+                        return true;
+                    }
+                    case "activity":
+                    {
+                        using var workerGo = new ManualResetEventSlim();
+                        using var actionGo = new ManualResetEventSlim();
+                        using var workerIn = new ManualResetEventSlim();
+                        using var actionIn = new ManualResetEventSlim();
+                        Task<bool>? worker = null;
+                        exec.Post(() => worker = exec.Worker(() =>
+                        {
+                            workerIn.Set();
+                            return workerGo.Wait(Patience);
+                        }));
+                        Assert.True(workerIn.Wait(Patience));
+                        exec.Post(() =>
+                        {
+                            actionIn.Set();
+                            actionGo.Wait(Patience);
+                        });
+                        Assert.True(actionIn.Wait(Patience));
+                        for (int i = 0; i < (int)given["queuedBehind"]!.AsInteger!; i++) exec.Post(() => { });
+                        Same(expect["whileWaiting"]!.AsInteger, (long?)exec.Activity, "activity while waiting");
+                        workerGo.Set();
+                        actionGo.Set();
+                        var until = DateTime.UtcNow + Patience;
+                        while (exec.Activity > 0 && DateTime.UtcNow < until) Thread.Sleep(1);
+                        Wait(exec.Barrier());
+                        Same(expect["afterwards"]!.AsInteger, (long?)exec.Activity, "activity afterwards");
                         return true;
                     }
                     case "stop-runs-what-is-queued":

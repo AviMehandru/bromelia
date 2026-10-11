@@ -25,6 +25,7 @@ typedef struct {
 
 BroJobRequest *bro_job_request_new (BroJobKind kind, const char *title);
 void bro_job_request_free (BroJobRequest *request);
+BroJobRequest *bro_job_request_copy (const BroJobRequest *request);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroJobRequest, bro_job_request_free)
 

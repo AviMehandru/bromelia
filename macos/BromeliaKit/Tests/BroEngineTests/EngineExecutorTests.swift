@@ -103,6 +103,29 @@ struct EngineExecutorTests {
             }
             await exec.barrier()
             try Fixtures.same(["slow done"], await log.items, "slow action done first")
+        case "activity":
+            let workerGo = DispatchSemaphore(value: 0), actionGo = DispatchSemaphore(value: 0)
+            let workerIn = DispatchSemaphore(value: 0), actionIn = DispatchSemaphore(value: 0)
+            Task { @EngineActor in
+                _ = try? await exec.worker { () throws(BroError) -> Bool in
+                    workerIn.signal()
+                    return wait(workerGo)
+                }
+            }
+            try Fixtures.check(wait(workerIn), "the worker started")
+            exec.post {
+                actionIn.signal()
+                _ = wait(actionGo)
+            }
+            try Fixtures.check(wait(actionIn), "the action started")
+            for _ in 0..<Int(given["queuedBehind"]!.int!) { exec.post {} }
+            try Fixtures.same(expect["whileWaiting"]!.int!, Int64(exec.activity), "activity while waiting")
+            workerGo.signal()
+            actionGo.signal()
+            let until = Date().addingTimeInterval(10)
+            while exec.activity > 0 && Date() < until { try await Task.sleep(nanoseconds: 1_000_000) }
+            await exec.barrier()
+            try Fixtures.same(expect["afterwards"]!.int!, Int64(exec.activity), "activity afterwards")
         case "stop-runs-what-is-queued":
             let hold = DispatchSemaphore(value: 0)
             exec.post { _ = wait(hold) }

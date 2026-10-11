@@ -58,6 +58,7 @@ public final class Scheduler {
     private var reserved: [Reservation: Int64] = [:]
     private var published = LeaseSnapshot.empty
     private var nextOrder = 0
+    private var granted: Int64 = 0
 
     public init(executor: EngineExecutor, bus: EventBus, limits: SchedulerLimits) {
         self.executor = executor
@@ -307,7 +308,8 @@ public final class Scheduler {
         r.unregister?()
         for d in r.resources.drives { driveHolder[d] = r.job }
         for (key, n) in needs { held[key, default: 0] += n }
-        let lease = Lease(jobId: r.job, counted: needs)
+        granted += 1
+        let lease = Lease(jobId: r.job, seq: granted, counted: needs)
         leasesOf[r.job, default: []].append(lease)
         r.done.resume(returning: .success(lease))
     }

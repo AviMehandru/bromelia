@@ -24,3 +24,22 @@ bro_job_record_free (BroJobRecord *x)
   g_clear_pointer (&x->plan, bro_job_plan_free);
   g_free (x);
 }
+
+BroJobRecord *
+bro_job_record_copy (const BroJobRecord *v)
+{
+  BroJobRecord *x;
+  if (!v)
+    return NULL;
+  x = g_memdup2 (v, sizeof *v);
+  x->error = bro_bro_error_copy (v->error);
+  x->blocked_by = v->blocked_by ? bro_json_value_ref (v->blocked_by) : NULL;
+  x->decision = v->decision ? bro_json_value_ref (v->decision) : NULL;
+  x->drive_id = g_strdup (v->drive_id);
+  x->mode = g_strdup (v->mode);
+  x->title = g_strdup (v->title);
+  x->fingerprint = g_strdup (v->fingerprint);
+  x->request = bro_job_request_copy (v->request);
+  x->plan = bro_job_plan_copy (v->plan);
+  return x;
+}

@@ -1,9 +1,8 @@
 /* bro-job-outcome.c */
 #include "bro-job-outcome.h"
 
-/* Steps after the archive is committed: their failures never fail a job. */
-static gboolean
-after_commit (BroStepKind k)
+gboolean
+bro_job_outcome_after_commit (BroStepKind k)
 {
   return k == BRO_STEP_KIND_PUBLISH || k == BRO_STEP_KIND_PROTECT || k == BRO_STEP_KIND_POST_PROCESS
          || k == BRO_STEP_KIND_NOTIFY || k == BRO_STEP_KIND_RUN_COMMAND || k == BRO_STEP_KIND_TRANSCODE;
@@ -57,7 +56,7 @@ bro_job_outcome_decide (GPtrArray *steps, gboolean cancelled, const BroOutcomePo
   }
   for (guint i = 0; i < steps->len; i++) {
     const BroStepResult *s = steps->pdata[i];
-    if (s->state != BRO_STEP_STATE_FAILED || after_commit (s->kind))
+    if (s->state != BRO_STEP_STATE_FAILED || bro_job_outcome_after_commit (s->kind))
       continue;
     BroBroError *error = s->error ? bro_bro_error_copy (s->error)
                                   : error_of (BRO_MSG_INTERNAL_UNEXPECTED, BRO_SEVERITY_ERROR, NULL, NULL);

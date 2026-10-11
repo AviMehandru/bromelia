@@ -1,9 +1,14 @@
 # L4 Engine (rearchitecture plan §3.2, §11): the executor, the event bus, services, the scheduler, the pipeline and
 # its steps. Reaches the outside world only through the ports: no adapters, no GIO, no platform calls.
-bro_engine_inc = include_directories('core', 'scheduler')
+bro_engine_inc = include_directories('api', 'core', 'pipeline', 'scheduler')
 
 bro_engine_lib = static_library('bro-engine',
   files(
+    'api/bro-decision-answer.c',
+    'api/bro-decision-dto.c',
+    'api/bro-job-dto.c',
+    'api/bro-log-line-dto.c',
+    'api/bro-progress-dto.c',
     'core/bro-coalescer.c',
     'core/bro-engine-clock.c',
     'core/bro-engine-event.c',
@@ -14,6 +19,20 @@ bro_engine_lib = static_library('bro-engine',
     'core/bro-event-stream.c',
     'core/bro-stream-item.c',
     'core/bro-subscription.c',
+    'pipeline/bro-catalog-queries.c',
+    'pipeline/bro-decision-port.c',
+    'pipeline/bro-job-logger.c',
+    'pipeline/bro-job-planner.c',
+    'pipeline/bro-library-handle.c',
+    'pipeline/bro-library-port.c',
+    'pipeline/bro-pipeline-runner.c',
+    'pipeline/bro-progress-reporter.c',
+    'pipeline/bro-step.c',
+    'pipeline/bro-step-context.c',
+    'pipeline/bro-step-environment.c',
+    'pipeline/bro-step-registry.c',
+    'pipeline/bro-step-report.c',
+    'pipeline/bro-tool-set.c',
     'scheduler/bro-drive-holder.c',
     'scheduler/bro-lease-snapshot.c',
     'scheduler/bro-lease.c',

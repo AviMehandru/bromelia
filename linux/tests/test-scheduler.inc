@@ -102,7 +102,7 @@ asker_done (BroLease *lease, const BroBroError *error, gpointer data)
   if (lease)
     {
       g_hash_table_replace (a->h->leases, g_strdup (a->name), lease);
-      g_ptr_array_add (a->h->granted, g_strdup (a->name));
+      g_ptr_array_add (a->h->granted, g_strdup_printf ("%012" G_GINT64_FORMAT " %s", lease->seq, a->name));
       set_state (a->h, a->name, "granted");
     }
   else
@@ -273,6 +273,12 @@ names_json (SchedulerHarness *h, GArray *ids)
   return a;
 }
 
+static int
+compare_strings_in_array (gconstpointer a, gconstpointer b)
+{
+  return strcmp (*(const char *const *) a, *(const char *const *) b);
+}
+
 static void
 cancel_source_free (gpointer data)
 {
@@ -306,7 +312,14 @@ scheduler_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
       bro_engine_executor_barrier (h.w.executor); /* and the answers it posted */
     }
   if ((v = bro_json_value_member (expect, "granted")))
-    same_lines (failures, id, "granted", v, h.granted);
+    {
+      /* "<seq> <name>", sorted: grant order, then the names alone */
+      g_autoptr (GPtrArray) names = g_ptr_array_new ();
+      g_ptr_array_sort (h.granted, compare_strings_in_array);
+      for (guint i = 0; i < h.granted->len; i++)
+        g_ptr_array_add (names, strchr (g_ptr_array_index (h.granted, i), ' ') + 1);
+      same_lines (failures, id, "granted", v, names);
+    }
   if ((v = bro_json_value_member (expect, "states")))
     for (guint i = 0; i < v->keys->len; i++)
       {

@@ -20,7 +20,7 @@ public sealed class SchedulerTests
         public readonly EventBus Bus;
         public readonly Scheduler Scheduler;
         public readonly Dictionary<string, Id> Jobs = new();
-        public readonly List<string> Granted = new();
+        public readonly List<(string Name, long Seq)> Granted = new();
         public readonly Dictionary<string, string> States = new();
         public readonly Dictionary<string, List<string>> Waits = new();
         public readonly Dictionary<string, Lease> Leases = new();
@@ -47,8 +47,8 @@ public sealed class SchedulerTests
         {
             try
             {
-                Leases[name] = await task;
-                Granted.Add(name);
+                var lease = Leases[name] = await task;
+                Granted.Add((name, lease.Seq));
                 States[name] = "granted";
             }
             catch (BroFailure f)
@@ -179,7 +179,7 @@ public sealed class SchedulerTests
                 }
                 JsonValue? got = null;
                 h.W.OnExecutor(() => got = JsonValue.Of(
-                    ("granted", JsonValue.Of(h.Granted.Select(g => JsonValue.Of(g)))),
+                    ("granted", JsonValue.Of(h.Granted.OrderBy(g => g.Seq).Select(g => JsonValue.Of(g.Name)))),
                     ("queues", h.QueuesJson()),
                     ("leases", LeaseSnapshot.Json(h.Scheduler.Leases())),
                     ("events", JsonValue.Of(h.Events.Select(EngineEvent.Json)))));

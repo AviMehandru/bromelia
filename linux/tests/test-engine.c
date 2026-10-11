@@ -1075,6 +1075,37 @@ executor_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
       if (p.log->len != 1)
         bro_test_fail (failures, id, "the barrier came back before the slow action ended");
     }
+  else if (strcmp (id, "activity") == 0)
+    {
+      gint64 behind = bro_json_value_get_integer (bro_json_value_member (given, "queuedBehind"), 0);
+      gint64 until = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+      int waiting, afterwards;
+      p.workers_wanted = 2; /* the worker waits until the test counts as a second "worker" */
+      bro_engine_executor_worker (p.executor, work_meets_the_others, nothing_done, &p, NULL);
+      g_mutex_lock (&p.hold_lock);
+      while (p.workers_started < 1)
+        g_cond_wait (&p.hold_cond, &p.hold_lock);
+      g_mutex_unlock (&p.hold_lock);
+      bro_engine_executor_post (p.executor, hold_action, &p, NULL);
+      while (bro_engine_executor_activity (p.executor) > 1) /* the hold action has started */
+        g_usleep (1000);
+      for (gint64 i = 0; i < behind; i++)
+        bro_engine_executor_post (p.executor, nothing, NULL, NULL);
+      waiting = bro_engine_executor_activity (p.executor);
+      if (waiting != bro_json_value_get_integer (bro_json_value_member (expect, "whileWaiting"), -1))
+        bro_test_fail (failures, id, "activity while waiting: %d", waiting);
+      g_mutex_lock (&p.hold_lock);
+      p.workers_started++; /* lets the worker go */
+      p.held = TRUE;
+      g_cond_broadcast (&p.hold_cond);
+      g_mutex_unlock (&p.hold_lock);
+      while (bro_engine_executor_activity (p.executor) > 0 && g_get_monotonic_time () < until)
+        g_usleep (1000);
+      bro_engine_executor_barrier (p.executor);
+      afterwards = bro_engine_executor_activity (p.executor);
+      if (afterwards != bro_json_value_get_integer (bro_json_value_member (expect, "afterwards"), -1))
+        bro_test_fail (failures, id, "activity afterwards: %d", afterwards);
+    }
   else if (strcmp (id, "stop-runs-what-is-queued") == 0)
     {
       gint64 n = bro_json_value_get_integer (bro_json_value_member (given, "actions"), 0);
@@ -1121,6 +1152,7 @@ test_engine_executor (void)
 }
 
 #include "test-scheduler.inc"
+#include "test-pipeline.inc"
 
 int
 main (int argc, char **argv)
@@ -1133,5 +1165,7 @@ main (int argc, char **argv)
   g_test_add_func ("/engine/executor", test_engine_executor);
   g_test_add_func ("/engine/scheduler", test_scheduler);
   g_test_add_func ("/engine/lease-snapshot", test_lease_snapshot);
+  g_test_add_func ("/engine/pipeline-runner", test_pipeline_runner);
+  g_test_add_func ("/engine/job-planner", test_job_planner);
   return g_test_run ();
 }

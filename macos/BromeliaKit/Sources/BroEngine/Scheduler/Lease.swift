@@ -5,11 +5,14 @@ import BroFoundation
 @EngineActor
 public final class Lease {
     public let jobId: Id
+    /// Leases are numbered in the order they were granted.
+    public let seq: Int64
     let counted: [(key: String, count: Int)]
     var released = false
 
-    init(jobId: Id, counted: [(key: String, count: Int)]) {
+    init(jobId: Id, seq: Int64, counted: [(key: String, count: Int)]) {
         self.jobId = jobId
+        self.seq = seq
         self.counted = counted
     }
 }

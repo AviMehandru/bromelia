@@ -1,15 +1,126 @@
 {
-  "description": "EngineExecutor (plan §8): the one thread (C#, C) or actor (Swift) that owns all service state. post(action) may be called from any thread; actions run one at a time, in the order they were posted (per posting thread), never inside post itself, even when post is called on the executor. isCurrent is true only on the executor (C#, C; Swift's EngineActor isolation is checked by the compiler). worker(work) runs work on a worker thread, off the executor, and delivers its result or its BroError back on the executor; workers run in parallel. barrier() waits until every action posted before it has run. stop() lets the queued actions run, then ends the executor; an action posted afterwards doesn't run (post says so). These cases are behaviours each platform's harness checks natively; 'given' holds their sizes. busyWhilePosting: the harness keeps the executor busy (an action waiting for it) until 'first' and 'second' are both posted, so 'second' is queued before 'first' runs.",
-  "functions": ["EngineExecutor.post", "EngineExecutor.isCurrent", "EngineExecutor.worker", "EngineExecutor.barrier", "EngineExecutor.stop"],
+  "description": "EngineExecutor (plan §8): the one thread (C#, C) or actor (Swift) that owns all service state. post(action) may be called from any thread; actions run one at a time, in the order they were posted (per posting thread), never inside post itself, even when post is called on the executor. isCurrent is true only on the executor (C#, C; Swift's EngineActor isolation is checked by the compiler). worker(work) runs work on a worker thread, off the executor, and delivers its result or its BroError back on the executor; workers run in parallel. activity() counts the work not done yet: actions waiting to run (not the one running) and workers whose result hasn't come back (the harness: a worker that waits, an action that waits, two actions behind it; then everything released). barrier() waits until every action posted before it has run. stop() lets the queued actions run, then ends the executor; an action posted afterwards doesn't run (post says so). These cases are behaviours each platform's harness checks natively; 'given' holds their sizes. busyWhilePosting: the harness keeps the executor busy (an action waiting for it) until 'first' and 'second' are both posted, so 'second' is queued before 'first' runs.",
+  "functions": [
+    "EngineExecutor.post",
+    "EngineExecutor.isCurrent",
+    "EngineExecutor.activity",
+    "EngineExecutor.worker",
+    "EngineExecutor.barrier",
+    "EngineExecutor.stop"
+  ],
   "cases": [
-    {"id": "in-order", "given": {"actions": 1000}, "expect": {"order": "as posted"}},
-    {"id": "in-order-per-thread", "given": {"threads": 4, "actionsEach": 500}, "expect": {"ran": 2000, "order": "each thread's actions as it posted them"}},
-    {"id": "one-thread-of-its-own", "given": {"actions": 100}, "expect": {"isCurrentInActions": true, "isCurrentOutside": false, "threads": 1}},
-    {"id": "posted-on-the-executor-runs-later", "given": {"busyWhilePosting": true}, "expect": {"order": ["first", "first ends", "second", "posted by first"]}},
-    {"id": "worker-runs-off-the-executor", "given": {}, "expect": {"workOnExecutor": false, "resultOnExecutor": true, "result": 42}},
-    {"id": "worker-error", "given": {"error": {"code": "fs.failed", "params": {"path": "/x"}}}, "expect": {"errorOnExecutor": true, "error": {"code": "fs.failed", "params": {"path": "/x"}}}},
-    {"id": "workers-in-parallel", "given": {"workers": 2}, "expect": {"allStartedBeforeAnyEnds": true}},
-    {"id": "barrier-waits", "given": {"slowActionMs": 50}, "expect": {"slowActionDoneFirst": true}},
-    {"id": "stop-runs-what-is-queued", "given": {"actions": 10}, "expect": {"ranBeforeStop": 10, "postAfterStop": false, "ranAfterStop": 0}}
+    {
+      "id": "in-order",
+      "given": {
+        "actions": 1000
+      },
+      "expect": {
+        "order": "as posted"
+      }
+    },
+    {
+      "id": "in-order-per-thread",
+      "given": {
+        "threads": 4,
+        "actionsEach": 500
+      },
+      "expect": {
+        "ran": 2000,
+        "order": "each thread's actions as it posted them"
+      }
+    },
+    {
+      "id": "one-thread-of-its-own",
+      "given": {
+        "actions": 100
+      },
+      "expect": {
+        "isCurrentInActions": true,
+        "isCurrentOutside": false,
+        "threads": 1
+      }
+    },
+    {
+      "id": "posted-on-the-executor-runs-later",
+      "given": {
+        "busyWhilePosting": true
+      },
+      "expect": {
+        "order": [
+          "first",
+          "first ends",
+          "second",
+          "posted by first"
+        ]
+      }
+    },
+    {
+      "id": "worker-runs-off-the-executor",
+      "given": {},
+      "expect": {
+        "workOnExecutor": false,
+        "resultOnExecutor": true,
+        "result": 42
+      }
+    },
+    {
+      "id": "worker-error",
+      "given": {
+        "error": {
+          "code": "fs.failed",
+          "params": {
+            "path": "/x"
+          }
+        }
+      },
+      "expect": {
+        "errorOnExecutor": true,
+        "error": {
+          "code": "fs.failed",
+          "params": {
+            "path": "/x"
+          }
+        }
+      }
+    },
+    {
+      "id": "workers-in-parallel",
+      "given": {
+        "workers": 2
+      },
+      "expect": {
+        "allStartedBeforeAnyEnds": true
+      }
+    },
+    {
+      "id": "barrier-waits",
+      "given": {
+        "slowActionMs": 50
+      },
+      "expect": {
+        "slowActionDoneFirst": true
+      }
+    },
+    {
+      "id": "stop-runs-what-is-queued",
+      "given": {
+        "actions": 10
+      },
+      "expect": {
+        "ranBeforeStop": 10,
+        "postAfterStop": false,
+        "ranAfterStop": 0
+      }
+    },
+    {
+      "id": "activity",
+      "given": {
+        "queuedBehind": 2
+      },
+      "expect": {
+        "whileWaiting": 3,
+        "afterwards": 0
+      }
+    }
   ]
 }
