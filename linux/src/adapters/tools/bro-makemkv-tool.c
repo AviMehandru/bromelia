@@ -17,7 +17,10 @@ struct _BroMakemkvTool {
   BroToolLocator *locator;
 };
 
-G_DEFINE_FINAL_TYPE (BroMakemkvTool, bro_makemkv_tool, G_TYPE_OBJECT)
+static void bro_makemkv_tool_iface_init (BroMakemkvInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (BroMakemkvTool, bro_makemkv_tool, G_TYPE_OBJECT,
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_MAKEMKV, bro_makemkv_tool_iface_init))
 
 /* makemkvcon's path, or NULL and @error set (the locator's reason). */
 static char *
@@ -342,4 +345,42 @@ bro_makemkv_tool_new (BroProcessLauncher *launcher, BroFileSystem *fs, BroSettin
   self->isolation = g_object_ref (isolation);
   self->locator = g_object_ref (locator);
   return self;
+}
+
+/* ---- the Makemkv port ---- */
+
+static GPtrArray *
+port_scan_drives (BroMakemkv *self, BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_makemkv_tool_scan_drives (BRO_MAKEMKV_TOOL (self), cancel, error);
+}
+
+static BroListingRun *
+port_listing (BroMakemkv *self, const BroMakemkvSource *source, const BroMakemkvInvocation *invocation, BroRunSink *sink,
+              BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_makemkv_tool_listing (BRO_MAKEMKV_TOOL (self), source, invocation, sink, cancel, error);
+}
+
+static BroMakemkvRun *
+port_rip (BroMakemkv *self, const BroMakemkvSource *source, const char *title, const char *destination,
+          const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_makemkv_tool_rip (BRO_MAKEMKV_TOOL (self), source, title, destination, invocation, sink, cancel, error);
+}
+
+static BroMakemkvRun *
+port_backup (BroMakemkv *self, const BroMakemkvSource *source, gboolean decrypt, const char *destination,
+             const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_makemkv_tool_backup (BRO_MAKEMKV_TOOL (self), source, decrypt, destination, invocation, sink, cancel, error);
+}
+
+static void
+bro_makemkv_tool_iface_init (BroMakemkvInterface *iface)
+{
+  iface->scan_drives = port_scan_drives;
+  iface->listing = port_listing;
+  iface->rip = port_rip;
+  iface->backup = port_backup;
 }

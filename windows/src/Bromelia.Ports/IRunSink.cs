@@ -1,6 +1,6 @@
 using Bromelia.Domain;
 
-namespace Bromelia.Adapters;
+namespace Bromelia.Ports;
 
 /// <summary>Where a tool reports what makemkvcon says, event by event (progress, messages, the current title). Called
 /// on the tool's thread.</summary>

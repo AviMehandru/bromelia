@@ -14,7 +14,7 @@ import BroPorts
 /// a backup", exit 0), so the call fails with fs.alreadyExists before anything runs. A backup that comes out as one file
 /// at the destination is classified as `RunProduct.image`, whatever it is called: MakeMKV writes DVD backups as ISO
 /// images even when a folder was asked for, and naming the image is the caller's job.
-public final class MakemkvTool: Sendable {
+public final class MakemkvTool: Makemkv {
     private let launcher: any ProcessLauncher
     private let fs: any FileSystem
     private let isolation: any SettingsIsolation

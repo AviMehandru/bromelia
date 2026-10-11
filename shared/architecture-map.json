@@ -10241,92 +10241,6 @@
             "name": "BroMakemkvTool",
             "file": "linux/src/adapters/tools/bro-makemkv-tool.h"
           }
-        },
-        {
-          "name": "MakemkvInvocation",
-          "kind": "struct",
-          "fields": [
-            "settings",
-            "options",
-            "stallTimeout",
-            "transcript"
-          ],
-          "doc": "What a run needs besides its source: the settings to isolate, the switches (the profile path comes from the lease), how long it may stay silent, and the transcript file (the job's makemkv.txt).",
-          "swift": {
-            "name": "MakemkvInvocation",
-            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/MakemkvInvocation.swift"
-          },
-          "cs": {
-            "name": "MakemkvInvocation",
-            "file": "windows/src/Bromelia.Adapters/Tools/MakemkvInvocation.cs"
-          },
-          "c": {
-            "name": "BroMakemkvInvocation",
-            "file": "linux/src/adapters/tools/bro-makemkv-invocation.h"
-          }
-        },
-        {
-          "name": "MakemkvRun",
-          "kind": "struct",
-          "fields": [
-            "outcome",
-            "notice",
-            "libreDrive",
-            "version",
-            "transcriptProblem",
-            "settingsProblem"
-          ],
-          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, MakeMKV's version, the warning when its transcript couldn't be written, and what giving its settings back reported (IsolationLease.release).",
-          "swift": {
-            "name": "MakemkvRun",
-            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/MakemkvRun.swift"
-          },
-          "cs": {
-            "name": "MakemkvRun",
-            "file": "windows/src/Bromelia.Adapters/Tools/MakemkvRun.cs"
-          },
-          "c": {
-            "name": "BroMakemkvRun",
-            "file": "linux/src/adapters/tools/bro-makemkv-run.h"
-          }
-        },
-        {
-          "name": "ListingRun",
-          "kind": "struct",
-          "fields": [
-            "listing",
-            "run"
-          ],
-          "doc": "An info run: the listing it printed and the run.",
-          "swift": {
-            "name": "ListingRun",
-            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/ListingRun.swift"
-          },
-          "cs": {
-            "name": "ListingRun",
-            "file": "windows/src/Bromelia.Adapters/Tools/ListingRun.cs"
-          },
-          "c": {
-            "name": "BroListingRun",
-            "file": "linux/src/adapters/tools/bro-listing-run.h"
-          }
-        },
-        {
-          "name": "RunSink",
-          "kind": "protocol",
-          "doc": "Where a tool reports what makemkvcon says, event by event (progress, messages, the current title). Called on the tool's thread.",
-          "swift": {
-            "name": "RunSink",
-            "file": "macos/BromeliaKit/Sources/BroAdapters/Tools/RunSink.swift"
-          },
-          "cs": {
-            "name": "IRunSink",
-            "file": "windows/src/Bromelia.Adapters/Tools/IRunSink.cs"
-          },
-          "c": {
-            "name": "BroRunSink",
-            "file": "linux/src/adapters/tools/bro-run-sink.h"
-          }
         }
       ],
       "functions": [
@@ -10392,15 +10306,6 @@
           "swift": "MakemkvTool.backup(_:decrypt:destination:invocation:sink:cancel:)",
           "cs": "MakemkvTool.Backup",
           "c": "bro_makemkv_tool_backup"
-        },
-        {
-          "name": "RunSink.event",
-          "params": [
-            "event"
-          ],
-          "swift": "RunSink.event(_:)",
-          "cs": "RunSink.Event",
-          "c": "bro_run_sink_event"
         }
       ]
     },
@@ -12435,6 +12340,273 @@
           "swift": "LeaseSnapshot.parse(_:)",
           "cs": "LeaseSnapshot.Parse",
           "c": "bro_lease_snapshot_parse"
+        }
+      ]
+    },
+    "ports/makemkv": {
+      "layer": "ports",
+      "folder": "",
+      "doc": "The makemkvcon port (plan §10.1, owner 2026-10-11: steps reach tools through ports): the drive scan, listings, rips and backups, and the types a run takes and returns. MakemkvTool (Adapters) implements it.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "Makemkv",
+          "kind": "protocol",
+          "doc": "makemkvcon: every call isolates the run's settings, reports each robot event to the sink and classifies the run.",
+          "swift": {
+            "name": "Makemkv",
+            "file": "macos/BromeliaKit/Sources/BroPorts/Makemkv.swift"
+          },
+          "cs": {
+            "name": "IMakemkv",
+            "file": "windows/src/Bromelia.Ports/IMakemkv.cs"
+          },
+          "c": {
+            "name": "BroMakemkv",
+            "file": "linux/src/ports/bro-makemkv.h"
+          }
+        },
+        {
+          "name": "MakemkvInvocation",
+          "kind": "struct",
+          "fields": [
+            "settings",
+            "options",
+            "stallTimeout",
+            "transcript"
+          ],
+          "doc": "What a run needs besides its source: the settings to isolate, the switches (the profile path comes from the lease), how long it may stay silent, and the transcript file (the job's makemkv.txt).",
+          "swift": {
+            "name": "MakemkvInvocation",
+            "file": "macos/BromeliaKit/Sources/BroPorts/MakemkvInvocation.swift"
+          },
+          "cs": {
+            "name": "MakemkvInvocation",
+            "file": "windows/src/Bromelia.Ports/MakemkvInvocation.cs"
+          },
+          "c": {
+            "name": "BroMakemkvInvocation",
+            "file": "linux/src/ports/bro-makemkv-invocation.h"
+          }
+        },
+        {
+          "name": "MakemkvRun",
+          "kind": "struct",
+          "fields": [
+            "outcome",
+            "notice",
+            "libreDrive",
+            "version",
+            "transcriptProblem",
+            "settingsProblem"
+          ],
+          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, MakeMKV's version, the warning when its transcript couldn't be written, and what giving its settings back reported (IsolationLease.release).",
+          "swift": {
+            "name": "MakemkvRun",
+            "file": "macos/BromeliaKit/Sources/BroPorts/MakemkvRun.swift"
+          },
+          "cs": {
+            "name": "MakemkvRun",
+            "file": "windows/src/Bromelia.Ports/MakemkvRun.cs"
+          },
+          "c": {
+            "name": "BroMakemkvRun",
+            "file": "linux/src/ports/bro-makemkv-run.h"
+          }
+        },
+        {
+          "name": "ListingRun",
+          "kind": "struct",
+          "fields": [
+            "listing",
+            "run"
+          ],
+          "doc": "An info run: the listing it printed and the run.",
+          "swift": {
+            "name": "ListingRun",
+            "file": "macos/BromeliaKit/Sources/BroPorts/ListingRun.swift"
+          },
+          "cs": {
+            "name": "ListingRun",
+            "file": "windows/src/Bromelia.Ports/ListingRun.cs"
+          },
+          "c": {
+            "name": "BroListingRun",
+            "file": "linux/src/ports/bro-listing-run.h"
+          }
+        },
+        {
+          "name": "RunSink",
+          "kind": "protocol",
+          "doc": "Where a tool reports what makemkvcon says, event by event (progress, messages, the current title). Called on the tool's thread.",
+          "swift": {
+            "name": "RunSink",
+            "file": "macos/BromeliaKit/Sources/BroPorts/RunSink.swift"
+          },
+          "cs": {
+            "name": "IRunSink",
+            "file": "windows/src/Bromelia.Ports/IRunSink.cs"
+          },
+          "c": {
+            "name": "BroRunSink",
+            "file": "linux/src/ports/bro-run-sink.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "Makemkv.scanDrives",
+          "params": [
+            "cancel"
+          ],
+          "returns": "[MakemkvDrive]",
+          "throws": true,
+          "async": true,
+          "doc": "-r --cache=1 info disc:9999, without settings isolation: every DRV line.",
+          "swift": "Makemkv.scanDrives(_:)",
+          "cs": "Makemkv.ScanDrives",
+          "c": "bro_makemkv_scan_drives"
+        },
+        {
+          "name": "Makemkv.listing",
+          "params": [
+            "source",
+            "invocation",
+            "sink",
+            "cancel"
+          ],
+          "returns": "ListingRun",
+          "throws": true,
+          "async": true,
+          "swift": "Makemkv.listing(_:invocation:sink:cancel:)",
+          "cs": "Makemkv.Listing",
+          "c": "bro_makemkv_listing"
+        },
+        {
+          "name": "Makemkv.rip",
+          "params": [
+            "source",
+            "title",
+            "destination",
+            "invocation",
+            "sink",
+            "cancel"
+          ],
+          "returns": "MakemkvRun",
+          "throws": true,
+          "async": true,
+          "swift": "Makemkv.rip(_:title:destination:invocation:sink:cancel:)",
+          "cs": "Makemkv.Rip",
+          "c": "bro_makemkv_rip"
+        },
+        {
+          "name": "Makemkv.backup",
+          "params": [
+            "source",
+            "decrypt",
+            "destination",
+            "invocation",
+            "sink",
+            "cancel"
+          ],
+          "returns": "MakemkvRun",
+          "throws": true,
+          "async": true,
+          "doc": "disc:N only (backup.needsDrive otherwise); stops at once when a DRV line shows the index now names another device.",
+          "swift": "Makemkv.backup(_:decrypt:destination:invocation:sink:cancel:)",
+          "cs": "Makemkv.Backup",
+          "c": "bro_makemkv_backup"
+        },
+        {
+          "name": "RunSink.event",
+          "params": [
+            "event"
+          ],
+          "swift": "RunSink.event(_:)",
+          "cs": "RunSink.Event",
+          "c": "bro_run_sink_event"
+        }
+      ]
+    },
+    "ports/matroska": {
+      "layer": "ports",
+      "folder": "",
+      "doc": "The MKVToolNix port (plan §10.1): what an MKV holds, remuxing, splitting at chapters, chapter times. MkvToolNix (Adapters) implements it.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "Matroska",
+          "kind": "protocol",
+          "doc": "mkvmerge and mkvextract.",
+          "swift": {
+            "name": "Matroska",
+            "file": "macos/BromeliaKit/Sources/BroPorts/Matroska.swift"
+          },
+          "cs": {
+            "name": "IMatroska",
+            "file": "windows/src/Bromelia.Ports/IMatroska.cs"
+          },
+          "c": {
+            "name": "BroMatroska",
+            "file": "linux/src/ports/bro-matroska.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "Matroska.probe",
+          "params": [
+            "file",
+            "cancel"
+          ],
+          "returns": "MkvProbe?",
+          "throws": true,
+          "async": true,
+          "doc": "None when mkvmerge can't read the file.",
+          "swift": "Matroska.probe(_:cancel:)",
+          "cs": "Matroska.Probe",
+          "c": "bro_matroska_probe"
+        },
+        {
+          "name": "Matroska.remux",
+          "params": [
+            "arguments",
+            "cancel"
+          ],
+          "returns": "Bool",
+          "throws": true,
+          "async": true,
+          "swift": "Matroska.remux(_:cancel:)",
+          "cs": "Matroska.Remux",
+          "c": "bro_matroska_remux"
+        },
+        {
+          "name": "Matroska.split",
+          "params": [
+            "chapters",
+            "input",
+            "cancel"
+          ],
+          "returns": "[String]?",
+          "throws": true,
+          "async": true,
+          "doc": "The parts in order (hidden files next to the input); none when mkvmerge failed or made another number of parts, which are removed.",
+          "swift": "Matroska.split(_:input:cancel:)",
+          "cs": "Matroska.Split",
+          "c": "bro_matroska_split"
+        },
+        {
+          "name": "Matroska.chapterTimes",
+          "params": [
+            "file",
+            "cancel"
+          ],
+          "returns": "[Duration]?",
+          "throws": true,
+          "async": true,
+          "swift": "Matroska.chapterTimes(_:cancel:)",
+          "cs": "Matroska.ChapterTimes",
+          "c": "bro_matroska_chapter_times"
         }
       ]
     }

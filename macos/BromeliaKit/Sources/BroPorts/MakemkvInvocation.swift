@@ -1,6 +1,5 @@
 import BroDomain
 import BroFoundation
-import BroPorts
 
 /// What a run needs besides its source: the settings to isolate, the switches (the profile path comes from the lease),
 /// how long it may stay silent, and the transcript file (the job's makemkv.txt).

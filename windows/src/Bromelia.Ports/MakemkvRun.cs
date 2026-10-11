@@ -1,6 +1,6 @@
 using Bromelia.Domain;
 
-namespace Bromelia.Adapters;
+namespace Bromelia.Ports;
 
 /// <summary>One run: its outcome, the first key, version or drive notice, the LibreDrive detail, MakeMKV's version,
 /// process.noTranscript when its transcript couldn't be written, and what giving its settings back reported

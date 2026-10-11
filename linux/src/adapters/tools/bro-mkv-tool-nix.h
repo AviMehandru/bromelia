@@ -5,6 +5,7 @@
 
 #include "bro-cancellation-token.h"
 #include "bro-file-system.h"
+#include "bro-matroska.h"
 #include "bro-mkv-probe.h"
 #include "bro-process-launcher.h"
 #include "bro-tool-locator.h"
@@ -12,6 +13,7 @@
 
 G_BEGIN_DECLS
 
+/* Implements BroMatroska. */
 #define BRO_TYPE_MKV_TOOL_NIX (bro_mkv_tool_nix_get_type ())
 G_DECLARE_FINAL_TYPE (BroMkvToolNix, bro_mkv_tool_nix, BRO, MKV_TOOL_NIX, GObject)
 

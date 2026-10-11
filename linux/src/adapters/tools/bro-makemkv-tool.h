@@ -17,6 +17,7 @@
 #include "bro-listing-run.h"
 #include "bro-makemkv-drive.h"
 #include "bro-makemkv-invocation.h"
+#include "bro-makemkv.h"
 #include "bro-makemkv-run.h"
 #include "bro-makemkv-source.h"
 #include "bro-process-launcher.h"
@@ -27,6 +28,7 @@
 
 G_BEGIN_DECLS
 
+/* Implements BroMakemkv. */
 #define BRO_TYPE_MAKEMKV_TOOL (bro_makemkv_tool_get_type ())
 G_DECLARE_FINAL_TYPE (BroMakemkvTool, bro_makemkv_tool, BRO, MAKEMKV_TOOL, GObject)
 

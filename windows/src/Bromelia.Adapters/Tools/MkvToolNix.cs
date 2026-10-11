@@ -14,7 +14,7 @@ namespace Bromelia.Adapters;
 /// <summary>MKVToolNix (plan §10.1; shared/fixtures/adapters/mkvtoolnix.cases.json): mkvmerge -J for the rip check,
 /// remuxing, splitting at chapters, chapter times with mkvextract. Exit status 1 is mkvmerge's warning: the output is
 /// good. tool.missing when the locator can't find a tool.</summary>
-public sealed class MkvToolNix
+public sealed class MkvToolNix : IMatroska
 {
     readonly IProcessLauncher _launcher;
     readonly IFileSystem _fs;

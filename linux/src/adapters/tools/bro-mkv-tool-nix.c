@@ -15,7 +15,10 @@ struct _BroMkvToolNix {
   char *work_directory;
 };
 
-G_DEFINE_FINAL_TYPE (BroMkvToolNix, bro_mkv_tool_nix, G_TYPE_OBJECT)
+static void bro_mkv_tool_nix_iface_init (BroMatroskaInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (BroMkvToolNix, bro_mkv_tool_nix, G_TYPE_OBJECT,
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_MATROSKA, bro_mkv_tool_nix_iface_init))
 
 /* Keeps the stdout lines (when @lines isn't NULL). */
 static gboolean
@@ -190,4 +193,39 @@ bro_mkv_tool_nix_new (BroProcessLauncher *launcher, BroFileSystem *fs, BroToolLo
   self->locator = g_object_ref (locator);
   self->work_directory = g_strdup (work_directory);
   return self;
+}
+
+/* ---- the Matroska port ---- */
+
+static BroMkvProbe *
+port_probe (BroMatroska *self, const char *file, BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_mkv_tool_nix_probe (BRO_MKV_TOOL_NIX (self), file, cancel, error);
+}
+
+static gboolean
+port_remux (BroMatroska *self, const char *const *arguments, BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_mkv_tool_nix_remux (BRO_MKV_TOOL_NIX (self), arguments, cancel, error);
+}
+
+static GStrv
+port_split (BroMatroska *self, GArray *chapters, const char *input, BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_mkv_tool_nix_split (BRO_MKV_TOOL_NIX (self), chapters, input, cancel, error);
+}
+
+static GArray *
+port_chapter_times (BroMatroska *self, const char *file, BroCancellationToken *cancel, BroBroError **error)
+{
+  return bro_mkv_tool_nix_chapter_times (BRO_MKV_TOOL_NIX (self), file, cancel, error);
+}
+
+static void
+bro_mkv_tool_nix_iface_init (BroMatroskaInterface *iface)
+{
+  iface->probe = port_probe;
+  iface->remux = port_remux;
+  iface->split = port_split;
+  iface->chapter_times = port_chapter_times;
 }

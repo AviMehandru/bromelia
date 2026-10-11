@@ -21,7 +21,7 @@ namespace Bromelia.Adapters;
 /// contains a backup", exit 0), so the call fails with fs.alreadyExists before anything runs. A backup that comes out
 /// as one file at the destination is classified as RunProduct.Image, whatever it is called: MakeMKV writes DVD backups
 /// as ISO images even when a folder was asked for, and naming the image is the caller's job.</summary>
-public sealed class MakemkvTool
+public sealed class MakemkvTool : IMakemkv
 {
     readonly IProcessLauncher _launcher;
     readonly IFileSystem _fs;

@@ -6,7 +6,7 @@ import Foundation
 /// MKVToolNix (plan §10.1; shared/fixtures/adapters/mkvtoolnix.cases.json): mkvmerge -J for the rip check, remuxing,
 /// splitting at chapters, chapter times with mkvextract. Exit status 1 is mkvmerge's warning: the output is good.
 /// tool.missing when the locator can't find a tool.
-public final class MkvToolNix: Sendable {
+public final class MkvToolNix: Matroska {
     private let launcher: any ProcessLauncher
     private let fs: any FileSystem
     private let locator: any ToolLocator
