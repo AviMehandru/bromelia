@@ -12023,6 +12023,420 @@
           "c": "bro_coalescer_drop"
         }
       ]
+    },
+    "engine/scheduler": {
+      "layer": "engine",
+      "folder": "Scheduler",
+      "cFolder": "scheduler",
+      "doc": "The Scheduler (plan §21, §11.1): the three queues, the resources steps ask for, and space reservations, on the executor. shared/fixtures/engine/scheduler.cases.json.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "Scheduler",
+          "kind": "class",
+          "doc": "Queues, leases and reservations. Grants a step's ResourceSet when everything in it has room, by queue, place in the queue and request order; publishes queueChanged and leaseChanged.",
+          "swift": {
+            "name": "Scheduler",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/Scheduler.swift"
+          },
+          "cs": {
+            "name": "Scheduler",
+            "file": "windows/src/Bromelia.Engine/Scheduler/Scheduler.cs"
+          },
+          "c": {
+            "name": "BroScheduler",
+            "file": "linux/src/engine/scheduler/bro-scheduler.h"
+          }
+        },
+        {
+          "name": "SchedulerLimits",
+          "kind": "struct",
+          "fields": [
+            "acquisitions",
+            "processing",
+            "cpu",
+            "ioPerVolume"
+          ],
+          "doc": "config limits, resolved: acquisitions 0 = no cap; cpu is a count (the caller turns 0 into cores / 2).",
+          "swift": {
+            "name": "SchedulerLimits",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/SchedulerLimits.swift"
+          },
+          "cs": {
+            "name": "SchedulerLimits",
+            "file": "windows/src/Bromelia.Engine/Scheduler/SchedulerLimits.cs"
+          },
+          "c": {
+            "name": "BroSchedulerLimits",
+            "file": "linux/src/engine/scheduler/bro-scheduler-limits.h"
+          }
+        },
+        {
+          "name": "Lease",
+          "kind": "class",
+          "fields": [
+            "jobId"
+          ],
+          "doc": "What one acquire gave a step. Release gives back everything but the drives, which stay with the job until releaseDrives or finish.",
+          "swift": {
+            "name": "Lease",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/Lease.swift"
+          },
+          "cs": {
+            "name": "Lease",
+            "file": "windows/src/Bromelia.Engine/Scheduler/Lease.cs"
+          },
+          "c": {
+            "name": "BroLease",
+            "file": "linux/src/engine/scheduler/bro-lease.h"
+          }
+        },
+        {
+          "name": "Wait",
+          "kind": "enum",
+          "doc": "Why a request isn't granted yet: waiting for room, or blocked by a reason (library.offline).",
+          "cases": [
+            "waiting",
+            "blocked"
+          ],
+          "swift": {
+            "name": "Wait",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/Wait.swift",
+            "cases": [
+              ".waiting",
+              ".blocked"
+            ]
+          },
+          "cs": {
+            "name": "Wait",
+            "file": "windows/src/Bromelia.Engine/Scheduler/Wait.cs",
+            "cases": [
+              "Waiting",
+              "Blocked"
+            ]
+          },
+          "c": {
+            "name": "BroWait",
+            "file": "linux/src/engine/scheduler/bro-wait.h",
+            "cases": [
+              "BRO_WAIT_WAITING",
+              "BRO_WAIT_BLOCKED"
+            ]
+          }
+        },
+        {
+          "name": "QueueOrders",
+          "kind": "struct",
+          "fields": [
+            "acquisition",
+            "processing",
+            "maintenance"
+          ],
+          "doc": "The jobs of each queue, in order.",
+          "swift": {
+            "name": "QueueOrders",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/QueueOrders.swift"
+          },
+          "cs": {
+            "name": "QueueOrders",
+            "file": "windows/src/Bromelia.Engine/Scheduler/QueueOrders.cs"
+          },
+          "c": {
+            "name": "BroQueueOrders",
+            "file": "linux/src/engine/scheduler/bro-queue-orders.h"
+          }
+        },
+        {
+          "name": "QueueChange",
+          "kind": "struct",
+          "fields": [
+            "queue",
+            "order"
+          ],
+          "doc": "The data of a queueChanged event.",
+          "swift": {
+            "name": "QueueChange",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/QueueChange.swift"
+          },
+          "cs": {
+            "name": "QueueChange",
+            "file": "windows/src/Bromelia.Engine/Scheduler/QueueChange.cs"
+          },
+          "c": {
+            "name": "BroQueueChange",
+            "file": "linux/src/engine/scheduler/bro-queue-change.h"
+          }
+        },
+        {
+          "name": "LeaseSnapshot",
+          "kind": "struct",
+          "fields": [
+            "drives",
+            "acquisitions",
+            "jobs"
+          ],
+          "doc": "The data of a leaseChanged event: who holds which drive, acquisition slots held, jobs holding anything per queue.",
+          "swift": {
+            "name": "LeaseSnapshot",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/LeaseSnapshot.swift"
+          },
+          "cs": {
+            "name": "LeaseSnapshot",
+            "file": "windows/src/Bromelia.Engine/Scheduler/LeaseSnapshot.cs"
+          },
+          "c": {
+            "name": "BroLeaseSnapshot",
+            "file": "linux/src/engine/scheduler/bro-lease-snapshot.h"
+          }
+        },
+        {
+          "name": "DriveHolder",
+          "kind": "struct",
+          "fields": [
+            "drive",
+            "job"
+          ],
+          "doc": "A drive and the job it was given to.",
+          "swift": {
+            "name": "DriveHolder",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/DriveHolder.swift"
+          },
+          "cs": {
+            "name": "DriveHolder",
+            "file": "windows/src/Bromelia.Engine/Scheduler/DriveHolder.cs"
+          },
+          "c": {
+            "name": "BroDriveHolder",
+            "file": "linux/src/engine/scheduler/bro-drive-holder.h"
+          }
+        },
+        {
+          "name": "JobCounts",
+          "kind": "struct",
+          "fields": [
+            "acquisition",
+            "processing",
+            "maintenance"
+          ],
+          "doc": "A count per queue.",
+          "swift": {
+            "name": "JobCounts",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Scheduler/JobCounts.swift"
+          },
+          "cs": {
+            "name": "JobCounts",
+            "file": "windows/src/Bromelia.Engine/Scheduler/JobCounts.cs"
+          },
+          "c": {
+            "name": "BroJobCounts",
+            "file": "linux/src/engine/scheduler/bro-job-counts.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "Scheduler.submit",
+          "params": [
+            "jobId",
+            "queue"
+          ],
+          "doc": "Adds a job at the end of a queue.",
+          "swift": "Scheduler.submit(_:queue:)",
+          "cs": "Scheduler.Submit",
+          "c": "bro_scheduler_submit"
+        },
+        {
+          "name": "Scheduler.moveTo",
+          "params": [
+            "jobId",
+            "queue"
+          ],
+          "doc": "Moves a job to the end of another queue (after Release: processing).",
+          "swift": "Scheduler.moveTo(_:queue:)",
+          "cs": "Scheduler.MoveTo",
+          "c": "bro_scheduler_move_to"
+        },
+        {
+          "name": "Scheduler.finish",
+          "params": [
+            "jobId"
+          ],
+          "doc": "Cancels the job's waiting requests, gives back everything it holds and its space, takes it out of its queue.",
+          "swift": "Scheduler.finish(_:)",
+          "cs": "Scheduler.Finish",
+          "c": "bro_scheduler_finish"
+        },
+        {
+          "name": "Scheduler.move",
+          "params": [
+            "jobId",
+            "by"
+          ],
+          "doc": "Moves a job within its queue (stops at the ends). job.notQueued when it isn't in one.",
+          "throws": true,
+          "swift": "Scheduler.move(_:by:)",
+          "cs": "Scheduler.Move",
+          "c": "bro_scheduler_move"
+        },
+        {
+          "name": "Scheduler.startNow",
+          "params": [
+            "jobId"
+          ],
+          "doc": "Puts a job first in its queue; the acquisitions cap no longer holds it back. job.notQueued when it isn't in one.",
+          "throws": true,
+          "swift": "Scheduler.startNow(_:)",
+          "cs": "Scheduler.StartNow",
+          "c": "bro_scheduler_start_now"
+        },
+        {
+          "name": "Scheduler.acquire",
+          "params": [
+            "jobId",
+            "resources",
+            "onWait",
+            "cancel"
+          ],
+          "returns": "Lease",
+          "doc": "Granted, never inside the call, when everything has room; onWait tells each change while it waits; job.cancelled when cancelled or the job finishes first; job.notQueued for a job in no queue.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "resources",
+            "on_wait",
+            "cancel",
+            "done"
+          ],
+          "swift": "Scheduler.acquire(_:resources:onWait:cancel:)",
+          "cs": "Scheduler.Acquire",
+          "c": "bro_scheduler_acquire"
+        },
+        {
+          "name": "Scheduler.release",
+          "params": [
+            "lease"
+          ],
+          "doc": "Gives back a lease (not its drives). Twice does nothing.",
+          "swift": "Scheduler.release(_:)",
+          "cs": "Scheduler.Release",
+          "c": "bro_scheduler_release"
+        },
+        {
+          "name": "Scheduler.releaseDrives",
+          "params": [
+            "jobId"
+          ],
+          "doc": "Gives back the job's drives (the Release step).",
+          "swift": "Scheduler.releaseDrives(_:)",
+          "cs": "Scheduler.ReleaseDrives",
+          "c": "bro_scheduler_release_drives"
+        },
+        {
+          "name": "Scheduler.cancelAll",
+          "params": [
+            "queue"
+          ],
+          "doc": "Cancels every waiting request of the jobs in a queue (stopping the engine: plan §15.1).",
+          "swift": "Scheduler.cancelAll(_:)",
+          "cs": "Scheduler.CancelAll",
+          "c": "bro_scheduler_cancel_all"
+        },
+        {
+          "name": "Scheduler.reserve",
+          "params": [
+            "jobId",
+            "volume",
+            "path",
+            "need",
+            "free"
+          ],
+          "doc": "Keeps need bytes on a volume for the job (replacing what it kept there): space.insufficient {path, need, free} when free minus other jobs' reservations is less.",
+          "throws": true,
+          "swift": "Scheduler.reserve(_:volume:path:need:free:)",
+          "cs": "Scheduler.Reserve",
+          "c": "bro_scheduler_reserve"
+        },
+        {
+          "name": "Scheduler.unreserve",
+          "params": [
+            "jobId"
+          ],
+          "doc": "Drops the job's reservations.",
+          "swift": "Scheduler.unreserve(_:)",
+          "cs": "Scheduler.Unreserve",
+          "c": "bro_scheduler_unreserve"
+        },
+        {
+          "name": "Scheduler.setLibraryOffline",
+          "params": [
+            "libraryId",
+            "reason"
+          ],
+          "doc": "A reason (library.offline) blocks writes to the library; none lets them through again.",
+          "swift": "Scheduler.setLibraryOffline(_:reason:)",
+          "cs": "Scheduler.SetLibraryOffline",
+          "c": "bro_scheduler_set_library_offline"
+        },
+        {
+          "name": "Scheduler.updateLimits",
+          "params": [
+            "limits"
+          ],
+          "swift": "Scheduler.updateLimits(_:)",
+          "cs": "Scheduler.UpdateLimits",
+          "c": "bro_scheduler_update_limits"
+        },
+        {
+          "name": "Scheduler.queues",
+          "params": [],
+          "returns": "QueueOrders",
+          "swift": "Scheduler.queues()",
+          "cs": "Scheduler.Queues",
+          "c": "bro_scheduler_queues"
+        },
+        {
+          "name": "Scheduler.leases",
+          "params": [],
+          "returns": "LeaseSnapshot",
+          "swift": "Scheduler.leases()",
+          "cs": "Scheduler.Leases",
+          "c": "bro_scheduler_leases"
+        },
+        {
+          "name": "QueueChange.json",
+          "params": [
+            "change"
+          ],
+          "returns": "JsonValue",
+          "doc": "{queue, order}",
+          "swift": "QueueChange.json(_:)",
+          "cs": "QueueChange.Json",
+          "c": "bro_queue_change_json"
+        },
+        {
+          "name": "LeaseSnapshot.json",
+          "params": [
+            "snapshot"
+          ],
+          "returns": "JsonValue",
+          "doc": "{drives: [{drive, job}], acquisitions, jobs: {acquisition, processing, maintenance}}",
+          "swift": "LeaseSnapshot.json(_:)",
+          "cs": "LeaseSnapshot.Json",
+          "c": "bro_lease_snapshot_json"
+        },
+        {
+          "name": "LeaseSnapshot.parse",
+          "params": [
+            "json"
+          ],
+          "returns": "LeaseSnapshot?",
+          "doc": "The typed reading of a leaseChanged event's data, for its subscribers.",
+          "swift": "LeaseSnapshot.parse(_:)",
+          "cs": "LeaseSnapshot.Parse",
+          "c": "bro_lease_snapshot_parse"
+        }
+      ]
     }
   }
 }

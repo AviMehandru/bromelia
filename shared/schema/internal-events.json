@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.bromelia.invalid/internal-events.json",
+  "title": "InternalEngineEvent",
+  "description": "Events that stay inside the engine (plan §11.2): published on the event bus, never streamed to clients. Same envelope as events.json. Services that subscribe read them through typed helpers (LeaseSnapshot.parse, …).",
+  "oneOf": [
+    {"$ref": "#/$defs/LeaseChanged"},
+    {"$ref": "#/$defs/StepFinished"}
+  ],
+  "$defs": {
+    "LeaseChanged": {
+      "description": "What the Scheduler gives out changed: a snapshot of it. DriveService reads the drives (busy), PowerPolicy the job counts (keep the computer awake).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "at", "type", "data"],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 0},
+        "at": {"$ref": "common.json#/$defs/Instant"},
+        "type": {"const": "leaseChanged"},
+        "data": {"$ref": "#/$defs/LeaseSnapshot"}
+      }
+    },
+    "LeaseSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drives", "acquisitions", "jobs"],
+      "properties": {
+        "drives": {
+          "description": "Every drive given to a job, by drive id.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["drive", "job"],
+            "properties": {
+              "drive": {"$ref": "common.json#/$defs/DriveId"},
+              "job": {"$ref": "common.json#/$defs/Uuid"}
+            }
+          }
+        },
+        "acquisitions": {"description": "Acquisition slots held.", "type": "integer", "minimum": 0},
+        "jobs": {
+          "description": "Jobs holding anything (a drive or a step's lease), per queue.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["acquisition", "processing", "maintenance"],
+          "properties": {
+            "acquisition": {"type": "integer", "minimum": 0},
+            "processing": {"type": "integer", "minimum": 0},
+            "maintenance": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "StepFinished": {
+      "description": "The PipelineRunner stored a step's result.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "at", "type", "data"],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 0},
+        "at": {"$ref": "common.json#/$defs/Instant"},
+        "type": {"const": "stepFinished"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job", "seq", "kind", "state"],
+          "properties": {
+            "job": {"$ref": "common.json#/$defs/Uuid"},
+            "seq": {"type": "integer", "minimum": 0},
+            "kind": {"$ref": "common.json#/$defs/StepKind"},
+            "state": {"$ref": "common.json#/$defs/StepState"}
+          }
+        }
+      }
+    }
+  }
+}

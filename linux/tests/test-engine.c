@@ -276,14 +276,10 @@ same_lines (GPtrArray *failures, const char *id, const char *what, BroJsonValue 
 static const char *
 op_name (BroJsonValue *op, BroJsonValue **arg)
 {
-  /* An op is an object with one member. */
-  g_autofree char *text = bro_json_value_to_text (op);
-  const char *names[] = { "publish", "advance", "subscribe", "unsubscribe", "stream", "read", "close", "timer", "cancel",
-                          "onExecutor", "offer", "flush", "drop" };
-  for (guint i = 0; i < G_N_ELEMENTS (names); i++)
-    if ((*arg = bro_json_value_member (op, names[i])))
-      return names[i];
-  g_error ("unknown op %s", text);
+  /* An op is an object with one member: its name and its argument. */
+  g_assert_true (op->kind == BRO_JSON_VALUE_OBJECT && op->keys->len == 1);
+  *arg = g_ptr_array_index (op->items, 0);
+  return g_ptr_array_index (op->keys, 0);
 }
 
 /* ---- the event bus ------------------------------------------------------------------------------------------- */
@@ -1124,6 +1120,8 @@ test_engine_executor (void)
   bro_test_run_cases ("engine/engine-executor.cases.json", executor_case);
 }
 
+#include "test-scheduler.inc"
+
 int
 main (int argc, char **argv)
 {
@@ -1133,5 +1131,7 @@ main (int argc, char **argv)
   g_test_add_func ("/engine/engine-clock", test_engine_clock);
   g_test_add_func ("/engine/coalescer", test_coalescer);
   g_test_add_func ("/engine/executor", test_engine_executor);
+  g_test_add_func ("/engine/scheduler", test_scheduler);
+  g_test_add_func ("/engine/lease-snapshot", test_lease_snapshot);
   return g_test_run ();
 }

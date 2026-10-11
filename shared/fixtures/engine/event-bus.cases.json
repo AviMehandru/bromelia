@@ -17,12 +17,9 @@
         "ops": [
           {
             "publish": {
-              "type": "jobChanged",
+              "type": "configChanged",
               "data": {
-                "job": {
-                  "id": "0b9a7f60-0000-4000-8000-000000000001",
-                  "state": "queued"
-                }
+                "version": 7
               }
             }
           },
@@ -33,7 +30,8 @@
             "publish": {
               "type": "problemCleared",
               "data": {
-                "id": "library.offline:lib"
+                "problemId": "library.offline:lib",
+                "code": "library.offline"
               }
             }
           }
@@ -45,12 +43,9 @@
           {
             "seq": 1,
             "at": "2026-10-02T20:00:00.000Z",
-            "type": "jobChanged",
+            "type": "configChanged",
             "data": {
-              "job": {
-                "id": "0b9a7f60-0000-4000-8000-000000000001",
-                "state": "queued"
-              }
+              "version": 7
             }
           },
           {
@@ -58,7 +53,8 @@
             "at": "2026-10-02T20:00:01.500Z",
             "type": "problemCleared",
             "data": {
-              "id": "library.offline:lib"
+              "problemId": "library.offline:lib",
+              "code": "library.offline"
             }
           }
         ]

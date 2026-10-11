@@ -13,6 +13,7 @@ phase 0, written before any engine code, so the three engines are built against 
 | `schema/archive-record-3.json`, `archive-record-2.json` | `bromelia-<unit8>.json`, and today's `bromelia.json` that the rebuild still reads | samples in `fixtures/archive/` |
 | `schema/manifest-2.json` | The post-processing manifest; adds to version 1 without renaming anything | samples in `fixtures/archive/` |
 | `schema/events.json` | The event stream (SSE) | `fixtures/api/events-sample.jsonl` |
+| `schema/internal-events.json` | Events that stay inside the engine (`leaseChanged`, `stepFinished`), read by its services | the events expected by `fixtures/engine/*.cases.json` (as are those of `events.json`) |
 | `schema/api/routes.json`, `api/dtos.json` | One HTTP route per EngineAPI method, and the data they exchange | `fixtures/api/api-samples.json` |
 | `schema/db/0001_init.sql` | The SQLite schema every engine runs verbatim; `0001_init.expected.txt` is the result | `tools/check-contracts.py` (applies it) |
 | `schema/scenario.json` | The format of `scenarios/` | `tools/check-contracts.py` |

@@ -266,12 +266,13 @@ class Checker:
 
     @staticmethod
     def _split(params):
-        parts, depth, cur = [], 0, ""
+        parts, depth, cur, prev = [], 0, "", ""
         for ch in params:
             if ch in "([{<":
                 depth += 1
-            elif ch in ")]}>":
+            elif ch in ")]}>" and not (ch == ">" and prev == "-"):  # a closure type's -> isn't a bracket
                 depth -= 1
+            prev = ch
             if ch == "," and depth == 0:
                 parts.append(cur.strip())
                 cur = ""

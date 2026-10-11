@@ -10,6 +10,9 @@ them (tools/check-architecture.py does that):
               the v2 → v3 key map covers every v2 key and points at real v3 keys
   fixtures    file names are unique across shared/fixtures (the macOS test
               bundle flattens folders); *.cases.json files are well formed
+  engine      every event a case in shared/fixtures/engine expects is valid: the
+              client-visible ones against events.json, the internal ones against
+              internal-events.json
   ...         further sections are listed in SECTIONS at the bottom
 
   --write     regenerate the generated files (config3-defaults.json, …) instead
@@ -637,6 +640,34 @@ def check_fixtures():
                 R.error(f"{rel(p)}: {e}")
 
 
+# ---- engine events -------------------------------------------------------------
+
+INTERNAL_EVENTS = {"leaseChanged", "stepFinished"}
+
+
+def check_engine():
+    """The events the engine's shared cases expect are what clients (or engine services) will be sent: each one is
+    checked against its schema, so every platform that matches the cases sends valid events."""
+    def events(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "events" and isinstance(v, list) and all(isinstance(e, dict) and "type" in e for e in v):
+                    yield from v
+                else:
+                    yield from events(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from events(v)
+    n = 0
+    for p in sorted((FIXTURES / "engine").glob("*.cases.json")):
+        for c in load_json(p)["cases"]:
+            for i, ev in enumerate(events(c.get("expect", {}))):
+                n += 1
+                schema = "internal-events.json" if ev["type"] in INTERNAL_EVENTS else "events.json"
+                validate(ev, schema, what=f"{rel(p)} {c['id']} events[{i}]")
+    R.check(n > 0, "shared/fixtures/engine: no expected events to check")
+
+
 # ---- archive records and manifests ------------------------------------------
 
 def check_documents():
@@ -1086,6 +1117,7 @@ SECTIONS = {
     "scenarios": check_scenarios,
     "coverage": check_coverage,
     "fixtures": check_fixtures,
+    "engine": check_engine,
 }
 
 

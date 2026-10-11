@@ -1,0 +1,1682 @@
+{
+  "description": "Scheduler (plan §21, §11.1), used on the engine executor. Jobs are submitted to a queue (acquisition, processing, maintenance) and keep their order there (move, startNow). acquire(job, resources, onWait, cancel) asks for a ResourceSet and is granted, never inside the call, when every resource has room: a drive has room for one job, and a job keeps a drive it was given until releaseDrives or finish (a step's other resources go back on release); the acquisition slot has limits.acquisitions (0 = no cap; a job put first by startNow isn't held back by it); a library write has unlimited room but is blocked while the library is offline; cpu has limits.cpu (a request for more asks for all of it); io per volume has limits.ioPerVolume; every request of a job in the processing queue also takes one processing slot (limits.processing), only while that step runs; a maintenance job's request waits while any acquisition slot is held. Requests are considered by queue (acquisition, processing, maintenance), then the job's place in its queue, then the order they were made; a request that has to wait keeps others from overtaking it only on the resources it is waiting for. onWait tells the caller each change of a waiting request: 'waiting', or 'blocked:<code>' (library.offline). cancel fails a waiting request with job.cancelled; finish cancels a job's waiting requests, gives back everything it holds and its space, and takes it out of its queue. reserve(job, volume, path, need, free) keeps space on a volume: it fails with space.insufficient when free minus what other jobs keep there is less than need. Every change of a queue's order publishes queueChanged {queue, order}; every change of what is held publishes leaseChanged (internal) with a snapshot: {drives: [{drive, job}] by drive, acquisitions, jobs: {acquisition, processing, maintenance}} (jobs holding anything, per queue). The harness runs each op on a real executor and lets it settle; the bus's clock stays at 2026-10-02T20:00:00.000Z. Jobs get ids in the order they first appear: 00000000-0000-4000-8000-000000000001, …0002, … Ops: submit {job, queue}; request {as, job, drives, acquisition, libraryWrites, cpu, io}; release <as>; releaseDrives <job>; toProcessing <job>; finish <job>; move {job, by, expectError}; startNow {job, expectError}; cancel <as>; library {id, online} (setLibraryOffline: offline gives the reason library.offline {library: id}); cancelAll <queue>; limits {acquisitions, processing, cpu, ioPerVolume} (the given limits default to 0, 1, 2, 2); reserve {job, volume, path, need, free, expectError}; unreserve <job>. Expect: granted (requests in the order they were granted), states ({as: granted | waiting | blocked:<code> | cancelled | released}), waits ({as: [what onWait said, in order]}), queues ({queue: [jobs]}), leases (the last snapshot), events (every published event, EngineEvent.json, in order).",
+  "functions": [
+    "Scheduler.submit",
+    "Scheduler.acquire",
+    "Scheduler.release",
+    "Scheduler.releaseDrives",
+    "Scheduler.moveTo",
+    "Scheduler.finish",
+    "Scheduler.move",
+    "Scheduler.startNow",
+    "Scheduler.reserve",
+    "Scheduler.unreserve",
+    "Scheduler.setLibraryOffline",
+    "Scheduler.updateLimits",
+    "Scheduler.queues",
+    "Scheduler.leases",
+    "Scheduler.cancelAll"
+  ],
+  "cases": [
+    {
+      "id": "one-job-per-drive",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "release": "a1"
+          },
+          {
+            "request": {
+              "as": "a2",
+              "job": "a",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "release": "a2"
+          },
+          {
+            "releaseDrives": "a"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "a2",
+          "b1"
+        ],
+        "states": {
+          "a1": "released",
+          "a2": "released",
+          "b1": "granted"
+        },
+        "waits": {
+          "b1": [
+            "waiting"
+          ]
+        },
+        "leases": {
+          "drives": [
+            {
+              "drive": "left",
+              "job": "00000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "acquisitions": 0,
+          "jobs": {
+            "acquisition": 1,
+            "processing": 0,
+            "maintenance": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "drives-in-parallel",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "right"
+              ],
+              "acquisition": true
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1"
+        ],
+        "leases": {
+          "drives": [
+            {
+              "drive": "left",
+              "job": "00000000-0000-4000-8000-000000000001"
+            },
+            {
+              "drive": "right",
+              "job": "00000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "acquisitions": 2,
+          "jobs": {
+            "acquisition": 2,
+            "processing": 0,
+            "maintenance": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "acquisitions-limit",
+      "given": {
+        "limits": {
+          "acquisitions": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "right"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "release": "a1"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1"
+        ],
+        "waits": {
+          "b1": [
+            "waiting"
+          ]
+        },
+        "leases": {
+          "drives": [
+            {
+              "drive": "left",
+              "job": "00000000-0000-4000-8000-000000000001"
+            },
+            {
+              "drive": "right",
+              "job": "00000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "acquisitions": 1,
+          "jobs": {
+            "acquisition": 2,
+            "processing": 0,
+            "maintenance": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "the-scenario-queue-one-job-per-drive-and-limits",
+      "given": {
+        "limits": {
+          "acquisitions": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "first",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "second",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "third",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "first-acquire",
+              "job": "first",
+              "drives": [
+                "a"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "second-acquire",
+              "job": "second",
+              "drives": [
+                "b"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "third-probe",
+              "job": "third",
+              "drives": [
+                "a"
+              ]
+            }
+          },
+          {
+            "move": {
+              "job": "third",
+              "by": -1
+            }
+          },
+          {
+            "finish": "first"
+          },
+          {
+            "release": "third-probe"
+          },
+          {
+            "request": {
+              "as": "third-acquire",
+              "job": "third",
+              "drives": [
+                "a"
+              ],
+              "acquisition": true
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "first-acquire",
+          "third-probe",
+          "second-acquire"
+        ],
+        "states": {
+          "third-acquire": "waiting",
+          "second-acquire": "granted"
+        },
+        "queues": {
+          "acquisition": [
+            "third",
+            "second"
+          ],
+          "processing": [],
+          "maintenance": []
+        }
+      }
+    },
+    {
+      "id": "queue-order-decides-a-shared-resource",
+      "given": {
+        "limits": {
+          "acquisitions": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "c",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "c1",
+              "job": "c",
+              "acquisition": true
+            }
+          },
+          {
+            "move": {
+              "job": "c",
+              "by": -1
+            }
+          },
+          {
+            "release": "a1"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "c1"
+        ],
+        "states": {
+          "b1": "waiting"
+        },
+        "queues": {
+          "acquisition": [
+            "a",
+            "c",
+            "b"
+          ],
+          "processing": [],
+          "maintenance": []
+        }
+      }
+    },
+    {
+      "id": "move-stops-at-the-ends",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "c",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "move": {
+              "job": "a",
+              "by": -5
+            }
+          },
+          {
+            "move": {
+              "job": "b",
+              "by": 9
+            }
+          },
+          {
+            "move": {
+              "job": "a",
+              "by": 1
+            }
+          }
+        ]
+      },
+      "expect": {
+        "queues": {
+          "acquisition": [
+            "c",
+            "a",
+            "b"
+          ],
+          "processing": [],
+          "maintenance": []
+        }
+      }
+    },
+    {
+      "id": "a-waiting-request-holds-up-only-what-it-waits-for",
+      "given": {
+        "limits": {
+          "acquisitions": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "x",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "x1",
+              "job": "x",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "right"
+              ],
+              "acquisition": true
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "x1",
+          "b1"
+        ],
+        "states": {
+          "a1": "waiting"
+        }
+      }
+    },
+    {
+      "id": "start-now-goes-first-and-past-the-cap",
+      "given": {
+        "limits": {
+          "acquisitions": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "c",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "c1",
+              "job": "c",
+              "acquisition": true
+            }
+          },
+          {
+            "startNow": {
+              "job": "c"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "c1"
+        ],
+        "states": {
+          "b1": "waiting"
+        },
+        "queues": {
+          "acquisition": [
+            "c",
+            "a",
+            "b"
+          ],
+          "processing": [],
+          "maintenance": []
+        },
+        "leases": {
+          "drives": [],
+          "acquisitions": 2,
+          "jobs": {
+            "acquisition": 2,
+            "processing": 0,
+            "maintenance": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "move-and-start-now-need-a-queued-job",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "finish": "a"
+          },
+          {
+            "move": {
+              "job": "a",
+              "by": 1,
+              "expectError": "job.notQueued"
+            }
+          },
+          {
+            "startNow": {
+              "job": "z",
+              "expectError": "job.notQueued"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "queues": {
+          "acquisition": [],
+          "processing": [],
+          "maintenance": []
+        }
+      }
+    },
+    {
+      "id": "processing-slots-per-step",
+      "given": {
+        "limits": {
+          "processing": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "processing"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a"
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b"
+            }
+          },
+          {
+            "release": "a1"
+          },
+          {
+            "request": {
+              "as": "a2",
+              "job": "a"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1"
+        ],
+        "states": {
+          "a2": "waiting"
+        },
+        "waits": {
+          "b1": [
+            "waiting"
+          ],
+          "a2": [
+            "waiting"
+          ]
+        }
+      }
+    },
+    {
+      "id": "after-release-a-job-moves-to-processing",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "drv-0123456789abcdef"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "release": "a1"
+          },
+          {
+            "releaseDrives": "a"
+          },
+          {
+            "toProcessing": "a"
+          }
+        ]
+      },
+      "expect": {
+        "queues": {
+          "acquisition": [],
+          "processing": [
+            "a"
+          ],
+          "maintenance": []
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "queueChanged",
+            "data": {
+              "queue": "acquisition",
+              "order": [
+                "00000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "leaseChanged",
+            "data": {
+              "drives": [
+                {
+                  "drive": "drv-0123456789abcdef",
+                  "job": "00000000-0000-4000-8000-000000000001"
+                }
+              ],
+              "acquisitions": 1,
+              "jobs": {
+                "acquisition": 1,
+                "processing": 0,
+                "maintenance": 0
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "leaseChanged",
+            "data": {
+              "drives": [
+                {
+                  "drive": "drv-0123456789abcdef",
+                  "job": "00000000-0000-4000-8000-000000000001"
+                }
+              ],
+              "acquisitions": 0,
+              "jobs": {
+                "acquisition": 1,
+                "processing": 0,
+                "maintenance": 0
+              }
+            }
+          },
+          {
+            "seq": 4,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "leaseChanged",
+            "data": {
+              "drives": [],
+              "acquisitions": 0,
+              "jobs": {
+                "acquisition": 0,
+                "processing": 0,
+                "maintenance": 0
+              }
+            }
+          },
+          {
+            "seq": 5,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "queueChanged",
+            "data": {
+              "queue": "acquisition",
+              "order": []
+            }
+          },
+          {
+            "seq": 6,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "queueChanged",
+            "data": {
+              "queue": "processing",
+              "order": [
+                "00000000-0000-4000-8000-000000000001"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "an-offline-library-blocks-its-writes",
+      "given": {
+        "limits": {
+          "processing": 5
+        },
+        "ops": [
+          {
+            "library": {
+              "id": "lib",
+              "online": false
+            }
+          },
+          {
+            "submit": {
+              "job": "a",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "processing"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "libraryWrites": [
+                "lib"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "libraryWrites": [
+                "other"
+              ]
+            }
+          },
+          {
+            "library": {
+              "id": "lib",
+              "online": true
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "b1",
+          "a1"
+        ],
+        "waits": {
+          "a1": [
+            "blocked:library.offline"
+          ]
+        }
+      }
+    },
+    {
+      "id": "blocked-then-waiting",
+      "given": {
+        "limits": {
+          "processing": 1
+        },
+        "ops": [
+          {
+            "library": {
+              "id": "lib",
+              "online": false
+            }
+          },
+          {
+            "submit": {
+              "job": "a",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "processing"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a"
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "libraryWrites": [
+                "lib"
+              ]
+            }
+          },
+          {
+            "library": {
+              "id": "lib",
+              "online": true
+            }
+          },
+          {
+            "release": "a1"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1"
+        ],
+        "waits": {
+          "b1": [
+            "blocked:library.offline",
+            "waiting"
+          ]
+        }
+      }
+    },
+    {
+      "id": "cpu-limit",
+      "given": {
+        "limits": {
+          "cpu": 2
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "c",
+              "queue": "processing"
+            }
+          },
+          {
+            "limits": {
+              "processing": 5,
+              "cpu": 2
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "cpu": 1
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "cpu": 1
+            }
+          },
+          {
+            "request": {
+              "as": "c1",
+              "job": "c",
+              "cpu": 4
+            }
+          },
+          {
+            "release": "a1"
+          },
+          {
+            "release": "b1"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1",
+          "c1"
+        ],
+        "waits": {
+          "c1": [
+            "waiting"
+          ]
+        }
+      }
+    },
+    {
+      "id": "io-per-volume",
+      "given": {
+        "limits": {
+          "processing": 5,
+          "ioPerVolume": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "c",
+              "queue": "processing"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "io": [
+                "v1"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "io": [
+                "v1"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "c1",
+              "job": "c",
+              "io": [
+                "v2"
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "c1"
+        ],
+        "states": {
+          "b1": "waiting"
+        }
+      }
+    },
+    {
+      "id": "limits-change-at-once",
+      "given": {
+        "limits": {
+          "acquisitions": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "acquisition": true
+            }
+          },
+          {
+            "limits": {
+              "acquisitions": 2,
+              "processing": 1,
+              "cpu": 2,
+              "ioPerVolume": 2
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1"
+        ]
+      }
+    },
+    {
+      "id": "maintenance-waits-for-acquisitions",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "m",
+              "queue": "maintenance"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "m1",
+              "job": "m",
+              "io": [
+                "v1"
+              ]
+            }
+          },
+          {
+            "release": "a1"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "m1"
+        ],
+        "waits": {
+          "m1": [
+            "waiting"
+          ]
+        }
+      }
+    },
+    {
+      "id": "maintenance-comes-last",
+      "given": {
+        "limits": {
+          "processing": 5,
+          "ioPerVolume": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "x",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "m",
+              "queue": "maintenance"
+            }
+          },
+          {
+            "submit": {
+              "job": "p",
+              "queue": "processing"
+            }
+          },
+          {
+            "request": {
+              "as": "x1",
+              "job": "x",
+              "io": [
+                "v1"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "m1",
+              "job": "m",
+              "io": [
+                "v1"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "p1",
+              "job": "p",
+              "io": [
+                "v1"
+              ]
+            }
+          },
+          {
+            "release": "x1"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "x1",
+          "p1"
+        ],
+        "states": {
+          "m1": "waiting"
+        }
+      }
+    },
+    {
+      "id": "cancel-a-waiting-request",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "cancel": "b1"
+          },
+          {
+            "releaseDrives": "a"
+          },
+          {
+            "cancel": "a1"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1"
+        ],
+        "states": {
+          "a1": "granted",
+          "b1": "cancelled"
+        },
+        "leases": {
+          "drives": [],
+          "acquisitions": 0,
+          "jobs": {
+            "acquisition": 1,
+            "processing": 0,
+            "maintenance": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "finish-gives-everything-back",
+      "given": {
+        "limits": {
+          "acquisitions": 1
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "a2",
+              "job": "a",
+              "cpu": 1
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "left"
+              ],
+              "acquisition": true
+            }
+          },
+          {
+            "reserve": {
+              "job": "a",
+              "volume": "v1",
+              "path": "/lib",
+              "need": 20000000000,
+              "free": 30000000000
+            }
+          },
+          {
+            "finish": "a"
+          },
+          {
+            "reserve": {
+              "job": "b",
+              "volume": "v1",
+              "path": "/lib",
+              "need": 20000000000,
+              "free": 30000000000
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "a2",
+          "b1"
+        ],
+        "states": {
+          "a1": "released",
+          "a2": "released",
+          "b1": "granted"
+        },
+        "queues": {
+          "acquisition": [
+            "b"
+          ],
+          "processing": [],
+          "maintenance": []
+        },
+        "leases": {
+          "drives": [
+            {
+              "drive": "left",
+              "job": "00000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "acquisitions": 1,
+          "jobs": {
+            "acquisition": 1,
+            "processing": 0,
+            "maintenance": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "finish-cancels-waiting-requests",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "x",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "x1",
+              "job": "x",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "finish": "a"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "x1"
+        ],
+        "states": {
+          "a1": "cancelled"
+        },
+        "queues": {
+          "acquisition": [
+            "x"
+          ],
+          "processing": [],
+          "maintenance": []
+        }
+      }
+    },
+    {
+      "id": "space-reservations-count-each-other",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "reserve": {
+              "job": "a",
+              "volume": "v1",
+              "path": "/lib",
+              "need": 20000000000,
+              "free": 30000000000
+            }
+          },
+          {
+            "reserve": {
+              "job": "b",
+              "volume": "v1",
+              "path": "/lib",
+              "need": 20000000000,
+              "free": 30000000000,
+              "expectError": {
+                "code": "space.insufficient",
+                "params": {
+                  "path": "/lib",
+                  "need": 20000000000,
+                  "free": 10000000000
+                }
+              }
+            }
+          },
+          {
+            "reserve": {
+              "job": "b",
+              "volume": "v2",
+              "path": "/other",
+              "need": 20000000000,
+              "free": 30000000000
+            }
+          },
+          {
+            "reserve": {
+              "job": "a",
+              "volume": "v1",
+              "path": "/lib",
+              "need": 25000000000,
+              "free": 30000000000
+            }
+          },
+          {
+            "unreserve": "a"
+          },
+          {
+            "reserve": {
+              "job": "b",
+              "volume": "v1",
+              "path": "/lib",
+              "need": 20000000000,
+              "free": 30000000000
+            }
+          }
+        ]
+      },
+      "expect": {}
+    },
+    {
+      "id": "space-more-than-free",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "reserve": {
+              "job": "a",
+              "volume": "v1",
+              "path": "/lib",
+              "need": 5,
+              "free": 4,
+              "expectError": {
+                "code": "space.insufficient",
+                "params": {
+                  "path": "/lib",
+                  "need": 5,
+                  "free": 4
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expect": {}
+    },
+    {
+      "id": "cancel-all-of-a-queue",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "x",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "p",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "q",
+              "queue": "processing"
+            }
+          },
+          {
+            "request": {
+              "as": "x1",
+              "job": "x",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "p1",
+              "job": "p"
+            }
+          },
+          {
+            "request": {
+              "as": "q1",
+              "job": "q"
+            }
+          },
+          {
+            "cancelAll": "acquisition"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "x1",
+          "p1"
+        ],
+        "states": {
+          "x1": "granted",
+          "a1": "cancelled",
+          "p1": "granted",
+          "q1": "waiting"
+        }
+      }
+    }
+  ]
+}
