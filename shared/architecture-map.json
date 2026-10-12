@@ -13130,6 +13130,193 @@
             "name": "BroJobTotals",
             "file": "linux/src/engine/api/bro-job-totals.h"
           }
+        },
+        {
+          "name": "ProblemDto",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "message",
+            "scope",
+            "raisedAt",
+            "actions"
+          ],
+          "doc": "A problem, as clients see it (dtos.json Problem).",
+          "swift": {
+            "name": "ProblemDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/ProblemDto.swift"
+          },
+          "cs": {
+            "name": "ProblemDto",
+            "file": "windows/src/Bromelia.Engine/API/ProblemDto.cs"
+          },
+          "c": {
+            "name": "BroProblemDto",
+            "file": "linux/src/engine/api/bro-problem-dto.h"
+          }
+        },
+        {
+          "name": "ProblemScope",
+          "kind": "struct",
+          "fields": [
+            "kind",
+            "id"
+          ],
+          "doc": "What a problem is about.",
+          "swift": {
+            "name": "ProblemScope",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/ProblemScope.swift"
+          },
+          "cs": {
+            "name": "ProblemScope",
+            "file": "windows/src/Bromelia.Engine/API/ProblemScope.cs"
+          },
+          "c": {
+            "name": "BroProblemScope",
+            "file": "linux/src/engine/api/bro-problem-scope.h"
+          }
+        },
+        {
+          "name": "ProblemScopeKind",
+          "kind": "enum",
+          "doc": "dtos.json Problem.scope.kind.",
+          "cases": [
+            "library",
+            "drive",
+            "job",
+            "unit",
+            "tool",
+            "target",
+            "notification"
+          ],
+          "swift": {
+            "name": "ProblemScopeKind",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/ProblemScopeKind.swift",
+            "cases": [
+              ".library",
+              ".drive",
+              ".job",
+              ".unit",
+              ".tool",
+              ".target",
+              ".notification"
+            ]
+          },
+          "cs": {
+            "name": "ProblemScopeKind",
+            "file": "windows/src/Bromelia.Engine/API/ProblemScopeKind.cs",
+            "cases": [
+              "Library",
+              "Drive",
+              "Job",
+              "Unit",
+              "Tool",
+              "Target",
+              "Notification"
+            ]
+          },
+          "c": {
+            "name": "BroProblemScopeKind",
+            "file": "linux/src/engine/api/bro-problem-scope-kind.h",
+            "cases": [
+              "BRO_PROBLEM_SCOPE_KIND_LIBRARY",
+              "BRO_PROBLEM_SCOPE_KIND_DRIVE",
+              "BRO_PROBLEM_SCOPE_KIND_JOB",
+              "BRO_PROBLEM_SCOPE_KIND_UNIT",
+              "BRO_PROBLEM_SCOPE_KIND_TOOL",
+              "BRO_PROBLEM_SCOPE_KIND_TARGET",
+              "BRO_PROBLEM_SCOPE_KIND_NOTIFICATION"
+            ]
+          }
+        },
+        {
+          "name": "ProblemAction",
+          "kind": "enum",
+          "doc": "What a UI can offer for a problem.",
+          "cases": [
+            "installBetaKey",
+            "openSettings",
+            "attachLibrary",
+            "repair",
+            "retry"
+          ],
+          "swift": {
+            "name": "ProblemAction",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/ProblemAction.swift",
+            "cases": [
+              ".installBetaKey",
+              ".openSettings",
+              ".attachLibrary",
+              ".repair",
+              ".retry"
+            ]
+          },
+          "cs": {
+            "name": "ProblemAction",
+            "file": "windows/src/Bromelia.Engine/API/ProblemAction.cs",
+            "cases": [
+              "InstallBetaKey",
+              "OpenSettings",
+              "AttachLibrary",
+              "Repair",
+              "Retry"
+            ]
+          },
+          "c": {
+            "name": "BroProblemAction",
+            "file": "linux/src/engine/api/bro-problem-action.h",
+            "cases": [
+              "BRO_PROBLEM_ACTION_INSTALL_BETA_KEY",
+              "BRO_PROBLEM_ACTION_OPEN_SETTINGS",
+              "BRO_PROBLEM_ACTION_ATTACH_LIBRARY",
+              "BRO_PROBLEM_ACTION_REPAIR",
+              "BRO_PROBLEM_ACTION_RETRY"
+            ]
+          }
+        },
+        {
+          "name": "SecretStatus",
+          "kind": "struct",
+          "fields": [
+            "name",
+            "set"
+          ],
+          "doc": "A secret the configuration refers to and whether it has a value (never the value).",
+          "swift": {
+            "name": "SecretStatus",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/SecretStatus.swift"
+          },
+          "cs": {
+            "name": "SecretStatus",
+            "file": "windows/src/Bromelia.Engine/API/SecretStatus.cs"
+          },
+          "c": {
+            "name": "BroSecretStatus",
+            "file": "linux/src/engine/api/bro-secret-status.h"
+          }
+        },
+        {
+          "name": "ConfigEnvelope",
+          "kind": "struct",
+          "fields": [
+            "version",
+            "config",
+            "issues",
+            "secrets"
+          ],
+          "doc": "The configuration as clients get it (dtos.json ConfigEnvelope).",
+          "swift": {
+            "name": "ConfigEnvelope",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/ConfigEnvelope.swift"
+          },
+          "cs": {
+            "name": "ConfigEnvelope",
+            "file": "windows/src/Bromelia.Engine/API/ConfigEnvelope.cs"
+          },
+          "c": {
+            "name": "BroConfigEnvelope",
+            "file": "linux/src/engine/api/bro-config-envelope.h"
+          }
         }
       ],
       "functions": [
@@ -13173,6 +13360,27 @@
           "swift": "LogLineDto.json(_:)",
           "cs": "LogLineDto.Json",
           "c": "bro_log_line_dto_json"
+        },
+        {
+          "name": "ProblemDto.json",
+          "params": [
+            "problem"
+          ],
+          "returns": "JsonValue",
+          "doc": "Optional members left out when absent or empty.",
+          "swift": "ProblemDto.json(_:)",
+          "cs": "ProblemDto.Json",
+          "c": "bro_problem_dto_json"
+        },
+        {
+          "name": "ConfigEnvelope.json",
+          "params": [
+            "envelope"
+          ],
+          "returns": "JsonValue",
+          "swift": "ConfigEnvelope.json(_:)",
+          "cs": "ConfigEnvelope.Json",
+          "c": "bro_config_envelope_json"
         }
       ]
     },
@@ -14038,6 +14246,199 @@
           "swift": "ReconcileOutput.decode(_:)",
           "cs": "ReconcileOutput.Decode",
           "c": "bro_reconcile_output_decode"
+        }
+      ]
+    },
+    "engine/services": {
+      "layer": "engine",
+      "folder": "Services",
+      "cFolder": "services",
+      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one) and ConfigService. shared/fixtures/engine/problem-service.cases.json, config-service.cases.json.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "ProblemService",
+          "kind": "class",
+          "doc": "The active problems every UI shows until they are cleared, in memory, keyed by code and scope (id: code, or code:kind:id); publishes problemRaised and problemCleared.",
+          "swift": {
+            "name": "ProblemService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/ProblemService.swift"
+          },
+          "cs": {
+            "name": "ProblemService",
+            "file": "windows/src/Bromelia.Engine/Services/ProblemService.cs"
+          },
+          "c": {
+            "name": "BroProblemService",
+            "file": "linux/src/engine/services/bro-problem-service.h"
+          }
+        },
+        {
+          "name": "ConfigService",
+          "kind": "class",
+          "doc": "config.json (0600), its version (kv config.version) and last good document (kv config.lastGood), and the secrets (keystore, then BROMELIA_SECRET_<NAME>); implements ConfigSource; publishes configChanged; raises config.invalid.",
+          "swift": {
+            "name": "ConfigService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/ConfigService.swift"
+          },
+          "cs": {
+            "name": "ConfigService",
+            "file": "windows/src/Bromelia.Engine/Services/ConfigService.cs"
+          },
+          "c": {
+            "name": "BroConfigService",
+            "file": "linux/src/engine/services/bro-config-service.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "ProblemService.problems",
+          "params": [],
+          "returns": "[ProblemDto]",
+          "doc": "In the order they were first raised.",
+          "swift": "ProblemService.problems()",
+          "cs": "ProblemService.Problems",
+          "c": "bro_problem_service_problems"
+        },
+        {
+          "name": "ProblemService.raise",
+          "params": [
+            "message",
+            "scope",
+            "actions"
+          ],
+          "returns": "ProblemDto",
+          "doc": "Adds the problem (problemRaised); the same again does nothing; a changed one is replaced in place, keeping its id, place and raisedAt.",
+          "swift": "ProblemService.raise(_:scope:actions:)",
+          "cs": "ProblemService.Raise",
+          "c": "bro_problem_service_raise"
+        },
+        {
+          "name": "ProblemService.clear",
+          "params": [
+            "code",
+            "scope"
+          ],
+          "doc": "Removes the problem (problemCleared); nothing when there is none.",
+          "swift": "ProblemService.clear(_:scope:)",
+          "cs": "ProblemService.Clear",
+          "c": "bro_problem_service_clear"
+        },
+        {
+          "name": "ConfigService.load",
+          "params": [],
+          "doc": "At startup: the version from kv; a missing file gives the defaults; a file with errors is left alone, the last good document is used and config.invalid{count} raised.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "swift": "ConfigService.load()",
+          "cs": "ConfigService.Load",
+          "c": "bro_config_service_load"
+        },
+        {
+          "name": "ConfigService.current",
+          "params": [],
+          "returns": "Config",
+          "doc": "The configuration in use (on the executor).",
+          "swift": "ConfigService.current()",
+          "cs": "ConfigService.Current",
+          "c": "bro_config_service_current"
+        },
+        {
+          "name": "ConfigService.version",
+          "params": [],
+          "returns": "Int64",
+          "doc": "The saved revision clients send back with an update.",
+          "swift": "ConfigService.version()",
+          "cs": "ConfigService.Version",
+          "c": "bro_config_service_version"
+        },
+        {
+          "name": "ConfigService.validate",
+          "params": [
+            "doc"
+          ],
+          "returns": "[Issue]",
+          "doc": "The document's issues; nothing is saved. config.rejected when it isn't a JSON object.",
+          "throws": true,
+          "swift": "ConfigService.validate(_:)",
+          "cs": "ConfigService.Validate",
+          "c": "bro_config_service_validate"
+        },
+        {
+          "name": "ConfigService.update",
+          "params": [
+            "doc",
+            "expectedVersion"
+          ],
+          "returns": "ConfigEnvelope",
+          "doc": "config.versionConflict{current}, config.rejected{count, issues}, config.saveFailed{reason}; stores the version, then the last good document, then config.json; publishes configChanged.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "doc",
+            "expected_version",
+            "done"
+          ],
+          "swift": "ConfigService.update(_:expectedVersion:)",
+          "cs": "ConfigService.Update",
+          "c": "bro_config_service_update"
+        },
+        {
+          "name": "ConfigService.envelope",
+          "params": [],
+          "returns": "ConfigEnvelope",
+          "doc": "The version, document, issues and the secrets it refers to with whether each is set.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "swift": "ConfigService.envelope()",
+          "cs": "ConfigService.Envelope",
+          "c": "bro_config_service_envelope"
+        },
+        {
+          "name": "ConfigService.secret",
+          "params": [
+            "name"
+          ],
+          "returns": "String?",
+          "doc": "The keystore's value, else BROMELIA_SECRET_<NAME>, else none; the keystore's failure when the environment has nothing. Not on the executor.",
+          "throws": true,
+          "swift": "ConfigService.secret(_:)",
+          "cs": "ConfigService.Secret",
+          "c": "bro_config_service_secret"
+        },
+        {
+          "name": "ConfigService.setSecret",
+          "params": [
+            "name",
+            "value"
+          ],
+          "doc": "Stores ('' removes) a secret in the keystore; publishes configChanged with the same version.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "name",
+            "value",
+            "done"
+          ],
+          "swift": "ConfigService.setSecret(_:value:)",
+          "cs": "ConfigService.SetSecret",
+          "c": "bro_config_service_set_secret"
+        },
+        {
+          "name": "ConfigService.export",
+          "params": [],
+          "returns": "Bytes",
+          "doc": "The export bundle: secret references, never values.",
+          "swift": "ConfigService.export()",
+          "cs": "ConfigService.Export",
+          "c": "bro_config_service_export"
         }
       ]
     }

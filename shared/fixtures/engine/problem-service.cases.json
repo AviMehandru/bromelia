@@ -1,0 +1,193 @@
+{
+  "description": "ProblemService (plan §11.1), a minimal one, used on the engine executor: the active problems every UI shows until they are cleared, in the order they were first raised, in memory only (each service raises its problems again after a restart). A problem is keyed by its code and scope: its id is the code, or '<code>:<scope kind>:<scope id>' with a scope. raise(code, params, severity, scope?, actions?) adds a problem and publishes problemRaised{problem}; raising one that is there already with the same params, severity and actions does nothing; with anything different it replaces it in place, keeping its id, place and raisedAt, and publishes problemRaised again. clear(code, scope?) removes it and publishes problemCleared{problemId, code}; clearing one that isn't there does nothing. Given: ops in order: raise {code, params?, severity, scope? {kind, id}, actions?}, clear {code, scope?}, advance (seconds on the clock, which starts at 2026-10-02T20:00:00.000Z). Expect: problems (dtos.json Problem, in order; optional members left out when absent or empty), events (every event published, in order).",
+  "cases": [
+    {
+      "id": "raise-publishes-the-problem",
+      "given": {
+        "ops": [
+          { "raise": { "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/Archive" }, "severity": "warning",
+                       "scope": { "kind": "library", "id": "movies" }, "actions": ["attachLibrary"] } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "library.offline:library:movies", "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/Archive" },
+            "severity": "warning", "scope": { "kind": "library", "id": "movies" }, "raisedAt": "2026-10-02T20:00:00.000Z", "actions": ["attachLibrary"] }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "library.offline:library:movies", "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/Archive" },
+              "severity": "warning", "scope": { "kind": "library", "id": "movies" }, "raisedAt": "2026-10-02T20:00:00.000Z", "actions": ["attachLibrary"] } } }
+        ]
+      }
+    },
+    {
+      "id": "without-a-scope-the-id-is-the-code",
+      "given": {
+        "ops": [
+          { "raise": { "code": "makemkv.keyExpired", "severity": "error", "actions": ["installBetaKey", "openSettings"] } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": ["installBetaKey", "openSettings"] }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
+              "actions": ["installBetaKey", "openSettings"] } } }
+        ]
+      }
+    },
+    {
+      "id": "the-same-problem-again-is-quiet",
+      "given": {
+        "ops": [
+          { "raise": { "code": "tool.missing", "params": { "tool": "mkvmerge" }, "severity": "error", "scope": { "kind": "tool", "id": "mkvmerge" } } },
+          { "advance": 30 },
+          { "raise": { "code": "tool.missing", "params": { "tool": "mkvmerge" }, "severity": "error", "scope": { "kind": "tool", "id": "mkvmerge" } } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "tool.missing:tool:mkvmerge", "code": "tool.missing", "params": { "tool": "mkvmerge" }, "severity": "error",
+            "scope": { "kind": "tool", "id": "mkvmerge" }, "raisedAt": "2026-10-02T20:00:00.000Z" }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "tool.missing:tool:mkvmerge", "code": "tool.missing", "params": { "tool": "mkvmerge" }, "severity": "error",
+              "scope": { "kind": "tool", "id": "mkvmerge" }, "raisedAt": "2026-10-02T20:00:00.000Z" } } }
+        ]
+      }
+    },
+    {
+      "id": "a-changed-problem-is-replaced-in-place",
+      "given": {
+        "ops": [
+          { "raise": { "code": "config.invalid", "params": { "count": 2 }, "severity": "error", "actions": ["openSettings"] } },
+          { "raise": { "code": "makemkv.keyExpired", "severity": "error" } },
+          { "advance": 60 },
+          { "raise": { "code": "config.invalid", "params": { "count": 3 }, "severity": "error", "actions": ["openSettings"] } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "config.invalid", "code": "config.invalid", "params": { "count": 3 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": ["openSettings"] },
+          { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z" }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "config.invalid", "code": "config.invalid", "params": { "count": 2 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
+              "actions": ["openSettings"] } } },
+          { "seq": 2, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z" } } },
+          { "seq": 3, "at": "2026-10-02T20:01:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "config.invalid", "code": "config.invalid", "params": { "count": 3 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
+              "actions": ["openSettings"] } } }
+        ]
+      }
+    },
+    {
+      "id": "a-new-severity-or-action-is-a-change",
+      "given": {
+        "ops": [
+          { "raise": { "code": "makemkv.keyExpired", "severity": "warning" } },
+          { "raise": { "code": "makemkv.keyExpired", "severity": "error" } },
+          { "raise": { "code": "makemkv.keyExpired", "severity": "error", "actions": ["installBetaKey"] } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": ["installBetaKey"] }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "warning", "raisedAt": "2026-10-02T20:00:00.000Z" } } },
+          { "seq": 2, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z" } } },
+          { "seq": 3, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
+              "actions": ["installBetaKey"] } } }
+        ]
+      }
+    },
+    {
+      "id": "scopes-keep-problems-apart",
+      "given": {
+        "ops": [
+          { "raise": { "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/A" }, "severity": "warning", "scope": { "kind": "library", "id": "movies" } } },
+          { "raise": { "code": "library.offline", "params": { "library": "TV", "path": "/Volumes/B" }, "severity": "warning", "scope": { "kind": "library", "id": "tv" } } },
+          { "clear": { "code": "library.offline", "scope": { "kind": "library", "id": "movies" } } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "library.offline:library:tv", "code": "library.offline", "params": { "library": "TV", "path": "/Volumes/B" }, "severity": "warning",
+            "scope": { "kind": "library", "id": "tv" }, "raisedAt": "2026-10-02T20:00:00.000Z" }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "library.offline:library:movies", "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/A" }, "severity": "warning",
+              "scope": { "kind": "library", "id": "movies" }, "raisedAt": "2026-10-02T20:00:00.000Z" } } },
+          { "seq": 2, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "library.offline:library:tv", "code": "library.offline", "params": { "library": "TV", "path": "/Volumes/B" }, "severity": "warning",
+              "scope": { "kind": "library", "id": "tv" }, "raisedAt": "2026-10-02T20:00:00.000Z" } } },
+          { "seq": 3, "at": "2026-10-02T20:00:00.000Z", "type": "problemCleared", "data": { "problemId": "library.offline:library:movies", "code": "library.offline" } }
+        ]
+      }
+    },
+    {
+      "id": "clearing-what-isnt-there-is-quiet",
+      "given": {
+        "ops": [
+          { "raise": { "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/A" }, "severity": "warning", "scope": { "kind": "library", "id": "movies" } } },
+          { "clear": { "code": "library.offline" } },
+          { "clear": { "code": "library.offline", "scope": { "kind": "library", "id": "tv" } } },
+          { "clear": { "code": "makemkv.keyExpired" } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "library.offline:library:movies", "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/A" }, "severity": "warning",
+            "scope": { "kind": "library", "id": "movies" }, "raisedAt": "2026-10-02T20:00:00.000Z" }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "library.offline:library:movies", "code": "library.offline", "params": { "library": "Movies", "path": "/Volumes/A" }, "severity": "warning",
+              "scope": { "kind": "library", "id": "movies" }, "raisedAt": "2026-10-02T20:00:00.000Z" } } }
+        ]
+      }
+    },
+    {
+      "id": "raised-again-after-a-clear-is-new",
+      "given": {
+        "ops": [
+          { "raise": { "code": "makemkv.keyExpired", "severity": "error" } },
+          { "advance": 10 },
+          { "clear": { "code": "makemkv.keyExpired" } },
+          { "raise": { "code": "config.invalid", "params": { "count": 1 }, "severity": "error" } },
+          { "advance": 10 },
+          { "raise": { "code": "makemkv.keyExpired", "severity": "error" } }
+        ]
+      },
+      "expect": {
+        "problems": [
+          { "id": "config.invalid", "code": "config.invalid", "params": { "count": 1 }, "severity": "error", "raisedAt": "2026-10-02T20:00:10.000Z" },
+          { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:20.000Z" }
+        ],
+        "events": [
+          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z" } } },
+          { "seq": 2, "at": "2026-10-02T20:00:10.000Z", "type": "problemCleared", "data": { "problemId": "makemkv.keyExpired", "code": "makemkv.keyExpired" } },
+          { "seq": 3, "at": "2026-10-02T20:00:10.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "config.invalid", "code": "config.invalid", "params": { "count": 1 }, "severity": "error", "raisedAt": "2026-10-02T20:00:10.000Z" } } },
+          { "seq": 4, "at": "2026-10-02T20:00:20.000Z", "type": "problemRaised", "data": { "problem":
+            { "id": "makemkv.keyExpired", "code": "makemkv.keyExpired", "severity": "error", "raisedAt": "2026-10-02T20:00:20.000Z" } } }
+        ]
+      }
+    }
+  ]
+}

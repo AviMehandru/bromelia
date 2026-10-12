@@ -1,14 +1,20 @@
 # L4 Engine (rearchitecture plan §3.2, §11): the executor, the event bus, services, the scheduler, the pipeline and
 # its steps. Reaches the outside world only through the ports: no adapters, no GIO, no platform calls.
-bro_engine_inc = include_directories('api', 'core', 'pipeline', 'scheduler', 'steps')
+bro_engine_inc = include_directories('api', 'core', 'pipeline', 'scheduler', 'services', 'steps')
 
 bro_engine_lib = static_library('bro-engine',
   files(
     'api/bro-decision-answer.c',
     'api/bro-decision-dto.c',
+    'api/bro-config-envelope.c',
     'api/bro-job-dto.c',
     'api/bro-log-line-dto.c',
+    'api/bro-problem-action.c',
+    'api/bro-problem-dto.c',
+    'api/bro-problem-scope.c',
+    'api/bro-problem-scope-kind.c',
     'api/bro-progress-dto.c',
+    'api/bro-secret-status.c',
     'core/bro-coalescer.c',
     'core/bro-engine-clock.c',
     'core/bro-engine-event.c',
@@ -37,6 +43,8 @@ bro_engine_lib = static_library('bro-engine',
     'pipeline/bro-step-registry.c',
     'pipeline/bro-step-report.c',
     'pipeline/bro-tool-set.c',
+    'services/bro-config-service.c',
+    'services/bro-problem-service.c',
     'steps/bro-await-media-step.c',
     'steps/bro-identify-step.c',
     'steps/bro-makemkv-sink.c',
