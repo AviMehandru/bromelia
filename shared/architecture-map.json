@@ -13752,6 +13752,294 @@
           "c": "bro_makemkv_setup_invocation"
         }
       ]
+    },
+    "engine/steps": {
+      "layer": "engine",
+      "folder": "Steps",
+      "cFolder": "steps",
+      "doc": "The steps of a video-disc job (plan §12.4, §20.1), each a Step: AwaitMedia, Probe, Reconcile, Identify (phase 3 form) and Release; the MakeMKV sink that turns robot events into progress and log; the typed data steps hand on; and what they share about the job's source. shared/fixtures/engine/video-steps.cases.json.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "AwaitMediaStep",
+          "kind": "class",
+          "doc": "Step 1: waits for the OS to mount the disc of an automatic rip (disc.changed when another disc was inserted).",
+          "swift": {
+            "name": "AwaitMediaStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/AwaitMediaStep.swift"
+          },
+          "cs": {
+            "name": "AwaitMediaStep",
+            "file": "windows/src/Bromelia.Engine/Steps/AwaitMediaStep.cs"
+          },
+          "c": {
+            "name": "BroAwaitMediaStep",
+            "file": "linux/src/engine/steps/bro-await-media-step.h"
+          }
+        },
+        {
+          "name": "ProbeStep",
+          "kind": "class",
+          "doc": "Step 2: reads the listing with makemkvcon; disc.noTitles with MakeMKV's notice, except a backup goes on.",
+          "swift": {
+            "name": "ProbeStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ProbeStep.swift"
+          },
+          "cs": {
+            "name": "ProbeStep",
+            "file": "windows/src/Bromelia.Engine/Steps/ProbeStep.cs"
+          },
+          "c": {
+            "name": "BroProbeStep",
+            "file": "linux/src/engine/steps/bro-probe-step.h"
+          }
+        },
+        {
+          "name": "ReconcileStep",
+          "kind": "class",
+          "doc": "Step 3: the disc is still the one opened, and each ticked title is found in the listing read now.",
+          "swift": {
+            "name": "ReconcileStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ReconcileStep.swift"
+          },
+          "cs": {
+            "name": "ReconcileStep",
+            "file": "windows/src/Bromelia.Engine/Steps/ReconcileStep.cs"
+          },
+          "c": {
+            "name": "BroReconcileStep",
+            "file": "linux/src/engine/steps/bro-reconcile-step.h"
+          }
+        },
+        {
+          "name": "IdentifyStep",
+          "kind": "class",
+          "doc": "Step 5 (phase 3 form): Identity.resolve from the listing, label, drive flags and the session's name and kind.",
+          "swift": {
+            "name": "IdentifyStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/IdentifyStep.swift"
+          },
+          "cs": {
+            "name": "IdentifyStep",
+            "file": "windows/src/Bromelia.Engine/Steps/IdentifyStep.cs"
+          },
+          "c": {
+            "name": "BroIdentifyStep",
+            "file": "linux/src/engine/steps/bro-identify-step.h"
+          }
+        },
+        {
+          "name": "ReleaseStep",
+          "kind": "class",
+          "doc": "Step 9: ejects per automation.ejectWhenDone; a failed eject is a warning.",
+          "swift": {
+            "name": "ReleaseStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ReleaseStep.swift"
+          },
+          "cs": {
+            "name": "ReleaseStep",
+            "file": "windows/src/Bromelia.Engine/Steps/ReleaseStep.cs"
+          },
+          "c": {
+            "name": "BroReleaseStep",
+            "file": "linux/src/engine/steps/bro-release-step.h"
+          }
+        },
+        {
+          "name": "MakemkvSink",
+          "kind": "class",
+          "doc": "A RunSink: makemkv.message (no debug), makemkv.titleProgress, and the total progress as the step's.",
+          "swift": {
+            "name": "MakemkvSink",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/MakemkvSink.swift"
+          },
+          "cs": {
+            "name": "MakemkvSink",
+            "file": "windows/src/Bromelia.Engine/Steps/MakemkvSink.cs"
+          },
+          "c": {
+            "name": "BroMakemkvSink",
+            "file": "linux/src/engine/steps/bro-makemkv-sink.h"
+          }
+        },
+        {
+          "name": "ProbeOutput",
+          "kind": "struct",
+          "fields": [
+            "listing",
+            "fingerprint",
+            "libreDrive",
+            "fromSession"
+          ],
+          "doc": "What ProbeStep found.",
+          "swift": {
+            "name": "ProbeOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ProbeOutput.swift"
+          },
+          "cs": {
+            "name": "ProbeOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/ProbeOutput.cs"
+          },
+          "c": {
+            "name": "BroProbeOutput",
+            "file": "linux/src/engine/steps/bro-probe-output.h"
+          }
+        },
+        {
+          "name": "ReconcileOutput",
+          "kind": "struct",
+          "fields": [
+            "titleMap"
+          ],
+          "doc": "Each chosen title of the opened listing → its number now.",
+          "swift": {
+            "name": "ReconcileOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ReconcileOutput.swift"
+          },
+          "cs": {
+            "name": "ReconcileOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/ReconcileOutput.cs"
+          },
+          "c": {
+            "name": "BroReconcileOutput",
+            "file": "linux/src/engine/steps/bro-reconcile-output.h"
+          }
+        },
+        {
+          "name": "StepSources",
+          "kind": "namespace",
+          "doc": "What the video-disc steps share about a job's source.",
+          "swift": {
+            "name": "StepSources",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/StepSources.swift"
+          },
+          "cs": {
+            "name": "StepSources",
+            "file": "windows/src/Bromelia.Engine/Steps/StepSources.cs"
+          },
+          "c": {
+            "name": "BroStepSources",
+            "file": "linux/src/engine/steps/bro-step-sources.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "StepSources.request",
+          "params": [
+            "job"
+          ],
+          "returns": "DiscRequest",
+          "doc": "internal.unexpected when the job names no source.",
+          "throws": true,
+          "swift": "StepSources.request(_:)",
+          "cs": "StepSources.Request",
+          "c": "bro_step_sources_request"
+        },
+        {
+          "name": "StepSources.drive",
+          "params": [
+            "lookup",
+            "_:driveId"
+          ],
+          "returns": "DriveLocation",
+          "doc": "drive.notFound when it isn't connected.",
+          "throws": true,
+          "swift": "StepSources.drive(_:_:)",
+          "cs": "StepSources.Drive",
+          "c": "bro_step_sources_drive"
+        },
+        {
+          "name": "StepSources.makemkv",
+          "params": [
+            "source",
+            "_:lookup"
+          ],
+          "returns": "MakemkvSource",
+          "doc": "disc:N (drive.notFound when not connected or not numbered), the image, or the disc a folder or file belongs to.",
+          "throws": true,
+          "swift": "StepSources.makemkv(_:_:)",
+          "cs": "StepSources.Makemkv",
+          "c": "bro_step_sources_makemkv"
+        },
+        {
+          "name": "StepSources.profile",
+          "params": [
+            "context",
+            "_:configId"
+          ],
+          "returns": "EffectiveProfile",
+          "doc": "The profile before Plan: no facts yet but whether the rip is automatic.",
+          "swift": "StepSources.profile(_:_:)",
+          "cs": "StepSources.Profile",
+          "c": "bro_step_sources_profile"
+        },
+        {
+          "name": "StepSources.baseMode",
+          "params": [
+            "job",
+            "_:profile"
+          ],
+          "returns": "RipMode",
+          "doc": "options.mode, else the profile's mode.default.",
+          "swift": "StepSources.baseMode(_:_:)",
+          "cs": "StepSources.BaseMode",
+          "c": "bro_step_sources_base_mode"
+        },
+        {
+          "name": "StepSources.label",
+          "params": [
+            "source",
+            "_:drive"
+          ],
+          "returns": "String",
+          "doc": "The disc's label before a listing names it.",
+          "swift": "StepSources.label(_:_:)",
+          "cs": "StepSources.Label",
+          "c": "bro_step_sources_label"
+        },
+        {
+          "name": "ProbeOutput.encode",
+          "params": [
+            "output"
+          ],
+          "returns": "JsonValue",
+          "swift": "ProbeOutput.encode(_:)",
+          "cs": "ProbeOutput.Encode",
+          "c": "bro_probe_output_encode"
+        },
+        {
+          "name": "ProbeOutput.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "ProbeOutput",
+          "swift": "ProbeOutput.decode(_:)",
+          "cs": "ProbeOutput.Decode",
+          "c": "bro_probe_output_decode"
+        },
+        {
+          "name": "ReconcileOutput.encode",
+          "params": [
+            "output"
+          ],
+          "returns": "JsonValue",
+          "doc": "{titleMap: [[opened, now], …]}.",
+          "swift": "ReconcileOutput.encode(_:)",
+          "cs": "ReconcileOutput.Encode",
+          "c": "bro_reconcile_output_encode"
+        },
+        {
+          "name": "ReconcileOutput.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "ReconcileOutput",
+          "swift": "ReconcileOutput.decode(_:)",
+          "cs": "ReconcileOutput.Decode",
+          "c": "bro_reconcile_output_decode"
+        }
+      ]
     }
   }
 }

@@ -1153,6 +1153,7 @@ test_engine_executor (void)
 
 #include "test-scheduler.inc"
 #include "test-pipeline.inc"
+#include "test-steps.inc"
 
 int
 main (int argc, char **argv)
@@ -1167,5 +1168,6 @@ main (int argc, char **argv)
   g_test_add_func ("/engine/lease-snapshot", test_lease_snapshot);
   g_test_add_func ("/engine/pipeline-runner", test_pipeline_runner);
   g_test_add_func ("/engine/job-planner", test_job_planner);
+  g_test_add_func ("/engine/video-steps", test_video_steps);
   return g_test_run ();
 }

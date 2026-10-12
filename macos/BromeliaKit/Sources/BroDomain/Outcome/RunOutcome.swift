@@ -15,6 +15,22 @@ public struct RunOutcome: Sendable, Equatable {
     public var error: BroMessage?
     public var produced: [String]
 
+    public init(saved: Int? = nil, failed: Int? = nil, exitCode: Int, firstError: RobotMessage? = nil, spaceWarning: RobotMessage? = nil,
+                readErrors: [RobotMessage] = [], driveMismatch: BroMessage? = nil, debugLog: String? = nil, status: StatusWord, error: BroMessage? = nil,
+                produced: [String] = []) {
+        self.saved = saved
+        self.failed = failed
+        self.exitCode = exitCode
+        self.firstError = firstError
+        self.spaceWarning = spaceWarning
+        self.readErrors = readErrors
+        self.driveMismatch = driveMismatch
+        self.debugLog = debugLog
+        self.status = status
+        self.error = error
+        self.produced = produced
+    }
+
     /// Cancelled when the run was cancelled. Failed when MakeMKV's space warning or a renumbered drive stopped it,
     /// when it stalled, exited non-zero, reported a failed title or produced nothing; the error is the reason (the
     /// first error MakeMKV reported, else the last, else the exit status, else process.savedNothing). A rip (`.titles`)

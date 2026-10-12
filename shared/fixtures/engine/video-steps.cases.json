@@ -1,0 +1,2916 @@
+{
+  "description": "The first video-disc steps (plan §20.1) run alone, each with a StepContext the harness builds: AwaitMedia, Probe, Reconcile, Identify (its phase 3 form: no lookups) and Release. Given: step (its kind); request (JobRequest: kind, title, automatic, driveId, mediaGeneration, sessionId, options, details; details as DiscRequest.encode writes them); outputs [{kind, data}] (the earlier steps'); config (the configuration document, through ConfigCodec.decode; default {\"version\": 3}); drives {driveId: DriveLocation {makemkvIndex, device, configId, generation, label, flags}} (what DriveLookup.find gives; a drive not listed isn't connected); mount (what DriveControl.waitForMount returns: a path or null); eject (absent: it works; {code, params}: it fails with that error); makemkv (the fake Makemkv.listing: listing (a generated listing, shared/scenarios/README.md) or robot [lines], each parsed with Robot.parseLine, given to the step's sink in order and built into the listing with ListingBuilder; outcome {status (success), error {code, params}, exitCode (0)}; notice (keyExpired, evaluationNotStarted, versionTooOld, libreDriveRequired); libreDrive; settingsProblem / transcriptProblem {code, params}). The fake MakemkvSetup gives an empty invocation. Calls are recorded in order: 'waitForMount <device> <seconds>', 'eject <device>', 'invocation <selectionOverride or -> minLength=<the profile's makemkv.minLengthSeconds or null>', 'listing <disc:N | iso:path | file:path>'. Expect: resources {drives} (Step.resources of the job); error {code, params} (absent: the step must not fail; a failure may be thrown or reported); notice (the report's MakeMKV notice); skipped (default false); data (the report's data; each key given must match, objects compared the same way, arrays element by element with the same length); log [the job log in order: a code, or {code, params, severity} to compare those too]; calls [exactly]; progress [[fraction, operation code, current item when there is one]] (every report, in order).",
+  "functions": [
+    "Step.run",
+    "Step.resources",
+    "StepSources.makemkv",
+    "StepSources.baseMode",
+    "StepSources.label",
+    "ProbeOutput.encode",
+    "ReconcileOutput.encode"
+  ],
+  "cases": [
+    {
+      "id": "await-mounted",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef",
+          "mediaGeneration": 2
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "mount": "/Volumes/HEAT"
+      },
+      "expect": {
+        "resources": {
+          "drives": [
+            "drv-0123456789abcdef"
+          ]
+        },
+        "data": {
+          "mountPath": "/Volumes/HEAT"
+        },
+        "log": [
+          {
+            "code": "disc.mounted"
+          }
+        ],
+        "calls": [
+          "waitForMount /dev/disk4 30"
+        ],
+        "progress": [
+          [
+            0,
+            "disc.waitingForMount"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "await-not-mounted",
+      "description": "Not mounted after the wait: the job goes on (as today).",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "mount": null
+      },
+      "expect": {
+        "data": {
+          "mountPath": null
+        },
+        "log": [
+          {
+            "code": "disc.notMounted",
+            "params": {
+              "seconds": 30
+            }
+          }
+        ],
+        "calls": [
+          "waitForMount /dev/disk4 30"
+        ]
+      }
+    },
+    {
+      "id": "await-the-drive-entry-wait",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef"
+        },
+        "config": {
+          "version": 3,
+          "drives": [
+            {
+              "id": "d1",
+              "automation": {
+                "waitForMountSeconds": 5
+              }
+            }
+          ],
+          "automation": {
+            "defaults": {
+              "waitForMountSeconds": 60
+            }
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT",
+            "configId": "d1"
+          }
+        },
+        "mount": "/Volumes/HEAT"
+      },
+      "expect": {
+        "calls": [
+          "waitForMount /dev/disk4 5"
+        ]
+      }
+    },
+    {
+      "id": "await-the-default-wait",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef"
+        },
+        "config": {
+          "version": 3,
+          "automation": {
+            "defaults": {
+              "waitForMountSeconds": 60
+            }
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "mount": "/Volumes/HEAT"
+      },
+      "expect": {
+        "calls": [
+          "waitForMount /dev/disk4 60"
+        ]
+      }
+    },
+    {
+      "id": "await-no-wait",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef"
+        },
+        "config": {
+          "version": 3,
+          "automation": {
+            "defaults": {
+              "waitForMountSeconds": 0
+            }
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        }
+      },
+      "expect": {
+        "skipped": true,
+        "calls": [],
+        "log": []
+      }
+    },
+    {
+      "id": "await-no-device",
+      "description": "macOS has no device path for an empty drive.",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        }
+      },
+      "expect": {
+        "skipped": true,
+        "calls": []
+      }
+    },
+    {
+      "id": "await-another-disc",
+      "description": "Another disc was inserted since the job was queued.",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef",
+          "mediaGeneration": 2
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 3,
+            "label": "HEAT"
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "disc.changed",
+          "params": {
+            "why": {
+              "code": "disc.changed.generation"
+            }
+          }
+        },
+        "calls": []
+      }
+    },
+    {
+      "id": "await-the-drive-is-gone",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {}
+      },
+      "expect": {
+        "error": {
+          "code": "drive.notFound",
+          "params": {
+            "driveId": "drv-0123456789abcdef"
+          }
+        },
+        "calls": []
+      }
+    },
+    {
+      "id": "await-not-a-drive",
+      "given": {
+        "step": "awaitMedia",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "iso": "/movies/HEAT.iso"
+            }
+          }
+        }
+      },
+      "expect": {
+        "resources": {
+          "drives": []
+        },
+        "skipped": true,
+        "calls": []
+      }
+    },
+    {
+      "id": "probe-a-drive",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "resources": {
+          "drives": [
+            "drv-0123456789abcdef"
+          ]
+        },
+        "data": {
+          "listing": {
+            "name": "HEAT",
+            "volumeName": "HEAT",
+            "type": "dvd",
+            "titles": [
+              {
+                "index": 0,
+                "sourceTitleId": 1,
+                "durationSeconds": 6000
+              },
+              {
+                "index": 1,
+                "sourceTitleId": 2,
+                "durationSeconds": 300
+              }
+            ]
+          },
+          "fingerprint": "v1:4ce360953febdc44fc005a9906f8bb4d",
+          "libreDrive": null,
+          "fromSession": false
+        },
+        "log": [
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "MakeMKV v1.18.1 darwin(arm64-release) started"
+            }
+          },
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "Operation successfully completed"
+            }
+          },
+          {
+            "code": "disc.found",
+            "params": {
+              "count": 2,
+              "name": "HEAT"
+            }
+          }
+        ],
+        "calls": [
+          "invocation - minLength=null",
+          "listing disc:0"
+        ],
+        "progress": [
+          [
+            0,
+            "disc.op.reading"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "probe-an-image",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "iso": "/movies/HEAT.iso"
+            }
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "resources": {
+          "drives": []
+        },
+        "calls": [
+          "invocation - minLength=null",
+          "listing iso:/movies/HEAT.iso"
+        ]
+      }
+    },
+    {
+      "id": "probe-a-file-of-a-disc",
+      "description": "A file inside a disc structure opens the disc (SourceResolver).",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "file": "/rips/HEAT/VIDEO_TS/VTS_01_0.IFO"
+            }
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          "invocation - minLength=null",
+          "listing file:/rips/HEAT"
+        ]
+      }
+    },
+    {
+      "id": "probe-a-folder",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "folder": "/rips/HEAT/VIDEO_TS"
+            }
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          "invocation - minLength=null",
+          "listing file:/rips/HEAT"
+        ]
+      }
+    },
+    {
+      "id": "probe-the-drive-profile",
+      "description": "The drive's configuration entry chooses the profile makemkvcon runs with.",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "short",
+              "makemkv": {
+                "minLengthSeconds": 600
+              }
+            }
+          ],
+          "drives": [
+            {
+              "id": "d1",
+              "profile": "short"
+            }
+          ]
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT",
+            "configId": "d1"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          "invocation - minLength=600",
+          "listing disc:0"
+        ]
+      }
+    },
+    {
+      "id": "probe-not-numbered-yet",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": null,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "drive.notFound",
+          "params": {
+            "driveId": "drv-0123456789abcdef"
+          }
+        },
+        "calls": []
+      }
+    },
+    {
+      "id": "probe-no-titles",
+      "description": "The notice names the real cause (an expired key) in the outcome.",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "bluray",
+            "titles": []
+          },
+          "outcome": {
+            "status": "failed",
+            "error": {
+              "code": "makemkv.message",
+              "params": {
+                "text": "Evaluation period has expired"
+              }
+            }
+          },
+          "notice": "keyExpired"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "disc.noTitles",
+          "params": {
+            "source": "disc:0",
+            "reason": {
+              "code": "makemkv.message",
+              "params": {
+                "text": "Evaluation period has expired"
+              }
+            }
+          }
+        },
+        "notice": "keyExpired"
+      }
+    },
+    {
+      "id": "probe-no-titles-and-no-message",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "titles": []
+          },
+          "outcome": {
+            "status": "failed",
+            "exitCode": 1
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "disc.noTitles",
+          "params": {
+            "source": "disc:0",
+            "reason": {
+              "code": "process.exitStatus",
+              "params": {
+                "status": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "probe-a-backup-goes-on-without-a-listing",
+      "description": "Backups don't need the listing (as today).",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "options": {
+            "mode": "backup"
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "titles": []
+          },
+          "outcome": {
+            "status": "failed",
+            "exitCode": 1
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "listing": null,
+          "fingerprint": null,
+          "libreDrive": null,
+          "fromSession": false
+        },
+        "log": [
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "MakeMKV v1.18.1 darwin(arm64-release) started"
+            }
+          },
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "Operation successfully completed"
+            }
+          },
+          {
+            "code": "disc.continuingWithoutListing",
+            "params": {
+              "reason": {
+                "code": "disc.noTitles",
+                "params": {
+                  "source": "disc:0",
+                  "reason": {
+                    "code": "process.exitStatus",
+                    "params": {
+                      "status": 1
+                    }
+                  }
+                }
+              }
+            },
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "id": "probe-a-backup-uses-the-opened-listing",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "options": {
+            "mode": "backupDecrypted"
+          },
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "titles": []
+          },
+          "outcome": {
+            "status": "failed",
+            "exitCode": 1
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "listing": {
+            "name": "HEAT",
+            "titles": [
+              {
+                "index": 0,
+                "sourceTitleId": 1
+              },
+              {
+                "index": 1,
+                "sourceTitleId": 2
+              }
+            ]
+          },
+          "fromSession": true
+        },
+        "log": [
+          "disc.readingAgain",
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "MakeMKV v1.18.1 darwin(arm64-release) started"
+            }
+          },
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "Operation successfully completed"
+            }
+          },
+          {
+            "code": "disc.usingOpenedListing",
+            "params": {
+              "reason": {
+                "code": "disc.noTitles",
+                "params": {
+                  "source": "disc:0",
+                  "reason": {
+                    "code": "process.exitStatus",
+                    "params": {
+                      "status": 1
+                    }
+                  }
+                }
+              }
+            },
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "id": "probe-a-backup-by-the-profile",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "mode": {
+                "default": "backup"
+              }
+            }
+          ]
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "titles": []
+          },
+          "outcome": {
+            "status": "failed",
+            "exitCode": 1
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "listing": null,
+          "fromSession": false
+        }
+      }
+    },
+    {
+      "id": "probe-mkv-by-format-is-still-a-backup",
+      "description": "Without a listing the format is unknown, so the mode stays mode.default (as today).",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "mode": {
+                "default": "backup",
+                "byFormat": {
+                  "dvd": "mkv"
+                }
+              }
+            }
+          ]
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "titles": []
+          },
+          "outcome": {
+            "status": "failed",
+            "exitCode": 1
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "listing": null
+        }
+      }
+    },
+    {
+      "id": "probe-reads-an-opened-disc-again",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "fingerprint": "v1:4ce360953febdc44fc005a9906f8bb4d",
+          "fromSession": false
+        },
+        "log": [
+          "disc.readingAgain",
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "MakeMKV v1.18.1 darwin(arm64-release) started"
+            }
+          },
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "Operation successfully completed"
+            }
+          },
+          "disc.found"
+        ]
+      }
+    },
+    {
+      "id": "probe-cancelled",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "titles": []
+          },
+          "outcome": {
+            "status": "cancelled"
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "job.cancelled"
+        }
+      }
+    },
+    {
+      "id": "probe-libre-drive-and-run-problems",
+      "description": "What giving back the run's settings reported is logged, never dropped.",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          },
+          "libreDrive": "Enabled",
+          "settingsProblem": {
+            "code": "makemkv.keyNotRemoved",
+            "params": {
+              "path": "/data/jobs/j/home",
+              "reason": "busy"
+            }
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "libreDrive": "Enabled"
+        },
+        "log": [
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "MakeMKV v1.18.1 darwin(arm64-release) started"
+            }
+          },
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "Operation successfully completed"
+            }
+          },
+          {
+            "code": "makemkv.keyNotRemoved",
+            "params": {
+              "path": "/data/jobs/j/home",
+              "reason": "busy"
+            },
+            "severity": "warning"
+          },
+          {
+            "code": "makemkv.libreDrive",
+            "params": {
+              "detail": "Enabled"
+            }
+          },
+          "disc.found"
+        ]
+      }
+    },
+    {
+      "id": "probe-makemkv-progress-and-messages",
+      "description": "Debug messages aren't logged; each new total operation is logged once; the total progress is the step's.",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "iso": "/movies/HEAT.iso"
+            }
+          }
+        },
+        "makemkv": {
+          "robot": [
+            "PRGT:5018,0,\"Scanning CD-ROM devices\"",
+            "PRGC:5018,0,\"Scanning drive\"",
+            "PRGV:0,32768,65536",
+            "MSG:1003,0,0,\"DEBUG: hidden\",\"%1\",\"x\"",
+            "MSG:3038,1024,0,\"A warning\",\"%1\",\"x\"",
+            "PRGT:5018,0,\"Scanning CD-ROM devices\"",
+            "PRGT:5024,0,\"Processing title sets\"",
+            "TCOUNT:1",
+            "CINFO:1,6206,\"DVD disc\"",
+            "CINFO:2,0,\"HEAT\"",
+            "CINFO:32,0,\"HEAT\"",
+            "TINFO:0,9,0,\"1:40:00\"",
+            "TINFO:0,24,0,\"1\"",
+            "TINFO:0,26,0,\"1\""
+          ]
+        }
+      },
+      "expect": {
+        "log": [
+          {
+            "code": "makemkv.titleProgress",
+            "params": {
+              "name": "Scanning CD-ROM devices"
+            }
+          },
+          {
+            "code": "makemkv.message",
+            "params": {
+              "text": "A warning"
+            },
+            "severity": "warning"
+          },
+          {
+            "code": "makemkv.titleProgress",
+            "params": {
+              "name": "Processing title sets"
+            }
+          },
+          {
+            "code": "disc.found",
+            "params": {
+              "count": 1,
+              "name": "HEAT"
+            }
+          }
+        ],
+        "progress": [
+          [
+            0,
+            "disc.op.reading"
+          ],
+          [
+            0.5,
+            "disc.op.reading",
+            "Scanning drive"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "reconcile-without-a-session",
+      "given": {
+        "step": "reconcile",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "resources": {
+          "drives": []
+        },
+        "skipped": true,
+        "log": []
+      }
+    },
+    {
+      "id": "reconcile-the-same-disc",
+      "given": {
+        "step": "reconcile",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true
+                  },
+                  {
+                    "index": 1,
+                    "selected": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "titleMap": [
+            [
+              0,
+              0
+            ]
+          ]
+        },
+        "log": []
+      }
+    },
+    {
+      "id": "reconcile-renumbered-titles",
+      "description": "MakeMKV numbers titles by position; a short title now listed first moves the others.",
+      "given": {
+        "step": "reconcile",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true
+                  },
+                  {
+                    "index": 1,
+                    "selected": true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 9,
+                    "durationSeconds": 120,
+                    "duration": "0:02:00",
+                    "segmentMap": "9",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 2,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "titleMap": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              2
+            ]
+          ]
+        },
+        "log": [
+          {
+            "code": "disc.titleNumbersChanged",
+            "params": {
+              "changes": [
+                "0 → 1",
+                "1 → 2"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "reconcile-another-disc",
+      "given": {
+        "step": "reconcile",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true
+                  },
+                  {
+                    "index": 1,
+                    "selected": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "ALIEN",
+                "volumeName": "ALIEN",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 7000,
+                    "duration": "1:56:40",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "disc.changed",
+          "params": {
+            "why": {
+              "code": "disc.changed.volume",
+              "params": {
+                "old": "HEAT",
+                "new": "ALIEN"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "reconcile-a-title-is-gone",
+      "given": {
+        "step": "reconcile",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 1,
+                    "selected": true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "disc.titleGone",
+          "params": {
+            "title": 1,
+            "duration": "0:05:00",
+            "source": "#2"
+          }
+        }
+      }
+    },
+    {
+      "id": "reconcile-hand-picked-tracks-changed",
+      "given": {
+        "step": "reconcile",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true,
+                    "tracks": [
+                      0,
+                      1
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      },
+                      {
+                        "index": 2,
+                        "kind": "subtitle"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "disc.tracksChanged",
+          "params": {
+            "title": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "reconcile-after-the-opened-listing-was-used",
+      "given": {
+        "step": "reconcile",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true
+                  },
+                  {
+                    "index": 1,
+                    "selected": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": true
+            }
+          }
+        ]
+      },
+      "expect": {
+        "skipped": true
+      }
+    },
+    {
+      "id": "identify-a-movie",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "resources": {
+          "drives": []
+        },
+        "data": {
+          "name": "Heat",
+          "kind": "movie",
+          "format": "dvd",
+          "formatCode": "DVD",
+          "encrypted": false,
+          "label": {
+            "title": "Heat",
+            "season": null,
+            "part": null,
+            "volume": null,
+            "disc": null,
+            "set": "",
+            "looksLikeSeries": false
+          },
+          "reason": {
+            "code": "identity.reason.none"
+          }
+        },
+        "log": [
+          {
+            "code": "identity.resolved",
+            "params": {
+              "kind": "movie",
+              "name": "Heat",
+              "hasSet": false,
+              "set": "",
+              "format": "dvd",
+              "formatCode": "DVD",
+              "reason": {
+                "code": "identity.reason.none"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "identify-a-show-by-its-label",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "ONE_PIECE_S2_P7_D2",
+                "volumeName": "ONE_PIECE_S2_P7_D2",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 1300,
+                    "duration": "0:21:40",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 1301,
+                    "duration": "0:21:41",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 2,
+                    "sourceTitleId": 3,
+                    "durationSeconds": 1299,
+                    "duration": "0:21:39",
+                    "segmentMap": "3",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "name": "One Piece",
+          "kind": "tv",
+          "format": "dvd",
+          "formatCode": "DVD",
+          "encrypted": false,
+          "label": {
+            "title": "One Piece",
+            "season": 2,
+            "part": 7,
+            "volume": null,
+            "disc": 2,
+            "set": "Season 2 Part 7 Disc 2",
+            "looksLikeSeries": true
+          },
+          "reason": {
+            "code": "identity.reason.labelMarkers"
+          }
+        },
+        "log": [
+          {
+            "code": "identity.resolved",
+            "params": {
+              "kind": "tv",
+              "name": "One Piece",
+              "hasSet": true,
+              "set": "Season 2 Part 7 Disc 2",
+              "format": "dvd",
+              "formatCode": "DVD",
+              "reason": {
+                "code": "identity.reason.labelMarkers"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "identify-the-session-choices",
+      "description": "The name and kind chosen on the opened disc win.",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true
+                  },
+                  {
+                    "index": 1,
+                    "selected": false
+                  }
+                ],
+                "name": "Heat (1995)",
+                "kind": "tv"
+              }
+            }
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "name": "Heat (1995)",
+          "kind": "tv",
+          "format": "dvd",
+          "formatCode": "DVD",
+          "encrypted": false,
+          "label": {
+            "title": "Heat",
+            "season": null,
+            "part": null,
+            "volume": null,
+            "disc": null,
+            "set": "",
+            "looksLikeSeries": false
+          },
+          "reason": {
+            "code": "identity.reason.chosen"
+          }
+        }
+      }
+    },
+    {
+      "id": "identify-an-encrypted-backup",
+      "description": "A backup that stays encrypted gets the e format code.",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "options": {
+            "mode": "backup"
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "encrypted": true,
+          "formatCode": "DVDe"
+        }
+      }
+    },
+    {
+      "id": "identify-a-decrypted-backup",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "options": {
+            "mode": "backupDecrypted"
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "encrypted": false,
+          "formatCode": "DVD"
+        }
+      }
+    },
+    {
+      "id": "identify-an-image-without-a-listing",
+      "description": "The image's name is the label when there is no listing.",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "iso": "/movies/THE_DARK_KNIGHT.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": null,
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "name": "The Dark Knight",
+          "format": "unknown",
+          "formatCode": "DISC"
+        }
+      }
+    },
+    {
+      "id": "identify-a-drive-without-a-listing",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "ALIEN_D1"
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": null,
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "data": {
+          "name": "Alien",
+          "label": {
+            "title": "Alien",
+            "disc": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "release-ejects",
+      "given": {
+        "step": "release",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "automatic": true,
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        }
+      },
+      "expect": {
+        "resources": {
+          "drives": [
+            "drv-0123456789abcdef"
+          ]
+        },
+        "data": {
+          "ejected": true
+        },
+        "log": [
+          {
+            "code": "drive.ejected"
+          }
+        ],
+        "calls": [
+          "eject /dev/disk4"
+        ],
+        "progress": [
+          [
+            0,
+            "drive.ejecting"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "release-keeps-the-disc",
+      "given": {
+        "step": "release",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "config": {
+          "version": 3,
+          "drives": [
+            {
+              "id": "d1",
+              "automation": {
+                "ejectWhenDone": false
+              }
+            }
+          ]
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT",
+            "configId": "d1"
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "ejected": false
+        },
+        "calls": [],
+        "log": []
+      }
+    },
+    {
+      "id": "release-the-eject-fails",
+      "description": "A failed eject is a warning: the archive is fine.",
+      "given": {
+        "step": "release",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "eject": {
+          "code": "process.exitStatus",
+          "params": {
+            "status": 1
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "ejected": false
+        },
+        "calls": [
+          "eject /dev/disk4"
+        ],
+        "log": [
+          {
+            "code": "drive.ejectFailed",
+            "params": {
+              "device": "/dev/disk4",
+              "reason": "process.exitStatus"
+            },
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "id": "release-without-a-device",
+      "description": "Nothing to eject without a device path.",
+      "given": {
+        "step": "release",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "ejected": false
+        },
+        "calls": [],
+        "log": []
+      }
+    },
+    {
+      "id": "release-the-drive-is-gone",
+      "given": {
+        "step": "release",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {}
+      },
+      "expect": {
+        "data": {
+          "ejected": false
+        },
+        "calls": []
+      }
+    },
+    {
+      "id": "release-not-a-drive",
+      "given": {
+        "step": "release",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "folder": "/rips/HEAT"
+            }
+          }
+        }
+      },
+      "expect": {
+        "resources": {
+          "drives": []
+        },
+        "skipped": true,
+        "calls": []
+      }
+    }
+  ]
+}
