@@ -11,4 +11,7 @@ public sealed record StepEnvironment(
     IDriveControl Drives,
     ILibraryPort Library,
     ICatalogQueries Catalog,
+    IConfigSource Config,
+    IDriveLookup DriveLookup,
+    IMakemkvSetup MakemkvSetup,
     string DataDirectory);

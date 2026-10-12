@@ -355,6 +355,50 @@ gates_parked (Gates *g, const char *job, gboolean *job_there)
 /* ---- a step that does what the case says --------------------------------------------------------------------- */
 
 #define TEST_TYPE_FAKE_STEP (test_fake_step_get_type ())
+/* ---- the configuration a case sets: given.config, then its config ops (read and changed on the executor) ---- */
+
+#define TEST_TYPE_CASE_CONFIG (test_case_config_get_type ())
+G_DECLARE_FINAL_TYPE (TestCaseConfig, test_case_config, TEST, CASE_CONFIG, GObject)
+
+struct _TestCaseConfig {
+  GObject parent;
+  BroJsonValue *document;
+};
+
+static BroConfig *
+case_config_current (BroConfigSource *source)
+{
+  return bro_config_new (bro_json_value_ref (TEST_CASE_CONFIG (source)->document), NULL);
+}
+
+static void
+case_config_iface_init (BroConfigSourceInterface *iface)
+{
+  iface->current = case_config_current;
+}
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (TestCaseConfig, test_case_config, G_TYPE_OBJECT,
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CONFIG_SOURCE, case_config_iface_init))
+
+static void
+test_case_config_finalize (GObject *object)
+{
+  bro_json_value_unref (TEST_CASE_CONFIG (object)->document);
+  G_OBJECT_CLASS (test_case_config_parent_class)->finalize (object);
+}
+
+static void
+test_case_config_class_init (TestCaseConfigClass *klass)
+{
+  G_OBJECT_CLASS (klass)->finalize = test_case_config_finalize;
+}
+
+static void
+test_case_config_init (TestCaseConfig *self)
+{
+  self->document = bro_json_value_new_object ();
+}
+
 G_DECLARE_FINAL_TYPE (TestFakeStep, test_fake_step, TEST, FAKE_STEP, GObject)
 
 struct _TestFakeStep {
@@ -435,6 +479,13 @@ fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
     }
   v = bro_json_value_member (b, "output");
   data = v ? bro_json_value_ref (v) : bro_json_value_new_object ();
+  if ((v = bro_json_value_member (b, "config")))
+    {
+      BroJsonValue *member = bro_json_value_member (ctx->config->document, v->string);
+      bro_json_value_unref (data);
+      data = bro_json_value_new_object ();
+      bro_json_value_set (data, v->string, member ? bro_json_value_ref (member) : bro_json_value_new_null ());
+    }
   if ((v = bro_json_value_member (b, "echo")))
     for (guint i = ctx->job->outputs->len; i > 0; i--)
       {
@@ -540,6 +591,7 @@ typedef struct {
   BroScheduler *scheduler;
   TestMemoryStore *store;
   TestMemoryFs *fs;
+  TestCaseConfig *config;
   BroPipelineRunner *runner;
   BroSubscription *subscription;
   GPtrArray *names;     /* job names, in order */
@@ -616,6 +668,11 @@ pipe_op_action (gpointer data)
   else if (strcmp (name, "decide") == 0)
     o->ok = bro_pipeline_runner_decide (h->runner, g_hash_table_lookup (h->jobs, bro_json_value_get_string (bro_json_value_member (arg, "job"), "")),
                                         bro_json_value_get_string (bro_json_value_member (arg, "answer"), ""), &o->error);
+  else if (strcmp (name, "config") == 0)
+    {
+      bro_json_value_unref (h->config->document);
+      h->config->document = bro_json_value_ref (arg);
+    }
   else if (strcmp (name, "library") == 0)
     {
       const char *lib = bro_json_value_get_string (bro_json_value_member (arg, "id"), "");
@@ -814,6 +871,12 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   h.scheduler = bro_scheduler_new (h.w.executor, h.bus, &limits);
   h.store = g_object_new (TEST_TYPE_MEMORY_STORE, NULL);
   h.fs = g_object_new (TEST_TYPE_MEMORY_FS, NULL);
+  h.config = g_object_new (TEST_TYPE_CASE_CONFIG, NULL);
+  if ((v = bro_json_value_member (given, "config")))
+    {
+      bro_json_value_unref (h.config->document);
+      h.config->document = bro_json_value_ref (v);
+    }
   for (guint k = 0; k < BRO_STEP_KIND_TRANSCODE + 1; k++)
     {
       TestFakeStep *s = g_object_new (TEST_TYPE_FAKE_STEP, NULL);
@@ -824,7 +887,8 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
       g_ptr_array_add (steps, s);
     }
   registry = bro_step_registry_new (steps);
-  environment = bro_step_environment_new (NULL, BRO_FILE_SYSTEM (h.fs), BRO_CLOCK (h.w.clock), NULL, NULL, NULL, "/data");
+  environment = bro_step_environment_new (NULL, BRO_FILE_SYSTEM (h.fs), BRO_CLOCK (h.w.clock), NULL, NULL, NULL,
+                                          BRO_CONFIG_SOURCE (h.config), NULL, NULL, "/data");
   h.runner = bro_pipeline_runner_new (h.w.executor, h.bus, h.scheduler, BRO_STORE (h.store), registry, environment, h.w.engine_clock);
   h.names = g_ptr_array_new_with_free_func (g_free);
   h.jobs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
@@ -1020,6 +1084,7 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   g_object_unref (h.bus);
   g_object_unref (h.store);
   g_object_unref (h.fs);
+  g_object_unref (h.config);
   g_ptr_array_unref (h.names);
   g_hash_table_unref (h.jobs);
   g_hash_table_unref (h.outcomes);

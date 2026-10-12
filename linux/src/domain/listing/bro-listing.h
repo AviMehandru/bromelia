@@ -4,6 +4,7 @@
 #pragma once
 
 #include "bro-disc-type.h"
+#include "bro-json-value.h"
 #include "bro-title.h"
 
 G_BEGIN_DECLS
@@ -20,6 +21,13 @@ typedef struct {
 
 BroListing *bro_listing_ref (BroListing *listing);
 void bro_listing_unref (BroListing *listing);
+
+/* The listing as JSON: dtos.json's Listing, as shared/fixtures/domain/info-dvd.listing.expected.json writes it
+ * (attributes keyed by their id as text, in id order). */
+BroJsonValue *bro_listing_encode (const BroListing *listing);
+
+/* A listing from its JSON (bro_listing_encode); what the JSON leaves out is empty. */
+BroListing *bro_listing_decode (const BroJsonValue *json);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroListing, bro_listing_unref)
 

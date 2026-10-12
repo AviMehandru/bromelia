@@ -41,3 +41,16 @@ bro_bro_message_to_json (const BroBroMessage *message)
     bro_json_value_set (v, "params", bro_json_value_ref (message->params));
   return v;
 }
+
+BroBroMessage *
+bro_bro_message_decode (const BroJsonValue *json)
+{
+  BroMessageCode code;
+  if (!bro_message_code_parse (bro_json_value_get_string (bro_json_value_member (json, "code"), ""), &code))
+    code = BRO_MSG_INTERNAL_UNEXPECTED;
+  BroSeverity severity;
+  if (!bro_severity_from_wire (bro_json_value_get_string (bro_json_value_member (json, "severity"), ""), &severity))
+    severity = BRO_SEVERITY_INFO;
+  BroJsonValue *params = bro_json_value_member (json, "params");
+  return bro_bro_message_new (code, params && params->kind == BRO_JSON_VALUE_OBJECT ? bro_json_value_ref (params) : NULL, severity);
+}

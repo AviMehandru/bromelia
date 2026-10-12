@@ -26,6 +26,9 @@ BroBroError *bro_bro_message_to_error (const BroBroMessage *message, BroBroError
 /* {"code": …, "params": {…}}, as in shared/schema/common.json (params left out when empty). */
 BroJsonValue *bro_bro_message_to_json (const BroBroMessage *message);
 
+/* A message from {"code", "params", "severity"}; an unknown code is internal.unexpected, a missing severity info. */
+BroBroMessage *bro_bro_message_decode (const BroJsonValue *json);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroBroMessage, bro_bro_message_free)
 
 G_END_DECLS

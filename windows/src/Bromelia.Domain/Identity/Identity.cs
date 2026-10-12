@@ -1,3 +1,5 @@
+using Bromelia.Foundation;
+
 namespace Bromelia.Domain;
 
 /// <summary>What a disc is: the movie or show on it, movie or TV, its format and format code, whether the backup
@@ -35,5 +37,30 @@ public sealed record Identity(string Name, MediaKind Kind, DiscFormat Format, Fo
             ? new Decision(k, new BroMessage(MessageCode.IdentityReasonChosen))
             : KindHeuristics.Decide(label, listing, inputs.PlayAllEpisodes);
         return new Identity(name, decision.Value, format, FormatDetector.Code(format, inputs.Encrypted), inputs.Encrypted, label, decision.Reason);
+    }
+
+    /// <summary>The identity as JSON (dtos.json's Identity); the label's set is <see cref="LabelParser.SetDescription"/>.</summary>
+    public static JsonValue Encode(Identity identity)
+    {
+        var l = identity.Label;
+        JsonValue N(int? v) => v is { } x ? JsonValue.Of(x) : JsonValue.Null.Instance;
+        return JsonValue.Of(("name", JsonValue.Of(identity.Name)), ("kind", JsonValue.Of(EnumWire.Name(identity.Kind))),
+            ("format", JsonValue.Of(EnumWire.Name(identity.Format))), ("formatCode", JsonValue.Of(identity.FormatCode.Text)),
+            ("encrypted", JsonValue.Of(identity.Encrypted)),
+            ("label", JsonValue.Of(("title", JsonValue.Of(l.Title)), ("season", N(l.Season)), ("part", N(l.Part)), ("volume", N(l.Volume)),
+                ("disc", N(l.Disc)), ("set", JsonValue.Of(LabelParser.SetDescription(l))), ("looksLikeSeries", JsonValue.Of(l.LooksLikeSeries)))),
+            ("reason", identity.Reason.ToJson()));
+    }
+
+    /// <summary>An identity from its JSON (<see cref="Encode"/>); what the JSON leaves out takes its empty value.</summary>
+    public static Identity Decode(JsonValue json)
+    {
+        var l = json["label"];
+        int? N(string key) => (int?)l?[key]?.AsInteger;
+        return new Identity(json["name"]?.AsString ?? "", EnumWire.Parse<MediaKind>(json["kind"]?.AsString) ?? MediaKind.Movie,
+            EnumWire.Parse<DiscFormat>(json["format"]?.AsString) ?? DiscFormat.Unknown, new FormatCode(json["formatCode"]?.AsString ?? ""),
+            json["encrypted"]?.AsBool ?? false,
+            new Label(l?["title"]?.AsString ?? "", N("season"), N("part"), N("volume"), N("disc"), l?["looksLikeSeries"]?.AsBool ?? false),
+            BroMessage.Decode(json["reason"] ?? JsonValue.Null.Instance));
     }
 }

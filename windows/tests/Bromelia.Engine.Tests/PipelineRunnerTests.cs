@@ -61,6 +61,8 @@ public sealed class PipelineRunnerTests
                 context.Progress.Report(p.AsArray![0].AsNumber!.Value, new BroMessage(MessageCode.Parse(p.AsArray[1].AsString!)!.Value));
             foreach (var code in Strings(_b["log"])) context.Log.Log(new BroMessage(MessageCode.Parse(code)!.Value));
             var data = _b["output"] ?? EmptyObject;
+            if (_b["config"]?.AsString is { } key)
+                data = JsonValue.Of((key, context.Config.Document[key] ?? JsonValue.Null.Instance));
             if (_b["echo"]?.AsString is { } echo)
                 data = context.Job.Outputs.Last(o => EnumWire.Name(o.Kind) == echo).Data;
             if (_b["ask"] is { } ask)
@@ -84,6 +86,14 @@ public sealed class PipelineRunnerTests
         }
     }
 
+    /// <summary>Gives the document the case sets (given.config, then the config ops); read on the executor.</summary>
+    sealed class CaseConfig : IConfigSource
+    {
+        public JsonValue Document = JsonValue.Of(Array.Empty<(string, JsonValue)>());
+
+        public Config Current() => new(Document, new List<Issue>());
+    }
+
     sealed class Harness : IDisposable
     {
         public readonly EngineClockTests.World W = new();
@@ -91,6 +101,7 @@ public sealed class PipelineRunnerTests
         public readonly Scheduler Scheduler;
         public readonly MemoryStore Store = new();
         public readonly MemoryFileSystem Fs = new();
+        public readonly CaseConfig Config = new();
         public readonly PipelineRunner Runner;
         public readonly Dictionary<string, Id> Jobs = new();
         public readonly Dictionary<string, Decided> Outcomes = new();
@@ -103,10 +114,11 @@ public sealed class PipelineRunnerTests
         {
             Bus = new EventBus(W.Clock);
             Scheduler = new Scheduler(W.Executor, Bus, new SchedulerLimits());
+            if (given["config"] is { } config) Config.Document = config;
             var steps = new List<IStep>();
             foreach (var kind in Enum.GetValues<StepKind>())
                 steps.Add(new FakeStep(this, kind, given["steps"]?[EnumWire.Name(kind)] ?? EmptyObject));
-            var env = new StepEnvironment(new ToolSet(null!, null!), Fs, W.Clock, null!, null!, null!, "/data");
+            var env = new StepEnvironment(new ToolSet(null!, null!), Fs, W.Clock, null!, null!, null!, Config, null!, null!, "/data");
             Runner = new PipelineRunner(W.Executor, Bus, Scheduler, Store, new StepRegistry(steps), env, W.EngineClock);
             W.OnExecutor(() => Bus.Subscribe(null, Events.Add));
             int n = 0;
@@ -255,6 +267,9 @@ public sealed class PipelineRunnerTests
                 }
                 case "advance":
                     W.Clock.Advance(arg.AsInteger!.Value);
+                    break;
+                case "config":
+                    W.OnExecutor(() => Config.Document = arg);
                     break;
                 case "library":
                 {

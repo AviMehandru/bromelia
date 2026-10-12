@@ -26,4 +26,10 @@ public struct BroMessage: Sendable, Equatable {
         if !params.isEmpty { members.append(("params", .object(params))) }
         return .object(members)
     }
+
+    /// A message from `{"code", "params", "severity"}`; an unknown code is internal.unexpected, a missing severity info.
+    public static func decode(_ json: JsonValue) -> BroMessage {
+        BroMessage(json["code"]?.string.flatMap(MessageCode.init(rawValue:)) ?? .internalUnexpected, json["params"]?.members ?? [],
+                   severity: json["severity"]?.string.flatMap(Severity.init(rawValue:)) ?? .info)
+    }
 }

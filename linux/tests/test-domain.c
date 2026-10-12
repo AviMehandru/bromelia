@@ -4,7 +4,9 @@
 #include <math.h>
 
 #include "bro-bro-message.h"
+#include "bro-disc-request.h"
 #include "bro-job-kind.h"
+#include "bro-job-snapshot.h"
 #include "bro-job-state.h"
 #include "bro-outcome.h"
 #include "bro-queue.h"
@@ -476,95 +478,18 @@ listing_of (const char *robot_text)
   return bro_listing_builder_build (b);
 }
 
-static int
-compare_keys (gconstpointer a, gconstpointer b)
-{
-  int x = GPOINTER_TO_INT (*(gpointer *) a), y = GPOINTER_TO_INT (*(gpointer *) b);
-  return x < y ? -1 : x > y;
-}
-
-static BroJsonValue *
-attributes_json (GHashTable *a)
-{
-  g_autoptr (GPtrArray) keys = g_ptr_array_new ();
-  GHashTableIter it;
-  gpointer k;
-  g_hash_table_iter_init (&it, a);
-  while (g_hash_table_iter_next (&it, &k, NULL))
-    g_ptr_array_add (keys, k);
-  g_ptr_array_sort (keys, compare_keys);
-  BroJsonValue *o = bro_json_value_new_object ();
-  for (guint i = 0; i < keys->len; i++) {
-    g_autofree char *key = g_strdup_printf ("%d", GPOINTER_TO_INT (keys->pdata[i]));
-    put (o, key, bro_json_value_new_string (g_hash_table_lookup (a, keys->pdata[i])));
-  }
-  return o;
-}
-
-static BroJsonValue *
-int_or_null (gboolean has, int v)
-{
-  return has ? bro_json_value_new_integer (v) : bro_json_value_new_null ();
-}
-
-/* A listing as the golden writes it. */
-static BroJsonValue *
-listing_json (const BroListing *l)
-{
-  BroJsonValue *o = bro_json_value_new_object ();
-  put (o, "name", bro_json_value_new_string (l->name));
-  put (o, "volumeName", bro_json_value_new_string (l->volume_name));
-  put (o, "type", bro_json_value_new_string (bro_disc_type_to_wire (l->type)));
-  put (o, "typeText", bro_json_value_new_string (l->type_text));
-  put (o, "reportedTitleCount", bro_json_value_new_integer (l->reported_title_count));
-  BroJsonValue *titles = bro_json_value_new_array ();
-  for (guint i = 0; i < l->titles->len; i++) {
-    const BroTitle *t = l->titles->pdata[i];
-    BroJsonValue *j = bro_json_value_new_object ();
-    put (j, "index", bro_json_value_new_integer (t->index));
-    put (j, "sourceTitleId", int_or_null (t->has_source_title_id, t->source_title_id));
-    put (j, "sourceFile", bro_json_value_new_string (t->source_file));
-    put (j, "name", bro_json_value_new_string (t->name));
-    put (j, "comment", bro_json_value_new_string (t->comment));
-    put (j, "duration", bro_json_value_new_string (t->duration));
-    put (j, "durationSeconds", bro_json_value_new_integer (t->duration_seconds));
-    put (j, "chapters", bro_json_value_new_integer (t->chapters));
-    put (j, "sizeBytes", bro_json_value_new_integer (t->size_bytes));
-    put (j, "segmentMap", bro_json_value_new_string (t->segment_map));
-    put (j, "outputFileName", bro_json_value_new_string (t->output_file_name));
-    put (j, "angle", int_or_null (t->has_angle, t->angle));
-    BroJsonValue *tracks = bro_json_value_new_array ();
-    for (guint k = 0; k < t->tracks->len; k++) {
-      const BroTrack *x = t->tracks->pdata[k];
-      BroJsonValue *tj = bro_json_value_new_object ();
-      put (tj, "index", bro_json_value_new_integer (x->index));
-      put (tj, "kind", bro_json_value_new_string (bro_track_kind_to_wire (x->kind)));
-      put (tj, "codec", bro_json_value_new_string (x->codec));
-      put (tj, "language", bro_json_value_new_string (x->language));
-      put (tj, "languageName", bro_json_value_new_string (x->language_name));
-      put (tj, "name", bro_json_value_new_string (x->name));
-      put (tj, "isDefault", bro_json_value_new_bool (x->is_default));
-      put (tj, "attributes", attributes_json (x->attributes));
-      bro_json_value_append (tracks, tj);
-    }
-    put (j, "tracks", tracks);
-    put (j, "attributes", attributes_json (t->attributes));
-    bro_json_value_append (titles, j);
-  }
-  put (o, "titles", titles);
-  put (o, "attributes", attributes_json (l->attributes));
-  return o;
-}
-
 static void
 test_listing_of_a_real_dvd (void)
 {
   g_autoptr (BroJsonValue) golden = bro_test_fixture_json ("domain/info-dvd.listing.expected.json");
   g_autofree char *text = bro_test_fixture_text (JS (golden, "input"), NULL);
   g_autoptr (BroListing) listing = listing_of (text);
-  g_autoptr (BroJsonValue) actual = listing_json (listing);
+  g_autoptr (BroJsonValue) actual = bro_listing_encode (listing);
+  g_autoptr (BroListing) read_back = bro_listing_decode (J (golden, "expect"));
+  g_autoptr (BroJsonValue) again = bro_listing_encode (read_back);
   g_autoptr (GPtrArray) failures = g_ptr_array_new_with_free_func (g_free);
   bro_test_same_json (failures, "info-dvd", "listing", J (golden, "expect"), actual);
+  bro_test_same_json (failures, "info-dvd", "listing read back", J (golden, "expect"), again);
   for (guint i = 0; i < failures->len; i++)
     g_printerr ("%s\n", (char *) failures->pdata[i]);
   g_assert_cmpuint (failures->len, ==, 0);
@@ -3129,6 +3054,104 @@ test_nfo_cases (void)
   }
 }
 
+/* ---- shared/fixtures/domain/job-details.cases.json ---- */
+
+static BroJobRequest *
+job_request_of (const BroJsonValue *r)
+{
+  BroJobKind kind;
+  if (!bro_job_kind_from_wire (bro_json_value_get_string (bro_json_value_member (r, "kind"), ""), &kind))
+    kind = BRO_JOB_KIND_VIDEO_DISC;
+  BroJobRequest *q = bro_job_request_new (kind, bro_json_value_get_string (bro_json_value_member (r, "title"), ""));
+  q->automatic = bro_json_value_get_bool (bro_json_value_member (r, "automatic"), FALSE);
+  q->drive_id = g_strdup (bro_json_value_get_string (bro_json_value_member (r, "driveId"), NULL));
+  if (bro_json_value_get_string (bro_json_value_member (r, "sessionId"), NULL)) {
+    q->session_id = g_new0 (BroId, 1);
+    g_strlcpy (q->session_id->value, bro_json_value_get_string (bro_json_value_member (r, "sessionId"), ""), sizeof q->session_id->value);
+  }
+  BroJsonValue *details = bro_json_value_member (r, "details");
+  q->details = details ? bro_json_value_ref (details) : NULL;
+  return q;
+}
+
+static BroJsonValue *
+disc_request_json (const BroJsonValue *r)
+{
+  g_autoptr (BroJobRequest) q = job_request_of (r);
+  g_autoptr (BroDiscRequest) d = bro_disc_request_decode (q);
+  return d ? bro_disc_request_encode (d) : bro_json_value_new_null ();
+}
+
+static gboolean
+job_details_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  BroJsonValue *v;
+  if ((v = J (given, "request"))) {
+    g_autoptr (BroJsonValue) got = disc_request_json (v);
+    bro_test_same_json (failures, id, "discRequest", J (expect, "discRequest"), got);
+  } else if ((v = J (given, "requests"))) {
+    g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+    for (guint i = 0; i < bro_json_value_length (v); i++)
+      bro_json_value_append (got, disc_request_json (bro_json_value_at (v, i)));
+    bro_test_same_json (failures, id, "discRequests", J (expect, "discRequests"), got);
+  } else if ((v = J (given, "choices"))) {
+    g_autoptr (BroSessionChoices) c = bro_session_choices_decode (v);
+    g_autoptr (BroJsonValue) got = bro_session_choices_encode (c);
+    bro_test_same_json (failures, id, "choices", J (expect, "choices"), got);
+  } else if ((v = J (given, "identity"))) {
+    g_autoptr (BroIdentity) identity = bro_identity_decode (v);
+    g_autoptr (BroJsonValue) got = bro_identity_encode (identity);
+    bro_test_same_json (failures, id, "identity", J (expect, "identity"), got);
+  } else if ((v = J (given, "resolve"))) {
+    g_autofree char *text = bro_test_generated_listing (J (v, "listing"));
+    g_autoptr (BroListing) listing = listing_of (text);
+    g_autoptr (BroIdentityInputs) inputs = bro_identity_inputs_new (listing, listing->volume_name, FALSE);
+    g_autoptr (BroIdentity) resolved = bro_identity_resolve (inputs);
+    g_autoptr (BroJsonValue) got = bro_identity_encode (resolved);
+    g_autoptr (BroIdentity) back = bro_identity_decode (got);
+    g_autoptr (BroJsonValue) again = bro_identity_encode (back);
+    bro_test_same_json (failures, id, "identity", J (expect, "identity"), got);
+    bro_test_same_json (failures, id, "identity read back", J (expect, "identity"), again);
+  } else if ((v = J (given, "message"))) {
+    g_autoptr (BroBroMessage) m = bro_bro_message_decode (v);
+    g_autoptr (BroJsonValue) got = bro_bro_message_to_json (m);
+    bro_test_same_json (failures, id, "message", J (expect, "message"), got);
+    bro_test_same_string (failures, id, "severity", JS (expect, "severity"), bro_severity_to_wire (m->severity));
+  } else if ((v = J (given, "automationOf"))) {
+    g_autoptr (BroConfig) config = decode_json (J (given, "config"));
+    g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+    for (guint i = 0; i < bro_json_value_length (v); i++)
+      bro_json_value_append (got, bro_config_automation (config, bro_json_value_get_string (bro_json_value_at (v, i), NULL)));
+    bro_test_same_json (failures, id, "automation", J (expect, "automation"), got);
+  } else if ((v = J (given, "outputOf"))) {
+    BroId job_id = { "00000000-0000-4000-8000-000000000001" };
+    g_autoptr (BroJobSnapshot) job = bro_job_snapshot_new (&job_id, bro_job_request_new (BRO_JOB_KIND_VIDEO_DISC, ""), NULL);
+    BroJsonValue *outputs = J (given, "outputs");
+    for (guint i = 0; i < bro_json_value_length (outputs); i++) {
+      BroJsonValue *o = bro_json_value_at (outputs, i);
+      BroStepKind kind;
+      g_assert_true (bro_step_kind_from_wire (JS (o, "kind"), &kind));
+      g_ptr_array_add (job->outputs, bro_step_output_new (kind, bro_json_value_ref (J (o, "data")), NULL));
+    }
+    g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+    for (guint i = 0; i < bro_json_value_length (v); i++) {
+      BroStepKind kind;
+      g_assert_true (bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_at (v, i), ""), &kind));
+      BroJsonValue *data = bro_job_snapshot_output (job, kind);
+      bro_json_value_append (got, data ? bro_json_value_ref (data) : bro_json_value_new_null ());
+    }
+    bro_test_same_json (failures, id, "outputs", J (expect, "outputs"), got);
+  } else
+    return FALSE;
+  return TRUE;
+}
+
+static void
+test_job_details_cases (void)
+{
+  bro_test_run_cases ("domain/job-details.cases.json", job_details_case);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -3136,6 +3159,7 @@ main (int argc, char **argv)
   g_test_add_func ("/messages/catalogue", test_every_code_of_the_catalogue_is_a_case);
   g_test_add_func ("/messages/errors-and-json", test_messages_become_errors_and_json);
   g_test_add_func ("/jobs/enums", test_job_enums_match_the_shared_schema);
+  g_test_add_func ("/jobs/details", test_job_details_cases);
   g_test_add_func ("/robot/cases", test_robot_cases);
   g_test_add_func ("/robot/drive-scan", test_drive_scan_fixture);
   g_test_add_func ("/robot/drive-join", test_drive_join_cases);

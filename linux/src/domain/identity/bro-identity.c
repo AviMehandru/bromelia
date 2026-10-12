@@ -76,3 +76,63 @@ bro_identity_resolve (const BroIdentityInputs *inputs)
   id->label = label;
   return id;
 }
+
+static BroJsonValue *
+part_json (int v)
+{
+  return v >= 0 ? bro_json_value_new_integer (v) : bro_json_value_new_null ();
+}
+
+BroJsonValue *
+bro_identity_encode (const BroIdentity *identity)
+{
+  const BroLabel *l = identity->label;
+  BroJsonValue *label = bro_json_value_new_object ();
+  bro_json_value_set (label, "title", bro_json_value_new_string (l->title));
+  bro_json_value_set (label, "season", part_json (l->season));
+  bro_json_value_set (label, "part", part_json (l->part));
+  bro_json_value_set (label, "volume", part_json (l->volume));
+  bro_json_value_set (label, "disc", part_json (l->disc));
+  g_autofree char *set = bro_label_parser_set_description (l);
+  bro_json_value_set (label, "set", bro_json_value_new_string (set));
+  bro_json_value_set (label, "looksLikeSeries", bro_json_value_new_bool (l->looks_like_series));
+  BroJsonValue *o = bro_json_value_new_object ();
+  bro_json_value_set (o, "name", bro_json_value_new_string (identity->name));
+  bro_json_value_set (o, "kind", bro_json_value_new_string (bro_media_kind_to_wire (identity->kind)));
+  bro_json_value_set (o, "format", bro_json_value_new_string (bro_disc_format_to_wire (identity->format)));
+  bro_json_value_set (o, "formatCode", bro_json_value_new_string (identity->format_code.text));
+  bro_json_value_set (o, "encrypted", bro_json_value_new_bool (identity->encrypted));
+  bro_json_value_set (o, "label", label);
+  bro_json_value_set (o, "reason", bro_bro_message_to_json (identity->reason));
+  return o;
+}
+
+static int
+part_of (const BroJsonValue *label, const char *key)
+{
+  BroJsonValue *v = bro_json_value_member (label, key);
+  return v && (v->kind == BRO_JSON_VALUE_INTEGER || v->kind == BRO_JSON_VALUE_NUMBER) ? (int) bro_json_value_get_integer (v, -1) : -1;
+}
+
+BroIdentity *
+bro_identity_decode (const BroJsonValue *json)
+{
+  BroIdentity *id = g_new0 (BroIdentity, 1);
+  id->name = g_strdup (bro_json_value_get_string (bro_json_value_member (json, "name"), ""));
+  if (!bro_media_kind_from_wire (bro_json_value_get_string (bro_json_value_member (json, "kind"), ""), &id->kind))
+    id->kind = BRO_MEDIA_KIND_MOVIE;
+  if (!bro_disc_format_from_wire (bro_json_value_get_string (bro_json_value_member (json, "format"), ""), &id->format))
+    id->format = BRO_DISC_FORMAT_UNKNOWN;
+  g_strlcpy (id->format_code.text, bro_json_value_get_string (bro_json_value_member (json, "formatCode"), ""), sizeof id->format_code.text);
+  id->encrypted = bro_json_value_get_bool (bro_json_value_member (json, "encrypted"), FALSE);
+  const BroJsonValue *l = bro_json_value_member (json, "label");
+  id->label = g_new0 (BroLabel, 1);
+  id->label->title = g_strdup (bro_json_value_get_string (bro_json_value_member (l, "title"), ""));
+  id->label->season = part_of (l, "season");
+  id->label->part = part_of (l, "part");
+  id->label->volume = part_of (l, "volume");
+  id->label->disc = part_of (l, "disc");
+  id->label->looks_like_series = bro_json_value_get_bool (bro_json_value_member (l, "looksLikeSeries"), FALSE);
+  id->reason = bro_bro_message_decode (bro_json_value_member (json, "reason"));
+  return id;
+}

@@ -116,6 +116,7 @@ typedef struct {
   gint64 log_seq;
   GPtrArray *log;     /* BroLogLineDto */
   gboolean directory_made;
+  BroConfig *config;  /* read when the job starts */
   GPtrArray *outputs; /* BroStepOutput */
   GPtrArray *results; /* BroStepResult */
   BroLease *lease;
@@ -151,6 +152,7 @@ live_unref (gpointer data)
   bro_decision_dto_free (l->decision);
   waiter_unref (l->waiter);
   g_ptr_array_unref (l->log);
+  bro_config_free (l->config);
   g_ptr_array_unref (l->outputs);
   g_ptr_array_unref (l->results);
   bro_lease_unref (l->lease);
@@ -692,7 +694,7 @@ started (Live *l)
   r->seq = l->seq;
   w->run_step = g_object_ref (step);
   w->context = bro_step_context_new (snapshot (l), bro_cancellation_source_token (l->cancel), g_object_ref (BRO_PROGRESS_REPORTER (r)),
-                                     g_object_ref (BRO_JOB_LOGGER (r)), BRO_DECISION_PORT (r), self->environment, directory);
+                                     g_object_ref (BRO_JOB_LOGGER (r)), BRO_DECISION_PORT (r), self->environment, l->config, directory);
   bro_engine_executor_worker (self->executor, step_work, step_done, w, work_free);
 }
 
@@ -803,6 +805,8 @@ planned (Live *l)
 {
   Work *w = work_new (l);
   l->steps = g_array_copy (l->record->plan->steps);
+  l->config = l->runner->environment->config ? bro_config_source_current (l->runner->environment->config)
+                                             : bro_config_new (bro_json_value_new_object (), NULL);
   bro_engine_executor_worker (l->runner->executor, completed_work, completed_done, w, work_free);
 }
 
@@ -1004,7 +1008,8 @@ bro_pipeline_runner_new (BroEngineExecutor *executor, BroEventBus *bus, BroSched
   self->store = g_object_ref (store);
   self->registry = g_object_ref (registry);
   self->environment = bro_step_environment_new (environment->tools, environment->fs, environment->clock, environment->drives,
-                                                environment->library, environment->catalog, environment->data_directory);
+                                                environment->library, environment->catalog, environment->config, environment->drive_lookup,
+                                                environment->makemkv_setup, environment->data_directory);
   self->clock = g_object_ref (clock);
   self->coalescer = bro_coalescer_new (clock, interval, emit_progress, self, NULL);
   return self;

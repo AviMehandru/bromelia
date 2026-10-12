@@ -25,6 +25,10 @@ GPtrArray *bro_config_drives (const BroConfig *config);   /* BroDriveEntry * */
 GPtrArray *bro_config_steps (const BroConfig *config);    /* BroStepDefinition * */
 GPtrArray *bro_config_rules (const BroConfig *config);    /* BroRule * */
 
+/* The automation of a drive entry (config-3.json's DriveAutomation, every field set): the entry's own, else
+ * automation.defaults (also for no entry, or an id no entry has). */
+BroJsonValue *bro_config_automation (const BroConfig *config, const char *entry_id);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroConfig, bro_config_free)
 
 G_END_DECLS

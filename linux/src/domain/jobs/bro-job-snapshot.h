@@ -20,6 +20,9 @@ typedef struct {
 BroJobSnapshot *bro_job_snapshot_new (const BroId *id, BroJobRequest *request, BroJobPlan *plan);
 void bro_job_snapshot_free (BroJobSnapshot *snapshot);
 
+/* The data of the last output of that kind of step (borrowed); NULL when no such step ran. */
+BroJsonValue *bro_job_snapshot_output (const BroJobSnapshot *job, BroStepKind kind);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroJobSnapshot, bro_job_snapshot_free)
 
 G_END_DECLS

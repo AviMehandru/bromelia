@@ -9,16 +9,23 @@ public struct StepEnvironment: Sendable {
     public var drives: any DriveControl
     public var library: any LibraryPort
     public var catalog: any CatalogQueries
+    public var config: any ConfigSource
+    public var driveLookup: any DriveLookup
+    public var makemkvSetup: any MakemkvSetup
     public var dataDirectory: String
 
     public init(tools: ToolSet, fs: any FileSystem, clock: any Clock, drives: any DriveControl, library: any LibraryPort,
-                catalog: any CatalogQueries, dataDirectory: String) {
+                catalog: any CatalogQueries, config: any ConfigSource, driveLookup: any DriveLookup, makemkvSetup: any MakemkvSetup,
+                dataDirectory: String) {
         self.tools = tools
         self.fs = fs
         self.clock = clock
         self.drives = drives
         self.library = library
         self.catalog = catalog
+        self.config = config
+        self.driveLookup = driveLookup
+        self.makemkvSetup = makemkvSetup
         self.dataDirectory = dataDirectory
     }
 }

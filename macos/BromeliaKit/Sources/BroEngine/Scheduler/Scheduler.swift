@@ -24,13 +24,13 @@ public final class Scheduler {
         let job: Id
         let resources: ResourceSet
         let onWait: @EngineActor (Wait) -> Void
-        let done: CheckedContinuation<Result<Lease, BroError>, Never>
+        let done: Resumption<Result<Lease, BroError>>
         let order: Int
         var lastWait: Wait?
         var unregister: (@Sendable () -> Void)?
 
         init(job: Id, resources: ResourceSet, onWait: @escaping @EngineActor (Wait) -> Void,
-             done: CheckedContinuation<Result<Lease, BroError>, Never>, order: Int) {
+             done: Resumption<Result<Lease, BroError>>, order: Int) {
             self.job = job
             self.resources = resources
             self.onWait = onWait
@@ -147,7 +147,7 @@ public final class Scheduler {
     public func acquire(_ jobId: Id, resources: ResourceSet, onWait: @escaping @EngineActor (Wait) -> Void,
                         cancel: CancellationToken) async throws(BroError) -> Lease {
         _ = try queueOfOrFail(jobId)
-        let result = await withCheckedContinuation { (done: CheckedContinuation<Result<Lease, BroError>, Never>) in
+        let result = await executor.suspend { (done: Resumption<Result<Lease, BroError>>) in
             let request = Request(job: jobId, resources: resources, onWait: onWait, done: done, order: nextOrder)
             nextOrder += 1
             pending.append(request)

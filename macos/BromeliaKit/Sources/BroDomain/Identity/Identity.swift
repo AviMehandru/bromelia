@@ -1,3 +1,5 @@
+import BroFoundation
+
 /// What a disc is: the movie or show on it, movie or TV, its format and format code, whether the backup stays
 /// encrypted, its label and why it's taken for a movie or a show.
 public struct Identity: Sendable, Equatable {
@@ -47,5 +49,33 @@ public struct Identity: Sendable, Equatable {
             ?? KindHeuristics.decide(label, listing: listing, playAllEpisodes: inputs.playAllEpisodes)
         return Identity(name: name, kind: decision.value, format: format, formatCode: FormatDetector.code(format, encrypted: inputs.encrypted),
                         encrypted: inputs.encrypted, label: label, reason: decision.reason)
+    }
+}
+
+extension Identity {
+    /// The identity as JSON (dtos.json's Identity); the label's set is `LabelParser.setDescription`.
+    public static func encode(_ identity: Identity) -> JsonValue {
+        let l = identity.label
+        func n(_ v: Int?) -> JsonValue { v.map { .integer(Int64($0)) } ?? .null }
+        return .object([
+            ("name", .string(identity.name)), ("kind", .string(identity.kind.rawValue)), ("format", .string(identity.format.rawValue)),
+            ("formatCode", .string(identity.formatCode.text)), ("encrypted", .bool(identity.encrypted)),
+            ("label", .object([("title", .string(l.title)), ("season", n(l.season)), ("part", n(l.part)), ("volume", n(l.volume)),
+                               ("disc", n(l.disc)), ("set", .string(LabelParser.setDescription(l))), ("looksLikeSeries", .bool(l.looksLikeSeries))])),
+            ("reason", identity.reason.toJson()),
+        ])
+    }
+
+    /// An identity from its JSON (`encode`); what the JSON leaves out takes its empty value.
+    public static func decode(_ json: JsonValue) -> Identity {
+        let l = json["label"]
+        func n(_ key: String) -> Int? { l?[key]?.int.map { Int($0) } }
+        return Identity(
+            name: json["name"]?.string ?? "", kind: json["kind"]?.string.flatMap(MediaKind.init(rawValue:)) ?? .movie,
+            format: json["format"]?.string.flatMap(DiscFormat.init(rawValue:)) ?? .unknown, formatCode: FormatCode(json["formatCode"]?.string ?? ""),
+            encrypted: json["encrypted"]?.bool ?? false,
+            label: Label(title: l?["title"]?.string ?? "", season: n("season"), part: n("part"), volume: n("volume"), disc: n("disc"),
+                         looksLikeSeries: l?["looksLikeSeries"]?.bool ?? false),
+            reason: BroMessage.decode(json["reason"] ?? .null))
     }
 }

@@ -13,6 +13,7 @@ public final class EngineExecutor: Sendable {
         let lock = NSLock()
         var queued = 0
         var workers = 0
+        var resuming = 0
     }
 
     private let mailbox: AsyncStream<Action>.Continuation
@@ -43,10 +44,23 @@ public final class EngineExecutor: Sendable {
         return true
     }
 
-    /// Work not done yet: actions waiting to run (not the one running) and workers whose caller hasn't resumed. A test
-    /// (or a scenario runner) knows the engine has settled when this is down to the workers it knows are parked (a
-    /// step waiting for an answer).
-    public var activity: Int { counts.lock.withLock { counts.queued + counts.workers } }
+    /// Work not done yet: actions waiting to run (not the one running), workers whose caller hasn't resumed, and
+    /// `suspend`s resumed whose caller hasn't run yet. A test (or a scenario runner) knows the engine has settled when
+    /// this is down to the workers it knows are parked (a step waiting for an answer).
+    public var activity: Int { counts.lock.withLock { counts.queued + counts.workers + counts.resuming } }
+
+    /// Suspends the caller until `start`'s resumption is resumed. Swift runs the caller again on the actor, not
+    /// through the mailbox, so `activity` counts it from the resume until the caller runs (C# and C resume through
+    /// the executor's queue, which counts it already). The Scheduler waits for leases this way.
+    @EngineActor
+    public func suspend<T: Sendable>(_ start: (Resumption<T>) -> Void) async -> T {
+        let counts = counts
+        let value = await withCheckedContinuation { (c: CheckedContinuation<T, Never>) in
+            start(Resumption(continuation: c, counted: { counts.lock.withLock { counts.resuming += 1 } }))
+        }
+        counts.lock.withLock { counts.resuming -= 1 }
+        return value
+    }
 
     /// Runs `work` on a worker (off the executor); its result or its error comes back on the executor, through the
     /// mailbox: after everything the work posted before it returned (a step's last progress, its log lines).

@@ -1,0 +1,607 @@
+{
+  "description": "The typed JSON of a job's details and step data: DiscRequest (a video-disc job's request details: its source and the session snapshot), DiscSource, SessionChoices, Identity and BroMessage as JSON, a drive's automation settings, and the last output of a kind of step. Each case gives one of request / requests / choices / identity / resolve / message / config+automationOf / outputs+outputOf; a decoded value is compared encoded again.",
+  "functions": [
+    "DiscRequest.decode",
+    "DiscRequest.encode",
+    "DiscSource.decode",
+    "DiscSource.encode",
+    "SessionChoices.decode",
+    "SessionChoices.encode",
+    "Identity.encode",
+    "Identity.decode",
+    "BroMessage.decode",
+    "Config.automation",
+    "JobSnapshot.output"
+  ],
+  "cases": [
+    {
+      "id": "source-in-details",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "iso": "/movies/heat.iso"
+            }
+          }
+        }
+      },
+      "expect": {
+        "discRequest": {
+          "source": {
+            "iso": "/movies/heat.iso"
+          }
+        }
+      }
+    },
+    {
+      "id": "folder-and-file",
+      "given": {
+        "requests": [
+          {
+            "kind": "videoDisc",
+            "title": "HEAT",
+            "details": {
+              "source": {
+                "folder": "/rips/HEAT"
+              }
+            }
+          },
+          {
+            "kind": "videoDisc",
+            "title": "HEAT",
+            "details": {
+              "source": {
+                "file": "/rips/HEAT/VIDEO_TS/VTS_01_0.IFO"
+              }
+            }
+          }
+        ]
+      },
+      "expect": {
+        "discRequests": [
+          {
+            "source": {
+              "folder": "/rips/HEAT"
+            }
+          },
+          {
+            "source": {
+              "file": "/rips/HEAT/VIDEO_TS/VTS_01_0.IFO"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "source-from-the-drive",
+      "description": "A drive job needs no details: the request's driveId is the source.",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "automatic": true
+        }
+      },
+      "expect": {
+        "discRequest": {
+          "source": {
+            "drive": "drv-0123456789abcdef"
+          }
+        }
+      }
+    },
+    {
+      "id": "details-name-the-source",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "details": {
+            "source": {
+              "iso": "/movies/heat.iso"
+            }
+          }
+        }
+      },
+      "expect": {
+        "discRequest": {
+          "source": {
+            "iso": "/movies/heat.iso"
+          }
+        }
+      }
+    },
+    {
+      "id": "no-source",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT"
+        }
+      },
+      "expect": {
+        "discRequest": null
+      }
+    },
+    {
+      "id": "unknown-source",
+      "description": "A source of another kind (not drive, iso, folder or file) is no source.",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "details": {
+            "source": {
+              "url": "https://example.com/heat"
+            }
+          }
+        }
+      },
+      "expect": {
+        "discRequest": null
+      }
+    },
+    {
+      "id": "session-snapshot",
+      "description": "The session's listing and choices come back with every field; attribute keys that aren't ids are dropped.",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-000000000009",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            },
+            "session": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "segmentMap": "1-2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video",
+                        "attributes": {
+                          "1": "Video"
+                        }
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "duration": "0:05:00",
+                    "durationSeconds": 300,
+                    "segmentMap": "3"
+                  }
+                ],
+                "attributes": {
+                  "2": "HEAT",
+                  "x": "not an id"
+                }
+              },
+              "choices": {
+                "titles": [
+                  {
+                    "index": 0,
+                    "selected": true,
+                    "tracks": [
+                      0,
+                      1
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "selected": false
+                  }
+                ],
+                "name": "Heat"
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "discRequest": {
+          "source": {
+            "drive": "drv-0123456789abcdef"
+          },
+          "session": {
+            "listing": {
+              "name": "HEAT",
+              "volumeName": "HEAT",
+              "type": "dvd",
+              "typeText": "",
+              "reportedTitleCount": 0,
+              "titles": [
+                {
+                  "index": 0,
+                  "sourceTitleId": 1,
+                  "sourceFile": "",
+                  "name": "",
+                  "comment": "",
+                  "duration": "1:40:00",
+                  "durationSeconds": 6000,
+                  "chapters": 0,
+                  "sizeBytes": 0,
+                  "segmentMap": "1-2",
+                  "outputFileName": "",
+                  "angle": null,
+                  "tracks": [
+                    {
+                      "index": 0,
+                      "kind": "video",
+                      "codec": "",
+                      "language": "",
+                      "languageName": "",
+                      "name": "",
+                      "isDefault": false,
+                      "attributes": {
+                        "1": "Video"
+                      }
+                    },
+                    {
+                      "index": 1,
+                      "kind": "audio",
+                      "codec": "",
+                      "language": "",
+                      "languageName": "",
+                      "name": "",
+                      "isDefault": false,
+                      "attributes": {}
+                    }
+                  ],
+                  "attributes": {}
+                },
+                {
+                  "index": 1,
+                  "sourceTitleId": 2,
+                  "sourceFile": "",
+                  "name": "",
+                  "comment": "",
+                  "duration": "0:05:00",
+                  "durationSeconds": 300,
+                  "chapters": 0,
+                  "sizeBytes": 0,
+                  "segmentMap": "3",
+                  "outputFileName": "",
+                  "angle": null,
+                  "tracks": [],
+                  "attributes": {}
+                }
+              ],
+              "attributes": {
+                "2": "HEAT"
+              }
+            },
+            "choices": {
+              "titles": [
+                {
+                  "index": 0,
+                  "selected": true,
+                  "tracks": [
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "index": 1,
+                  "selected": false
+                }
+              ],
+              "name": "Heat",
+              "kind": null,
+              "year": null,
+              "onlineId": "",
+              "firstEpisode": null,
+              "library": null,
+              "profile": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "choices-every-field",
+      "given": {
+        "choices": {
+          "titles": [
+            {
+              "index": 3,
+              "selected": true,
+              "name": "Heat (1995)"
+            }
+          ],
+          "name": "Heat",
+          "kind": "movie",
+          "year": 1995,
+          "onlineId": "tt0113277",
+          "firstEpisode": null,
+          "library": "films",
+          "profile": "dvd"
+        }
+      },
+      "expect": {
+        "choices": {
+          "titles": [
+            {
+              "index": 3,
+              "selected": true,
+              "name": "Heat (1995)"
+            }
+          ],
+          "name": "Heat",
+          "kind": "movie",
+          "year": 1995,
+          "onlineId": "tt0113277",
+          "firstEpisode": null,
+          "library": "films",
+          "profile": "dvd"
+        }
+      }
+    },
+    {
+      "id": "identity-round-trip",
+      "given": {
+        "identity": {
+          "name": "One Piece",
+          "kind": "tv",
+          "format": "dvd",
+          "formatCode": "DVD",
+          "encrypted": false,
+          "label": {
+            "title": "One Piece",
+            "season": 2,
+            "part": 7,
+            "volume": null,
+            "disc": 2,
+            "set": "ignored when read",
+            "looksLikeSeries": true
+          },
+          "reason": {
+            "code": "identity.reason.labelMarkers"
+          }
+        }
+      },
+      "expect": {
+        "identity": {
+          "name": "One Piece",
+          "kind": "tv",
+          "format": "dvd",
+          "formatCode": "DVD",
+          "encrypted": false,
+          "label": {
+            "title": "One Piece",
+            "season": 2,
+            "part": 7,
+            "volume": null,
+            "disc": 2,
+            "set": "Season 2 Part 7 Disc 2",
+            "looksLikeSeries": true
+          },
+          "reason": {
+            "code": "identity.reason.labelMarkers"
+          }
+        }
+      }
+    },
+    {
+      "id": "identity-of-a-listing",
+      "description": "Identity.resolve of a generated listing, as JSON.",
+      "given": {
+        "resolve": {
+          "listing": {
+            "volume": "ONE_PIECE_S2_P7_D2",
+            "type": "dvd",
+            "titles": [
+              [
+                "0:21:40",
+                1
+              ],
+              [
+                "0:21:41",
+                2
+              ],
+              [
+                "0:21:39",
+                3
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "identity": {
+          "name": "One Piece",
+          "kind": "tv",
+          "format": "dvd",
+          "formatCode": "DVD",
+          "encrypted": false,
+          "label": {
+            "title": "One Piece",
+            "season": 2,
+            "part": 7,
+            "volume": null,
+            "disc": 2,
+            "set": "Season 2 Part 7 Disc 2",
+            "looksLikeSeries": true
+          },
+          "reason": {
+            "code": "identity.reason.labelMarkers"
+          }
+        }
+      }
+    },
+    {
+      "id": "message-severity",
+      "description": "BroMessage.decode reads the severity; toJson writes code and params only.",
+      "given": {
+        "message": {
+          "code": "disc.found",
+          "params": {
+            "count": 2,
+            "name": "HEAT"
+          },
+          "severity": "warning"
+        }
+      },
+      "expect": {
+        "message": {
+          "code": "disc.found",
+          "params": {
+            "count": 2,
+            "name": "HEAT"
+          }
+        },
+        "severity": "warning"
+      }
+    },
+    {
+      "id": "message-unknown-code",
+      "given": {
+        "message": {
+          "code": "Not a code"
+        }
+      },
+      "expect": {
+        "message": {
+          "code": "internal.unexpected"
+        },
+        "severity": "info"
+      }
+    },
+    {
+      "id": "automation-own-and-defaults",
+      "description": "A drive's own automation, else automation.defaults; every field set.",
+      "given": {
+        "config": {
+          "version": 3,
+          "drives": [
+            {
+              "id": "d1",
+              "automation": {
+                "ejectWhenDone": false
+              }
+            },
+            {
+              "id": "d2"
+            }
+          ],
+          "automation": {
+            "defaults": {
+              "waitForMountSeconds": 5
+            }
+          }
+        },
+        "automationOf": [
+          "d1",
+          "d2",
+          null,
+          "nope"
+        ]
+      },
+      "expect": {
+        "automation": [
+          {
+            "ripOnInsert": false,
+            "delaySeconds": 10,
+            "ejectWhenDone": false,
+            "ejectOnFailure": false,
+            "waitForMountSeconds": 30,
+            "alreadyArchived": "skip",
+            "desktopNotification": true,
+            "playSound": true
+          },
+          {
+            "ripOnInsert": false,
+            "delaySeconds": 10,
+            "ejectWhenDone": true,
+            "ejectOnFailure": false,
+            "waitForMountSeconds": 5,
+            "alreadyArchived": "skip",
+            "desktopNotification": true,
+            "playSound": true
+          },
+          {
+            "ripOnInsert": false,
+            "delaySeconds": 10,
+            "ejectWhenDone": true,
+            "ejectOnFailure": false,
+            "waitForMountSeconds": 5,
+            "alreadyArchived": "skip",
+            "desktopNotification": true,
+            "playSound": true
+          },
+          {
+            "ripOnInsert": false,
+            "delaySeconds": 10,
+            "ejectWhenDone": true,
+            "ejectOnFailure": false,
+            "waitForMountSeconds": 5,
+            "alreadyArchived": "skip",
+            "desktopNotification": true,
+            "playSound": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "last-output-of-a-kind",
+      "given": {
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "n": 1
+            }
+          },
+          {
+            "kind": "identify",
+            "data": {
+              "n": 2
+            }
+          },
+          {
+            "kind": "probe",
+            "data": {
+              "n": 3
+            }
+          }
+        ],
+        "outputOf": [
+          "probe",
+          "identify",
+          "plan"
+        ]
+      },
+      "expect": {
+        "outputs": [
+          {
+            "n": 3
+          },
+          {
+            "n": 2
+          },
+          null
+        ]
+      }
+    }
+  ]
+}

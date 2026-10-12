@@ -25,6 +25,12 @@ typedef struct {
 BroIdentity *bro_identity_resolve (const BroIdentityInputs *inputs);
 void bro_identity_free (BroIdentity *identity);
 
+/* The identity as JSON (dtos.json's Identity); the label's set is bro_label_parser_set_description. */
+BroJsonValue *bro_identity_encode (const BroIdentity *identity);
+
+/* An identity from its JSON (bro_identity_encode); what the JSON leaves out takes its empty value. */
+BroIdentity *bro_identity_decode (const BroJsonValue *json);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroIdentity, bro_identity_free)
 
 G_END_DECLS

@@ -15,32 +15,12 @@ public class ListingTests
         return b.Build();
     }
 
-    private static JsonValue AttributesJson(IReadOnlyDictionary<int, string> a) =>
-        JsonValue.Of(a.OrderBy(kv => kv.Key).Select(kv => (kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), JsonValue.Of(kv.Value))).ToArray());
-
-    private static JsonValue OrNull(int? v) => v is { } x ? JsonValue.Of(x) : JsonValue.Null.Instance;
-
-    /// <summary>A listing as the golden writes it.</summary>
-    internal static JsonValue ListingJson(Listing l) => JsonValue.Of(
-        ("name", JsonValue.Of(l.Name)), ("volumeName", JsonValue.Of(l.VolumeName)), ("type", JsonValue.Of(EnumWire.Name(l.Type))),
-        ("typeText", JsonValue.Of(l.TypeText)), ("reportedTitleCount", JsonValue.Of(l.ReportedTitleCount)),
-        ("titles", JsonValue.Of(l.Titles.Select(t => JsonValue.Of(
-            ("index", JsonValue.Of(t.Index)), ("sourceTitleId", OrNull(t.SourceTitleId)), ("sourceFile", JsonValue.Of(t.SourceFile)),
-            ("name", JsonValue.Of(t.Name)), ("comment", JsonValue.Of(t.Comment)), ("duration", JsonValue.Of(t.Duration)),
-            ("durationSeconds", JsonValue.Of(t.DurationSeconds)), ("chapters", JsonValue.Of(t.Chapters)), ("sizeBytes", JsonValue.Of(t.SizeBytes)),
-            ("segmentMap", JsonValue.Of(t.SegmentMap)), ("outputFileName", JsonValue.Of(t.OutputFileName)), ("angle", OrNull(t.Angle)),
-            ("tracks", JsonValue.Of(t.Tracks.Select(k => JsonValue.Of(
-                ("index", JsonValue.Of(k.Index)), ("kind", JsonValue.Of(EnumWire.Name(k.Kind))), ("codec", JsonValue.Of(k.Codec)),
-                ("language", JsonValue.Of(k.Language)), ("languageName", JsonValue.Of(k.LanguageName)), ("name", JsonValue.Of(k.Name)),
-                ("isDefault", JsonValue.Of(k.IsDefault)), ("attributes", AttributesJson(k.Attributes)))))),
-            ("attributes", AttributesJson(t.Attributes)))))),
-        ("attributes", AttributesJson(l.Attributes)));
-
     [Fact]
     public void ListingOfARealDvd()
     {
         var golden = Json("domain/info-dvd.listing.expected.json");
-        Same(golden["expect"], ListingJson(ListingOf(Text(golden["input"]!.AsString!))), "listing");
+        Same(golden["expect"], Listing.Encode(ListingOf(Text(golden["input"]!.AsString!))), "listing");
+        Same(golden["expect"], Listing.Encode(Listing.Decode(golden["expect"]!)), "listing read back");
     }
 
     [Fact]

@@ -40,6 +40,7 @@ public sealed class PipelineRunner
         public long LogSeq;
         public readonly List<LogLineDto> Log = new();
         public bool DirectoryMade;
+        public Config? Config;
     }
 
     public PipelineRunner(EngineExecutor executor, EventBus bus, Scheduler scheduler, IStore store, StepRegistry registry,
@@ -122,6 +123,7 @@ public sealed class PipelineRunner
             await SaveRecord(live, live.Record with { Plan = plan });
         }
         live.Steps = plan.Steps.ToList();
+        live.Config = _env.Config.Current();
         var done = await _executor.Worker(() => _store.Steps().Completed(jobId));
         var outputs = done.Select(s => s.Output ?? new StepOutput(s.Kind, Empty)).ToList();
         var results = done.Select(s => new StepResult(s.Kind, s.State)).ToList();
@@ -342,7 +344,7 @@ public sealed class PipelineRunner
 
     StepContext Context(Live live, JobSnapshot snapshot, int seq) => new(snapshot, live.Cancel.Token,
         new Reporter(this, live, seq), new Logger(this, live), new Decisions(this, live), _env.Tools, _env.Fs, _env.Clock, _env.Drives,
-        _env.Library, _env.Catalog, JobDirectory(live.Record.Id));
+        _env.Library, _env.Catalog, live.Config!, _env.DriveLookup, _env.MakemkvSetup, JobDirectory(live.Record.Id));
 
     static readonly JsonValue Empty = JsonValue.Of(Array.Empty<(string, JsonValue)>());
 

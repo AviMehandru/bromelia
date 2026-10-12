@@ -20,4 +20,11 @@ public sealed record BroMessage(MessageCode Code, JsonValue.Object Params, Sever
         if (Params.Members.Count > 0) members.Add(new("params", Params));
         return new JsonValue.Object(members);
     }
+
+    /// <summary>A message from <c>{"code", "params", "severity"}</c>; an unknown code is internal.unexpected, a missing
+    /// severity info.</summary>
+    public static BroMessage Decode(JsonValue json) =>
+        new(MessageCode.Parse(json["code"]?.AsString ?? "") ?? MessageCode.InternalUnexpected,
+            json["params"] as JsonValue.Object ?? new JsonValue.Object(new List<KeyValuePair<string, JsonValue>>()),
+            EnumWire.Parse<Severity>(json["severity"]?.AsString) ?? Severity.Info);
 }

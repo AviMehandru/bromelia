@@ -14,4 +14,7 @@ public struct JobSnapshot: Sendable, Equatable {
         self.plan = plan
         self.outputs = outputs
     }
+
+    /// The data of the last output of that kind of step; nil when no such step ran.
+    public static func output(_ job: JobSnapshot, _ kind: StepKind) -> JsonValue? { job.outputs.last { $0.kind == kind }?.data }
 }

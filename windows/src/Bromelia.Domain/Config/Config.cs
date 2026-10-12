@@ -18,4 +18,13 @@ public sealed record Config(JsonValue Document, IReadOnlyList<Issue> Issues)
     public static List<StepDefinition> Steps(Config config) => config.List("steps").Select(StepDefinition.Decode).ToList();
 
     public static List<Rule> Rules(Config config) => config.List("rules").Select(Rule.Decode).ToList();
+
+    /// <summary>The automation of a drive entry (config-3.json's DriveAutomation, every field set): the entry's own,
+    /// else automation.defaults (also for no entry, or an id no entry has).</summary>
+    public static JsonValue Automation(Config config, string? entryId)
+    {
+        var own = entryId == null ? null : config.List("drives").FirstOrDefault(d => d["id"]?.AsString == entryId)?["automation"];
+        var chosen = own is JsonValue.Object ? own : config.Document["automation"]?["defaults"] ?? JsonValue.Of();
+        return SchemaWalker.Normalize(chosen, SchemaWalker.Def("DriveAutomation"), "", true, new List<Issue>(), full: true);
+    }
 }

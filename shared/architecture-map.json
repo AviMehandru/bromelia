@@ -1262,6 +1262,30 @@
           "swift": "ListingBuilder.build()",
           "cs": "ListingBuilder.Build",
           "c": "bro_listing_builder_build"
+        },
+        {
+          "name": "Listing.encode",
+          "params": [
+            "listing"
+          ],
+          "returns": "JsonValue",
+          "doc": "dtos.json's Listing (shared/fixtures/domain/info-dvd.listing.expected.json).",
+          "phase": 3,
+          "swift": "Listing.encode(_:)",
+          "cs": "Listing.Encode",
+          "c": "bro_listing_encode"
+        },
+        {
+          "name": "Listing.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "Listing",
+          "doc": "From its JSON; what it leaves out is empty.",
+          "phase": 3,
+          "swift": "Listing.decode(_:)",
+          "cs": "Listing.Decode",
+          "c": "bro_listing_decode"
         }
       ]
     },
@@ -2414,6 +2438,30 @@
           "swift": "Identity.resolve(_:)",
           "cs": "Identity.Resolve",
           "c": "bro_identity_resolve"
+        },
+        {
+          "name": "Identity.encode",
+          "params": [
+            "identity"
+          ],
+          "returns": "JsonValue",
+          "doc": "dtos.json's Identity; the label's set is LabelParser.setDescription.",
+          "phase": 3,
+          "swift": "Identity.encode(_:)",
+          "cs": "Identity.Encode",
+          "c": "bro_identity_encode"
+        },
+        {
+          "name": "Identity.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "Identity",
+          "doc": "From its JSON; what it leaves out takes its empty value.",
+          "phase": 3,
+          "swift": "Identity.decode(_:)",
+          "cs": "Identity.Decode",
+          "c": "bro_identity_decode"
         }
       ]
     },
@@ -3983,6 +4031,19 @@
           "swift": "Issue.toJson(_:)",
           "cs": "Issue.ToJson",
           "c": "bro_issue_to_json"
+        },
+        {
+          "name": "Config.automation",
+          "params": [
+            "config",
+            "_:entryId"
+          ],
+          "returns": "JsonValue",
+          "doc": "A drive entry's automation (every field set): its own, else automation.defaults.",
+          "phase": 3,
+          "swift": "Config.automation(_:_:)",
+          "cs": "Config.Automation",
+          "c": "bro_config_automation"
         }
       ]
     },
@@ -6603,9 +6664,232 @@
               "BRO_STATUS_WORD_INTERRUPTED"
             ]
           }
+        },
+        {
+          "name": "DiscSource",
+          "kind": "enum",
+          "doc": "Where a video-disc job reads (dtos.json's SessionSource).",
+          "cases": [
+            "drive",
+            "iso",
+            "folder",
+            "file"
+          ],
+          "phase": 3,
+          "swift": {
+            "name": "DiscSource",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/DiscSource.swift",
+            "cases": [
+              ".drive",
+              ".iso",
+              ".folder",
+              ".file"
+            ]
+          },
+          "cs": {
+            "name": "DiscSource",
+            "file": "windows/src/Bromelia.Domain/Jobs/DiscSource.cs",
+            "cases": [
+              "Drive",
+              "Iso",
+              "Folder",
+              "File"
+            ]
+          },
+          "c": {
+            "name": "BroDiscSource",
+            "file": "linux/src/domain/jobs/bro-disc-source.h",
+            "cases": [
+              "BRO_DISC_SOURCE_DRIVE",
+              "BRO_DISC_SOURCE_ISO",
+              "BRO_DISC_SOURCE_FOLDER",
+              "BRO_DISC_SOURCE_FILE"
+            ]
+          }
+        },
+        {
+          "name": "TitleChoice",
+          "kind": "struct",
+          "fields": [
+            "index",
+            "selected",
+            "tracks",
+            "name"
+          ],
+          "doc": "A title of an opened disc as the user left it.",
+          "phase": 3,
+          "swift": {
+            "name": "TitleChoice",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/TitleChoice.swift"
+          },
+          "cs": {
+            "name": "TitleChoice",
+            "file": "windows/src/Bromelia.Domain/Jobs/TitleChoice.cs"
+          },
+          "c": {
+            "name": "BroTitleChoice",
+            "file": "linux/src/domain/jobs/bro-title-choice.h"
+          }
+        },
+        {
+          "name": "SessionChoices",
+          "kind": "struct",
+          "fields": [
+            "titles",
+            "name",
+            "kind",
+            "year",
+            "onlineId",
+            "firstEpisode",
+            "library",
+            "profile"
+          ],
+          "doc": "What the user chose on an opened disc (dtos.json's SessionChoices).",
+          "phase": 3,
+          "swift": {
+            "name": "SessionChoices",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/SessionChoices.swift"
+          },
+          "cs": {
+            "name": "SessionChoices",
+            "file": "windows/src/Bromelia.Domain/Jobs/SessionChoices.cs"
+          },
+          "c": {
+            "name": "BroSessionChoices",
+            "file": "linux/src/domain/jobs/bro-session-choices.h"
+          }
+        },
+        {
+          "name": "SessionSnapshot",
+          "kind": "struct",
+          "fields": [
+            "listing",
+            "choices"
+          ],
+          "doc": "An opened disc as it was when ripped: its listing and the choices made on it.",
+          "phase": 3,
+          "swift": {
+            "name": "SessionSnapshot",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/SessionSnapshot.swift"
+          },
+          "cs": {
+            "name": "SessionSnapshot",
+            "file": "windows/src/Bromelia.Domain/Jobs/SessionSnapshot.cs"
+          },
+          "c": {
+            "name": "BroSessionSnapshot",
+            "file": "linux/src/domain/jobs/bro-session-snapshot.h"
+          }
+        },
+        {
+          "name": "DiscRequest",
+          "kind": "struct",
+          "fields": [
+            "source",
+            "session"
+          ],
+          "doc": "A video-disc job's request details: its source and the session snapshot.",
+          "phase": 3,
+          "swift": {
+            "name": "DiscRequest",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/DiscRequest.swift"
+          },
+          "cs": {
+            "name": "DiscRequest",
+            "file": "windows/src/Bromelia.Domain/Jobs/DiscRequest.cs"
+          },
+          "c": {
+            "name": "BroDiscRequest",
+            "file": "linux/src/domain/jobs/bro-disc-request.h"
+          }
         }
       ],
-      "functions": []
+      "functions": [
+        {
+          "name": "DiscSource.encode",
+          "params": [
+            "source"
+          ],
+          "returns": "JsonValue",
+          "doc": "{drive|iso|folder|file: value}.",
+          "phase": 3,
+          "swift": "DiscSource.encode(_:)",
+          "cs": "DiscSource.Encode",
+          "c": "bro_disc_source_encode"
+        },
+        {
+          "name": "DiscSource.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "DiscSource?",
+          "doc": "None for anything else.",
+          "phase": 3,
+          "swift": "DiscSource.decode(_:)",
+          "cs": "DiscSource.Decode",
+          "c": "bro_disc_source_decode"
+        },
+        {
+          "name": "SessionChoices.encode",
+          "params": [
+            "choices"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "SessionChoices.encode(_:)",
+          "cs": "SessionChoices.Encode",
+          "c": "bro_session_choices_encode"
+        },
+        {
+          "name": "SessionChoices.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "SessionChoices",
+          "doc": "What the JSON leaves out takes its default.",
+          "phase": 3,
+          "swift": "SessionChoices.decode(_:)",
+          "cs": "SessionChoices.Decode",
+          "c": "bro_session_choices_decode"
+        },
+        {
+          "name": "DiscRequest.encode",
+          "params": [
+            "request"
+          ],
+          "returns": "JsonValue",
+          "doc": "{source, session?{listing, choices}}.",
+          "phase": 3,
+          "swift": "DiscRequest.encode(_:)",
+          "cs": "DiscRequest.Encode",
+          "c": "bro_disc_request_encode"
+        },
+        {
+          "name": "DiscRequest.decode",
+          "params": [
+            "request"
+          ],
+          "returns": "DiscRequest?",
+          "doc": "From a JobRequest: the details' source, else its driveId; none when there is neither.",
+          "phase": 3,
+          "swift": "DiscRequest.decode(_:)",
+          "cs": "DiscRequest.Decode",
+          "c": "bro_disc_request_decode"
+        },
+        {
+          "name": "JobSnapshot.output",
+          "params": [
+            "job",
+            "_:kind"
+          ],
+          "returns": "JsonValue?",
+          "doc": "The data of the last output of that kind of step.",
+          "phase": 3,
+          "swift": "JobSnapshot.output(_:_:)",
+          "cs": "JobSnapshot.Output",
+          "c": "bro_job_snapshot_output"
+        }
+      ]
     },
     "domain/messages": {
       "layer": "domain",
@@ -6737,6 +7021,18 @@
           "swift": "BroMessage.toJson(_:)",
           "cs": "BroMessage.ToJson",
           "c": "bro_bro_message_to_json"
+        },
+        {
+          "name": "BroMessage.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "BroMessage",
+          "doc": "From {code, params, severity}; an unknown code is internal.unexpected, a missing severity info.",
+          "phase": 3,
+          "swift": "BroMessage.decode(_:)",
+          "cs": "BroMessage.Decode",
+          "c": "bro_bro_message_decode"
         }
       ]
     },
@@ -11702,6 +11998,19 @@
             "name": "BroCoalescer",
             "file": "linux/src/engine/core/bro-coalescer.h"
           }
+        },
+        {
+          "name": "Resumption",
+          "kind": "struct",
+          "only": [
+            "swift"
+          ],
+          "why": "Swift resumes a continuation on the actor, not through the mailbox, so activity wouldn't see it; in C# and C the resumption goes through the executor's queue, which counts it.",
+          "doc": "How a caller suspended by EngineExecutor.suspend is woken (once); counted in activity until it runs.",
+          "swift": {
+            "name": "Resumption",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Core/Resumption.swift"
+          }
         }
       ],
       "functions": [
@@ -11750,7 +12059,7 @@
           "name": "EngineExecutor.activity",
           "params": [],
           "returns": "Int",
-          "doc": "Work not done yet: actions waiting to run (not the one running) and workers whose result hasn't come back. Settled when it is down to the workers known to be parked (a step waiting for an answer): for tests and scenario runners.",
+          "doc": "Work not done yet: actions waiting to run (not the one running), workers whose result hasn't come back, and (Swift) resumed suspends whose caller hasn't run. Settled when it is down to the workers known to be parked (a step waiting for an answer): for tests and scenario runners.",
           "swift": "EngineExecutor.activity()",
           "cs": "EngineExecutor.Activity",
           "c": "bro_engine_executor_activity"
@@ -11946,6 +12255,31 @@
           "swift": "Coalescer.drop(_:)",
           "cs": "Coalescer.Drop",
           "c": "bro_coalescer_drop"
+        },
+        {
+          "name": "EngineExecutor.suspend",
+          "params": [
+            "start"
+          ],
+          "returns": "T",
+          "doc": "Suspends the caller until start's resumption is resumed; activity counts it from the resume until the caller runs. The Scheduler waits for leases this way.",
+          "async": true,
+          "only": [
+            "swift"
+          ],
+          "why": "Swift resumes a continuation on the actor, not through the mailbox, so activity wouldn't see it; in C# and C the resumption goes through the executor's queue, which counts it.",
+          "swift": "EngineExecutor.suspend(_:)"
+        },
+        {
+          "name": "Resumption.resume",
+          "params": [
+            "returning:value"
+          ],
+          "only": [
+            "swift"
+          ],
+          "why": "Swift resumes a continuation on the actor, not through the mailbox, so activity wouldn't see it; in C# and C the resumption goes through the executor's queue, which counts it.",
+          "swift": "Resumption.resume(returning:)"
         }
       ]
     },
@@ -12846,7 +13180,7 @@
       "layer": "engine",
       "folder": "Pipeline",
       "cFolder": "pipeline",
-      "doc": "The pipeline (plan §12): the Step interface, the StepContext a step gets on its worker and the capability ports in it, the registry of steps, the planner, and the PipelineRunner that moves jobs between states. shared/fixtures/engine/pipeline-runner.cases.json, job-planner.cases.json.",
+      "doc": "The pipeline (plan §12): the Step interface, the StepContext a step gets on its worker and the capability ports in it (library, catalogue, decisions, the configuration source, where a drive is, MakeMKV's run setup), the registry of steps, the planner, and the PipelineRunner that moves jobs between states. shared/fixtures/engine/pipeline-runner.cases.json, job-planner.cases.json.",
       "phase": 3,
       "types": [
         {
@@ -12910,9 +13244,12 @@
             "drives",
             "library",
             "catalog",
+            "config",
+            "driveLookup",
+            "makemkvSetup",
             "jobDirectory"
           ],
-          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe.",
+          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with.",
           "swift": {
             "name": "StepContext",
             "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
@@ -12936,6 +13273,9 @@
             "drives",
             "library",
             "catalog",
+            "config",
+            "driveLookup",
+            "makemkvSetup",
             "dataDirectory"
           ],
           "doc": "The parts of a StepContext that every job shares; the composition root builds it.",
@@ -13129,6 +13469,82 @@
             "name": "BroPipelineRunner",
             "file": "linux/src/engine/pipeline/bro-pipeline-runner.h"
           }
+        },
+        {
+          "name": "ConfigSource",
+          "kind": "protocol",
+          "doc": "Where the runner gets the configuration a job runs with (implemented by ConfigService); read once when the job starts.",
+          "swift": {
+            "name": "ConfigSource",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/ConfigSource.swift"
+          },
+          "cs": {
+            "name": "IConfigSource",
+            "file": "windows/src/Bromelia.Engine/Pipeline/IConfigSource.cs"
+          },
+          "c": {
+            "name": "BroConfigSource",
+            "file": "linux/src/engine/pipeline/bro-config-source.h"
+          }
+        },
+        {
+          "name": "DriveLookup",
+          "kind": "protocol",
+          "doc": "Where a drive is now (implemented by DriveService).",
+          "swift": {
+            "name": "DriveLookup",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/DriveLookup.swift"
+          },
+          "cs": {
+            "name": "IDriveLookup",
+            "file": "windows/src/Bromelia.Engine/Pipeline/IDriveLookup.cs"
+          },
+          "c": {
+            "name": "BroDriveLookup",
+            "file": "linux/src/engine/pipeline/bro-drive-lookup.h"
+          }
+        },
+        {
+          "name": "DriveLocation",
+          "kind": "struct",
+          "fields": [
+            "makemkvIndex",
+            "device",
+            "configId",
+            "generation",
+            "label",
+            "flags"
+          ],
+          "doc": "A connected drive: MakeMKV's index, the OS device, its configuration entry, its disc's generation, label and flags.",
+          "swift": {
+            "name": "DriveLocation",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/DriveLocation.swift"
+          },
+          "cs": {
+            "name": "DriveLocation",
+            "file": "windows/src/Bromelia.Engine/Pipeline/DriveLocation.cs"
+          },
+          "c": {
+            "name": "BroDriveLocation",
+            "file": "linux/src/engine/pipeline/bro-drive-location.h"
+          }
+        },
+        {
+          "name": "MakemkvSetup",
+          "kind": "protocol",
+          "doc": "What a makemkvcon run needs for a profile (implemented by MakemkvService: registration key, data folder, profile file).",
+          "swift": {
+            "name": "MakemkvSetup",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/MakemkvSetup.swift"
+          },
+          "cs": {
+            "name": "IMakemkvSetup",
+            "file": "windows/src/Bromelia.Engine/Pipeline/IMakemkvSetup.cs"
+          },
+          "c": {
+            "name": "BroMakemkvSetup",
+            "file": "linux/src/engine/pipeline/bro-makemkv-setup.h"
+          }
         }
       ],
       "functions": [
@@ -13300,6 +13716,40 @@
           "swift": "PipelineRunner.decide(_:answer:)",
           "cs": "PipelineRunner.Decide",
           "c": "bro_pipeline_runner_decide"
+        },
+        {
+          "name": "ConfigSource.current",
+          "params": [],
+          "returns": "Config",
+          "doc": "On the executor.",
+          "swift": "ConfigSource.current()",
+          "cs": "ConfigSource.Current",
+          "c": "bro_config_source_current"
+        },
+        {
+          "name": "DriveLookup.find",
+          "params": [
+            "driveId"
+          ],
+          "returns": "DriveLocation?",
+          "doc": "None when no such drive is connected.",
+          "swift": "DriveLookup.find(_:)",
+          "cs": "DriveLookup.Find",
+          "c": "bro_drive_lookup_find"
+        },
+        {
+          "name": "MakemkvSetup.invocation",
+          "params": [
+            "profile",
+            "selectionOverride",
+            "jobDirectory"
+          ],
+          "returns": "MakemkvInvocation",
+          "doc": "selectionOverride: app_DefaultSelectionString for this run (hand-picked tracks: +sel:all).",
+          "throws": true,
+          "swift": "MakemkvSetup.invocation(_:selectionOverride:jobDirectory:)",
+          "cs": "MakemkvSetup.Invocation",
+          "c": "bro_makemkv_setup_invocation"
         }
       ]
     }

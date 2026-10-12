@@ -22,3 +22,14 @@ bro_job_snapshot_free (BroJobSnapshot *snapshot)
   g_ptr_array_unref (snapshot->outputs);
   g_free (snapshot);
 }
+
+BroJsonValue *
+bro_job_snapshot_output (const BroJobSnapshot *job, BroStepKind kind)
+{
+  for (guint i = job->outputs->len; i > 0; i--) {
+    const BroStepOutput *o = job->outputs->pdata[i - 1];
+    if (o->kind == kind)
+      return o->data;
+  }
+  return NULL;
+}

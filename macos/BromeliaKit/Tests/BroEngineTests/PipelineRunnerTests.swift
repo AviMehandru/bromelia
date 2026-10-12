@@ -86,6 +86,7 @@ struct FakeStep: Step {
         }
         for code in FakeStep.strings(behaviour["log"]) { context.log.log(BroMessage(MessageCode(rawValue: code)!)) }
         var data = behaviour["output"] ?? .object([])
+        if let key = behaviour["config"]?.string { data = .object([(key, context.config.document[key] ?? .null)]) }
         if let echo = behaviour["echo"]?.string { data = context.job.outputs.last { $0.kind.rawValue == echo }!.data }
         if let ask = behaviour["ask"] {
             let question = DecisionDto(id: ask["id"]!.string!, question: FakeStep.message(ask["question"]!),
@@ -122,6 +123,7 @@ final class PipelineHarness {
     let scheduler: Scheduler
     let store = MemoryStore()
     let fs = MemoryFileSystem()
+    let config = CaseConfig()
     let runner: PipelineRunner
     var jobs: [(name: String, id: Id)] = []
     var outcomes: [String: Decided] = [:]
@@ -136,8 +138,9 @@ final class PipelineHarness {
         scheduler = Scheduler(executor: world.executor, bus: bus, limits: SchedulerLimits())
         let steps: [any Step] = StepKind.allCases.map { FakeStep(kind: $0, behaviour: given["steps"]?[$0.rawValue] ?? .object([]), gates: gates) }
         let unused = UnusedTools()
+        if let document = given["config"] { config.document = document }
         let env = StepEnvironment(tools: ToolSet(makemkv: unused, matroska: unused), fs: fs, clock: world.clock, drives: unused, library: unused,
-                                  catalog: unused, dataDirectory: "/data")
+                                  catalog: unused, config: config, driveLookup: unused, makemkvSetup: unused, dataDirectory: "/data")
         runner = PipelineRunner(executor: world.executor, bus: bus, scheduler: scheduler, store: store, registry: StepRegistry(steps),
                                 environment: env, clock: world.engineClock)
         subscription = bus.subscribe(types: []) { [unowned self] e in self.events.append(e) }
@@ -226,6 +229,8 @@ final class PipelineHarness {
             try Fixtures.same(arg["expectError"]?.string, code, "decide's error")
         case "advance":
             await world.advance(arg.int!)
+        case "config":
+            config.document = arg
         case "library":
             let lib = arg["id"]!.string!
             scheduler.setLibraryOffline(lib, reason: arg["online"]!.bool! ? nil : BroError(MessageCode.wire(.libraryOffline), [("library", .string(lib))]))

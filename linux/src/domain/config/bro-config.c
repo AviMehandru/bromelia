@@ -1,5 +1,8 @@
 /* bro-config.c */
 #include "bro-config.h"
+#include "bro-config-private.h"
+
+#include <string.h>
 
 BroConfig *
 bro_config_new (BroJsonValue *document, GPtrArray *issues)
@@ -54,4 +57,25 @@ GPtrArray *
 bro_config_rules (const BroConfig *c)
 {
   return list_of (c, "rules", (Decode) bro_rule_decode, (GDestroyNotify) bro_rule_free);
+}
+
+BroJsonValue *
+bro_config_automation (const BroConfig *config, const char *entry_id)
+{
+  BroJsonValue *chosen = NULL;
+  BroJsonValue *drives = bro_json_value_member (config->document, "drives");
+  for (guint i = 0; entry_id && i < bro_json_value_length (drives); i++) {
+    BroJsonValue *d = bro_json_value_at (drives, i);
+    BroJsonValue *own = bro_json_value_member (d, "automation");
+    if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (d, "id"), NULL), entry_id) == 0) {
+      if (own && own->kind == BRO_JSON_VALUE_OBJECT)
+        chosen = own;
+      break;
+    }
+  }
+  if (!chosen)
+    chosen = bro_json_value_member (bro_json_value_member (config->document, "automation"), "defaults");
+  g_autoptr (BroJsonValue) empty = bro_json_value_new_object ();
+  g_autoptr (GPtrArray) issues = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_issue_free);
+  return _bro_schema_normalize_full (chosen ? chosen : empty, _bro_schema_def ("DriveAutomation"), "", TRUE, TRUE, issues);
 }

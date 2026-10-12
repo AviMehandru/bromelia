@@ -21,6 +21,7 @@ public final class PipelineRunner {
         var logSeq: Int64 = 0
         var log: [LogLineDto] = []
         var directoryMade = false
+        var config: Config?
 
         init(record: JobRecord) { self.record = record }
     }
@@ -110,6 +111,7 @@ public final class PipelineRunner {
             try await save(l, r)
         }
         l.steps = plan.steps
+        l.config = environment.config.current()
         let done = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().completed(jobId) }
         var outputs = done.map { $0.output ?? StepOutput(kind: $0.kind, data: .object([])) }
         var results = done.map { StepResult(kind: $0.kind, state: $0.state) }
@@ -317,7 +319,8 @@ public final class PipelineRunner {
         StepContext(job: snapshot, cancel: l.cancel.token, progress: Reporter(runner: self, live: l, seq: seq, executor: executor),
                     log: Logger(runner: self, live: l, executor: executor), decisions: Decisions(runner: self, live: l, executor: executor),
                     tools: environment.tools, fs: environment.fs, clock: environment.clock, drives: environment.drives, library: environment.library,
-                    catalog: environment.catalog, jobDirectory: jobDirectory(l.record.id))
+                    catalog: environment.catalog, config: l.config!, driveLookup: environment.driveLookup, makemkvSetup: environment.makemkvSetup,
+                    jobDirectory: jobDirectory(l.record.id))
     }
 
     static func unexpected(_ detail: String) -> BroError {

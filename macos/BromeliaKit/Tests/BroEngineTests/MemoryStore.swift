@@ -84,7 +84,7 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
 }
 
 /// Ports the pipeline's own tests never call.
-struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries {
+struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries, DriveLookup, MakemkvSetup {
     func scanDrives(_ cancel: CancellationToken) async throws(BroError) -> [MakemkvDrive] { fatalError("not used") }
     func listing(_ source: MakemkvSource, invocation: MakemkvInvocation, sink: any RunSink, cancel: CancellationToken) async throws(BroError) -> ListingRun { fatalError("not used") }
     func rip(_ source: MakemkvSource, title: String, destination: String, invocation: MakemkvInvocation, sink: any RunSink,
@@ -103,4 +103,16 @@ struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries
     func require(_ libraryId: String) throws(BroError) -> LibraryHandle { fatalError("not used") }
     func stagingDirectory(_ libraryId: String, jobId: Id) throws(BroError) -> String { fatalError("not used") }
     func archivedBefore(_ fingerprint: String) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
+    func find(_ driveId: String) -> DriveLocation? { fatalError("not used") }
+    func invocation(_ profile: EffectiveProfile, selectionOverride: String?, jobDirectory: String) throws(BroError) -> MakemkvInvocation {
+        fatalError("not used")
+    }
+}
+
+/// Gives the document a case sets (given.config, then its config ops).
+@EngineActor
+final class CaseConfig: ConfigSource {
+    var document: JsonValue = .object([])
+
+    func current() -> Config { Config(document: document, issues: []) }
 }
