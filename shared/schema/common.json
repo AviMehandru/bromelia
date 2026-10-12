@@ -157,7 +157,7 @@
       }
     },
     "SecretRef": {
-      "description": "A secret kept outside the configuration. Resolved from the keystore, then the environment variable BROMELIA_SECRET_<NAME> (upper case, '.' → '_'), then <data>/secrets/<name>.",
+      "description": "A secret kept outside the configuration. Resolved from the system keystore, then the environment variable BROMELIA_SECRET_<NAME> (upper case, '.' → '_'), then <data>/secrets/<name>; config secrets.prefer / secrets.bySecret choose a source when they disagree.",
       "type": "object",
       "required": [
         "secret"

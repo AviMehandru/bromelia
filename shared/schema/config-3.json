@@ -111,6 +111,9 @@
     },
     "updates": {
       "$ref": "#/$defs/Updates"
+    },
+    "secrets": {
+      "$ref": "#/$defs/Secrets"
     }
   },
   "$defs": {
@@ -1369,6 +1372,38 @@
           "description": "Check GitHub releases for a newer Bromelia (backlog 15).",
           "type": "boolean",
           "default": false
+        }
+      }
+    },
+    "Secrets": {
+      "description": "Where a secret comes from when its sources disagree (owner, 2026-10-12). A secret can be in the system keystore, in BROMELIA_SECRET_<NAME> and in <data>/secrets/<name>; the first of those that has it is used. Two different values are a problem: secret.conflict (an error) until a preference settles it, then secret.conflictPreferred (a warning) while they still differ.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prefer": {
+          "description": "The source to rely on for every secret: none keeps the order above (keystore, environment, file); a preferred source that has no value falls back to that order.",
+          "enum": [
+            "none",
+            "keystore",
+            "environment",
+            "file"
+          ],
+          "default": "none"
+        },
+        "bySecret": {
+          "description": "The source to rely on for one secret, by name; it overrides prefer.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-zA-Z0-9]*(\\.[A-Za-z0-9_-]+)*$"
+          },
+          "additionalProperties": {
+            "enum": [
+              "keystore",
+              "environment",
+              "file"
+            ]
+          },
+          "default": {}
         }
       }
     }

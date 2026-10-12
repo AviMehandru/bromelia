@@ -199,6 +199,7 @@ struct _TestConfigFakes {
   GHashTable *keystore;    /* name → value */
   BroJsonValue *keystore_fails;
   GHashTable *kv;          /* key → BroJsonValue */
+  gboolean system_store;
 };
 
 static void fakes_fs_iface (BroFileSystemInterface *iface);
@@ -342,9 +343,16 @@ fakes_keystore_remove (BroKeystore *keystore, const char *name, BroBroError **er
   return TRUE;
 }
 
+static gboolean
+fakes_keystore_is_system_store (BroKeystore *keystore)
+{
+  return TEST_CONFIG_FAKES (keystore)->system_store;
+}
+
 static void
 fakes_keystore_iface (BroKeystoreInterface *iface)
 {
+  iface->is_system_store = fakes_keystore_is_system_store;
   iface->get = fakes_keystore_get;
   iface->set = fakes_keystore_set;
   iface->remove = fakes_keystore_remove;
@@ -565,6 +573,8 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
   BroEventBus *bus;
   BroProblemService *problems;
   TestConfigFakes *f = g_object_new (TEST_TYPE_CONFIG_FAKES, NULL);
+  TestConfigFakes *folder = g_object_new (TEST_TYPE_CONFIG_FAKES, NULL); /* the secrets folder: only its keystore part */
+  gboolean system_store = bro_json_value_get_bool (bro_json_value_member (given, "systemStore"), TRUE);
   ConfigHarness h = { 0 };
   SubscribeHarness s;
   BroJsonValue *ops = bro_json_value_member (given, "ops"), *v, *want_results = bro_json_value_member (expect, "results");
@@ -585,6 +595,12 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
     for (guint i = 0; i < v->keys->len; i++)
       g_hash_table_insert (f->keystore, g_strdup (v->keys->pdata[i]), g_strdup (bro_json_value_get_string (v->items->pdata[i], "")));
   f->keystore_fails = (v = bro_json_value_member (given, "keystoreFails")) ? bro_json_value_ref (v) : bro_json_value_new_object ();
+  f->system_store = TRUE;
+  if ((v = bro_json_value_member (given, "files")))
+    for (guint i = 0; i < v->keys->len; i++)
+      g_hash_table_insert (folder->keystore, g_strdup (v->keys->pdata[i]), g_strdup (bro_json_value_get_string (v->items->pdata[i], "")));
+  folder->keystore_fails = (v = bro_json_value_member (given, "filesFail")) ? bro_json_value_ref (v) : bro_json_value_new_object ();
+  folder->system_store = FALSE;
   if ((v = bro_json_value_member (given, "kv")))
     for (guint i = 0; i < v->keys->len; i++)
       g_hash_table_insert (f->kv, g_strdup (v->keys->pdata[i]), bro_json_value_ref (v->items->pdata[i]));
@@ -594,8 +610,9 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
 
   bus = bro_event_bus_new (BRO_CLOCK (w.clock), 1, 1024, 1024);
   problems = bro_problem_service_new (bus, BRO_CLOCK (w.clock));
-  h.service = bro_config_service_new (w.executor, bus, problems, BRO_FILE_SYSTEM (f), BRO_KEYSTORE (f), BRO_KEY_VALUE_REPOSITORY (f),
-                                      CONFIG_PATH, environment);
+  /* Without a system store, the keystore is the secrets folder. */
+  h.service = bro_config_service_new (w.executor, bus, problems, BRO_FILE_SYSTEM (f), system_store ? BRO_KEYSTORE (f) : BRO_KEYSTORE (folder),
+                                      BRO_KEYSTORE (folder), BRO_KEY_VALUE_REPOSITORY (f), CONFIG_PATH, environment);
   g_mutex_init (&h.lock);
   g_cond_init (&h.cond);
   h.results = g_new0 (BroJsonValue *, n);
@@ -617,11 +634,25 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
         }
       else if (strcmp (name, "secret") == 0)
         {
-          /* Not on the executor: the keystore may block. */
+          /* Not on the executor (the keystore may block), with the configuration a job would have. */
           g_autoptr (BroBroError) error = NULL;
-          g_autofree char *value = bro_config_service_secret (h.service, op->items->pdata[0] ? ((BroJsonValue *) op->items->pdata[0])->string : "",
-                                                              &error);
+          g_autoptr (BroConfig) config = bro_config_service_current (h.service); /* only read; nothing runs meanwhile */
+          g_autofree char *value = bro_config_service_secret (h.service, ((BroJsonValue *) op->items->pdata[0])->string, config, &error);
           record (&h, i, error ? error_json (error) : value ? bro_json_value_new_string (value) : bro_json_value_new_null ());
+          bro_engine_executor_barrier (w.executor);
+        }
+      else if (strcmp (name, "changeOutside") == 0)
+        {
+          BroJsonValue *arg = op->items->pdata[0];
+          TestConfigFakes *store = strcmp (bro_json_value_get_string (bro_json_value_member (arg, "store"), ""), "keystore") == 0 ? f : folder;
+          const char *secret = bro_json_value_get_string (bro_json_value_member (arg, "name"), "");
+          const char *value = bro_json_value_get_string (bro_json_value_member (arg, "value"), NULL);
+          g_mutex_lock (&store->lock);
+          if (value)
+            g_hash_table_replace (store->keystore, g_strdup (secret), g_strdup (value));
+          else
+            g_hash_table_remove (store->keystore, secret);
+          g_mutex_unlock (&store->lock);
         }
       else
         {
@@ -655,7 +686,7 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
       BroJsonValue *want = bro_json_value_at (want_results, r);
       g_autoptr (BroJsonValue) normalized = NULL;
       g_autofree char *what = NULL;
-      if (strcmp (name, "releaseWrites") == 0)
+      if (strcmp (name, "releaseWrites") == 0 || strcmp (name, "changeOutside") == 0)
         continue;
       r++;
       if (want && !bro_json_value_member (want, "error"))
@@ -739,6 +770,17 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
     same_sorted (failures, id, "keystore", bro_json_value_member (expect, "keystore"), got);
   }
   {
+    g_autoptr (BroJsonValue) got = bro_json_value_new_object ();
+    g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
+    BroJsonValue *want = bro_json_value_member (expect, "files");
+    GHashTableIter it;
+    gpointer k, value;
+    g_hash_table_iter_init (&it, folder->keystore);
+    while (g_hash_table_iter_next (&it, &k, &value))
+      bro_json_value_set (got, k, bro_json_value_new_string (value));
+    same_sorted (failures, id, "files", want ? want : none, got);
+  }
+  {
     g_autoptr (BroJsonValue) got_events = events_json (s.events);
     g_autoptr (BroJsonValue) got_problems = problems_json (problems);
     same_sorted (failures, id, "events", bro_json_value_member (expect, "events"), got_events);
@@ -757,6 +799,7 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
   g_object_unref (problems);
   g_object_unref (bus);
   g_object_unref (f);
+  g_object_unref (folder);
   world_clear (&w);
   return TRUE;
 }

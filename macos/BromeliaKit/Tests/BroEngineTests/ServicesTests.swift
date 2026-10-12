@@ -82,10 +82,19 @@ private final class FakeKeystore: Keystore, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [String: String] = [:]
     var fails: [String: JsonValue] = [:]
+    let systemStore: Bool
 
     var values: [String: String] { lock.withLock { stored } }
 
-    init(_ initial: [String: String]) { stored = initial }
+    init(_ initial: [String: String], systemStore: Bool) {
+        stored = initial
+        self.systemStore = systemStore
+    }
+
+    func isSystemStore() -> Bool { systemStore }
+
+    /// A change made outside Bromelia.
+    func change(_ name: String, to value: String?) { lock.withLock { stored[name] = value } }
 
     private func check(_ name: String) throws(BroError) { if let f = fails[name] { throw failure(f) } }
 
@@ -198,14 +207,20 @@ struct ServicesTests {
         let files = ConfigFiles(initial)
         files.writeFails = given["writeFails"]
         if given["holdWrites"]?.bool == true { files.hold = DispatchSemaphore(value: 0) }
-        let keystore = FakeKeystore(Dictionary(uniqueKeysWithValues: (given["keystore"]?.members ?? []).map { ($0.key, $0.value.string!) }))
+        func strings(_ j: JsonValue?) -> [String: String] { Dictionary(uniqueKeysWithValues: (j?.members ?? []).map { ($0.key, $0.value.string!) }) }
+        let keystore = FakeKeystore(strings(given["keystore"]), systemStore: true)
         for (k, v) in given["keystoreFails"]?.members ?? [] { keystore.fails[k] = v }
+        let secretFiles = FakeKeystore(strings(given["files"]), systemStore: false)
+        for (k, v) in given["filesFail"]?.members ?? [] { secretFiles.fails[k] = v }
+        // Without a system store, the keystore is the secrets folder.
+        let systemStore = given["systemStore"]?.bool != false
         let kv = FakeKv(Dictionary(uniqueKeysWithValues: (given["kv"]?.members ?? []).map { ($0.key, $0.value) }), gate: files)
         let environment = Dictionary(uniqueKeysWithValues: (given["environment"]?.members ?? []).map { ($0.key, $0.value.string!) })
         let bus = EventBus(clock: world.clock)
         let problems = await ProblemService(bus: bus, clock: world.clock)
-        let service = await ConfigService(executor: world.executor, bus: bus, problems: problems, fs: files, keystore: keystore, kv: kv,
-                                          path: configPath, environment: environment)
+        let service = await ConfigService(executor: world.executor, bus: bus, problems: problems, fs: files,
+                                          keystore: systemStore ? keystore : secretFiles, secretFiles: secretFiles, kv: kv, path: configPath,
+                                          environment: environment)
         let recorder = Recorder()
         await world.onExecutor { recorder.subscription = bus.subscribe(types: []) { recorder.events.append($0) } }
 
@@ -248,10 +263,14 @@ struct ServicesTests {
             case "export":
                 await result(i) { JsonValue.parse(service.export())! }
             case "secret":
-                // Not on the executor: the keystore may block.
+                // Not on the executor (the keystore may block), with the configuration a job would have.
+                let config = await service.current()
                 let r: JsonValue
-                do throws(BroError) { r = try service.secret(arg.string!).map { .string($0) } ?? .null } catch { r = errorJson(error) }
+                do throws(BroError) { r = try service.secret(arg.string!, config: config).map { .string($0) } ?? .null } catch { r = errorJson(error) }
                 await Self.store(recorder, i, r)
+                await world.executor.barrier()
+            case "changeOutside":
+                (arg["store"]?.string == "keystore" ? keystore : secretFiles).change(arg["name"]!.string!, to: arg["value"]?.string)
             case "releaseWrites":
                 files.hold!.signal()
                 for t in pending { await t.value }
@@ -265,7 +284,7 @@ struct ServicesTests {
         let results = await recorder.results
         let wantResults = expect["results"]!.array!
         var r = 0
-        for (i, op) in ops.enumerated() where op.string != "releaseWrites" {
+        for (i, op) in ops.enumerated() where op.string != "releaseWrites" && op["changeOutside"] == nil {
             var want = wantResults[r]
             r += 1
             let name = op.string ?? op.members![0].key
@@ -300,6 +319,8 @@ struct ServicesTests {
         if let stored = gotKv["config.lastGood"] { gotKv = replacing(gotKv, "config.lastGood", norm(stored)) }
         try Fixtures.same(Fixtures.sorted(wantKv), Fixtures.sorted(gotKv), "kv")
         try Fixtures.same(Fixtures.sorted(expect["keystore"]!), Fixtures.sorted(.object(keystore.values.map { ($0.key, .string($0.value)) })), "keystore")
+        try Fixtures.same(Fixtures.sorted(expect["files"] ?? .object([])), Fixtures.sorted(.object(secretFiles.values.map { ($0.key, .string($0.value)) })),
+                          "files")
         let (events, list) = await eventsAndProblems(recorder, problems)
         try Fixtures.same(Fixtures.sorted(expect["events"]!), Fixtures.sorted(events), "events")
         try Fixtures.same(Fixtures.sorted(expect["problems"]!), Fixtures.sorted(list), "problems")

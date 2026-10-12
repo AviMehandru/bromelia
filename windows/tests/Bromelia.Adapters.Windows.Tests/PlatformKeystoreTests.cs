@@ -112,6 +112,7 @@ public sealed class PlatformKeystoreTests
         var keystore = new PlatformKeystore(dir, service);
         if (!CredentialManagerUsable()) return; // checked by TheSharedCasesPassInCredentialManager
         Assert.Equal("credentialManager", keystore.Backend());
+        Assert.True(keystore.IsSystemStore());
         keystore.Set("metadata.tmdb", "abc123");
         try
         {
@@ -141,6 +142,7 @@ public sealed class PlatformKeystoreTests
         var dir = Path.Combine(Path.GetTempPath(), "BromeliaTest-" + Guid.NewGuid().ToString("N"));
         var keystore = new PlatformKeystore(dir, systemStore: false);
         Assert.Equal("file", keystore.Backend());
+        Assert.False(keystore.IsSystemStore());
         if (OwnerOnly.IsOnNetworkShare(dir))
         {
             // On a network share the server decides who reads the files: nothing is written.

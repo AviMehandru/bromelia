@@ -28,3 +28,10 @@ bro_keystore_remove (BroKeystore *self, const char *name, BroBroError **error)
   g_return_val_if_fail (BRO_IS_KEYSTORE (self), FALSE);
   return BRO_KEYSTORE_GET_IFACE (self)->remove (self, name, error);
 }
+
+gboolean
+bro_keystore_is_system_store (BroKeystore *self)
+{
+  g_return_val_if_fail (BRO_IS_KEYSTORE (self), FALSE);
+  return BRO_KEYSTORE_GET_IFACE (self)->is_system_store (self);
+}

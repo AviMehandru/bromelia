@@ -355,12 +355,21 @@ static char *get_vfunc (BroKeystore *self, const char *name, BroBroError **error
 static gboolean set_vfunc (BroKeystore *self, const char *name, const char *value, BroBroError **error) { return bro_platform_keystore_set (BRO_PLATFORM_KEYSTORE (self), name, value, error); }
 static gboolean remove_vfunc (BroKeystore *self, const char *name, BroBroError **error) { return bro_platform_keystore_remove (BRO_PLATFORM_KEYSTORE (self), name, error); }
 
+gboolean
+bro_platform_keystore_is_system_store (BroPlatformKeystore *self)
+{
+  return use_system (self);
+}
+
+static gboolean is_system_store_vfunc (BroKeystore *self) { return bro_platform_keystore_is_system_store (BRO_PLATFORM_KEYSTORE (self)); }
+
 static void
 bro_platform_keystore_iface_init (BroKeystoreInterface *iface)
 {
   iface->get = get_vfunc;
   iface->set = set_vfunc;
   iface->remove = remove_vfunc;
+  iface->is_system_store = is_system_store_vfunc;
 }
 
 static void

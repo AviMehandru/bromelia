@@ -17,6 +17,8 @@ internal sealed class MemoryKeystore : IKeystore
     public void Set(string name, string value) => _secrets[name] = value;
 
     public void Remove(string name) => _secrets.Remove(name);
+
+    public bool IsSystemStore() => false;
 }
 
 public class PortsTests

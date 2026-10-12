@@ -48,9 +48,16 @@ keystore_remove (BroKeystore *self, const char *name, BroBroError **error)
   return TRUE;
 }
 
+static gboolean
+keystore_is_system_store (BroKeystore *self)
+{
+  return FALSE;
+}
+
 static void
 test_keystore_iface_init (BroKeystoreInterface *iface)
 {
+  iface->is_system_store = keystore_is_system_store;
   iface->get = keystore_get;
   iface->set = keystore_set;
   iface->remove = keystore_remove;

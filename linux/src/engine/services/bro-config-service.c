@@ -18,6 +18,7 @@ struct _BroConfigService {
   BroProblemService *problems;
   BroFileSystem *fs;
   BroKeystore *keystore;
+  BroKeystore *secret_files;
   BroKeyValueRepository *kv;
   char *path;
   GHashTable *environment; /* variable → value */
@@ -101,16 +102,129 @@ from_environment (BroConfigService *self, const char *name)
   return value && *value ? g_strdup (value) : NULL;
 }
 
-static gboolean
-is_set (BroConfigService *self, const char *name)
+/* What a secret's sources hold: the value used and where it came from, every source that has a value (in order),
+ * whether they disagree and whether the preference chose the one used. */
+typedef struct {
+  char *value;          /* NULL: none */
+  BroSecretSource using;
+  GArray *sources;      /* BroSecretSource */
+  gboolean conflict;
+  gboolean preferred;
+  BroBroError *failure; /* the first, or NULL */
+} Resolution;
+
+static void
+resolution_free (gpointer data)
 {
-  g_autoptr (BroBroError) error = NULL;
-  g_autofree char *value = bro_keystore_get (self->keystore, name, &error);
-  g_autofree char *given = NULL;
+  Resolution *r = data;
+  g_free (r->value);
+  g_array_unref (r->sources);
+  bro_bro_error_free (r->failure);
+  g_free (r);
+}
+
+/* secrets.bySecret[name], else secrets.prefer; FALSE for none. */
+static gboolean
+preference (const BroConfig *config, const char *name, BroSecretSource *out)
+{
+  BroJsonValue *secrets = bro_json_value_member (config->document, "secrets");
+  const char *chosen = bro_json_value_get_string (bro_json_value_member (bro_json_value_member (secrets, "bySecret"), name), NULL);
+  if (!chosen)
+    chosen = bro_json_value_get_string (bro_json_value_member (secrets, "prefer"), NULL);
+  return bro_secret_source_from_wire (chosen, out);
+}
+
+static void
+read_source (Resolution *r, GPtrArray *values, BroSecretSource source, BroKeystore *store, const char *name)
+{
+  BroBroError *error = NULL;
+  char *value = bro_keystore_get (store, name, &error);
   if (value)
-    return TRUE;
-  given = from_environment (self, name);
-  return given != NULL;
+    {
+      g_array_append_val (r->sources, source);
+      g_ptr_array_add (values, value);
+    }
+  else if (error && !r->failure)
+    r->failure = error;
+  else
+    bro_bro_error_free (error);
+}
+
+static Resolution *
+resolve (BroConfigService *self, const char *name, const BroConfig *config)
+{
+  Resolution *r = g_new0 (Resolution, 1);
+  g_autoptr (GPtrArray) values = g_ptr_array_new_with_free_func (g_free);
+  char *given;
+  BroSecretSource prefer;
+  gboolean has_prefer = preference (config, name, &prefer);
+  int chosen = -1;
+  r->sources = g_array_new (FALSE, FALSE, sizeof (BroSecretSource));
+  if (bro_keystore_is_system_store (self->keystore))
+    read_source (r, values, BRO_SECRET_SOURCE_KEYSTORE, self->keystore, name);
+  if ((given = from_environment (self, name)))
+    {
+      BroSecretSource environment = BRO_SECRET_SOURCE_ENVIRONMENT;
+      g_array_append_val (r->sources, environment);
+      g_ptr_array_add (values, given);
+    }
+  read_source (r, values, BRO_SECRET_SOURCE_FILE, self->secret_files, name);
+  for (guint i = 0; has_prefer && i < r->sources->len; i++)
+    if (g_array_index (r->sources, BroSecretSource, i) == prefer)
+      {
+        chosen = (int) i;
+        break;
+      }
+  if (chosen < 0 && values->len > 0)
+    chosen = 0;
+  if (chosen >= 0)
+    {
+      r->value = g_strdup (values->pdata[chosen]);
+      r->using = g_array_index (r->sources, BroSecretSource, chosen);
+      r->preferred = has_prefer && r->using == prefer;
+    }
+  for (guint i = 1; i < values->len; i++)
+    if (strcmp (values->pdata[i], values->pdata[0]) != 0)
+      r->conflict = TRUE;
+  return r;
+}
+
+static BroJsonValue *
+source_label (BroSecretSource source)
+{
+  BroMessageCode code = source == BRO_SECRET_SOURCE_KEYSTORE      ? BRO_MSG_SECRET_SOURCE_KEYSTORE
+                        : source == BRO_SECRET_SOURCE_ENVIRONMENT ? BRO_MSG_SECRET_SOURCE_ENVIRONMENT
+                                                                  : BRO_MSG_SECRET_SOURCE_FILE;
+  g_autoptr (BroBroMessage) label = bro_bro_message_new (code, NULL, BRO_SEVERITY_INFO);
+  return bro_bro_message_to_json (label);
+}
+
+/* Raises, updates or clears a secret's problem (on the executor). */
+static void
+report (BroConfigService *self, const char *name, const Resolution *r)
+{
+  g_autoptr (BroProblemScope) scope = bro_problem_scope_new (BRO_PROBLEM_SCOPE_KIND_SECRET, name);
+  BroProblemAction open_settings = BRO_PROBLEM_ACTION_OPEN_SETTINGS;
+  BroJsonValue *params, *sources;
+  g_autoptr (BroBroMessage) message = NULL;
+  g_autoptr (BroProblemDto) raised = NULL;
+  if (!r->conflict || !r->value)
+    {
+      bro_problem_service_clear (self->problems, BRO_MSG_SECRET_CONFLICT, scope);
+      bro_problem_service_clear (self->problems, BRO_MSG_SECRET_CONFLICT_PREFERRED, scope);
+      return;
+    }
+  params = bro_json_value_new_object ();
+  sources = bro_json_value_new_array ();
+  for (guint i = 0; i < r->sources->len; i++)
+    bro_json_value_append (sources, source_label (g_array_index (r->sources, BroSecretSource, i)));
+  bro_json_value_set (params, "name", bro_json_value_new_string (name));
+  bro_json_value_set (params, "using", source_label (r->using));
+  bro_json_value_set (params, "sources", sources);
+  bro_problem_service_clear (self->problems, r->preferred ? BRO_MSG_SECRET_CONFLICT : BRO_MSG_SECRET_CONFLICT_PREFERRED, scope);
+  message = bro_bro_message_new (r->preferred ? BRO_MSG_SECRET_CONFLICT_PREFERRED : BRO_MSG_SECRET_CONFLICT, params,
+                                 r->preferred ? BRO_SEVERITY_WARNING : BRO_SEVERITY_ERROR);
+  raised = bro_problem_service_raise (self->problems, message, scope, &open_settings, 1);
 }
 
 /* The names of the document's SecretRefs ({"secret": name}), in document order, each once. */
@@ -150,6 +264,10 @@ typedef struct {
   GPtrArray *statuses;     /* BroSecretStatus * */
   char *name;
   char *value;
+  BroConfig *check_config; /* the secrets check */
+  GPtrArray *check_names;  /* char * */
+  GPtrArray *check_results; /* Resolution * */
+  void (*then) (gpointer op);
 } Op;
 
 static void
@@ -169,6 +287,9 @@ op_clear (gpointer data)
   g_clear_pointer (&op->statuses, g_ptr_array_unref);
   g_free (op->name);
   g_free (op->value);
+  g_clear_pointer (&op->check_config, bro_config_free);
+  g_clear_pointer (&op->check_names, g_ptr_array_unref);
+  g_clear_pointer (&op->check_results, g_ptr_array_unref);
 }
 
 static Op *
@@ -239,7 +360,9 @@ envelope_work (gpointer data, BroBroError **error)
   for (guint i = 0; i < op->names->len; i++)
     {
       const char *name = g_ptr_array_index (op->names, i);
-      g_ptr_array_add (op->statuses, bro_secret_status_new (name, is_set (op->self, name)));
+      Resolution *r = resolve (op->self, name, op->snapshot);
+      g_ptr_array_add (op->statuses, bro_secret_status_new (name, r->value != NULL));
+      resolution_free (r);
     }
   return TRUE;
 }
@@ -278,6 +401,70 @@ bro_config_service_envelope (BroConfigService *self, BroEnvelopeDone done, gpoin
   op_unref (op);
 }
 
+/* ---- the secrets check: every secret the configuration refers to (and @extra) ---- */
+
+static gboolean
+check_work (gpointer data, BroBroError **error)
+{
+  Op *op = data;
+  op->check_results = g_ptr_array_new_with_free_func (resolution_free);
+  for (guint i = 0; i < op->check_names->len; i++)
+    g_ptr_array_add (op->check_results, resolve (op->self, op->check_names->pdata[i], op->check_config));
+  return TRUE;
+}
+
+static void
+check_done (gpointer data, const BroBroError *error)
+{
+  Op *op = data;
+  BroConfigService *self = op->self;
+  g_autoptr (GPtrArray) problems = NULL;
+  if (error)
+    {
+      finish (op, NULL, error);
+      return;
+    }
+  for (guint i = 0; i < op->check_names->len; i++)
+    report (self, op->check_names->pdata[i], op->check_results->pdata[i]);
+  /* The problems of secrets the configuration no longer refers to. */
+  problems = bro_problem_service_problems (self->problems);
+  for (guint i = 0; i < problems->len; i++)
+    {
+      BroProblemDto *p = problems->pdata[i];
+      if (p->scope && p->scope->kind == BRO_PROBLEM_SCOPE_KIND_SECRET
+          && !g_ptr_array_find_with_equal_func (op->check_names, p->scope->id, g_str_equal, NULL))
+        bro_problem_service_clear (self->problems, p->message->code, p->scope);
+    }
+  op->then (op);
+}
+
+static void
+finish_ok (gpointer data)
+{
+  finish (data, NULL, NULL);
+}
+
+/* Checks the secrets, then runs @then (which finishes @op). */
+static void
+start_check (Op *op, const char *extra, void (*then) (gpointer op))
+{
+  g_clear_pointer (&op->check_config, bro_config_free);
+  g_clear_pointer (&op->check_names, g_ptr_array_unref);
+  op->check_config = config_copy (op->self->config);
+  op->check_names = g_ptr_array_new_with_free_func (g_free);
+  secret_names (op->check_config->document, op->check_names);
+  if (extra && !g_ptr_array_find_with_equal_func (op->check_names, extra, g_str_equal, NULL))
+    g_ptr_array_add (op->check_names, g_strdup (extra));
+  op->then = then;
+  work (op, check_work, check_done);
+}
+
+static void
+envelope_next (gpointer op)
+{
+  start_envelope (op);
+}
+
 /* ---- load ---- */
 
 static gboolean
@@ -291,9 +478,13 @@ static void
 last_good_done (gpointer data, const BroBroError *error)
 {
   Op *op = data;
-  if (!error)
-    bro_problem_service_clear (op->self->problems, BRO_MSG_CONFIG_INVALID, NULL);
-  finish (op, NULL, error);
+  if (error)
+    {
+      finish (op, NULL, error);
+      return;
+    }
+  bro_problem_service_clear (op->self->problems, BRO_MSG_CONFIG_INVALID, NULL);
+  start_check (op, NULL, finish_ok);
 }
 
 static gboolean
@@ -337,7 +528,7 @@ load_done (gpointer data, const BroBroError *error)
     {
       g_clear_pointer (&self->config, bro_config_free);
       self->config = defaults ();
-      finish (op, NULL, NULL);
+      start_check (op, NULL, finish_ok);
       return;
     }
   {
@@ -367,7 +558,7 @@ load_done (gpointer data, const BroBroError *error)
   bro_json_value_set (params, "count", bro_json_value_new_integer (errors));
   message = bro_bro_message_new (BRO_MSG_CONFIG_INVALID, params, BRO_SEVERITY_ERROR);
   raised = bro_problem_service_raise (self->problems, message, NULL, &open_settings, 1);
-  finish (op, NULL, NULL);
+  start_check (op, NULL, finish_ok);
 }
 
 void
@@ -463,7 +654,7 @@ file_done (gpointer data, const BroBroError *error)
   self->config = g_steal_pointer (&op->next);
   bro_problem_service_clear (self->problems, BRO_MSG_CONFIG_INVALID, NULL);
   publish_changed (self);
-  start_envelope (op);
+  start_check (op, NULL, envelope_next);
 }
 
 static void
@@ -521,19 +712,42 @@ bro_config_service_update (BroConfigService *self, const BroJsonValue *doc, gint
 
 /* ---- secrets ---- */
 
-char *
-bro_config_service_secret (BroConfigService *self, const char *name, BroBroError **error)
+typedef struct {
+  BroConfigService *self;
+  char *name;
+  Resolution *resolution;
+} Report;
+
+static void
+report_action (gpointer data)
 {
-  g_autoptr (BroBroError) failure = NULL;
-  char *value = bro_keystore_get (self->keystore, name, &failure);
-  if (value)
-    return value;
-  value = from_environment (self, name);
-  if (value)
-    return value;
-  if (failure && error)
-    *error = g_steal_pointer (&failure);
-  return NULL;
+  Report *r = data;
+  report (r->self, r->name, r->resolution);
+}
+
+static void
+report_free (gpointer data)
+{
+  Report *r = data;
+  g_object_unref (r->self);
+  g_free (r->name);
+  resolution_free (r->resolution);
+  g_free (r);
+}
+
+char *
+bro_config_service_secret (BroConfigService *self, const char *name, const BroConfig *config, BroBroError **error)
+{
+  Resolution *resolution = resolve (self, name, config);
+  Report *posted = g_new0 (Report, 1);
+  char *value = g_strdup (resolution->value);
+  if (!value && resolution->failure && error)
+    *error = bro_bro_error_copy (resolution->failure);
+  posted->self = g_object_ref (self);
+  posted->name = g_strdup (name);
+  posted->resolution = resolution;
+  bro_engine_executor_post (self->executor, report_action, posted, report_free);
+  return value;
 }
 
 static gboolean
@@ -549,9 +763,13 @@ static void
 set_secret_done (gpointer data, const BroBroError *error)
 {
   Op *op = data;
-  if (!error)
-    publish_changed (op->self);
-  finish (op, NULL, error);
+  if (error)
+    {
+      finish (op, NULL, error);
+      return;
+    }
+  publish_changed (op->self);
+  start_check (op, op->name, finish_ok);
 }
 
 void
@@ -569,7 +787,8 @@ bro_config_service_set_secret (BroConfigService *self, const char *name, const c
 
 BroConfigService *
 bro_config_service_new (BroEngineExecutor *executor, BroEventBus *bus, BroProblemService *problems, BroFileSystem *fs,
-                        BroKeystore *keystore, BroKeyValueRepository *kv, const char *path, GHashTable *environment)
+                        BroKeystore *keystore, BroKeystore *secret_files, BroKeyValueRepository *kv, const char *path,
+                        GHashTable *environment)
 {
   BroConfigService *self = g_object_new (BRO_TYPE_CONFIG_SERVICE, NULL);
   self->executor = g_object_ref (executor);
@@ -577,6 +796,7 @@ bro_config_service_new (BroEngineExecutor *executor, BroEventBus *bus, BroProble
   self->problems = g_object_ref (problems);
   self->fs = g_object_ref (fs);
   self->keystore = g_object_ref (keystore);
+  self->secret_files = g_object_ref (secret_files);
   self->kv = g_object_ref (kv);
   self->path = g_strdup (path);
   if (environment)
@@ -599,6 +819,7 @@ bro_config_service_finalize (GObject *object)
   g_object_unref (self->problems);
   g_object_unref (self->fs);
   g_object_unref (self->keystore);
+  g_object_unref (self->secret_files);
   g_object_unref (self->kv);
   g_free (self->path);
   g_hash_table_unref (self->environment);

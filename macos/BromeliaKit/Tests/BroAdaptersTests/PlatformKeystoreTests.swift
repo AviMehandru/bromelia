@@ -81,6 +81,7 @@ struct PlatformKeystoreTests {
 
     @Test func theSharedCasesPassInTheKeychain() throws {
         #expect(PlatformKeystore(fallbackDir: scratch()).backend() == "keychain")
+        #expect(PlatformKeystore(fallbackDir: scratch()).isSystemStore())
         try runAll(systemStore: true)
     }
 
@@ -104,6 +105,7 @@ struct PlatformKeystoreTests {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let keystore = PlatformKeystore(fallbackDir: dir, systemStore: false)
         #expect(keystore.backend() == "file")
+        #expect(!keystore.isSystemStore())
         if onShare {
             // On a network share the server decides who reads the files: nothing is written.
             #expect(throws: BroError.self) { try keystore.set("metadata.tmdb", value: "abc123") }

@@ -5,7 +5,10 @@ import BroPorts
 /// The configuration (plan §11.1, §15.1, §15.7, §24), on the executor: config.json (mode 0600), its version (kv
 /// config.version, so it survives a restart) and the last good document (kv config.lastGood), and the secrets it
 /// refers to. The engine owns the secrets (owner, 2026-10-12, review L3-6): clients set them through `setSecret` and
-/// only ever see whether one is set. File, keystore and store work runs on workers.
+/// only ever see whether one is set. A secret comes from the system keystore, then BROMELIA_SECRET_<NAME>, then the
+/// secrets folder (plan §24); when two of them disagree, config secrets.prefer / secrets.bySecret pick one, and the
+/// disagreement is a problem: secret.conflict (an error) without a preference that settles it, secret.conflictPreferred
+/// (a warning) with one (owner, 2026-10-12). File, keystore and store work runs on workers.
 /// shared/fixtures/engine/config-service.cases.json.
 @EngineActor
 public final class ConfigService: ConfigSource {
@@ -14,11 +17,12 @@ public final class ConfigService: ConfigSource {
     private nonisolated static let fileMode = 0o600
     private nonisolated static let environmentPrefix = "BROMELIA_SECRET_"
 
-    private let executor: EngineExecutor
+    private nonisolated let executor: EngineExecutor
     private let bus: EventBus
     private let problems: ProblemService
     private let fs: any FileSystem
     private nonisolated let keystore: any Keystore
+    private nonisolated let secretFiles: any Keystore
     private let kv: any KeyValueRepository
     private let path: String
     private nonisolated let environment: [String: String]
@@ -26,15 +30,18 @@ public final class ConfigService: ConfigSource {
     private var savedVersion: Int64 = 0
     private var saving = false
 
-    /// `path`: config.json. `environment`: the process's BROMELIA_SECRET_<NAME> variables, read once by the
-    /// composition root (the engine never reads the environment itself).
+    /// `keystore`: where `setSecret` stores secrets (the system store, or the secrets folder when there is none).
+    /// `secretFiles`: the secrets folder alone (the keystore adapter without its system store). `path`: config.json.
+    /// `environment`: the process's BROMELIA_SECRET_<NAME> variables, read once by the composition root (the engine
+    /// never reads the environment itself).
     public init(executor: EngineExecutor, bus: EventBus, problems: ProblemService, fs: any FileSystem, keystore: any Keystore,
-                kv: any KeyValueRepository, path: String, environment: [String: String]) {
+                secretFiles: any Keystore, kv: any KeyValueRepository, path: String, environment: [String: String]) {
         self.executor = executor
         self.bus = bus
         self.problems = problems
         self.fs = fs
         self.keystore = keystore
+        self.secretFiles = secretFiles
         self.kv = kv
         self.path = path
         self.environment = environment
@@ -53,6 +60,7 @@ public final class ConfigService: ConfigSource {
         savedVersion = version?.int ?? 0
         guard let bytes else {
             config = Self.defaults()
+            try await checkSecrets()
             return
         }
         var decoded: Config?
@@ -69,11 +77,13 @@ public final class ConfigService: ConfigSource {
             let document = decoded.document
             try await executor.worker { () async throws(BroError) in try await kv.set(Self.lastGoodKey, value: document) }
             problems.clear(.configInvalid)
+            try await checkSecrets()
             return
         }
         config = Self.defaults()
         if let lastGood, lastGood.members != nil, let c = try? Self.decode(lastGood) { config = c }
         problems.raise(BroMessage(.configInvalid, [("count", .integer(Int64(errors)))], severity: .error), actions: [.openSettings])
+        try await checkSecrets()
     }
 
     /// The configuration in use (on the executor).
@@ -89,7 +99,7 @@ public final class ConfigService: ConfigSource {
     /// another update saves); config.rejected{count (errors), issues} when it has errors. The version and the last
     /// good document are stored before config.json, so a crash or a failed write can only make a client reload; a
     /// failure is config.saveFailed{reason} and leaves the configuration in use as it was. Publishes
-    /// configChanged{version}.
+    /// configChanged{version}, then checks the secrets again (the preference may have changed).
     public func update(_ doc: JsonValue, expectedVersion: Int64) async throws(BroError) -> ConfigEnvelope {
         if saving || expectedVersion != savedVersion {
             throw BroMessage(.configVersionConflict, [("current", .integer(savedVersion))], severity: .error).toError()
@@ -115,6 +125,7 @@ public final class ConfigService: ConfigSource {
         config = next
         problems.clear(.configInvalid)
         bus.publish(.configChanged, data: .object([("version", .integer(savedVersion))]))
+        try await checkSecrets()
         return try await envelope()
     }
 
@@ -127,48 +138,121 @@ public final class ConfigService: ConfigSource {
     }
 
     /// The version, the document, its issues and every secret it refers to (in document order) with whether it is
-    /// set: in the keystore, or given as BROMELIA_SECRET_<NAME>; a keystore failure counts as not set.
+    /// set: in any of its sources; a source that fails counts as not having it.
     public func envelope() async throws(BroError) -> ConfigEnvelope {
         let config = self.config
         let version = savedVersion
         let names = Self.secretNames(config.document)
         let secrets = try await executor.worker { [self] () async throws(BroError) -> [SecretStatus] in
-            names.map { SecretStatus(name: $0, set: isSet($0)) }
+            names.map { SecretStatus(name: $0, set: resolve($0, config: config).value != nil) }
         }
         return ConfigEnvelope(version: version, config: config, issues: ConfigValidator.validate(config), secrets: secrets)
     }
 
-    /// A secret's value: the keystore's, else BROMELIA_SECRET_<NAME> (upper case, '.' → '_'), else nil; the keystore's
-    /// failure when it fails and the environment has nothing (fs.notPrivate on a share, L3-8). Any thread but the
+    /// A secret's value, from the first source that has it: the system keystore, BROMELIA_SECRET_<NAME> (upper case,
+    /// '.' → '_'), the secrets folder; a source `config` prefers (secrets.bySecret, else secrets.prefer) comes first when
+    /// it has one. Nil when none has it; the first failure when a source failed and none has it (fs.notPrivate on a
+    /// share, L3-8). Sources that disagree raise (or update) the secret's problem on the executor. Any thread but the
     /// executor: the keystore may block.
-    public nonisolated func secret(_ name: String) throws(BroError) -> String? {
-        var failure: BroError?
-        do {
-            if let value = try keystore.get(name) { return value }
-        } catch {
-            failure = error
-        }
-        if let given = fromEnvironment(name) { return given }
-        if let failure { throw failure }
-        return nil
+    public nonisolated func secret(_ name: String, config: Config) throws(BroError) -> String? {
+        let r = resolve(name, config: config)
+        _ = executor.post { [self] in report(name, r) }
+        if r.value == nil, let failure = r.failure { throw failure }
+        return r.value
     }
 
-    /// Stores a secret in the keystore ('' removes it) and publishes configChanged{version} (the version doesn't
-    /// change). The keystore's failure is returned.
+    /// Stores a secret in the keystore ('' removes it), publishes configChanged{version} (the version doesn't change)
+    /// and checks the secrets again. The keystore's failure is returned.
     public func setSecret(_ name: String, value: String) async throws(BroError) {
         let keystore = self.keystore
         try await executor.worker { () async throws(BroError) in
             if value.isEmpty { try keystore.remove(name) } else { try keystore.set(name, value: value) }
         }
         bus.publish(.configChanged, data: .object([("version", .integer(savedVersion))]))
+        try await checkSecrets(also: name)
     }
 
     /// The export bundle: the configuration with its secret references, never their values.
     public func export() -> [UInt8] { ConfigCodec.exportBundle(config) }
 
-    private nonisolated func isSet(_ name: String) -> Bool {
-        if (try? keystore.get(name)) != nil { return true }
-        return fromEnvironment(name) != nil
+    /// What a secret's sources hold: the value used and where it came from, every source that has a value (in order),
+    /// whether they disagree and whether the preference chose the one used.
+    private struct Resolution: Sendable {
+        var value: String?
+        var using: SecretSource?
+        var sources: [SecretSource]
+        var conflict: Bool
+        var preferred: Bool
+        var failure: BroError?
+    }
+
+    private nonisolated func resolve(_ name: String, config: Config) -> Resolution {
+        var found: [(source: SecretSource, value: String)] = []
+        var failure: BroError?
+        func read(_ source: SecretSource, _ store: any Keystore) {
+            do {
+                if let v = try store.get(name) { found.append((source, v)) }
+            } catch {
+                if failure == nil { failure = error }
+            }
+        }
+        if keystore.isSystemStore() { read(.keystore, keystore) }
+        if let given = fromEnvironment(name) { found.append((.environment, given)) }
+        read(.file, secretFiles)
+        let prefer = Self.preference(config, name)
+        let chosen = found.firstIndex { $0.source == prefer } ?? (found.isEmpty ? nil : 0)
+        return Resolution(value: chosen.map { found[$0].value }, using: chosen.map { found[$0].source }, sources: found.map(\.source),
+                          conflict: Set(found.map(\.value)).count > 1, preferred: chosen.map { found[$0].source == prefer } ?? false,
+                          failure: failure)
+    }
+
+    /// secrets.bySecret[name], else secrets.prefer; nil for none.
+    private nonisolated static func preference(_ config: Config, _ name: String) -> SecretSource? {
+        let secrets = config.document["secrets"]
+        return (secrets?["bySecret"]?[name]?.string ?? secrets?["prefer"]?.string).flatMap(SecretSource.init(rawValue:))
+    }
+
+    private static func label(_ source: SecretSource) -> BroMessage {
+        switch source {
+        case .keystore: BroMessage(.secretSourceKeystore)
+        case .environment: BroMessage(.secretSourceEnvironment)
+        case .file: BroMessage(.secretSourceFile)
+        }
+    }
+
+    /// Raises, updates or clears a secret's problem (on the executor).
+    private func report(_ name: String, _ r: Resolution) {
+        let scope = ProblemScope(kind: .secret, id: name)
+        guard r.conflict, let using = r.using else {
+            problems.clear(.secretConflict, scope: scope)
+            problems.clear(.secretConflictPreferred, scope: scope)
+            return
+        }
+        let params: [(key: String, value: JsonValue)] = [("name", .string(name)), ("using", Self.label(using).toJson()),
+                                                         ("sources", .array(r.sources.map { Self.label($0).toJson() }))]
+        if r.preferred {
+            problems.clear(.secretConflict, scope: scope)
+            problems.raise(BroMessage(.secretConflictPreferred, params, severity: .warning), scope: scope, actions: [.openSettings])
+        } else {
+            problems.clear(.secretConflictPreferred, scope: scope)
+            problems.raise(BroMessage(.secretConflict, params, severity: .error), scope: scope, actions: [.openSettings])
+        }
+    }
+
+    /// Checks every secret the configuration refers to (and `also`), and clears the problems of secrets it no longer
+    /// refers to.
+    private func checkSecrets(also extra: String? = nil) async throws(BroError) {
+        let config = self.config
+        var names = Self.secretNames(config.document)
+        if let extra, !names.contains(extra) { names.append(extra) }
+        let checked = names
+        let results = try await executor.worker { [self] () async throws(BroError) -> [Resolution] in
+            checked.map { resolve($0, config: config) }
+        }
+        for (name, result) in zip(names, results) { report(name, result) }
+        for p in problems.problems() {
+            if let scope = p.scope, scope.kind == .secret, !names.contains(scope.id) { problems.clear(p.message.code, scope: scope) }
+        }
     }
 
     private nonisolated func fromEnvironment(_ name: String) -> String? {

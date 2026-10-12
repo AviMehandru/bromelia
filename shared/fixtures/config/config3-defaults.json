@@ -91,5 +91,9 @@
   },
   "updates": {
     "check": false
+  },
+  "secrets": {
+    "prefer": "none",
+    "bySecret": {}
   }
 }

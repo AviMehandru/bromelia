@@ -21,6 +21,9 @@ BroPlatformKeystore *bro_platform_keystore_new (const char *fallback_dir, const 
 /* Where the secrets are: "secretService" or "file". */
 const char *bro_platform_keystore_backend (BroPlatformKeystore *self);
 
+/* TRUE when the secrets are in the Secret Service, FALSE when they are files. */
+gboolean bro_platform_keystore_is_system_store (BroPlatformKeystore *self);
+
 /* NULL (and no error) when there is no such secret. Free with g_free. */
 char *bro_platform_keystore_get (BroPlatformKeystore *self, const char *name, BroBroError **error);
 gboolean bro_platform_keystore_set (BroPlatformKeystore *self, const char *name, const char *value, BroBroError **error);

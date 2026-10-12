@@ -42,6 +42,8 @@ public sealed class PlatformKeystore : IKeystore
     /// <summary>Where the secrets are: "credentialManager" or "file".</summary>
     public string Backend() => UseSystem() ? "credentialManager" : "file";
 
+    public bool IsSystemStore() => UseSystem();
+
     public string? Get(string name)
     {
         Check(name);

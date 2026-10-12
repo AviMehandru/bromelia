@@ -7,4 +7,5 @@ public enum ProblemScopeKind: String, Sendable, CaseIterable {
     case tool
     case target
     case notification
+    case secret
 }

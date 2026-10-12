@@ -111,6 +111,7 @@ test_keystore_without_secret_service (void)
       g_setenv ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bromelia-session-bus", TRUE);
       keystore = bro_platform_keystore_new (dir, NULL, TRUE);
       g_assert_cmpstr (bro_platform_keystore_backend (keystore), ==, "file");
+      g_assert_false (bro_keystore_is_system_store (BRO_KEYSTORE (keystore)));
       if (keystore_on_share ())
         return; /* checked by /keystore/files */
       g_assert_true (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
@@ -138,6 +139,7 @@ test_keystore_files (void)
   bro_test_run_cases ("adapters/keystore.cases.json", keystore_case);
 
   g_assert_cmpstr (bro_platform_keystore_backend (keystore), ==, "file");
+  g_assert_false (bro_keystore_is_system_store (BRO_KEYSTORE (keystore)));
   if (keystore_on_share ())
     {
       /* On a network share the server decides who reads the files: nothing is written. */

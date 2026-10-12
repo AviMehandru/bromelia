@@ -13,6 +13,7 @@ typedef enum {
   BRO_PROBLEM_SCOPE_KIND_TOOL,
   BRO_PROBLEM_SCOPE_KIND_TARGET,
   BRO_PROBLEM_SCOPE_KIND_NOTIFICATION,
+  BRO_PROBLEM_SCOPE_KIND_SECRET,
 } BroProblemScopeKind;
 
 /* The wire form ("library"), as in shared/schema/api/dtos.json. */

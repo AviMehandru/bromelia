@@ -8155,6 +8155,15 @@
           "swift": "Keystore.remove(_:)",
           "cs": "Keystore.Remove",
           "c": "bro_keystore_remove"
+        },
+        {
+          "name": "Keystore.isSystemStore",
+          "params": [],
+          "returns": "Bool",
+          "doc": "True when the secrets are in the system's store, false when they are files in the secrets folder because there is none.",
+          "swift": "Keystore.isSystemStore()",
+          "cs": "Keystore.IsSystemStore",
+          "c": "bro_keystore_is_system_store"
         }
       ]
     },
@@ -11142,6 +11151,15 @@
           "swift": "PlatformKeystore.backend()",
           "cs": "PlatformKeystore.Backend",
           "c": "bro_platform_keystore_backend"
+        },
+        {
+          "name": "PlatformKeystore.isSystemStore",
+          "params": [],
+          "returns": "Bool",
+          "doc": "Whether the system store is used (decided at the first call).",
+          "swift": "PlatformKeystore.isSystemStore()",
+          "cs": "PlatformKeystore.IsSystemStore",
+          "c": "bro_platform_keystore_is_system_store"
         }
       ]
     },
@@ -13177,59 +13195,6 @@
           }
         },
         {
-          "name": "ProblemScopeKind",
-          "kind": "enum",
-          "doc": "dtos.json Problem.scope.kind.",
-          "cases": [
-            "library",
-            "drive",
-            "job",
-            "unit",
-            "tool",
-            "target",
-            "notification"
-          ],
-          "swift": {
-            "name": "ProblemScopeKind",
-            "file": "macos/BromeliaKit/Sources/BroEngine/API/ProblemScopeKind.swift",
-            "cases": [
-              ".library",
-              ".drive",
-              ".job",
-              ".unit",
-              ".tool",
-              ".target",
-              ".notification"
-            ]
-          },
-          "cs": {
-            "name": "ProblemScopeKind",
-            "file": "windows/src/Bromelia.Engine/API/ProblemScopeKind.cs",
-            "cases": [
-              "Library",
-              "Drive",
-              "Job",
-              "Unit",
-              "Tool",
-              "Target",
-              "Notification"
-            ]
-          },
-          "c": {
-            "name": "BroProblemScopeKind",
-            "file": "linux/src/engine/api/bro-problem-scope-kind.h",
-            "cases": [
-              "BRO_PROBLEM_SCOPE_KIND_LIBRARY",
-              "BRO_PROBLEM_SCOPE_KIND_DRIVE",
-              "BRO_PROBLEM_SCOPE_KIND_JOB",
-              "BRO_PROBLEM_SCOPE_KIND_UNIT",
-              "BRO_PROBLEM_SCOPE_KIND_TOOL",
-              "BRO_PROBLEM_SCOPE_KIND_TARGET",
-              "BRO_PROBLEM_SCOPE_KIND_NOTIFICATION"
-            ]
-          }
-        },
-        {
           "name": "ProblemAction",
           "kind": "enum",
           "doc": "What a UI can offer for a problem.",
@@ -13316,6 +13281,63 @@
           "c": {
             "name": "BroConfigEnvelope",
             "file": "linux/src/engine/api/bro-config-envelope.h"
+          }
+        },
+        {
+          "name": "ProblemScopeKind",
+          "kind": "enum",
+          "doc": "dtos.json Problem.scope.kind.",
+          "cases": [
+            "library",
+            "drive",
+            "job",
+            "unit",
+            "tool",
+            "target",
+            "notification",
+            "secret"
+          ],
+          "swift": {
+            "name": "ProblemScopeKind",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/ProblemScopeKind.swift",
+            "cases": [
+              ".library",
+              ".drive",
+              ".job",
+              ".unit",
+              ".tool",
+              ".target",
+              ".notification",
+              ".secret"
+            ]
+          },
+          "cs": {
+            "name": "ProblemScopeKind",
+            "file": "windows/src/Bromelia.Engine/API/ProblemScopeKind.cs",
+            "cases": [
+              "Library",
+              "Drive",
+              "Job",
+              "Unit",
+              "Tool",
+              "Target",
+              "Notification",
+              "Secret"
+            ]
+          },
+          "c": {
+            "name": "BroProblemScopeKind",
+            "file": "linux/src/engine/api/bro-problem-scope-kind.h",
+            "cases": [
+              "BRO_PROBLEM_SCOPE_KIND_LIBRARY",
+              "BRO_PROBLEM_SCOPE_KIND_DRIVE",
+              "BRO_PROBLEM_SCOPE_KIND_JOB",
+              "BRO_PROBLEM_SCOPE_KIND_UNIT",
+              "BRO_PROBLEM_SCOPE_KIND_TOOL",
+              "BRO_PROBLEM_SCOPE_KIND_TARGET",
+              "BRO_PROBLEM_SCOPE_KIND_NOTIFICATION",
+              "BRO_PROBLEM_SCOPE_KIND_SECRET"
+            ]
           }
         }
       ],
@@ -14289,6 +14311,43 @@
             "name": "BroConfigService",
             "file": "linux/src/engine/services/bro-config-service.h"
           }
+        },
+        {
+          "name": "SecretSource",
+          "kind": "enum",
+          "doc": "Where a secret's value can come from, in the order they are asked (config secrets.prefer).",
+          "cases": [
+            "keystore",
+            "environment",
+            "file"
+          ],
+          "swift": {
+            "name": "SecretSource",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/SecretSource.swift",
+            "cases": [
+              ".keystore",
+              ".environment",
+              ".file"
+            ]
+          },
+          "cs": {
+            "name": "SecretSource",
+            "file": "windows/src/Bromelia.Engine/Services/SecretSource.cs",
+            "cases": [
+              "Keystore",
+              "Environment",
+              "File"
+            ]
+          },
+          "c": {
+            "name": "BroSecretSource",
+            "file": "linux/src/engine/services/bro-secret-source.h",
+            "cases": [
+              "BRO_SECRET_SOURCE_KEYSTORE",
+              "BRO_SECRET_SOURCE_ENVIRONMENT",
+              "BRO_SECRET_SOURCE_FILE"
+            ]
+          }
         }
       ],
       "functions": [
@@ -14402,18 +14461,6 @@
           "c": "bro_config_service_envelope"
         },
         {
-          "name": "ConfigService.secret",
-          "params": [
-            "name"
-          ],
-          "returns": "String?",
-          "doc": "The keystore's value, else BROMELIA_SECRET_<NAME>, else none; the keystore's failure when the environment has nothing. Not on the executor.",
-          "throws": true,
-          "swift": "ConfigService.secret(_:)",
-          "cs": "ConfigService.Secret",
-          "c": "bro_config_service_secret"
-        },
-        {
           "name": "ConfigService.setSecret",
           "params": [
             "name",
@@ -14439,6 +14486,19 @@
           "swift": "ConfigService.export()",
           "cs": "ConfigService.Export",
           "c": "bro_config_service_export"
+        },
+        {
+          "name": "ConfigService.secret",
+          "params": [
+            "name",
+            "config"
+          ],
+          "returns": "String?",
+          "doc": "The first source that has it (system keystore, BROMELIA_SECRET_<NAME>, secrets folder), the one config prefers first; the first failure when none has it. Sources that disagree raise secret.conflict (or secret.conflictPreferred) on the executor. Not on the executor.",
+          "throws": true,
+          "swift": "ConfigService.secret(_:config:)",
+          "cs": "ConfigService.Secret",
+          "c": "bro_config_service_secret"
         }
       ]
     }

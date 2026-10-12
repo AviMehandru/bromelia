@@ -1,157 +1,587 @@
 {
-  "description": "ConfigService (plan §11.1, §15.1, §15.7, §23, §24), on the engine executor, with ProblemService. load(): the version is the kv value config.version (0 when there is none); a missing config.json gives the defaults (decode of {\"version\": 3}) and writes nothing; a file that decodes and validates without errors (warnings are fine) is the configuration, and is kept in kv as config.lastGood; a file that doesn't (not JSON, or any error issue) leaves the file alone, uses config.lastGood (the defaults when there is none) and raises config.invalid{count} (error, action openSettings), count being the number of errors. update(doc, version): config.versionConflict{current} unless version is the current one, and also while another update is saving; config.rejected{count (of errors), issues (all of them)} when the document has errors (secrets written into it are config.secretInline errors), nothing saved; otherwise kv config.version = version + 1 first, then kv config.lastGood, then config.json (canonical, mode 0600, written atomically), so a crash or a failed write can only make a client reload, never let an old version through; config.invalid is cleared, configChanged{version} published, and the result is the envelope. A write that fails is config.saveFailed{reason: the failure's code}: the version (and config.lastGood, when it got that far) have moved on, the file and the configuration in use haven't. validate(doc): the issues, nothing saved. envelope(): {version, doc, issues (the current document's), secrets: every SecretRef name the document uses, in document order, with set = the keystore has it or BROMELIA_SECRET_<NAME> is given (a keystore failure counts as not set)}. secret(name) (not on the executor): the keystore's value, else the environment's BROMELIA_SECRET_<NAME> (upper case, '.' → '_'; an empty value counts as none), else null; when the keystore fails and the environment has nothing, its failure. setSecret(name, value): stores it in the keystore ('' removes it) and publishes configChanged{version} (the version doesn't change); a keystore failure is returned. export(): the export bundle (ConfigCodec.exportBundle). Given: file (config.json: a document, or {text} for raw text; absent: no file); kv {key: value}; keystore {name: value}; keystoreFails {name: {code, params}} (every keystore call for that name fails so); environment {BROMELIA_SECRET_<NAME>: value} (what the composition root passes); writeFails {code, params} (every config.json write fails so); holdWrites (every write, to the kv table or config.json, waits for a releaseWrites op). ops in order: load, {update: {doc, version, wait (default true; false: start it and go on, its result comes when it finishes)}}, {validate: doc}, envelope, {secret: name}, {setSecret: {name, value}}, export, current, version, releaseWrites (lets the held writes go and waits for the ops they held). Expect: results (one per op except releaseWrites, in op order: ok for load and setSecret, the envelope for update and envelope, issues for validate, the value (or null) for secret, the bundle for export, the document for current, the number for version; {error: {code, params}} for a failure); file (config.json afterwards: a document, {text}, or null for none; when written, its mode is 0600); kv, keystore (everything afterwards); events; problems. Every configuration document in expect (an envelope's doc, current, file, kv config.lastGood, export's config) is compared after ConfigCodec.decode, so it is written as short as the given ones.",
+  "description": "ConfigService (plan §11.1, §15.1, §15.7, §23, §24), on the engine executor, with ProblemService. load(): the version is the kv value config.version (0 when there is none); a missing config.json gives the defaults (decode of {\"version\": 3}) and writes nothing; a file that decodes and validates without errors (warnings are fine) is the configuration, and is kept in kv as config.lastGood; a file that doesn't (not JSON, or any error issue) leaves the file alone, uses config.lastGood (the defaults when there is none) and raises config.invalid{count} (error, action openSettings), count being the number of errors. update(doc, version): config.versionConflict{current} unless version is the current one, and also while another update is saving; config.rejected{count (of errors), issues (all of them)} when the document has errors (secrets written into it are config.secretInline errors), nothing saved; otherwise kv config.version = version + 1 first, then kv config.lastGood, then config.json (canonical, mode 0600, written atomically), so a crash or a failed write can only make a client reload, never let an old version through; config.invalid is cleared, configChanged{version} published, and the result is the envelope. A write that fails is config.saveFailed{reason: the failure's code}: the version (and config.lastGood, when it got that far) have moved on, the file and the configuration in use haven't. validate(doc): the issues, nothing saved. envelope(): {version, doc, issues (the current document's), secrets: every SecretRef name the document uses, in document order, with set = any source has it (a source that fails counts as not having it)}. secret(name, config) (not on the executor, with the configuration a job would have): the value of the first source that has it, in the order system keystore (only when the keystore is the system's store), BROMELIA_SECRET_<NAME> (upper case, '.' → '_'; an empty value counts as none), secrets folder; the source config secrets.bySecret[name] (else secrets.prefer, 'none' for no preference) names comes first when it has a value; null when none has it; the first failure when a source failed and none has it. Sources with different values are a problem scoped to the secret (id secret.<code>:secret:<name>, action openSettings, params {name, using: the label of the source used, sources: the labels of every source with a value, in order}): secret.conflict (error) unless the preferred source is the one used, then secret.conflictPreferred (warning); the other one is cleared first, and both are cleared when the sources agree. load, update and setSecret check every secret the configuration refers to (setSecret also the one it set) and clear the problems of secrets it no longer refers to; secret(name) checks that one. setSecret(name, value): stores it in the keystore ('' removes it), publishes configChanged{version} (the version doesn't change), then checks; a keystore failure is returned. export(): the export bundle (ConfigCodec.exportBundle). Given: file (config.json: a document, or {text} for raw text; absent: no file); kv {key: value}; systemStore (default true; false: there is no system store, so the keystore is the secrets folder); keystore {name: value} (the system store); keystoreFails {name: {code, params}} (every system store call for that name fails so); files {name: value} (the secrets folder); filesFail {name: {code, params}}; environment {BROMELIA_SECRET_<NAME>: value} (what the composition root passes); writeFails {code, params} (every config.json write fails so); holdWrites (every write, to the kv table or config.json, waits for a releaseWrites op). ops in order: load, {changeOutside: {store (keystore or files), name, value (absent: removed)}} (no result), {update: {doc, version, wait (default true; false: start it and go on, its result comes when it finishes)}}, {validate: doc}, envelope, {secret: name}, {setSecret: {name, value}}, export, current, version, releaseWrites (lets the held writes go and waits for the ops they held). Expect: results (one per op except releaseWrites, in op order: ok for load and setSecret, the envelope for update and envelope, issues for validate, the value (or null) for secret, the bundle for export, the document for current, the number for version; {error: {code, params}} for a failure); file (config.json afterwards: a document, {text}, or null for none; when written, its mode is 0600); kv, keystore, files (everything afterwards; files absent: none); events; problems. Every configuration document in expect (an envelope's doc, current, file, kv config.lastGood, export's config) is compared after ConfigCodec.decode, so it is written as short as the given ones.",
   "cases": [
     {
       "id": "a-missing-file-gives-the-defaults",
-      "given": { "ops": ["load", "version", "current", "envelope"] },
+      "given": {
+        "ops": [
+          "load",
+          "version",
+          "current",
+          "envelope"
+        ]
+      },
       "expect": {
-        "results": ["ok", 0, { "version": 3 }, { "version": 0, "doc": { "version": 3 }, "issues": [], "secrets": [] }],
-        "file": null, "kv": {}, "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          0,
+          {
+            "version": 3
+          },
+          {
+            "version": 0,
+            "doc": {
+              "version": 3
+            },
+            "issues": [],
+            "secrets": []
+          }
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "load-reads-the-file-and-the-version",
       "given": {
-        "file": { "version": 3, "metadata": { "provider": "tmdb" } },
-        "kv": { "config.version": 7 },
-        "ops": ["load", "version", "current"]
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb"
+          }
+        },
+        "kv": {
+          "config.version": 7
+        },
+        "ops": [
+          "load",
+          "version",
+          "current"
+        ]
       },
       "expect": {
-        "results": ["ok", 7, { "version": 3, "metadata": { "provider": "tmdb" } }],
-        "file": { "version": 3, "metadata": { "provider": "tmdb" } },
-        "kv": { "config.version": 7, "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb" } } },
-        "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          7,
+          {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb"
+          }
+        },
+        "kv": {
+          "config.version": 7,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        },
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "an-invalid-file-keeps-the-last-good-one",
       "given": {
-        "file": { "version": 3, "defaultProfile": "nope", "metadata": { "provider": "omdb" } },
-        "kv": { "config.version": 4, "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb" } } },
-        "ops": ["load", "version", "current"]
+        "file": {
+          "version": 3,
+          "defaultProfile": "nope",
+          "metadata": {
+            "provider": "omdb"
+          }
+        },
+        "kv": {
+          "config.version": 4,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        },
+        "ops": [
+          "load",
+          "version",
+          "current"
+        ]
       },
       "expect": {
-        "results": ["ok", 4, { "version": 3, "metadata": { "provider": "tmdb" } }],
-        "file": { "version": 3, "defaultProfile": "nope", "metadata": { "provider": "omdb" } },
-        "kv": { "config.version": 4, "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb" } } },
+        "results": [
+          "ok",
+          4,
+          {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        ],
+        "file": {
+          "version": 3,
+          "defaultProfile": "nope",
+          "metadata": {
+            "provider": "omdb"
+          }
+        },
+        "kv": {
+          "config.version": 4,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        },
         "keystore": {},
         "events": [
-          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
-            { "id": "config.invalid", "code": "config.invalid", "params": { "count": 1 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
-              "actions": ["openSettings"] } } }
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "config.invalid",
+                "code": "config.invalid",
+                "params": {
+                  "count": 1
+                },
+                "severity": "error",
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
         ],
         "problems": [
-          { "id": "config.invalid", "code": "config.invalid", "params": { "count": 1 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
-            "actions": ["openSettings"] }
+          {
+            "id": "config.invalid",
+            "code": "config.invalid",
+            "params": {
+              "count": 1
+            },
+            "severity": "error",
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
         ]
       }
     },
     {
       "id": "a-file-that-isnt-json-and-no-last-good-one-gives-the-defaults",
       "given": {
-        "file": { "text": "{ \"version\": 3," },
-        "ops": ["load", "current"]
+        "file": {
+          "text": "{ \"version\": 3,"
+        },
+        "ops": [
+          "load",
+          "current"
+        ]
       },
       "expect": {
-        "results": ["ok", { "version": 3 }],
-        "file": { "text": "{ \"version\": 3," },
-        "kv": {}, "keystore": {},
+        "results": [
+          "ok",
+          {
+            "version": 3
+          }
+        ],
+        "file": {
+          "text": "{ \"version\": 3,"
+        },
+        "kv": {},
+        "keystore": {},
         "events": [
-          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
-            { "id": "config.invalid", "code": "config.invalid", "params": { "count": 1 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
-              "actions": ["openSettings"] } } }
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "config.invalid",
+                "code": "config.invalid",
+                "params": {
+                  "count": 1
+                },
+                "severity": "error",
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
         ],
         "problems": [
-          { "id": "config.invalid", "code": "config.invalid", "params": { "count": 1 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
-            "actions": ["openSettings"] }
+          {
+            "id": "config.invalid",
+            "code": "config.invalid",
+            "params": {
+              "count": 1
+            },
+            "severity": "error",
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
         ]
       }
     },
     {
       "id": "warnings-dont-make-a-file-invalid",
       "given": {
-        "file": { "version": 3, "colour": "red" },
-        "ops": ["load", "envelope"]
+        "file": {
+          "version": 3,
+          "colour": "red"
+        },
+        "ops": [
+          "load",
+          "envelope"
+        ]
       },
       "expect": {
-        "results": ["ok", { "version": 0, "doc": { "version": 3 },
-                            "issues": [{ "path": "colour", "code": "config.unknownKey", "severity": "warning" }], "secrets": [] }],
-        "file": { "version": 3, "colour": "red" },
-        "kv": { "config.lastGood": { "version": 3 } },
-        "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "version": 0,
+            "doc": {
+              "version": 3
+            },
+            "issues": [
+              {
+                "path": "colour",
+                "code": "config.unknownKey",
+                "severity": "warning"
+              }
+            ],
+            "secrets": []
+          }
+        ],
+        "file": {
+          "version": 3,
+          "colour": "red"
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3
+          }
+        },
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "update-saves-and-publishes",
       "given": {
-        "ops": ["load", { "update": { "doc": { "version": 3, "metadata": { "provider": "tmdb" } }, "version": 0 } }, "version"]
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "tmdb"
+                }
+              },
+              "version": 0
+            }
+          },
+          "version"
+        ]
       },
       "expect": {
-        "results": ["ok", { "version": 1, "doc": { "version": 3, "metadata": { "provider": "tmdb" } }, "issues": [], "secrets": [] }, 1],
-        "file": { "version": 3, "metadata": { "provider": "tmdb" } },
-        "kv": { "config.version": 1, "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb" } } },
+        "results": [
+          "ok",
+          {
+            "version": 1,
+            "doc": {
+              "version": 3,
+              "metadata": {
+                "provider": "tmdb"
+              }
+            },
+            "issues": [],
+            "secrets": []
+          },
+          1
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb"
+          }
+        },
+        "kv": {
+          "config.version": 1,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        },
         "keystore": {},
-        "events": [{ "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "configChanged", "data": { "version": 1 } }],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          }
+        ],
         "problems": []
       }
     },
     {
       "id": "an-old-version-is-a-conflict",
       "given": {
-        "file": { "version": 3 },
-        "kv": { "config.version": 3 },
-        "ops": ["load", { "update": { "doc": { "version": 3, "metadata": { "provider": "tmdb" } }, "version": 2 } }]
+        "file": {
+          "version": 3
+        },
+        "kv": {
+          "config.version": 3
+        },
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "tmdb"
+                }
+              },
+              "version": 2
+            }
+          }
+        ]
       },
       "expect": {
-        "results": ["ok", { "error": { "code": "config.versionConflict", "params": { "current": 3 } } }],
-        "file": { "version": 3 },
-        "kv": { "config.version": 3, "config.lastGood": { "version": 3 } },
-        "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "config.versionConflict",
+              "params": {
+                "current": 3
+              }
+            }
+          }
+        ],
+        "file": {
+          "version": 3
+        },
+        "kv": {
+          "config.version": 3,
+          "config.lastGood": {
+            "version": 3
+          }
+        },
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "a-document-with-errors-is-rejected",
       "given": {
-        "ops": ["load", { "update": { "doc": { "version": 3, "defaultProfile": "nope" }, "version": 0 } }, "version"]
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "defaultProfile": "nope"
+              },
+              "version": 0
+            }
+          },
+          "version"
+        ]
       },
       "expect": {
-        "results": ["ok",
-          { "error": { "code": "config.rejected", "params": { "count": 1, "issues": [
-            { "path": "defaultProfile", "code": "config.unknownReference", "params": { "kind": "profile", "id": "nope" }, "severity": "error" }] } } },
-          0],
-        "file": null, "kv": {}, "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "config.rejected",
+              "params": {
+                "count": 1,
+                "issues": [
+                  {
+                    "path": "defaultProfile",
+                    "code": "config.unknownReference",
+                    "params": {
+                      "kind": "profile",
+                      "id": "nope"
+                    },
+                    "severity": "error"
+                  }
+                ]
+              }
+            }
+          },
+          0
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "a-secret-in-the-document-is-rejected",
       "given": {
-        "ops": ["load", { "update": { "doc": { "version": 3, "metadata": { "provider": "tmdb", "apiKey": "0123456789abcdef" } }, "version": 0 } }]
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "tmdb",
+                  "apiKey": "0123456789abcdef"
+                }
+              },
+              "version": 0
+            }
+          }
+        ]
       },
       "expect": {
-        "results": ["ok",
-          { "error": { "code": "config.rejected", "params": { "count": 1, "issues": [
-            { "path": "metadata.apiKey", "code": "config.secretInline", "severity": "error" }] } } }],
-        "file": null, "kv": {}, "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "config.rejected",
+              "params": {
+                "count": 1,
+                "issues": [
+                  {
+                    "path": "metadata.apiKey",
+                    "code": "config.secretInline",
+                    "severity": "error"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "saving-a-good-one-clears-config-invalid",
       "given": {
-        "file": { "text": "nonsense" },
-        "kv": { "config.version": 2, "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb" } } },
-        "ops": ["load", { "update": { "doc": { "version": 3, "metadata": { "provider": "omdb" } }, "version": 2 } }]
+        "file": {
+          "text": "nonsense"
+        },
+        "kv": {
+          "config.version": 2,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        },
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "omdb"
+                }
+              },
+              "version": 2
+            }
+          }
+        ]
       },
       "expect": {
-        "results": ["ok", { "version": 3, "doc": { "version": 3, "metadata": { "provider": "omdb" } }, "issues": [], "secrets": [] }],
-        "file": { "version": 3, "metadata": { "provider": "omdb" } },
-        "kv": { "config.version": 3, "config.lastGood": { "version": 3, "metadata": { "provider": "omdb" } } },
+        "results": [
+          "ok",
+          {
+            "version": 3,
+            "doc": {
+              "version": 3,
+              "metadata": {
+                "provider": "omdb"
+              }
+            },
+            "issues": [],
+            "secrets": []
+          }
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "omdb"
+          }
+        },
+        "kv": {
+          "config.version": 3,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "omdb"
+            }
+          }
+        },
         "keystore": {},
         "events": [
-          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "problemRaised", "data": { "problem":
-            { "id": "config.invalid", "code": "config.invalid", "params": { "count": 1 }, "severity": "error", "raisedAt": "2026-10-02T20:00:00.000Z",
-              "actions": ["openSettings"] } } },
-          { "seq": 2, "at": "2026-10-02T20:00:00.000Z", "type": "problemCleared", "data": { "problemId": "config.invalid", "code": "config.invalid" } },
-          { "seq": 3, "at": "2026-10-02T20:00:00.000Z", "type": "configChanged", "data": { "version": 3 } }
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "config.invalid",
+                "code": "config.invalid",
+                "params": {
+                  "count": 1
+                },
+                "severity": "error",
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "config.invalid",
+              "code": "config.invalid"
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 3
+            }
+          }
         ],
         "problems": []
       }
@@ -159,158 +589,637 @@
     {
       "id": "a-write-that-fails-leaves-the-configuration-alone",
       "given": {
-        "file": { "version": 3 },
-        "writeFails": { "code": "fs.failed", "params": { "path": "config.json", "reason": "No space left on device" } },
-        "ops": ["load",
-          { "update": { "doc": { "version": 3, "metadata": { "provider": "tmdb" } }, "version": 0 } },
-          "version", "current",
-          { "update": { "doc": { "version": 3, "metadata": { "provider": "tmdb" } }, "version": 0 } }]
+        "file": {
+          "version": 3
+        },
+        "writeFails": {
+          "code": "fs.failed",
+          "params": {
+            "path": "config.json",
+            "reason": "No space left on device"
+          }
+        },
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "tmdb"
+                }
+              },
+              "version": 0
+            }
+          },
+          "version",
+          "current",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "tmdb"
+                }
+              },
+              "version": 0
+            }
+          }
+        ]
       },
       "expect": {
-        "results": ["ok",
-          { "error": { "code": "config.saveFailed", "params": { "reason": "fs.failed" } } },
-          1, { "version": 3 },
-          { "error": { "code": "config.versionConflict", "params": { "current": 1 } } }],
-        "file": { "version": 3 },
-        "kv": { "config.version": 1, "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb" } } },
-        "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "config.saveFailed",
+              "params": {
+                "reason": "fs.failed"
+              }
+            }
+          },
+          1,
+          {
+            "version": 3
+          },
+          {
+            "error": {
+              "code": "config.versionConflict",
+              "params": {
+                "current": 1
+              }
+            }
+          }
+        ],
+        "file": {
+          "version": 3
+        },
+        "kv": {
+          "config.version": 1,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        },
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "an-update-while-another-saves-is-a-conflict",
       "given": {
         "holdWrites": true,
-        "ops": ["load",
-          { "update": { "doc": { "version": 3, "metadata": { "provider": "tmdb" } }, "version": 0, "wait": false } },
-          { "update": { "doc": { "version": 3, "metadata": { "provider": "omdb" } }, "version": 0 } },
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "tmdb"
+                }
+              },
+              "version": 0,
+              "wait": false
+            }
+          },
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "omdb"
+                }
+              },
+              "version": 0
+            }
+          },
           "releaseWrites",
-          "version"]
+          "version"
+        ]
       },
       "expect": {
-        "results": ["ok",
-          { "version": 1, "doc": { "version": 3, "metadata": { "provider": "tmdb" } }, "issues": [], "secrets": [] },
-          { "error": { "code": "config.versionConflict", "params": { "current": 0 } } },
-          1],
-        "file": { "version": 3, "metadata": { "provider": "tmdb" } },
-        "kv": { "config.version": 1, "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb" } } },
+        "results": [
+          "ok",
+          {
+            "version": 1,
+            "doc": {
+              "version": 3,
+              "metadata": {
+                "provider": "tmdb"
+              }
+            },
+            "issues": [],
+            "secrets": []
+          },
+          {
+            "error": {
+              "code": "config.versionConflict",
+              "params": {
+                "current": 0
+              }
+            }
+          },
+          1
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb"
+          }
+        },
+        "kv": {
+          "config.version": 1,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb"
+            }
+          }
+        },
         "keystore": {},
-        "events": [{ "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "configChanged", "data": { "version": 1 } }],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          }
+        ],
         "problems": []
       }
     },
     {
       "id": "validate-only-reports",
       "given": {
-        "ops": ["load",
-          { "validate": { "version": 3, "defaultProfile": "nope", "colour": "red" } },
-          { "validate": { "version": 3 } }]
+        "ops": [
+          "load",
+          {
+            "validate": {
+              "version": 3,
+              "defaultProfile": "nope",
+              "colour": "red"
+            }
+          },
+          {
+            "validate": {
+              "version": 3
+            }
+          }
+        ]
       },
       "expect": {
-        "results": ["ok",
-          [{ "path": "colour", "code": "config.unknownKey", "severity": "warning" },
-           { "path": "defaultProfile", "code": "config.unknownReference", "params": { "kind": "profile", "id": "nope" }, "severity": "error" }],
-          []],
-        "file": null, "kv": {}, "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          [
+            {
+              "path": "colour",
+              "code": "config.unknownKey",
+              "severity": "warning"
+            },
+            {
+              "path": "defaultProfile",
+              "code": "config.unknownReference",
+              "params": {
+                "kind": "profile",
+                "id": "nope"
+              },
+              "severity": "error"
+            }
+          ],
+          []
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "the-envelope-lists-the-secrets-without-values",
       "given": {
-        "file": { "version": 3,
-                  "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                  "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } },
-                  "notifications": { "targets": [
-                    { "id": "phone", "url": { "secret": "notify.phone" } },
-                    { "id": "phone2", "url": { "secret": "makemkv.key" } }] } },
-        "keystore": { "makemkv.key": "T-0123456789" },
-        "environment": { "BROMELIA_SECRET_METADATA_TMDB": "abcdef" },
-        "ops": ["load", "envelope"]
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "notifications": {
+            "targets": [
+              {
+                "id": "phone",
+                "url": {
+                  "secret": "notify.phone"
+                }
+              },
+              {
+                "id": "phone2",
+                "url": {
+                  "secret": "makemkv.key"
+                }
+              }
+            ]
+          }
+        },
+        "keystore": {
+          "makemkv.key": "T-0123456789"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "abcdef"
+        },
+        "ops": [
+          "load",
+          "envelope"
+        ]
       },
       "expect": {
-        "results": ["ok", {
-          "version": 0,
-          "doc": { "version": 3,
-                   "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                   "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } },
-                   "notifications": { "targets": [
-                     { "id": "phone", "url": { "secret": "notify.phone" } },
-                     { "id": "phone2", "url": { "secret": "makemkv.key" } }] } },
-          "issues": [],
-          "secrets": [{ "name": "makemkv.key", "set": true }, { "name": "metadata.tmdb", "set": true }, { "name": "notify.phone", "set": false }] }],
-        "file": { "version": 3,
-                  "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                  "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } },
-                  "notifications": { "targets": [
-                    { "id": "phone", "url": { "secret": "notify.phone" } },
-                    { "id": "phone2", "url": { "secret": "makemkv.key" } }] } },
-        "kv": { "config.lastGood": { "version": 3,
-                  "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                  "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } },
-                  "notifications": { "targets": [
-                    { "id": "phone", "url": { "secret": "notify.phone" } },
-                    { "id": "phone2", "url": { "secret": "makemkv.key" } }] } } },
-        "keystore": { "makemkv.key": "T-0123456789" },
-        "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "version": 0,
+            "doc": {
+              "version": 3,
+              "makemkv": {
+                "registrationKey": {
+                  "secret": "makemkv.key"
+                }
+              },
+              "metadata": {
+                "provider": "tmdb",
+                "apiKey": {
+                  "secret": "metadata.tmdb"
+                }
+              },
+              "notifications": {
+                "targets": [
+                  {
+                    "id": "phone",
+                    "url": {
+                      "secret": "notify.phone"
+                    }
+                  },
+                  {
+                    "id": "phone2",
+                    "url": {
+                      "secret": "makemkv.key"
+                    }
+                  }
+                ]
+              }
+            },
+            "issues": [],
+            "secrets": [
+              {
+                "name": "makemkv.key",
+                "set": true
+              },
+              {
+                "name": "metadata.tmdb",
+                "set": true
+              },
+              {
+                "name": "notify.phone",
+                "set": false
+              }
+            ]
+          }
+        ],
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "notifications": {
+            "targets": [
+              {
+                "id": "phone",
+                "url": {
+                  "secret": "notify.phone"
+                }
+              },
+              {
+                "id": "phone2",
+                "url": {
+                  "secret": "makemkv.key"
+                }
+              }
+            ]
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "makemkv": {
+              "registrationKey": {
+                "secret": "makemkv.key"
+              }
+            },
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            },
+            "notifications": {
+              "targets": [
+                {
+                  "id": "phone",
+                  "url": {
+                    "secret": "notify.phone"
+                  }
+                },
+                {
+                  "id": "phone2",
+                  "url": {
+                    "secret": "makemkv.key"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "keystore": {
+          "makemkv.key": "T-0123456789"
+        },
+        "events": [],
+        "problems": []
       }
     },
     {
-      "id": "secrets-come-from-the-keystore-then-the-environment",
+      "id": "secrets-come-from-the-keystore-then-the-environment-then-the-folder",
       "given": {
-        "keystore": { "makemkv.key": "from-keystore" },
-        "environment": { "BROMELIA_SECRET_MAKEMKV_KEY": "from-env", "BROMELIA_SECRET_METADATA_TMDB": "env-only",
-                         "BROMELIA_SECRET_NOTIFY_HOME-1": "dash" },
-        "ops": ["load", { "secret": "makemkv.key" }, { "secret": "metadata.tmdb" }, { "secret": "notify.home-1" }, { "secret": "notify.phone" }]
+        "keystore": {
+          "makemkv.key": "from-keystore"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-only",
+          "BROMELIA_SECRET_NOTIFY_HOME-1": "dash",
+          "BROMELIA_SECRET_NOTIFY_SAME": "same",
+          "BROMELIA_SECRET_NOTIFY_EMPTY": ""
+        },
+        "files": {
+          "notify.folder": "from-folder",
+          "notify.same": "same"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "makemkv.key"
+          },
+          {
+            "secret": "metadata.tmdb"
+          },
+          {
+            "secret": "notify.home-1"
+          },
+          {
+            "secret": "notify.folder"
+          },
+          {
+            "secret": "notify.same"
+          },
+          {
+            "secret": "notify.empty"
+          },
+          {
+            "secret": "notify.phone"
+          }
+        ]
       },
       "expect": {
-        "results": ["ok", "from-keystore", "env-only", "dash", null],
-        "file": null, "kv": {}, "keystore": { "makemkv.key": "from-keystore" }, "events": [], "problems": []
+        "results": [
+          "ok",
+          "from-keystore",
+          "env-only",
+          "dash",
+          "from-folder",
+          "same",
+          null,
+          null
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {
+          "makemkv.key": "from-keystore"
+        },
+        "files": {
+          "notify.folder": "from-folder",
+          "notify.same": "same"
+        },
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "a-keystore-that-fails-falls-back-to-the-environment",
       "given": {
-        "file": { "version": 3,
-                  "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                  "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } },
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
         "keystoreFails": {
-          "makemkv.key": { "code": "fs.notPrivate", "params": { "path": "/Volumes/nas/Bromelia/secrets", "reason": "a network share" } },
-          "metadata.tmdb": { "code": "fs.notPrivate", "params": { "path": "/Volumes/nas/Bromelia/secrets", "reason": "a network share" } } },
-        "environment": { "BROMELIA_SECRET_METADATA_TMDB": "abcdef" },
-        "ops": ["load", { "secret": "metadata.tmdb" }, { "secret": "makemkv.key" }, "envelope"]
+          "makemkv.key": {
+            "code": "fs.notPrivate",
+            "params": {
+              "path": "/Volumes/nas/Bromelia/secrets",
+              "reason": "a network share"
+            }
+          },
+          "metadata.tmdb": {
+            "code": "fs.notPrivate",
+            "params": {
+              "path": "/Volumes/nas/Bromelia/secrets",
+              "reason": "a network share"
+            }
+          }
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "abcdef"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "metadata.tmdb"
+          },
+          {
+            "secret": "makemkv.key"
+          },
+          "envelope"
+        ]
       },
       "expect": {
-        "results": ["ok", "abcdef",
-          { "error": { "code": "fs.notPrivate", "params": { "path": "/Volumes/nas/Bromelia/secrets", "reason": "a network share" } } },
-          { "version": 0,
-            "doc": { "version": 3,
-                     "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                     "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } },
+        "results": [
+          "ok",
+          "abcdef",
+          {
+            "error": {
+              "code": "fs.notPrivate",
+              "params": {
+                "path": "/Volumes/nas/Bromelia/secrets",
+                "reason": "a network share"
+              }
+            }
+          },
+          {
+            "version": 0,
+            "doc": {
+              "version": 3,
+              "makemkv": {
+                "registrationKey": {
+                  "secret": "makemkv.key"
+                }
+              },
+              "metadata": {
+                "provider": "tmdb",
+                "apiKey": {
+                  "secret": "metadata.tmdb"
+                }
+              }
+            },
             "issues": [],
-            "secrets": [{ "name": "makemkv.key", "set": false }, { "name": "metadata.tmdb", "set": true }] }],
-        "file": { "version": 3,
-                  "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                  "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } },
-        "kv": { "config.lastGood": { "version": 3,
-                  "makemkv": { "registrationKey": { "secret": "makemkv.key" } },
-                  "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } } },
-        "keystore": {}, "events": [], "problems": []
+            "secrets": [
+              {
+                "name": "makemkv.key",
+                "set": false
+              },
+              {
+                "name": "metadata.tmdb",
+                "set": true
+              }
+            ]
+          }
+        ],
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "makemkv": {
+              "registrationKey": {
+                "secret": "makemkv.key"
+              }
+            },
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "set-secret-stores-removes-and-publishes",
       "given": {
-        "kv": { "config.version": 5 },
-        "keystore": { "metadata.tmdb": "old" },
-        "ops": ["load", { "setSecret": { "name": "makemkv.key", "value": "T-0123456789" } }, { "setSecret": { "name": "metadata.tmdb", "value": "" } },
-                "version", { "secret": "makemkv.key" }, { "secret": "metadata.tmdb" }]
+        "kv": {
+          "config.version": 5
+        },
+        "keystore": {
+          "metadata.tmdb": "old"
+        },
+        "ops": [
+          "load",
+          {
+            "setSecret": {
+              "name": "makemkv.key",
+              "value": "T-0123456789"
+            }
+          },
+          {
+            "setSecret": {
+              "name": "metadata.tmdb",
+              "value": ""
+            }
+          },
+          "version",
+          {
+            "secret": "makemkv.key"
+          },
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
       },
       "expect": {
-        "results": ["ok", "ok", "ok", 5, "T-0123456789", null],
-        "file": null, "kv": { "config.version": 5 },
-        "keystore": { "makemkv.key": "T-0123456789" },
+        "results": [
+          "ok",
+          "ok",
+          "ok",
+          5,
+          "T-0123456789",
+          null
+        ],
+        "file": null,
+        "kv": {
+          "config.version": 5
+        },
+        "keystore": {
+          "makemkv.key": "T-0123456789"
+        },
         "events": [
-          { "seq": 1, "at": "2026-10-02T20:00:00.000Z", "type": "configChanged", "data": { "version": 5 } },
-          { "seq": 2, "at": "2026-10-02T20:00:00.000Z", "type": "configChanged", "data": { "version": 5 } }
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 5
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 5
+            }
+          }
         ],
         "problems": []
       }
@@ -318,27 +1227,1752 @@
     {
       "id": "set-secret-reports-a-keystore-failure",
       "given": {
-        "keystoreFails": { "makemkv.key": { "code": "keystore.failed", "params": { "name": "makemkv.key", "reason": "The keychain is locked" } } },
-        "ops": ["load", { "setSecret": { "name": "makemkv.key", "value": "T-0123456789" } }]
+        "keystoreFails": {
+          "makemkv.key": {
+            "code": "keystore.failed",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "The keychain is locked"
+            }
+          }
+        },
+        "ops": [
+          "load",
+          {
+            "setSecret": {
+              "name": "makemkv.key",
+              "value": "T-0123456789"
+            }
+          }
+        ]
       },
       "expect": {
-        "results": ["ok", { "error": { "code": "keystore.failed", "params": { "name": "makemkv.key", "reason": "The keychain is locked" } } }],
-        "file": null, "kv": {}, "keystore": {}, "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "keystore.failed",
+              "params": {
+                "name": "makemkv.key",
+                "reason": "The keychain is locked"
+              }
+            }
+          }
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     },
     {
       "id": "export-keeps-references-not-values",
       "given": {
-        "file": { "version": 3, "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } },
-        "keystore": { "metadata.tmdb": "abcdef" },
-        "ops": ["load", "export"]
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "abcdef"
+        },
+        "ops": [
+          "load",
+          "export"
+        ]
       },
       "expect": {
-        "results": ["ok", { "format": "bromelia-config", "version": 3,
-                            "config": { "version": 3, "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } } }],
-        "file": { "version": 3, "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } },
-        "kv": { "config.lastGood": { "version": 3, "metadata": { "provider": "tmdb", "apiKey": { "secret": "metadata.tmdb" } } } },
-        "keystore": { "metadata.tmdb": "abcdef" }, "events": [], "problems": []
+        "results": [
+          "ok",
+          {
+            "format": "bromelia-config",
+            "version": 3,
+            "config": {
+              "version": 3,
+              "metadata": {
+                "provider": "tmdb",
+                "apiKey": {
+                  "secret": "metadata.tmdb"
+                }
+              }
+            }
+          }
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "abcdef"
+        },
+        "events": [],
+        "problems": []
+      }
+    },
+    {
+      "id": "two-sources-that-disagree-ring-the-alarm",
+      "given": {
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "ks-value"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "metadata.tmdb"
+          },
+          "envelope"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ks-value",
+          {
+            "version": 0,
+            "doc": {
+              "version": 3,
+              "metadata": {
+                "provider": "tmdb",
+                "apiKey": {
+                  "secret": "metadata.tmdb"
+                }
+              }
+            },
+            "issues": [],
+            "secrets": [
+              {
+                "name": "metadata.tmdb",
+                "set": true
+              }
+            ]
+          }
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "ks-value"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:metadata.tmdb",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.keystore"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.keystore"
+                    },
+                    {
+                      "code": "secret.source.environment"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflict:secret:metadata.tmdb",
+            "code": "secret.conflict",
+            "params": {
+              "name": "metadata.tmdb",
+              "using": {
+                "code": "secret.source.keystore"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.keystore"
+                },
+                {
+                  "code": "secret.source.environment"
+                }
+              ]
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "without-a-system-store-the-environment-beats-the-folder",
+      "given": {
+        "systemStore": false,
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "files": {
+          "metadata.tmdb": "file-value"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "env-value"
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "metadata.tmdb": "file-value"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:metadata.tmdb",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.environment"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.environment"
+                    },
+                    {
+                      "code": "secret.source.file"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflict:secret:metadata.tmdb",
+            "code": "secret.conflict",
+            "params": {
+              "name": "metadata.tmdb",
+              "using": {
+                "code": "secret.source.environment"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.environment"
+                },
+                {
+                  "code": "secret.source.file"
+                }
+              ]
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "the-same-value-in-two-places-is-no-conflict",
+      "given": {
+        "systemStore": false,
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "files": {
+          "metadata.tmdb": "abc"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "abc"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "abc"
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "metadata.tmdb": "abc"
+        },
+        "events": [],
+        "problems": []
+      }
+    },
+    {
+      "id": "a-preference-picks-the-source-and-keeps-a-warning",
+      "given": {
+        "systemStore": false,
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "secrets": {
+            "prefer": "file"
+          }
+        },
+        "files": {
+          "metadata.tmdb": "file-value"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "file-value"
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "secrets": {
+            "prefer": "file"
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            },
+            "secrets": {
+              "prefer": "file"
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "metadata.tmdb": "file-value"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflictPreferred:secret:metadata.tmdb",
+                "code": "secret.conflictPreferred",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.file"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.environment"
+                    },
+                    {
+                      "code": "secret.source.file"
+                    }
+                  ]
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflictPreferred:secret:metadata.tmdb",
+            "code": "secret.conflictPreferred",
+            "params": {
+              "name": "metadata.tmdb",
+              "using": {
+                "code": "secret.source.file"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.environment"
+                },
+                {
+                  "code": "secret.source.file"
+                }
+              ]
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-per-secret-preference-overrides-the-global-one",
+      "given": {
+        "systemStore": false,
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "secrets": {
+            "prefer": "environment",
+            "bySecret": {
+              "metadata.tmdb": "file"
+            }
+          }
+        },
+        "files": {
+          "makemkv.key": "T-file",
+          "metadata.tmdb": "file-value"
+        },
+        "environment": {
+          "BROMELIA_SECRET_MAKEMKV_KEY": "T-env",
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "makemkv.key"
+          },
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "T-env",
+          "file-value"
+        ],
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "secrets": {
+            "prefer": "environment",
+            "bySecret": {
+              "metadata.tmdb": "file"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "makemkv": {
+              "registrationKey": {
+                "secret": "makemkv.key"
+              }
+            },
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            },
+            "secrets": {
+              "prefer": "environment",
+              "bySecret": {
+                "metadata.tmdb": "file"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "makemkv.key": "T-file",
+          "metadata.tmdb": "file-value"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflictPreferred:secret:makemkv.key",
+                "code": "secret.conflictPreferred",
+                "params": {
+                  "name": "makemkv.key",
+                  "using": {
+                    "code": "secret.source.environment"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.environment"
+                    },
+                    {
+                      "code": "secret.source.file"
+                    }
+                  ]
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflictPreferred:secret:metadata.tmdb",
+                "code": "secret.conflictPreferred",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.file"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.environment"
+                    },
+                    {
+                      "code": "secret.source.file"
+                    }
+                  ]
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflictPreferred:secret:makemkv.key",
+            "code": "secret.conflictPreferred",
+            "params": {
+              "name": "makemkv.key",
+              "using": {
+                "code": "secret.source.environment"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.environment"
+                },
+                {
+                  "code": "secret.source.file"
+                }
+              ]
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "secret",
+              "id": "makemkv.key"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          },
+          {
+            "id": "secret.conflictPreferred:secret:metadata.tmdb",
+            "code": "secret.conflictPreferred",
+            "params": {
+              "name": "metadata.tmdb",
+              "using": {
+                "code": "secret.source.file"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.environment"
+                },
+                {
+                  "code": "secret.source.file"
+                }
+              ]
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-preferred-source-without-a-value-falls-back-to-the-order",
+      "given": {
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "secrets": {
+            "prefer": "keystore"
+          }
+        },
+        "files": {
+          "metadata.tmdb": "file-value"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "env-value"
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "secrets": {
+            "prefer": "keystore"
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            },
+            "secrets": {
+              "prefer": "keystore"
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "metadata.tmdb": "file-value"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:metadata.tmdb",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.environment"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.environment"
+                    },
+                    {
+                      "code": "secret.source.file"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflict:secret:metadata.tmdb",
+            "code": "secret.conflict",
+            "params": {
+              "name": "metadata.tmdb",
+              "using": {
+                "code": "secret.source.environment"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.environment"
+                },
+                {
+                  "code": "secret.source.file"
+                }
+              ]
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "choosing-a-source-turns-the-alarm-into-a-warning",
+      "given": {
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "ks-value"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "metadata": {
+                  "provider": "tmdb",
+                  "apiKey": {
+                    "secret": "metadata.tmdb"
+                  }
+                },
+                "secrets": {
+                  "prefer": "environment"
+                }
+              },
+              "version": 0
+            }
+          },
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "version": 1,
+            "doc": {
+              "version": 3,
+              "metadata": {
+                "provider": "tmdb",
+                "apiKey": {
+                  "secret": "metadata.tmdb"
+                }
+              },
+              "secrets": {
+                "prefer": "environment"
+              }
+            },
+            "issues": [],
+            "secrets": [
+              {
+                "name": "metadata.tmdb",
+                "set": true
+              }
+            ]
+          },
+          "env-value"
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          },
+          "secrets": {
+            "prefer": "environment"
+          }
+        },
+        "kv": {
+          "config.version": 1,
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            },
+            "secrets": {
+              "prefer": "environment"
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "ks-value"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:metadata.tmdb",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.keystore"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.keystore"
+                    },
+                    {
+                      "code": "secret.source.environment"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "secret.conflict:secret:metadata.tmdb",
+              "code": "secret.conflict"
+            }
+          },
+          {
+            "seq": 4,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflictPreferred:secret:metadata.tmdb",
+                "code": "secret.conflictPreferred",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.environment"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.keystore"
+                    },
+                    {
+                      "code": "secret.source.environment"
+                    }
+                  ]
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflictPreferred:secret:metadata.tmdb",
+            "code": "secret.conflictPreferred",
+            "params": {
+              "name": "metadata.tmdb",
+              "using": {
+                "code": "secret.source.environment"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.keystore"
+                },
+                {
+                  "code": "secret.source.environment"
+                }
+              ]
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "setting-the-same-value-silences-the-alarm",
+      "given": {
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "old"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "new"
+        },
+        "ops": [
+          "load",
+          {
+            "setSecret": {
+              "name": "metadata.tmdb",
+              "value": "new"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok"
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "new"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:metadata.tmdb",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.keystore"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.keystore"
+                    },
+                    {
+                      "code": "secret.source.environment"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 0
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "secret.conflict:secret:metadata.tmdb",
+              "code": "secret.conflict"
+            }
+          }
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "setting-a-different-value-rings-the-alarm",
+      "given": {
+        "environment": {
+          "BROMELIA_SECRET_NOTIFY_PHONE": "https://ntfy.example/env"
+        },
+        "ops": [
+          "load",
+          {
+            "setSecret": {
+              "name": "notify.phone",
+              "value": "https://ntfy.example/ui"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok"
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {
+          "notify.phone": "https://ntfy.example/ui"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 0
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:notify.phone",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "notify.phone",
+                  "using": {
+                    "code": "secret.source.keystore"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.keystore"
+                    },
+                    {
+                      "code": "secret.source.environment"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "notify.phone"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflict:secret:notify.phone",
+            "code": "secret.conflict",
+            "params": {
+              "name": "notify.phone",
+              "using": {
+                "code": "secret.source.keystore"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.keystore"
+                },
+                {
+                  "code": "secret.source.environment"
+                }
+              ]
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "secret",
+              "id": "notify.phone"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-change-outside-bromelia-is-noticed-when-the-secret-is-read",
+      "given": {
+        "systemStore": false,
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "changeOutside": {
+              "store": "files",
+              "name": "metadata.tmdb",
+              "value": "stale"
+            }
+          },
+          {
+            "secret": "metadata.tmdb"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "env-value"
+        ],
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "metadata.tmdb": "stale"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:metadata.tmdb",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.environment"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.environment"
+                    },
+                    {
+                      "code": "secret.source.file"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.conflict:secret:metadata.tmdb",
+            "code": "secret.conflict",
+            "params": {
+              "name": "metadata.tmdb",
+              "using": {
+                "code": "secret.source.environment"
+              },
+              "sources": [
+                {
+                  "code": "secret.source.environment"
+                },
+                {
+                  "code": "secret.source.file"
+                }
+              ]
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-secret-no-longer-used-loses-its-alarm",
+      "given": {
+        "file": {
+          "version": 3,
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "ks-value"
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "env-value"
+        },
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3
+              },
+              "version": 0
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "version": 1,
+            "doc": {
+              "version": 3
+            },
+            "issues": [],
+            "secrets": []
+          }
+        ],
+        "file": {
+          "version": 3
+        },
+        "kv": {
+          "config.version": 1,
+          "config.lastGood": {
+            "version": 3
+          }
+        },
+        "keystore": {
+          "metadata.tmdb": "ks-value"
+        },
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.conflict:secret:metadata.tmdb",
+                "code": "secret.conflict",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "using": {
+                    "code": "secret.source.keystore"
+                  },
+                  "sources": [
+                    {
+                      "code": "secret.source.keystore"
+                    },
+                    {
+                      "code": "secret.source.environment"
+                    }
+                  ]
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "secret.conflict:secret:metadata.tmdb",
+              "code": "secret.conflict"
+            }
+          }
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "a-secrets-folder-on-a-share-falls-back-to-the-environment",
+      "given": {
+        "systemStore": false,
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "filesFail": {
+          "makemkv.key": {
+            "code": "fs.notPrivate",
+            "params": {
+              "path": "/Volumes/nas/Bromelia/secrets",
+              "reason": "a network share"
+            }
+          },
+          "metadata.tmdb": {
+            "code": "fs.notPrivate",
+            "params": {
+              "path": "/Volumes/nas/Bromelia/secrets",
+              "reason": "a network share"
+            }
+          }
+        },
+        "environment": {
+          "BROMELIA_SECRET_METADATA_TMDB": "abcdef"
+        },
+        "ops": [
+          "load",
+          {
+            "secret": "metadata.tmdb"
+          },
+          {
+            "secret": "makemkv.key"
+          },
+          "envelope"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "abcdef",
+          {
+            "error": {
+              "code": "fs.notPrivate",
+              "params": {
+                "path": "/Volumes/nas/Bromelia/secrets",
+                "reason": "a network share"
+              }
+            }
+          },
+          {
+            "version": 0,
+            "doc": {
+              "version": 3,
+              "makemkv": {
+                "registrationKey": {
+                  "secret": "makemkv.key"
+                }
+              },
+              "metadata": {
+                "provider": "tmdb",
+                "apiKey": {
+                  "secret": "metadata.tmdb"
+                }
+              }
+            },
+            "issues": [],
+            "secrets": [
+              {
+                "name": "makemkv.key",
+                "set": false
+              },
+              {
+                "name": "metadata.tmdb",
+                "set": true
+              }
+            ]
+          }
+        ],
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          },
+          "metadata": {
+            "provider": "tmdb",
+            "apiKey": {
+              "secret": "metadata.tmdb"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "makemkv": {
+              "registrationKey": {
+                "secret": "makemkv.key"
+              }
+            },
+            "metadata": {
+              "provider": "tmdb",
+              "apiKey": {
+                "secret": "metadata.tmdb"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "events": [],
+        "problems": []
+      }
+    },
+    {
+      "id": "a-preference-that-isnt-a-source-is-rejected",
+      "given": {
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3,
+                "secrets": {
+                  "bySecret": {
+                    "metadata.tmdb": "vault"
+                  }
+                }
+              },
+              "version": 0
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "config.rejected",
+              "params": {
+                "count": 1,
+                "issues": [
+                  {
+                    "path": "secrets.bySecret.metadata.tmdb",
+                    "code": "config.invalidValue",
+                    "params": {
+                      "value": "vault"
+                    },
+                    "severity": "error"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "file": null,
+        "kv": {},
+        "keystore": {},
+        "events": [],
+        "problems": []
       }
     }
   ]

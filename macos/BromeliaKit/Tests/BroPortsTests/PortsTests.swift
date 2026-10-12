@@ -13,6 +13,7 @@ final class MemoryKeystore: Keystore, @unchecked Sendable {
     func get(_ name: String) throws(BroError) -> String? { lock.withLock { secrets[name] } }
     func set(_ name: String, value: String) throws(BroError) { lock.withLock { secrets[name] = value } }
     func remove(_ name: String) throws(BroError) { _ = lock.withLock { secrets.removeValue(forKey: name) } }
+    func isSystemStore() -> Bool { false }
 }
 
 /// The values a column's CHECK (column IN (…)) allows in shared/schema/db/0001_init.sql.

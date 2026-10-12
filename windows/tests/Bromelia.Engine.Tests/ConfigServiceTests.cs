@@ -80,6 +80,9 @@ public sealed class ConfigServiceTests
         readonly object _lock = new();
         public readonly SortedDictionary<string, string> Values = new(StringComparer.Ordinal);
         public readonly Dictionary<string, JsonValue> Fails = new();
+        public bool SystemStore = true;
+
+        public bool IsSystemStore() => SystemStore;
 
         void Check(string name)
         {
@@ -137,13 +140,20 @@ public sealed class ConfigServiceTests
                 files.Bytes = file["text"]?.AsString is { } text ? Encoding.UTF8.GetBytes(text) : JsonValue.EncodeCanonical(file);
             if (given["writeFails"] is { } wf) files.WriteFails = wf;
             if (given["holdWrites"]?.AsBool == true) files.Hold = new ManualResetEventSlim();
+            var empty = new List<KeyValuePair<string, JsonValue>>();
             var keystore = new Keystore();
-            foreach (var (k, v) in given["keystore"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()) keystore.Values[k] = v.AsString!;
-            foreach (var (k, v) in given["keystoreFails"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()) keystore.Fails[k] = v;
+            foreach (var (k, v) in given["keystore"]?.AsObject ?? empty) keystore.Values[k] = v.AsString!;
+            foreach (var (k, v) in given["keystoreFails"]?.AsObject ?? empty) keystore.Fails[k] = v;
+            var secretFiles = new Keystore { SystemStore = false };
+            foreach (var (k, v) in given["files"]?.AsObject ?? empty) secretFiles.Values[k] = v.AsString!;
+            foreach (var (k, v) in given["filesFail"]?.AsObject ?? empty) secretFiles.Fails[k] = v;
+            // Without a system store, the keystore is the secrets folder.
+            var systemStore = given["systemStore"]?.AsBool != false;
             var kv = new Kv { Gate = files };
             foreach (var (k, v) in given["kv"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()) kv.Values[k] = v;
             var environment = (given["environment"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()).ToDictionary(m => m.Key, m => m.Value.AsString!);
-            var service = new ConfigService(w.Executor, bus, problems, files, keystore, kv, ConfigPath, environment);
+            var service = new ConfigService(w.Executor, bus, problems, files, systemStore ? keystore : secretFiles, secretFiles, kv, ConfigPath,
+                environment);
             var events = new List<EngineEvent>();
             w.OnExecutor(() => bus.Subscribe(null, events.Add));
 
@@ -216,10 +226,23 @@ public sealed class ConfigServiceTests
                         results[i] = Sync(() => JsonValue.Parse(service.Export())!);
                         break;
                     case "secret":
-                        // Not on the executor: the keystore may block.
-                        try { results[i] = JsonValue.Of(service.Secret(arg.AsString!)); }
+                    {
+                        // Not on the executor (the keystore may block), with the configuration a job would have.
+                        Config? config = null;
+                        w.OnExecutor(() => config = service.Current());
+                        try { results[i] = JsonValue.Of(service.Secret(arg.AsString!, config!)); }
                         catch (BroFailure f) { results[i] = ErrorJson(f.Error); }
+                        w.Settle();
                         break;
+                    }
+                    case "changeOutside":
+                    {
+                        var store = arg["store"]!.AsString == "keystore" ? keystore : secretFiles;
+                        var secret = arg["name"]!.AsString!;
+                        if (arg["value"]?.AsString is { } value) store.Values[secret] = value;
+                        else store.Values.Remove(secret);
+                        break;
+                    }
                     case "releaseWrites":
                         files.Hold!.Set();
                         foreach (var d in done) Wait(d);
@@ -235,7 +258,7 @@ public sealed class ConfigServiceTests
             var r = 0;
             for (int i = 0; i < ops.Count; i++)
             {
-                if (ops[i].AsString == "releaseWrites") continue;
+                if (ops[i].AsString == "releaseWrites" || ops[i]["changeOutside"] != null) continue;
                 var want = expectedResults[r++];
                 var name = ops[i].AsString ?? ops[i].AsObject!.Single().Key;
                 if (want["error"] == null)
@@ -267,6 +290,8 @@ public sealed class ConfigServiceTests
             if (gotKv["config.lastGood"] is { } stored) gotKv = (JsonValue.Object)Replace(gotKv, "config.lastGood", Norm(stored));
             Same(Sorted(wantKv), Sorted(gotKv), "kv");
             Same(Sorted(expect["keystore"]!), Sorted(JsonValue.Of(keystore.Values.Select(p => (p.Key, JsonValue.Of(p.Value))).ToArray())), "keystore");
+            Same(Sorted(expect["files"] ?? JsonValue.Of()), Sorted(JsonValue.Of(secretFiles.Values.Select(p => (p.Key, JsonValue.Of(p.Value))).ToArray())),
+                "files");
             JsonValue? got = null;
             w.OnExecutor(() => got = JsonValue.Of(
                 ("problems", JsonValue.Of(problems.Problems().Select(ProblemDto.Json))),

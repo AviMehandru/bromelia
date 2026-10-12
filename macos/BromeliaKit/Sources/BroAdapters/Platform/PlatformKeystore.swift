@@ -27,6 +27,8 @@ public final class PlatformKeystore: Keystore, @unchecked Sendable {
     /// Where the secrets are: "keychain" or "file".
     public func backend() -> String { useSystem() ? "keychain" : "file" }
 
+    public func isSystemStore() -> Bool { useSystem() }
+
     public func get(_ name: String) throws(BroError) -> String? {
         try check(name)
         guard useSystem() else { return try readFile(name) }

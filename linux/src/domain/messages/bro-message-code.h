@@ -282,6 +282,11 @@ typedef enum {
   BRO_MSG_STORE_REENTERED, /* store.reentered */
   BRO_MSG_STORE_TOO_NEW, /* store.tooNew */
   BRO_MSG_KEYSTORE_FAILED, /* keystore.failed */
+  BRO_MSG_SECRET_CONFLICT, /* secret.conflict */
+  BRO_MSG_SECRET_CONFLICT_PREFERRED, /* secret.conflictPreferred */
+  BRO_MSG_SECRET_SOURCE_KEYSTORE, /* secret.source.keystore */
+  BRO_MSG_SECRET_SOURCE_ENVIRONMENT, /* secret.source.environment */
+  BRO_MSG_SECRET_SOURCE_FILE, /* secret.source.file */
   BRO_MSG_ARCHIVE_RECORD_WRITTEN, /* archive.recordWritten */
   BRO_MSG_ARCHIVE_RENAME_FAILED, /* archive.renameFailed */
   BRO_MSG_ARCHIVE_SYNCED, /* archive.synced */

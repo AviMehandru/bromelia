@@ -11,6 +11,7 @@ static const char *const names[] = {
   "tool",
   "target",
   "notification",
+  "secret",
 };
 
 const char *

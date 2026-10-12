@@ -1870,6 +1870,36 @@
       "http": 500,
       "today": "new: PlatformKeystore (plan §10.3); reason is the system's text, or that the name isn't a secret name"
     },
+    "secret.conflict": {
+      "kind": "problem",
+      "params": {
+        "name": "string",
+        "using": "message",
+        "sources": "messageList"
+      },
+      "today": "new: ConfigService (owner, 2026-10-12): two sources of a secret disagree and no preference settles it"
+    },
+    "secret.conflictPreferred": {
+      "kind": "problem",
+      "params": {
+        "name": "string",
+        "using": "message",
+        "sources": "messageList"
+      },
+      "today": "new: ConfigService (owner, 2026-10-12): the sources still disagree; the preferred one is used"
+    },
+    "secret.source.keystore": {
+      "kind": "label",
+      "today": "new"
+    },
+    "secret.source.environment": {
+      "kind": "label",
+      "today": "new"
+    },
+    "secret.source.file": {
+      "kind": "label",
+      "today": "new"
+    },
     "archive.recordWritten": {
       "kind": "log",
       "severity": "info",

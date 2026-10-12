@@ -240,7 +240,8 @@
                 "unit",
                 "tool",
                 "target",
-                "notification"
+                "notification",
+                "secret"
               ]
             },
             "id": {

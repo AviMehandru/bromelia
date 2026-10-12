@@ -10,4 +10,5 @@ public enum ProblemScopeKind
     Tool,
     Target,
     Notification,
+    Secret,
 }
