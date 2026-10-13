@@ -18,6 +18,7 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
     public ICheckRepository Checks() => throw new NotSupportedException();
     public IReplicaRepository Replicas() => throw new NotSupportedException();
     public IDriveRepository Drives() => throw new NotSupportedException();
+    public ILibraryRepository Libraries() => throw new NotSupportedException();
     public ILookupCacheRepository LookupCache() => throw new NotSupportedException();
     public IOutboxRepository Outbox() => throw new NotSupportedException();
     public IKeyValueRepository Kv() => throw new NotSupportedException();

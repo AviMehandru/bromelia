@@ -8612,6 +8612,13 @@
           "swift": "Store.migrate()",
           "cs": "Store.Migrate",
           "c": "bro_store_migrate"
+        },
+        {
+          "name": "Store.libraries",
+          "params": [],
+          "swift": "Store.libraries()",
+          "cs": "Store.Libraries",
+          "c": "bro_store_libraries"
         }
       ]
     },
@@ -14499,6 +14506,99 @@
           "swift": "ConfigService.secret(_:config:)",
           "cs": "ConfigService.Secret",
           "c": "bro_config_service_secret"
+        }
+      ]
+    },
+    "ports/library-repository": {
+      "layer": "ports",
+      "folder": "",
+      "cFolder": "",
+      "doc": "Part of Store (plan §9): the libraries table, owned by LibraryService (added 2026-10-13: archive_units.library_id needs a row).",
+      "phase": 3,
+      "types": [
+        {
+          "name": "LibraryRepository",
+          "kind": "protocol",
+          "doc": "Part of Store (plan §9): the libraries table.",
+          "swift": {
+            "name": "LibraryRepository",
+            "file": "macos/BromeliaKit/Sources/BroPorts/LibraryRepository.swift"
+          },
+          "cs": {
+            "name": "ILibraryRepository",
+            "file": "windows/src/Bromelia.Ports/ILibraryRepository.cs"
+          },
+          "c": {
+            "name": "BroLibraryRepository",
+            "file": "linux/src/ports/bro-library-repository.h"
+          }
+        },
+        {
+          "name": "LibraryRecord",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "name",
+            "path",
+            "markerId",
+            "attachedAt",
+            "online",
+            "lastSeenAt"
+          ],
+          "doc": "A row of libraries: the config entry's id, the id in its .bromelia-library marker, whether the marker was there at the last check and when it was last seen.",
+          "swift": {
+            "name": "LibraryRecord",
+            "file": "macos/BromeliaKit/Sources/BroPorts/LibraryRecord.swift"
+          },
+          "cs": {
+            "name": "LibraryRecord",
+            "file": "windows/src/Bromelia.Ports/LibraryRecord.cs"
+          },
+          "c": {
+            "name": "BroLibraryRecord",
+            "file": "linux/src/ports/bro-library-record.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "LibraryRepository.all",
+          "params": [],
+          "doc": "By id.",
+          "swift": "LibraryRepository.all()",
+          "cs": "LibraryRepository.All",
+          "c": "bro_library_repository_all"
+        },
+        {
+          "name": "LibraryRepository.get",
+          "params": [
+            "libraryId"
+          ],
+          "swift": "LibraryRepository.get(_:)",
+          "cs": "LibraryRepository.Get",
+          "c": "bro_library_repository_get"
+        },
+        {
+          "name": "LibraryRepository.upsert",
+          "params": [
+            "library"
+          ],
+          "doc": "Inserts the row or replaces every column.",
+          "swift": "LibraryRepository.upsert(_:)",
+          "cs": "LibraryRepository.Upsert",
+          "c": "bro_library_repository_upsert"
+        },
+        {
+          "name": "LibraryRepository.setSeen",
+          "params": [
+            "libraryId",
+            "online",
+            "at"
+          ],
+          "doc": "Sets online; last_seen_at becomes at only when online. Nothing when there is no such row.",
+          "swift": "LibraryRepository.setSeen(_:online:at:)",
+          "cs": "LibraryRepository.SetSeen",
+          "c": "bro_library_repository_set_seen"
         }
       ]
     }

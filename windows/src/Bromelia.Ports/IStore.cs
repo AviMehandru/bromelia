@@ -23,6 +23,8 @@ public interface IStore
 
     IDriveRepository Drives();
 
+    ILibraryRepository Libraries();
+
     ILookupCacheRepository LookupCache();
 
     IOutboxRepository Outbox();

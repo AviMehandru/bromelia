@@ -1539,6 +1539,75 @@
           "seconds_reading": 4.5
         }
       }
+    },
+    {
+      "id": "libraries-set-seen",
+      "given": {
+        "rows": {
+          "libraries": [
+            {
+              "id": "b",
+              "name": "Library",
+              "path": "/b",
+              "marker_id": "m-b",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1,
+              "last_seen_at": "2026-10-02T12:00:00.000Z"
+            },
+            {
+              "id": "a",
+              "name": "Library",
+              "path": "/a",
+              "marker_id": "m-a",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 0,
+              "last_seen_at": null
+            },
+            {
+              "id": "c",
+              "name": "Library",
+              "path": "/c",
+              "marker_id": "m-c",
+              "attached_at": "2026-10-01T12:00:00.000Z",
+              "online": 1,
+              "last_seen_at": "2026-10-02T12:00:00.000Z"
+            }
+          ]
+        },
+        "call": "libraries.setSeen",
+        "args": {
+          "seen": [
+            {
+              "id": "b",
+              "online": false,
+              "at": "2026-10-03T12:00:00.000Z"
+            },
+            {
+              "id": "a",
+              "online": true,
+              "at": "2026-10-03T12:00:00.000Z"
+            },
+            {
+              "id": "c",
+              "online": true,
+              "at": "2026-10-04T12:00:00.000Z"
+            },
+            {
+              "id": "nope",
+              "online": true,
+              "at": "2026-10-04T12:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "libraries": [
+          "a online 2026-10-03T12:00:00.000Z",
+          "b offline 2026-10-02T12:00:00.000Z",
+          "c online 2026-10-04T12:00:00.000Z"
+        ],
+        "rule": "all() by id; offline keeps the last time the marker was seen; an unknown id changes nothing"
+      }
     }
   ]
 }

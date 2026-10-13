@@ -7,6 +7,7 @@
 #include "bro-drive-repository.h"
 #include "bro-job-repository.h"
 #include "bro-key-value-repository.h"
+#include "bro-library-repository.h"
 #include "bro-lookup-cache-repository.h"
 #include "bro-outbox-repository.h"
 #include "bro-replica-repository.h"
@@ -32,6 +33,7 @@ struct _BroStoreInterface {
   BroCheckRepository *(*checks) (BroStore *self);
   BroReplicaRepository *(*replicas) (BroStore *self);
   BroDriveRepository *(*drives) (BroStore *self);
+  BroLibraryRepository *(*libraries) (BroStore *self);
   BroLookupCacheRepository *(*lookup_cache) (BroStore *self);
   BroOutboxRepository *(*outbox) (BroStore *self);
   BroKeyValueRepository *(*kv) (BroStore *self);
@@ -52,6 +54,8 @@ BroCheckRepository *bro_store_checks (BroStore *self);
 BroReplicaRepository *bro_store_replicas (BroStore *self);
 
 BroDriveRepository *bro_store_drives (BroStore *self);
+
+BroLibraryRepository *bro_store_libraries (BroStore *self);
 
 BroLookupCacheRepository *bro_store_lookup_cache (BroStore *self);
 

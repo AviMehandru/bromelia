@@ -57,6 +57,13 @@ bro_store_drives (BroStore *self)
   return BRO_STORE_GET_IFACE (self)->drives (self);
 }
 
+BroLibraryRepository *
+bro_store_libraries (BroStore *self)
+{
+  g_return_val_if_fail (BRO_IS_STORE (self), NULL);
+  return BRO_STORE_GET_IFACE (self)->libraries (self);
+}
+
 BroLookupCacheRepository *
 bro_store_lookup_cache (BroStore *self)
 {

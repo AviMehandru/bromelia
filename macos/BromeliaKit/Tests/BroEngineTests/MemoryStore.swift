@@ -17,6 +17,7 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
     func checks() -> any CheckRepository { fatalError("not used") }
     func replicas() -> any ReplicaRepository { fatalError("not used") }
     func drives() -> any DriveRepository { fatalError("not used") }
+    func libraries() -> any LibraryRepository { fatalError("not used") }
     func lookupCache() -> any LookupCacheRepository { fatalError("not used") }
     func outbox() -> any OutboxRepository { fatalError("not used") }
     func kv() -> any KeyValueRepository { fatalError("not used") }

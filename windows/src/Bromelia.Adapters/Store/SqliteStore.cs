@@ -79,6 +79,7 @@ public sealed class SqliteStore : IStore, IDisposable
     public ICheckRepository Checks() => new CheckRepo(_top);
     public IReplicaRepository Replicas() => new ReplicaRepo(_top);
     public IDriveRepository Drives() => new DriveRepo(_top);
+    public ILibraryRepository Libraries() => new LibraryRepo(_top);
     public ILookupCacheRepository LookupCache() => new LookupRepo(_top);
     public IOutboxRepository Outbox() => new OutboxRepo(_top);
     public IKeyValueRepository Kv() => new KvRepo(_top);
@@ -231,6 +232,7 @@ public sealed class SqliteStore : IStore, IDisposable
         public ICheckRepository Checks() => new CheckRepo(_db);
         public IReplicaRepository Replicas() => new ReplicaRepo(_db);
         public IDriveRepository Drives() => new DriveRepo(_db);
+        public ILibraryRepository Libraries() => new LibraryRepo(_db);
         public ILookupCacheRepository LookupCache() => new LookupRepo(_db);
         public IOutboxRepository Outbox() => new OutboxRepo(_db);
         public IKeyValueRepository Kv() => new KvRepo(_db);
@@ -643,6 +645,32 @@ public sealed class SqliteStore : IStore, IDisposable
             + "seconds_reading = seconds_reading + excluded.seconds_reading",
             ("$drive", driveId), ("$day", day), ("$jobs", s.Jobs), ("$failed", s.FailedJobs), ("$rejobs", s.ReadErrorJobs), ("$errors", s.ReadErrors),
             ("$bytes", s.BytesRead), ("$seconds", s.SecondsReading)));
+    }
+
+    sealed class LibraryRepo : ILibraryRepository
+    {
+        const string Columns = "id, name, path, marker_id, attached_at, online, last_seen_at";
+        readonly Db _db;
+        public LibraryRepo(Db db) { _db = db; }
+
+        static LibraryRecord Map(Row r) => new(r.Text("id"), r.Text("name"), r.Text("path"), r.Text("marker_id"), r.Time("attached_at"), r.Bool("online"),
+            r.TimeOrNull("last_seen_at"));
+
+        public Task<IReadOnlyList<LibraryRecord>> All() => _db.Run(db => (IReadOnlyList<LibraryRecord>)Rows(db, $"SELECT {Columns} FROM libraries ORDER BY id", Map));
+
+        public Task<LibraryRecord?> Get(string libraryId) => _db.Run(db =>
+            Rows(db, $"SELECT {Columns} FROM libraries WHERE id = $id", Map, ("$id", libraryId)).FirstOrDefault());
+
+        public Task Upsert(LibraryRecord l) => _db.Run(db => Execute(db,
+            $"INSERT INTO libraries ({Columns}) VALUES ($id, $name, $path, $marker, $attached, $online, $seen) ON CONFLICT (id) DO UPDATE SET "
+            + "name = excluded.name, path = excluded.path, marker_id = excluded.marker_id, attached_at = excluded.attached_at, online = excluded.online, "
+            + "last_seen_at = excluded.last_seen_at",
+            ("$id", l.Id), ("$name", l.Name), ("$path", l.Path), ("$marker", l.MarkerId), ("$attached", T(l.AttachedAt)), ("$online", l.Online ? 1 : 0),
+            ("$seen", T(l.LastSeenAt))));
+
+        public Task SetSeen(string libraryId, bool online, Instant at) => _db.Run(db => Execute(db,
+            "UPDATE libraries SET online = $online, last_seen_at = CASE WHEN $online = 1 THEN $at ELSE last_seen_at END WHERE id = $id",
+            ("$id", libraryId), ("$online", online ? 1 : 0), ("$at", T(at))));
     }
 
     // ---- services ----------------------------------------------------------------------------------

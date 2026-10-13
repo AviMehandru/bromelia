@@ -17,6 +17,8 @@ public protocol Store: Sendable {
 
     func drives() -> any DriveRepository
 
+    func libraries() -> any LibraryRepository
+
     func lookupCache() -> any LookupCacheRepository
 
     func outbox() -> any OutboxRepository

@@ -53,6 +53,7 @@ public final class SqliteStore: Store, @unchecked Sendable {
     public func checks() -> any CheckRepository { CheckRepo(Db(self, inTransaction: false)) }
     public func replicas() -> any ReplicaRepository { ReplicaRepo(Db(self, inTransaction: false)) }
     public func drives() -> any DriveRepository { DriveRepo(Db(self, inTransaction: false)) }
+    public func libraries() -> any LibraryRepository { LibraryRepo(Db(self, inTransaction: false)) }
     public func lookupCache() -> any LookupCacheRepository { LookupRepo(Db(self, inTransaction: false)) }
     public func outbox() -> any OutboxRepository { OutboxRepo(Db(self, inTransaction: false)) }
     public func kv() -> any KeyValueRepository { KvRepo(Db(self, inTransaction: false)) }
@@ -213,6 +214,7 @@ public final class SqliteStore: Store, @unchecked Sendable {
         func checks() -> any CheckRepository { CheckRepo(db) }
         func replicas() -> any ReplicaRepository { ReplicaRepo(db) }
         func drives() -> any DriveRepository { DriveRepo(db) }
+        func libraries() -> any LibraryRepository { LibraryRepo(db) }
         func lookupCache() -> any LookupCacheRepository { LookupRepo(db) }
         func outbox() -> any OutboxRepository { OutboxRepo(db) }
         func kv() -> any KeyValueRepository { KvRepo(db) }
@@ -702,6 +704,41 @@ private struct DriveRepo: DriveRepository {
                           + "seconds_reading = seconds_reading + excluded.seconds_reading",
                           [.text(driveId), .text(day), .of(st.jobs), .of(st.failedJobs), .of(st.readErrorJobs), .of(st.readErrors), .of(st.bytesRead),
                            .double(st.secondsReading)])
+        }
+    }
+}
+
+private struct LibraryRepo: LibraryRepository {
+    private static let columns = "id, name, path, marker_id, attached_at, online, last_seen_at"
+    let db: SqliteStore.Db
+    init(_ db: SqliteStore.Db) { self.db = db }
+
+    private static func map(_ r: Row) throws(BroError) -> LibraryRecord {
+        LibraryRecord(id: r.text(0), name: r.text(1), path: r.text(2), markerId: r.text(3), attachedAt: try r.time(4), online: r.bool(5),
+                      lastSeenAt: try r.timeOrNil(6))
+    }
+
+    func all() async throws(BroError) -> [LibraryRecord] {
+        try await db.run { s throws(BroError) in try s.rows("SELECT \(Self.columns) FROM libraries ORDER BY id", [], Self.map) }
+    }
+
+    func get(_ libraryId: String) async throws(BroError) -> LibraryRecord? {
+        try await db.run { s throws(BroError) in try s.rows("SELECT \(Self.columns) FROM libraries WHERE id = ?", [.text(libraryId)], Self.map).first }
+    }
+
+    func upsert(_ l: LibraryRecord) async throws(BroError) {
+        try await db.run { s throws(BroError) in
+            try s.execute("INSERT INTO libraries (\(Self.columns)) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, "
+                          + "path = excluded.path, marker_id = excluded.marker_id, attached_at = excluded.attached_at, online = excluded.online, "
+                          + "last_seen_at = excluded.last_seen_at",
+                          [.text(l.id), .text(l.name), .text(l.path), .text(l.markerId), .of(l.attachedAt), .of(l.online), .of(l.lastSeenAt)])
+        }
+    }
+
+    func setSeen(_ libraryId: String, online: Bool, at: Instant) async throws(BroError) {
+        try await db.run { s throws(BroError) in
+            try s.execute("UPDATE libraries SET online = ?, last_seen_at = CASE WHEN ? = 1 THEN ? ELSE last_seen_at END WHERE id = ?",
+                          [.of(online), .of(online), .of(at), .text(libraryId)])
         }
     }
 }

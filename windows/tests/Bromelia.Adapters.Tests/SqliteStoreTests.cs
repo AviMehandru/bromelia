@@ -132,6 +132,12 @@ public sealed class SqliteStoreTests : IDisposable
                     Same("changed", JsonValue.Of(checks[0].Changed.Select(JsonValue.Of)));
                     Assert.Equal(expect["latest"]!.AsString, store.Checks().Latest(expect["latestFolder"]!.AsString!).Result!.Id.Value);
                     break;
+                case "libraries.setSeen":
+                    foreach (var seen in a["seen"]!.AsArray!)
+                        store.Libraries().SetSeen(seen["id"]!.AsString!, seen["online"]!.AsBool!.Value, Instant.Parse(seen["at"]!.AsString!)!.Value).Wait();
+                    Same("libraries", JsonValue.Of(store.Libraries().All().Result.Select(l =>
+                        JsonValue.Of($"{l.Id} {(l.Online ? "online" : "offline")} {(l.LastSeenAt is { } t ? Instant.Format(t) : "never")}"))));
+                    break;
                 case "replicas.lagging": Same("ids", Ids(store.Replicas().Lagging().Result, r => r.Id.Value)); break;
                 case "outbox.due": Same("ids", Ids(store.Outbox().Due(Instant.Parse(a["now"]!.AsString!)!.Value).Result, o => o.Id.Value)); break;
                 case "lookupCache.get":
@@ -189,7 +195,15 @@ public sealed class SqliteStoreTests : IDisposable
         await store.Steps().Save(step with { Attempt = 3 });
         Assert.Equal(J(step with { Attempt = 3 }), J((await store.Steps().Load(U(1))).Single()));
 
-        Sql("db", "INSERT INTO libraries (id, name, path, marker_id, attached_at) VALUES ('lib', 'L', '/archive', 'm', '2026-10-01T12:00:00.000Z')");
+        var library = new LibraryRecord("lib", "L", "/archive", "m", T1, true, T1);
+        await store.Libraries().Upsert(library with { Online = false, LastSeenAt = null });
+        await store.Libraries().Upsert(library);
+        Assert.Equal(library, await store.Libraries().Get("lib"));
+        await store.Libraries().SetSeen("lib", false, T2);
+        Assert.Equal(library with { Online = false }, (await store.Libraries().All()).Single());
+        await store.Libraries().SetSeen("lib", true, T2);
+        Assert.Equal(library with { LastSeenAt = T2 }, await store.Libraries().Get("lib"));
+        Assert.Null(await store.Libraries().Get("nope"));
         var unit = new UnitRecord(U(100), "lib", null, U(1), "Movies/Disc", "bromelia-00000000.json", 3, UnitState.Committing, UnitStatus.Success, "Disc",
             MediaKind.Movie, "bluray", "BD", true, "v1:aa", "DISC", null, null, null, 1, "v2.0", 1234, 2, 1, T1);
         var intent = new CommitIntent(U(100), U(1), "/staging", "/archive/Movies/Disc", false, false, T1,

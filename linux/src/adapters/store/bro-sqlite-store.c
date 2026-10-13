@@ -50,6 +50,7 @@ static void catalog_iface_init (BroCatalogRepositoryInterface *iface);
 static void checks_iface_init (BroCheckRepositoryInterface *iface);
 static void replicas_iface_init (BroReplicaRepositoryInterface *iface);
 static void drives_iface_init (BroDriveRepositoryInterface *iface);
+static void libraries_iface_init (BroLibraryRepositoryInterface *iface);
 static void lookup_iface_init (BroLookupCacheRepositoryInterface *iface);
 static void outbox_iface_init (BroOutboxRepositoryInterface *iface);
 static void kv_iface_init (BroKeyValueRepositoryInterface *iface);
@@ -63,6 +64,7 @@ G_DEFINE_FINAL_TYPE_WITH_CODE (BroSqliteStore, bro_sqlite_store, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_CHECK_REPOSITORY, checks_iface_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_REPLICA_REPOSITORY, replicas_iface_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_DRIVE_REPOSITORY, drives_iface_init)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_LIBRARY_REPOSITORY, libraries_iface_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_LOOKUP_CACHE_REPOSITORY, lookup_iface_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_OUTBOX_REPOSITORY, outbox_iface_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_KEY_VALUE_REPOSITORY, kv_iface_init))
@@ -1272,6 +1274,68 @@ drives_iface_init (BroDriveRepositoryInterface *iface)
   iface->record_stats = drive_record_stats;
 }
 
+/* ---- libraries ---- */
+
+#define LIBRARY_COLUMNS "id, name, path, marker_id, attached_at, online, last_seen_at"
+
+static gpointer
+map_library (BroSqliteStore *self, sqlite3_stmt *r)
+{
+  BroLibraryRecord *l = bro_library_record_new ();
+  l->id = col_text (r, 0);
+  l->name = col_text (r, 1);
+  l->path = col_text (r, 2);
+  l->marker_id = col_text (r, 3);
+  l->attached_at = col_time (r, 4);
+  l->online = col_int (r, 5) != 0;
+  OPT_TIME (l->has_last_seen_at, l->last_seen_at, r, 6);
+  return l;
+}
+
+static GPtrArray *
+library_all (BroLibraryRepository *repo, BroBroError **error)
+{
+  return locked_rows (STORE (repo), "SELECT " LIBRARY_COLUMNS " FROM libraries ORDER BY id", NULL, 0, map_library,
+                      (GDestroyNotify) bro_library_record_free, error);
+}
+
+static BroLibraryRecord *
+library_get (BroLibraryRepository *repo, const char *library_id, BroBroError **error)
+{
+  Arg a[] = { a_text (library_id) };
+  return first_row (locked_rows (STORE (repo), "SELECT " LIBRARY_COLUMNS " FROM libraries WHERE id = ?", a, N (a), map_library,
+                                 (GDestroyNotify) bro_library_record_free, error));
+}
+
+static gboolean
+library_upsert (BroLibraryRepository *repo, const BroLibraryRecord *l, BroBroError **error)
+{
+  Arg a[] = { a_text (l->id), a_text (l->name ? l->name : ""), a_text (l->path), a_text (l->marker_id), a_time (l->attached_at), a_bool (l->online),
+              a_opt_time (l->has_last_seen_at, l->last_seen_at) };
+  return locked_execute (STORE (repo),
+                         "INSERT INTO libraries (" LIBRARY_COLUMNS ") VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, "
+                         "path = excluded.path, marker_id = excluded.marker_id, attached_at = excluded.attached_at, online = excluded.online, "
+                         "last_seen_at = excluded.last_seen_at",
+                         a, N (a), error);
+}
+
+static gboolean
+library_set_seen (BroLibraryRepository *repo, const char *library_id, gboolean online, BroInstant at, BroBroError **error)
+{
+  Arg a[] = { a_bool (online), a_bool (online), a_time (at), a_text (library_id) };
+  return locked_execute (STORE (repo), "UPDATE libraries SET online = ?, last_seen_at = CASE WHEN ? = 1 THEN ? ELSE last_seen_at END WHERE id = ?",
+                         a, N (a), error);
+}
+
+static void
+libraries_iface_init (BroLibraryRepositoryInterface *iface)
+{
+  iface->all = library_all;
+  iface->get = library_get;
+  iface->upsert = library_upsert;
+  iface->set_seen = library_set_seen;
+}
+
 /* ---- lookup cache ---- */
 
 static gpointer
@@ -1431,6 +1495,7 @@ static BroCatalogRepository *s_catalog (BroStore *s) { return BRO_CATALOG_REPOSI
 static BroCheckRepository *s_checks (BroStore *s) { return BRO_CHECK_REPOSITORY (s); }
 static BroReplicaRepository *s_replicas (BroStore *s) { return BRO_REPLICA_REPOSITORY (s); }
 static BroDriveRepository *s_drives (BroStore *s) { return BRO_DRIVE_REPOSITORY (s); }
+static BroLibraryRepository *s_libraries (BroStore *s) { return BRO_LIBRARY_REPOSITORY (s); }
 static BroLookupCacheRepository *s_lookup (BroStore *s) { return BRO_LOOKUP_CACHE_REPOSITORY (s); }
 static BroOutboxRepository *s_outbox (BroStore *s) { return BRO_OUTBOX_REPOSITORY (s); }
 static BroKeyValueRepository *s_kv (BroStore *s) { return BRO_KEY_VALUE_REPOSITORY (s); }
@@ -1531,6 +1596,7 @@ store_iface_init (BroStoreInterface *iface)
   iface->checks = s_checks;
   iface->replicas = s_replicas;
   iface->drives = s_drives;
+  iface->libraries = s_libraries;
   iface->lookup_cache = s_lookup;
   iface->outbox = s_outbox;
   iface->kv = s_kv;

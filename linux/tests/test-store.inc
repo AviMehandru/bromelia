@@ -135,6 +135,7 @@ int_or_null (int v)
 }
 
 static int store_case_number;
+static BroInstant at (const char *text);
 
 static gboolean
 store_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
@@ -314,6 +315,28 @@ store_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray
             bro_json_value_append (got, bro_json_value_new_null ());
         }
       key = "bodies";
+    }
+  else if (g_str_equal (call, "libraries.setSeen"))
+    {
+      BroJsonValue *seen = bro_json_value_member (a, "seen");
+      g_autoptr (GPtrArray) all = NULL;
+      for (guint i = 0; i < bro_json_value_length (seen); i++)
+        {
+          BroJsonValue *v = bro_json_value_at (seen, i);
+          bro_library_repository_set_seen (bro_store_libraries (s), bro_json_value_get_string (bro_json_value_member (v, "id"), NULL),
+                                           bro_json_value_get_bool (bro_json_value_member (v, "online"), FALSE),
+                                           at (bro_json_value_get_string (bro_json_value_member (v, "at"), NULL)), &error);
+        }
+      all = bro_library_repository_all (bro_store_libraries (s), &error);
+      got = bro_json_value_new_array ();
+      for (guint i = 0; all && i < all->len; i++)
+        {
+          BroLibraryRecord *l = all->pdata[i];
+          g_autofree char *seen_at = l->has_last_seen_at ? bro_instant_format (l->last_seen_at) : g_strdup ("never");
+          g_autofree char *line = g_strdup_printf ("%s %s %s", l->id, l->online ? "online" : "offline", seen_at);
+          bro_json_value_append (got, bro_json_value_new_string (line));
+        }
+      key = "libraries";
     }
   else if (g_str_equal (call, "drives.recordStats"))
     {
@@ -495,9 +518,44 @@ test_store_round_trips (void)
     g_assert_true (bro_json_value_equal (b->checkpoint, step->checkpoint));
   }
 
+  /* a library, upserted twice and seen */
+  {
+    g_autoptr (BroLibraryRecord) library = bro_library_record_new ();
+    g_autoptr (BroLibraryRecord) back = NULL;
+    g_autoptr (BroLibraryRecord) none = NULL;
+    g_autoptr (GPtrArray) all = NULL;
+    library->id = g_strdup ("lib");
+    library->name = g_strdup ("L");
+    library->path = g_strdup ("/archive");
+    library->marker_id = g_strdup ("m");
+    library->attached_at = t1;
+    g_assert_true (bro_library_repository_upsert (bro_store_libraries (s), library, &error));
+    library->online = TRUE;
+    library->has_last_seen_at = TRUE;
+    library->last_seen_at = t1;
+    g_assert_true (bro_library_repository_upsert (bro_store_libraries (s), library, &error));
+    back = bro_library_repository_get (bro_store_libraries (s), "lib", &error);
+    g_assert_cmpstr (back->path, ==, "/archive");
+    g_assert_cmpstr (back->marker_id, ==, "m");
+    g_assert_true (back->online && back->has_last_seen_at);
+    g_assert_cmpint (back->last_seen_at.unix_milliseconds, ==, t1.unix_milliseconds);
+    g_assert_cmpint (back->attached_at.unix_milliseconds, ==, t1.unix_milliseconds);
+    g_assert_true (bro_library_repository_set_seen (bro_store_libraries (s), "lib", FALSE, t2, &error));
+    all = bro_library_repository_all (bro_store_libraries (s), &error);
+    g_assert_cmpuint (all->len, ==, 1);
+    g_assert_false (((BroLibraryRecord *) all->pdata[0])->online);
+    g_assert_cmpint (((BroLibraryRecord *) all->pdata[0])->last_seen_at.unix_milliseconds, ==, t1.unix_milliseconds);
+    g_assert_true (bro_library_repository_set_seen (bro_store_libraries (s), "lib", TRUE, t2, &error));
+    g_clear_pointer (&back, bro_library_record_free);
+    back = bro_library_repository_get (bro_store_libraries (s), "lib", &error);
+    g_assert_true (back->online);
+    g_assert_cmpint (back->last_seen_at.unix_milliseconds, ==, t2.unix_milliseconds);
+    none = bro_library_repository_get (bro_store_libraries (s), "nope", &error);
+    g_assert_null (none);
+    g_assert_null (error);
+  }
+
   /* a unit through the commit protocol */
-  sqlite3_exec (db, "INSERT INTO libraries (id, name, path, marker_id, attached_at) VALUES ('lib', 'L', '/archive', 'm', '2026-10-01T12:00:00.000Z')",
-                NULL, NULL, NULL);
   {
     g_autoptr (BroUnitRecord) unit = bro_unit_record_new ();
     g_autoptr (BroCommitIntent) intent = bro_commit_intent_new ();

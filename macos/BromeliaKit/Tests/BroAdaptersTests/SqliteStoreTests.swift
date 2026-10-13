@@ -177,6 +177,13 @@ final class RawDb {
             let r = raw.rows("SELECT jobs, failed_jobs, read_error_jobs, read_errors, bytes_read, seconds_reading FROM drive_stats_daily")[0]
             try same("row", .object([("jobs", .integer(Int64(r[0]!)!)), ("failed_jobs", .integer(Int64(r[1]!)!)), ("read_error_jobs", .integer(Int64(r[2]!)!)),
                                      ("read_errors", .integer(Int64(r[3]!)!)), ("bytes_read", .integer(Int64(r[4]!)!)), ("seconds_reading", .number(Double(r[5]!)!))]))
+        case "libraries.setSeen":
+            for seen in a["seen"]!.array! {
+                try await s.libraries().setSeen(seen["id"]!.string!, online: seen["online"]!.bool!, at: Instant.parse(seen["at"]!.string!)!)
+            }
+            try same("libraries", .array(try await s.libraries().all().map {
+                .string("\($0.id) \($0.online ? "online" : "offline") \($0.lastSeenAt.map(Instant.format) ?? "never")")
+            }))
         default: throw FixtureError("no test handles this call")
         }
     }
@@ -217,7 +224,22 @@ final class RawDb {
         #expect(try await s.steps().load(u(1)) == [step])
 
         let raw = RawDb(dir + "/db.sqlite")
-        raw.exec("INSERT INTO libraries (id, name, path, marker_id, attached_at) VALUES ('lib', 'L', '/archive', 'm', '2026-10-01T12:00:00.000Z')")
+        let library = LibraryRecord(id: "lib", name: "L", path: "/archive", markerId: "m", attachedAt: t1, online: true, lastSeenAt: t1)
+        var unseen = library
+        unseen.online = false
+        unseen.lastSeenAt = nil
+        try await s.libraries().upsert(unseen)
+        try await s.libraries().upsert(library)
+        #expect(try await s.libraries().get("lib") == library)
+        try await s.libraries().setSeen("lib", online: false, at: t2)
+        var offline = library
+        offline.online = false
+        #expect(try await s.libraries().all() == [offline])
+        try await s.libraries().setSeen("lib", online: true, at: t2)
+        var seen = library
+        seen.lastSeenAt = t2
+        #expect(try await s.libraries().get("lib") == seen)
+        #expect(try await s.libraries().get("nope") == nil)
         let unit = UnitRecord(id: u(100), libraryId: "lib", jobId: u(1), path: "Movies/Disc", recordFile: "bromelia-00000000.json", recordVersion: 3,
                               state: .committing, status: .success, name: "Disc", kind: .movie, format: "bluray", formatCode: "BD", encrypted: true,
                               fingerprint: "v1:aa", label: "DISC", disc: 1, makemkvVersion: "v2.0", bytes: 1234, fileCount: 2, attempts: 1, createdAt: t1)
