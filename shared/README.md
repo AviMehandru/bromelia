@@ -18,7 +18,7 @@ phase 0, written before any engine code, so the three engines are built against 
 | `schema/db/0001_init.sql` | The SQLite schema every engine runs verbatim; `0001_init.expected.txt` is the result | `tools/check-contracts.py` (applies it) |
 | `schema/scenario.json` | The format of `scenarios/` | `tools/check-contracts.py` |
 | `messages/codes.json`, `messages/en.json` | Every code the engine emits, and its English text (ICU MessageFormat) | `tools/check-contracts.py` |
-| `fixtures/` | Recorded makemkvcon output, lookup answers, NFO, notifications, IFOs (today's), and the rebuild's golden cases: `domain/*.cases.json` for every pure function, `api/`, `host/`, `adapters/*.contract.json`, `engine/*.cases.json` (the engine: executor, event bus, engine clock, coalescer, scheduler, pipeline runner, job planner, video-disc steps), `config/`, `archive/` | each platform's tests |
+| `fixtures/` | Recorded makemkvcon output, lookup answers, NFO, notifications, IFOs (today's), and the rebuild's golden cases: `domain/*.cases.json` for every pure function, `api/`, `host/`, `adapters/*.contract.json`, `engine/*.cases.json` (the engine: executor, event bus, engine clock, coalescer, scheduler, pipeline runner, job planner, video-disc steps, problem, config and library services), `config/`, `archive/` | each platform's tests |
 | `scenarios/` | End-to-end behaviour written once and run by every platform's scenario runner; `COVERAGE.md` maps every test of today's suites and every documented behaviour to a fixture or scenario | `tools/check-contracts.py` |
 | `catalog/settings-catalog.json` | MakeMKV's settings, for the settings forms | today's apps |
 | `web/` | The web page | Playwright in CI |

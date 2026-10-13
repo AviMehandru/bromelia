@@ -5,6 +5,7 @@
 
 #include "bro-drive-entry.h"
 #include "bro-issue.h"
+#include "bro-library-entry.h"
 #include "bro-profile.h"
 #include "bro-rule.h"
 #include "bro-step-definition.h"
@@ -22,6 +23,7 @@ void bro_config_free (BroConfig *config);
 
 GPtrArray *bro_config_profiles (const BroConfig *config); /* BroProfile * */
 GPtrArray *bro_config_drives (const BroConfig *config);   /* BroDriveEntry * */
+GPtrArray *bro_config_libraries (const BroConfig *config); /* BroLibraryEntry * */
 GPtrArray *bro_config_steps (const BroConfig *config);    /* BroStepDefinition * */
 GPtrArray *bro_config_rules (const BroConfig *config);    /* BroRule * */
 

@@ -23,6 +23,9 @@ typedef struct {
 BroCommitIntent *bro_commit_intent_new (void);
 void bro_commit_intent_free (BroCommitIntent *value);
 
+/* A deep copy, items included. */
+BroCommitIntent *bro_commit_intent_copy (const BroCommitIntent *value);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroCommitIntent, bro_commit_intent_free)
 
 G_END_DECLS

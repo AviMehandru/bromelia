@@ -3847,6 +3847,29 @@
             "name": "BroRule",
             "file": "linux/src/domain/config/bro-rule.h"
           }
+        },
+        {
+          "name": "LibraryEntry",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "name",
+            "path"
+          ],
+          "doc": "A library of the configuration (config-3.json's Library).",
+          "phase": 3,
+          "swift": {
+            "name": "LibraryEntry",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Config/LibraryEntry.swift"
+          },
+          "cs": {
+            "name": "LibraryEntry",
+            "file": "windows/src/Bromelia.Domain/Config/LibraryEntry.cs"
+          },
+          "c": {
+            "name": "BroLibraryEntry",
+            "file": "linux/src/domain/config/bro-library-entry.h"
+          }
         }
       ],
       "functions": [
@@ -4044,6 +4067,30 @@
           "swift": "Config.automation(_:_:)",
           "cs": "Config.Automation",
           "c": "bro_config_automation"
+        },
+        {
+          "name": "Config.libraries",
+          "params": [
+            "config"
+          ],
+          "returns": "[LibraryEntry]",
+          "doc": "The configuration's libraries.",
+          "phase": 3,
+          "swift": "Config.libraries(_:)",
+          "cs": "Config.Libraries",
+          "c": "bro_config_libraries"
+        },
+        {
+          "name": "LibraryEntry.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "LibraryEntry",
+          "doc": "A library entry from its JSON (\"\" for what it leaves out).",
+          "phase": 3,
+          "swift": "LibraryEntry.decode(_:)",
+          "cs": "LibraryEntry.Decode",
+          "c": "bro_library_entry_decode"
         }
       ]
     },
@@ -4277,6 +4324,47 @@
               "BRO_FILE_VERDICT_UNREADABLE"
             ]
           }
+        },
+        {
+          "name": "LibraryMarker",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "name",
+            "created"
+          ],
+          "doc": "The .bromelia-library file at a library's root (plan §22.2): its id (a UUID made from the library's entry id, path and the time it was written, so no randomness is needed), name and when it was written.",
+          "phase": 3,
+          "swift": {
+            "name": "LibraryMarker",
+            "file": "macos/BromeliaKit/Sources/BroDomain/ArchiveFormat/LibraryMarker.swift"
+          },
+          "cs": {
+            "name": "LibraryMarker",
+            "file": "windows/src/Bromelia.Domain/ArchiveFormat/LibraryMarker.cs"
+          },
+          "c": {
+            "name": "BroLibraryMarker",
+            "file": "linux/src/domain/archive-format/bro-library-marker.h"
+          }
+        },
+        {
+          "name": "Sha256Hasher",
+          "kind": "class",
+          "doc": "SHA-256 fed a piece at a time (a file read back from disk as a stream), lower-case hex at the end.",
+          "phase": 3,
+          "swift": {
+            "name": "Sha256Hasher",
+            "file": "macos/BromeliaKit/Sources/BroDomain/ArchiveFormat/Sha256Hasher.swift"
+          },
+          "cs": {
+            "name": "Sha256Hasher",
+            "file": "windows/src/Bromelia.Domain/ArchiveFormat/Sha256Hasher.cs"
+          },
+          "c": {
+            "name": "BroSha256Hasher",
+            "file": "linux/src/domain/archive-format/bro-sha256-hasher.h"
+          }
         }
       ],
       "functions": [
@@ -4395,7 +4483,7 @@
             "bytes"
           ],
           "returns": "String",
-          "doc": "SHA-256 of bytes in memory, lower-case hex (files are hashed by the adapters, streaming).",
+          "doc": "SHA-256 of bytes in memory, lower-case hex (a file is hashed as a stream with Sha256Hasher).",
           "swift": "Sha256Sums.hash(_:)",
           "cs": "Sha256Sums.Hash",
           "c": "bro_sha256_sums_hash"
@@ -4411,6 +4499,65 @@
           "swift": "ArchiveRecordCodec.archivedDisc(_:folder:)",
           "cs": "ArchiveRecordCodec.ArchivedDisc",
           "c": "bro_archive_record_codec_archived_disc"
+        },
+        {
+          "name": "LibraryMarker.make",
+          "params": [
+            "libraryId",
+            "path",
+            "name",
+            "created"
+          ],
+          "returns": "LibraryMarker",
+          "doc": "id = the UUID (version 8, RFC 9562) of the first 16 bytes of SHA-256 of \"<libraryId>\\n<path>\\n<created>\".",
+          "phase": 3,
+          "swift": "LibraryMarker.make(_:path:name:created:)",
+          "cs": "LibraryMarker.Make",
+          "c": "bro_library_marker_make"
+        },
+        {
+          "name": "LibraryMarker.encode",
+          "params": [
+            "marker"
+          ],
+          "returns": "[UInt8]",
+          "doc": "{\"id\", \"name\", \"created\"}: canonical JSON with a final newline.",
+          "phase": 3,
+          "swift": "LibraryMarker.encode(_:)",
+          "cs": "LibraryMarker.Encode",
+          "c": "bro_library_marker_encode"
+        },
+        {
+          "name": "LibraryMarker.decode",
+          "params": [
+            "bytes"
+          ],
+          "returns": "LibraryMarker?",
+          "doc": "Null unless a JSON object with a string id; name defaults to '' and created to null.",
+          "phase": 3,
+          "swift": "LibraryMarker.decode(_:)",
+          "cs": "LibraryMarker.Decode",
+          "c": "bro_library_marker_decode"
+        },
+        {
+          "name": "Sha256Hasher.update",
+          "params": [
+            "bytes"
+          ],
+          "phase": 3,
+          "swift": "Sha256Hasher.update(_:)",
+          "cs": "Sha256Hasher.Update",
+          "c": "bro_sha256_hasher_update"
+        },
+        {
+          "name": "Sha256Hasher.finish",
+          "params": [],
+          "returns": "String",
+          "doc": "The digest, lower-case hex; the hasher is spent.",
+          "phase": 3,
+          "swift": "Sha256Hasher.finish()",
+          "cs": "Sha256Hasher.Finish",
+          "c": "bro_sha256_hasher_finish"
         }
       ]
     },
@@ -12305,6 +12452,19 @@
           ],
           "why": "Swift resumes a continuation on the actor, not through the mailbox, so activity wouldn't see it; in C# and C the resumption goes through the executor's queue, which counts it.",
           "swift": "Resumption.resume(returning:)"
+        },
+        {
+          "name": "EngineExecutor.spawn",
+          "params": [
+            "work"
+          ],
+          "doc": "Starts work as a task of its own on the actor and returns at once; activity counts it until it starts.",
+          "only": [
+            "swift"
+          ],
+          "why": "Swift starts a task on the actor, not through the mailbox, so activity wouldn't see it until its first worker call; C# (a Task from Worker) and C (a GTask) start the worker at once, which counts it.",
+          "phase": 3,
+          "swift": "EngineExecutor.spawn(_:)"
         }
       ]
     },
@@ -13346,6 +13506,33 @@
               "BRO_PROBLEM_SCOPE_KIND_SECRET"
             ]
           }
+        },
+        {
+          "name": "LibraryDto",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "name",
+            "path",
+            "online",
+            "reason",
+            "freeBytes",
+            "lastSeenAt"
+          ],
+          "doc": "A library, as clients see it (dtos.json Library).",
+          "phase": 3,
+          "swift": {
+            "name": "LibraryDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/LibraryDto.swift"
+          },
+          "cs": {
+            "name": "LibraryDto",
+            "file": "windows/src/Bromelia.Engine/API/LibraryDto.cs"
+          },
+          "c": {
+            "name": "BroLibraryDto",
+            "file": "linux/src/engine/api/bro-library-dto.h"
+          }
         }
       ],
       "functions": [
@@ -13410,6 +13597,17 @@
           "swift": "ConfigEnvelope.json(_:)",
           "cs": "ConfigEnvelope.Json",
           "c": "bro_config_envelope_json"
+        },
+        {
+          "name": "LibraryDto.json",
+          "params": [
+            "library"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "LibraryDto.json(_:)",
+          "cs": "LibraryDto.Json",
+          "c": "bro_library_dto_json"
         }
       ]
     },
@@ -13604,7 +13802,7 @@
         {
           "name": "LibraryPort",
           "kind": "protocol",
-          "doc": "What a step may do with a library (implemented by LibraryService).",
+          "doc": "What a step may do with a library: require it, its staging folder, and the commit protocol (implemented by LibraryService).",
           "swift": {
             "name": "LibraryPort",
             "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/LibraryPort.swift"
@@ -13782,6 +13980,30 @@
             "name": "BroMakemkvSetup",
             "file": "linux/src/engine/pipeline/bro-makemkv-setup.h"
           }
+        },
+        {
+          "name": "CommitResult",
+          "kind": "struct",
+          "fields": [
+            "unitId",
+            "destination",
+            "files",
+            "merged"
+          ],
+          "doc": "What a commit did: the unit, its folder (absolute), its files as committed, and whether they were added to an existing folder.",
+          "phase": 3,
+          "swift": {
+            "name": "CommitResult",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/CommitResult.swift"
+          },
+          "cs": {
+            "name": "CommitResult",
+            "file": "windows/src/Bromelia.Engine/Pipeline/CommitResult.cs"
+          },
+          "c": {
+            "name": "BroCommitResult",
+            "file": "linux/src/engine/pipeline/bro-commit-result.h"
+          }
         }
       ],
       "functions": [
@@ -13865,7 +14087,7 @@
             "libraryId"
           ],
           "returns": "LibraryHandle",
-          "doc": "library.offline when its marker is missing.",
+          "doc": "library.notFound, or the reason it is offline (library.offline when its marker is missing).",
           "throws": true,
           "swift": "LibraryPort.require(_:)",
           "cs": "LibraryPort.Require",
@@ -13987,6 +14209,37 @@
           "swift": "MakemkvSetup.invocation(_:selectionOverride:jobDirectory:)",
           "cs": "MakemkvSetup.Invocation",
           "c": "bro_makemkv_setup_invocation"
+        },
+        {
+          "name": "LibraryPort.commit",
+          "params": [
+            "unit",
+            "intent",
+            "files"
+          ],
+          "returns": "CommitResult",
+          "doc": "Plan §22.3 steps 4–6 (Seal did 1–3): the intent, the move (a new folder renamed whole; a shared one item by item, SHA256SUMS merged), the folders synced, then the unit committed with its files. Any thread but the executor.",
+          "throws": true,
+          "async": true,
+          "swift": "LibraryPort.commit(_:intent:files:)",
+          "cs": "LibraryPort.Commit",
+          "c": "bro_library_port_commit"
+        },
+        {
+          "name": "LibraryPort.quarantine",
+          "params": [
+            "unit",
+            "intent",
+            "files",
+            "tag"
+          ],
+          "returns": "CommitResult",
+          "doc": "commit into <library>/_Quarantine/<name> [<tag>] (a free name), the unit quarantined.",
+          "throws": true,
+          "async": true,
+          "swift": "LibraryPort.quarantine(_:intent:files:tag:)",
+          "cs": "LibraryPort.Quarantine",
+          "c": "bro_library_port_quarantine"
         }
       ]
     },
@@ -14282,7 +14535,7 @@
       "layer": "engine",
       "folder": "Services",
       "cFolder": "services",
-      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one) and ConfigService. shared/fixtures/engine/problem-service.cases.json, config-service.cases.json.",
+      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService and LibraryService. shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json.",
       "phase": 3,
       "types": [
         {
@@ -14354,6 +14607,24 @@
               "BRO_SECRET_SOURCE_ENVIRONMENT",
               "BRO_SECRET_SOURCE_FILE"
             ]
+          }
+        },
+        {
+          "name": "LibraryService",
+          "kind": "class",
+          "doc": "The libraries of the configuration (plan §11.1, §22): their markers checked at start, every 30 s and on check(), offline ones blocked in the scheduler and raised as problems; attach writes the marker; implements LibraryPort: staging folders and the commit protocol (§22.3) with its roll forward. shared/fixtures/engine/library-service.cases.json.",
+          "phase": 3,
+          "swift": {
+            "name": "LibraryService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/LibraryService.swift"
+          },
+          "cs": {
+            "name": "LibraryService",
+            "file": "windows/src/Bromelia.Engine/Services/LibraryService.cs"
+          },
+          "c": {
+            "name": "BroLibraryService",
+            "file": "linux/src/engine/services/bro-library-service.h"
           }
         }
       ],
@@ -14506,6 +14777,82 @@
           "swift": "ConfigService.secret(_:config:)",
           "cs": "ConfigService.Secret",
           "c": "bro_config_service_secret"
+        },
+        {
+          "name": "LibraryService.start",
+          "params": [],
+          "doc": "Reads the stored libraries, checks every marker, then every 30 s; follows configChanged.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "swift": "LibraryService.start()",
+          "cs": "LibraryService.Start",
+          "c": "bro_library_service_start"
+        },
+        {
+          "name": "LibraryService.stop",
+          "params": [],
+          "doc": "Stops the timer and the configChanged subscription.",
+          "swift": "LibraryService.stop()",
+          "cs": "LibraryService.Stop",
+          "c": "bro_library_service_stop"
+        },
+        {
+          "name": "LibraryService.libraries",
+          "params": [],
+          "returns": "[LibraryDto]",
+          "doc": "In configuration order (on the executor).",
+          "swift": "LibraryService.libraries()",
+          "cs": "LibraryService.Libraries",
+          "c": "bro_library_service_libraries"
+        },
+        {
+          "name": "LibraryService.check",
+          "params": [],
+          "doc": "Checks every marker now (mount events); a library whose last check hasn't come back is offline.",
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "swift": "LibraryService.check()",
+          "cs": "LibraryService.Check",
+          "c": "bro_library_service_check"
+        },
+        {
+          "name": "LibraryService.attach",
+          "params": [
+            "libraryId",
+            "path",
+            "name"
+          ],
+          "returns": "LibraryDto",
+          "doc": "Writes the marker into an existing folder (never creates it): library.pathMissing, library.alreadyAttached; stores the library and brings it online.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "library_id",
+            "path",
+            "name",
+            "done"
+          ],
+          "swift": "LibraryService.attach(_:path:name:)",
+          "cs": "LibraryService.Attach",
+          "c": "bro_library_service_attach"
+        },
+        {
+          "name": "LibraryService.rollForward",
+          "params": [
+            "intent"
+          ],
+          "returns": "CommitResult",
+          "doc": "Finishes an interrupted commit (§15.8): moves what is left, recognising moved files by their SHA-256, merges SHA256SUMS, syncs, commits; commit.rolledForward is the caller's to log. Any thread but the executor.",
+          "throws": true,
+          "async": true,
+          "swift": "LibraryService.rollForward(_:)",
+          "cs": "LibraryService.RollForward",
+          "c": "bro_library_service_roll_forward"
         }
       ]
     },

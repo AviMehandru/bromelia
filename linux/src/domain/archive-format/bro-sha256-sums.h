@@ -16,7 +16,7 @@ char *bro_sha256_sums_render (GPtrArray *entries);
 /* The entries of @existing (an earlier job's in the same folder) and @entries; a path in both takes the new hash. */
 char *bro_sha256_sums_merge (const char *existing, GPtrArray *entries);
 
-/* SHA-256 of bytes in memory, lower-case hex (files are hashed by the adapters, streaming). */
+/* SHA-256 of bytes in memory, lower-case hex (a file is hashed as a stream with BroSha256Hasher). */
 char *bro_sha256_sums_hash (const guint8 *bytes, gsize length);
 
 G_END_DECLS

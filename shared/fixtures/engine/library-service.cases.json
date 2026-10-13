@@ -1,0 +1,5253 @@
+{
+  "description": "LibraryService (plan §11.1, §15.4, §15.8, §22), on the engine executor with ProblemService and the Scheduler, over a file system and database in memory; the clock starts at 2026-10-02T20:00:00.000Z. Libraries are the configuration's (id, name, path). A library is online when its folder exists and holds .bromelia-library (LibraryMarker.decode) whose id is the stored one; with no stored row the marker is adopted (row: the marker's id, attachedAt its created). Offline reasons, raised as a problem scoped to the library (id <code>:library:<id>): library.offline{library: name, path} (warning, action openSettings) when the folder is missing, the marker can't be read or decoded, a stored library lost its marker, or a check hasn't come back by the next 30 s tick; library.notAttached{path} (warning, action attachLibrary) when the folder exists, has no marker and was never stored; library.markerMismatch{path, found, expected} (error, openSettings) for another library's marker. Every check stores online and, when online, lastSeenAt (LibraryRepository.setSeen). A change of online or reason publishes libraryChanged{library: LibraryDto} (freeBytes from FileSystem.volume when online and it answers; lastSeenAt when known), then raises or clears the problems; the scheduler blocks LibraryWrite(id) with the reason while offline. start(): reads the stored rows (when each library was last seen), checks every library and completes when that round is applied; then every 30 s. A round's results are applied together, in configuration order, when all have come back, or by the next tick (those not back are offline and aren't checked again until they come back; a late result is applied alone). check(): a round now. configChanged: libraries added are checked, removed ones dropped (problems cleared, scheduler unblocked). attach(id, path, name): library.pathMissing{path} unless path is a folder (never created); library.alreadyAttached{path, library: the marker's name} when it has a marker; else writes LibraryMarker.make(id, path, name or the folder's name, now) (mode 0644), stores the row and the library is online. require(id): library.notFound (not configured), else the offline reason, else {id, path}. stagingDirectory(id, job): <path>/.bromelia/staging/<job>, each folder made with parentsMustExist. commit(unit, intent, files) (plan §22.3 steps 4–6, from a worker): library.notFound unless the destination is under the library; the library's reason unless online; the marker is read again; commit.inProgress{unit} while another commit of the unit runs; an open intent for the unit is rolled forward instead; fs.notFound for a missing staging folder, staging SHA256SUMS or item; library.folderExists{path} for an existing destination unless merge; fs.alreadyExists{path} for a file item whose destination exists; then UnitRepository.beginCommit (state committing), crash point commit.afterIntent, the move: a destination that doesn't exist (not merge) gets the staging folder renamed whole (its parents made under the root first), otherwise each item in seq order (a file renamed, a folder moveMerging'd); markMoved after each, then crash point commit.afterMove:<n> (n counting items marked); then SHA256SUMS: merged into the destination's (Sha256Sums.merge, written atomically, 0644) and the staging copy removed when it is still in staging; empty staging folders removed; every folder from the library root down to each committed file and the staging folder's parent synced (any failure fails the commit, the intent stays); crash point commit.beforeDone; finishCommit with the unit committed (quarantined for quarantine) at now and the files given. quarantine(unit, intent, files, tag): the destination is <library>/_Quarantine/<ConflictNamer.next('<last part of the intent's destination> [<tag>]')>, not merged. rollForward(intent): the marker check, then the same move: an item whose source is gone and whose destination exists counts as moved when its SHA-256 (read back through openForReading) is the item's (or it has none, or is a folder); a destination that differs is fs.alreadyExists{path}; neither is fs.notFound{path: source}; the files are the destination SHA256SUMS lines of the unit's items (size from stat, role title). Given: config (libraries), libraries (stored rows), files {path: text} and dirs (folders; parents implied), fail [{op, path, error, times}] (the fake file system's call fails so, every time or that many times), hold [{op, path}] (the call waits for release), crashAt (the crash point stops the operation, as a killed engine would). Ops: start (wait: false: its result comes when it finishes), check, libraries, {require: id}, {staging: {library, job}}, {blocked: id} (the scheduler's reason code for a LibraryWrite of it, or null when granted), {attach: {id, path, name}}, {configure: libraries} (a new configuration, configChanged published), {advance: s}, {fs: {put: {path: text}} | {moveAway: path}} (changes from outside), {held: op} (waits until that many calls are held), release, {commit|quarantine: {unit: {id, path, name}, intent: {staging, destination, merge, items: [[from, to, sha256, isDir]]}, files: [[path, size, sha256, role]], tag, wait}}, restart (a new service, bus, scheduler and problems on the same files and database), rollForward (every open intent, oldest first: a list of results), {dump: intents} ([[unit, ['seq from to[ dir][ moved]']]]). Expect: results (ok, a value, {error}, {crashed: point}); events (libraryChanged, problemRaised, problemCleared and configChanged, in order, across restarts; seq as published, so the scheduler events of a blocked op leave gaps); problems; files (every file afterwards) and modes; dirs (every folder); synced (folders synced, sorted, unique); db {libraries, units [{id, path, state, committedAt}], intents (as dump), unitFiles {unit: [[path, size, sha256, role]]}}.",
+  "cases": [
+    {
+      "id": "a-library-with-its-marker-is-online",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          "libraries",
+          {
+            "require": "lib"
+          },
+          {
+            "blocked": "lib"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          {
+            "id": "lib",
+            "path": "/lib"
+          },
+          null
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "problems": [],
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "markerId": "m-lib",
+              "attachedAt": "2026-10-01T12:00:00.000Z",
+              "online": true,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a-marker-without-a-stored-library-is-adopted",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "ops": [
+          "start",
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "problems": [],
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "markerId": "m-lib",
+              "attachedAt": "2026-10-01T12:00:00.000Z",
+              "online": true,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a-missing-folder-is-offline-and-blocks-writes",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          "libraries",
+          {
+            "require": "lib"
+          },
+          {
+            "staging": {
+              "library": "lib",
+              "job": "00000000-0000-4000-8000-000000000001"
+            }
+          },
+          {
+            "blocked": "lib"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": false,
+              "reason": {
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning"
+              },
+              "lastSeenAt": "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          {
+            "error": {
+              "code": "library.offline",
+              "params": {
+                "library": "Library",
+                "path": "/lib"
+              }
+            }
+          },
+          {
+            "error": {
+              "code": "library.offline",
+              "params": {
+                "library": "Library",
+                "path": "/lib"
+              }
+            }
+          },
+          "library.offline"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "Library",
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-01T12:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:lib",
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "library.offline:library:lib",
+            "code": "library.offline",
+            "params": {
+              "library": "Library",
+              "path": "/lib"
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "library",
+              "id": "lib"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ],
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "markerId": "m-lib",
+              "attachedAt": "2026-10-01T12:00:00.000Z",
+              "online": false,
+              "lastSeenAt": "2026-10-01T12:00:00.000Z"
+            }
+          ]
+        },
+        "dirs": [
+          "/"
+        ]
+      }
+    },
+    {
+      "id": "a-folder-never-attached-asks-to-be-attached",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "dirs": [
+          "/lib"
+        ],
+        "ops": [
+          "start",
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": false,
+              "reason": {
+                "code": "library.notAttached",
+                "params": {
+                  "path": "/lib"
+                },
+                "severity": "warning"
+              }
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.notAttached",
+                  "params": {
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                }
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.notAttached:library:lib",
+                "code": "library.notAttached",
+                "params": {
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "attachLibrary"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "library.notAttached:library:lib",
+            "code": "library.notAttached",
+            "params": {
+              "path": "/lib"
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "library",
+              "id": "lib"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "attachLibrary"
+            ]
+          }
+        ],
+        "db": {
+          "libraries": []
+        },
+        "files": {}
+      }
+    },
+    {
+      "id": "a-folder-that-lost-its-marker-is-offline-not-unattached",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "dirs": [
+          "/lib"
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "Library",
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-01T12:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:lib",
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "library.offline:library:lib",
+            "code": "library.offline",
+            "params": {
+              "library": "Library",
+              "path": "/lib"
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "library",
+              "id": "lib"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "another-librarys-marker-is-a-mismatch",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-other\",\n  \"name\": \"Other\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "require": "lib"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "library.markerMismatch",
+              "params": {
+                "path": "/lib",
+                "found": "m-other",
+                "expected": "m-lib"
+              }
+            }
+          }
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.markerMismatch",
+                  "params": {
+                    "path": "/lib",
+                    "found": "m-other",
+                    "expected": "m-lib"
+                  },
+                  "severity": "error"
+                },
+                "lastSeenAt": "2026-10-01T12:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.markerMismatch:library:lib",
+                "code": "library.markerMismatch",
+                "params": {
+                  "path": "/lib",
+                  "found": "m-other",
+                  "expected": "m-lib"
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "library.markerMismatch:library:lib",
+            "code": "library.markerMismatch",
+            "params": {
+              "path": "/lib",
+              "found": "m-other",
+              "expected": "m-lib"
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "library",
+              "id": "lib"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ],
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "markerId": "m-lib",
+              "attachedAt": "2026-10-01T12:00:00.000Z",
+              "online": false,
+              "lastSeenAt": "2026-10-01T12:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a-marker-that-is-not-json-is-offline",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "not json"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "Library",
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-01T12:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:lib",
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "the-marker-is-checked-every-30-seconds",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "fs": {
+              "put": {
+                "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+              }
+            }
+          },
+          {
+            "advance": 29
+          },
+          {
+            "blocked": "lib"
+          },
+          {
+            "advance": 1
+          },
+          {
+            "blocked": "lib"
+          },
+          {
+            "fs": {
+              "moveAway": "/lib"
+            }
+          },
+          {
+            "advance": 30
+          },
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok",
+          "ok",
+          "library.offline",
+          "ok",
+          null,
+          "ok",
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": false,
+              "reason": {
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning"
+              },
+              "lastSeenAt": "2026-10-02T20:00:30.000Z"
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "Library",
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-01T12:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:lib",
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 5,
+            "at": "2026-10-02T20:00:30.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:30.000Z"
+              }
+            }
+          },
+          {
+            "seq": 6,
+            "at": "2026-10-02T20:00:30.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "library.offline:library:lib",
+              "code": "library.offline"
+            }
+          },
+          {
+            "seq": 11,
+            "at": "2026-10-02T20:01:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "Library",
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-02T20:00:30.000Z"
+              }
+            }
+          },
+          {
+            "seq": 12,
+            "at": "2026-10-02T20:01:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:lib",
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:01:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "markerId": "m-lib",
+              "attachedAt": "2026-10-01T12:00:00.000Z",
+              "online": false,
+              "lastSeenAt": "2026-10-02T20:00:30.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "check-looks-at-once",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "fs": {
+              "moveAway": "/lib"
+            }
+          },
+          "check",
+          {
+            "require": "lib"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok",
+          "ok",
+          {
+            "error": {
+              "code": "library.offline",
+              "params": {
+                "library": "Library",
+                "path": "/lib"
+              }
+            }
+          }
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "Library",
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:lib",
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-check-that-never-comes-back-is-offline-and-not-repeated",
+      "given": {
+        "config": [
+          {
+            "id": "nas",
+            "name": "NAS",
+            "path": "/nas"
+          },
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/nas/.bromelia-library": "{\n  \"id\": \"m-nas\",\n  \"name\": \"NAS\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "nas",
+            "name": "NAS",
+            "path": "/nas",
+            "markerId": "m-nas",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "hold": [
+          {
+            "op": "read",
+            "path": "/nas/.bromelia-library"
+          }
+        ],
+        "ops": [
+          {
+            "start": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          {
+            "blocked": "nas"
+          },
+          {
+            "advance": 30
+          },
+          {
+            "held": "read"
+          },
+          "release",
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok",
+          "library.offline",
+          "ok",
+          1,
+          "ok",
+          [
+            {
+              "id": "nas",
+              "name": "NAS",
+              "path": "/nas",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:01:00.000Z"
+            },
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:01:00.000Z"
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:30.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "nas",
+                "name": "NAS",
+                "path": "/nas",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "NAS",
+                    "path": "/nas"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-01T12:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:30.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:nas",
+                "code": "library.offline",
+                "params": {
+                  "library": "NAS",
+                  "path": "/nas"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "nas"
+                },
+                "raisedAt": "2026-10-02T20:00:30.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:30.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 6,
+            "at": "2026-10-02T20:01:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "nas",
+                "name": "NAS",
+                "path": "/nas",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:01:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 7,
+            "at": "2026-10-02T20:01:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "library.offline:library:nas",
+              "code": "library.offline"
+            }
+          }
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "a-volume-that-fails-leaves-out-the-free-space",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "fail": [
+          {
+            "op": "volume",
+            "path": "/lib",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "statfs",
+                "path": "/lib",
+                "reason": "EIO"
+              }
+            }
+          }
+        ],
+        "ops": [
+          "start",
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": true,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-library-added-to-the-configuration-is-checked",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/nas/.bromelia-library": "{\n  \"id\": \"m-nas\",\n  \"name\": \"NAS\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "configure": [
+              {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib"
+              },
+              {
+                "id": "nas",
+                "name": "NAS",
+                "path": "/nas"
+              }
+            ]
+          },
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            },
+            {
+              "id": "nas",
+              "name": "NAS",
+              "path": "/nas",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "nas",
+                "name": "NAS",
+                "path": "/nas",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "markerId": "m-lib",
+              "attachedAt": "2026-10-01T12:00:00.000Z",
+              "online": true,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            },
+            {
+              "id": "nas",
+              "name": "NAS",
+              "path": "/nas",
+              "markerId": "m-nas",
+              "attachedAt": "2026-10-01T12:00:00.000Z",
+              "online": true,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a-library-removed-from-the-configuration-is-gone",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "configure": []
+          },
+          "libraries",
+          {
+            "require": "lib"
+          },
+          {
+            "blocked": "lib"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok",
+          [],
+          {
+            "error": {
+              "code": "library.notFound"
+            }
+          },
+          null
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.offline",
+                  "params": {
+                    "library": "Library",
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                },
+                "lastSeenAt": "2026-10-01T12:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.offline:library:lib",
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          },
+          {
+            "seq": 4,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "library.offline:library:lib",
+              "code": "library.offline"
+            }
+          }
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "a-library-moved-to-another-folder-adopts-the-marker-there",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib2/.bromelia-library": "{\n  \"id\": \"m-lib2\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-05T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "configure": [
+              {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib2"
+              }
+            ]
+          },
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok",
+          [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib2",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib2",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib2",
+              "markerId": "m-lib2",
+              "attachedAt": "2026-10-05T12:00:00.000Z",
+              "online": true,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "attach-writes-the-marker-into-the-folder",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "dirs": [
+          "/lib"
+        ],
+        "ops": [
+          "start",
+          {
+            "attach": {
+              "id": "lib",
+              "path": "/lib",
+              "name": "Library"
+            }
+          },
+          {
+            "require": "lib"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "online": true,
+            "freeBytes": 5000000000,
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          },
+          {
+            "id": "lib",
+            "path": "/lib"
+          }
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": false,
+                "reason": {
+                  "code": "library.notAttached",
+                  "params": {
+                    "path": "/lib"
+                  },
+                  "severity": "warning"
+                }
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "library.notAttached:library:lib",
+                "code": "library.notAttached",
+                "params": {
+                  "path": "/lib"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "library",
+                  "id": "lib"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "attachLibrary"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "libraryChanged",
+            "data": {
+              "library": {
+                "id": "lib",
+                "name": "Library",
+                "path": "/lib",
+                "online": true,
+                "freeBytes": 5000000000,
+                "lastSeenAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 4,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "library.notAttached:library:lib",
+              "code": "library.notAttached"
+            }
+          }
+        ],
+        "problems": [],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"9286d278-9ab0-8502-92b6-9cd2d6d08747\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-02T20:00:00.000Z\"\n}\n"
+        },
+        "modes": {
+          "/lib/.bromelia-library": 420
+        },
+        "db": {
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib",
+              "markerId": "9286d278-9ab0-8502-92b6-9cd2d6d08747",
+              "attachedAt": "2026-10-02T20:00:00.000Z",
+              "online": true,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "attach-never-creates-the-folder",
+      "given": {
+        "config": [],
+        "ops": [
+          "start",
+          {
+            "attach": {
+              "id": "lib",
+              "path": "/lib",
+              "name": ""
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "library.pathMissing",
+              "params": {
+                "path": "/lib"
+              }
+            }
+          }
+        ],
+        "events": [],
+        "dirs": [
+          "/"
+        ],
+        "db": {
+          "libraries": []
+        }
+      }
+    },
+    {
+      "id": "attach-names-the-library-after-its-folder",
+      "given": {
+        "config": [],
+        "dirs": [
+          "/Volumes/Archive"
+        ],
+        "ops": [
+          "start",
+          {
+            "attach": {
+              "id": "archive",
+              "path": "/Volumes/Archive",
+              "name": ""
+            }
+          },
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "id": "archive",
+            "name": "Archive",
+            "path": "/Volumes/Archive",
+            "online": true,
+            "freeBytes": 5000000000,
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          },
+          [
+            {
+              "id": "archive",
+              "name": "Archive",
+              "path": "/Volumes/Archive",
+              "online": true,
+              "freeBytes": 5000000000,
+              "lastSeenAt": "2026-10-02T20:00:00.000Z"
+            }
+          ]
+        ],
+        "files": {
+          "/Volumes/Archive/.bromelia-library": "{\n  \"id\": \"dc37a183-9152-82df-9be9-a3e625729ebf\",\n  \"name\": \"Archive\",\n  \"created\": \"2026-10-02T20:00:00.000Z\"\n}\n"
+        }
+      }
+    },
+    {
+      "id": "attach-refuses-a-folder-that-has-a-marker",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-other\",\n  \"name\": \"Other\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "ops": [
+          "start",
+          {
+            "attach": {
+              "id": "lib",
+              "path": "/lib",
+              "name": "Library"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "library.alreadyAttached",
+              "params": {
+                "path": "/lib",
+                "library": "Other"
+              }
+            }
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-other\",\n  \"name\": \"Other\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        }
+      }
+    },
+    {
+      "id": "a-failed-marker-write-is-returned",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "dirs": [
+          "/lib"
+        ],
+        "fail": [
+          {
+            "op": "writeAtomically",
+            "path": "/lib/.bromelia-library",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "write",
+                "path": "/lib/.bromelia-library",
+                "reason": "EROFS"
+              }
+            }
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "attach": {
+              "id": "lib",
+              "path": "/lib",
+              "name": "Library"
+            }
+          },
+          {
+            "require": "lib"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "write",
+                "path": "/lib/.bromelia-library",
+                "reason": "EROFS"
+              }
+            }
+          },
+          {
+            "error": {
+              "code": "library.notAttached",
+              "params": {
+                "path": "/lib"
+              }
+            }
+          }
+        ],
+        "db": {
+          "libraries": []
+        },
+        "files": {}
+      }
+    },
+    {
+      "id": "the-staging-folder-is-made-inside-the-library",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "staging": {
+              "library": "lib",
+              "job": "00000000-0000-4000-8000-000000000001"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "dirs": [
+          "/",
+          "/lib",
+          "/lib/.bromelia",
+          "/lib/.bromelia/staging",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ]
+      }
+    },
+    {
+      "id": "staging-for-an-unknown-library",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "staging": {
+              "library": "nope",
+              "job": "00000000-0000-4000-8000-000000000001"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "library.notFound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-new-folder-is-renamed-whole",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "dirs": [
+          "/lib/Movies"
+        ],
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/Movies/Sample Movie",
+            "files": [
+              "Sample Movie - Playlist 00001.mkv",
+              "Sample Movie - Playlist 00002.mkv",
+              "bromelia-00000000.json"
+            ],
+            "merged": false
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "dirs": [
+          "/",
+          "/lib",
+          "/lib/.bromelia",
+          "/lib/.bromelia/staging",
+          "/lib/Movies",
+          "/lib/Movies/Sample Movie"
+        ],
+        "synced": [
+          "/lib",
+          "/lib/.bromelia/staging",
+          "/lib/Movies",
+          "/lib/Movies/Sample Movie"
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "Sample Movie - Playlist 00001.mkv",
+                44,
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                "title"
+              ],
+              [
+                "Sample Movie - Playlist 00002.mkv",
+                44,
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                "title"
+              ],
+              [
+                "bromelia-00000000.json",
+                33,
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "the-folders-above-a-new-unit-are-made-under-the-root",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/Movies/Sample Movie",
+            "files": [
+              "Sample Movie - Playlist 00001.mkv",
+              "Sample Movie - Playlist 00002.mkv",
+              "bromelia-00000000.json"
+            ],
+            "merged": false
+          }
+        ],
+        "dirs": [
+          "/",
+          "/lib",
+          "/lib/.bromelia",
+          "/lib/.bromelia/staging",
+          "/lib/Movies",
+          "/lib/Movies/Sample Movie"
+        ]
+      }
+    },
+    {
+      "id": "an-existing-folder-is-never-replaced",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/old.mkv": "old"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "library.folderExists",
+              "params": {
+                "path": "/lib/Movies/Sample Movie"
+              }
+            }
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/old.mkv": "old"
+        },
+        "db": {
+          "units": [],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "a-shared-folder-is-merged-item-by-item",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-22222222.json": "record 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "TV Shows/Sample Show",
+                "name": "Sample Show"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/TV Shows/Sample Show",
+                "merge": true,
+                "items": [
+                  [
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                    false
+                  ],
+                  [
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                    false
+                  ],
+                  [
+                    "bromelia-22222222.json",
+                    "bromelia-22222222.json",
+                    "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Season 02/Sample Show - S02E03.mkv",
+                  2,
+                  "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                  "title"
+                ],
+                [
+                  "Season 02/Sample Show - S02E04.mkv",
+                  2,
+                  "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                  "title"
+                ],
+                [
+                  "bromelia-22222222.json",
+                  8,
+                  "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/TV Shows/Sample Show",
+            "files": [
+              "Season 02/Sample Show - S02E03.mkv",
+              "Season 02/Sample Show - S02E04.mkv",
+              "bromelia-22222222.json"
+            ],
+            "merged": true
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/TV Shows/Sample Show/bromelia-22222222.json": "record 2",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\ncef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "dirs": [
+          "/",
+          "/lib",
+          "/lib/.bromelia",
+          "/lib/.bromelia/staging",
+          "/lib/TV Shows",
+          "/lib/TV Shows/Sample Show",
+          "/lib/TV Shows/Sample Show/Season 02"
+        ],
+        "synced": [
+          "/lib",
+          "/lib/.bromelia/staging",
+          "/lib/TV Shows",
+          "/lib/TV Shows/Sample Show",
+          "/lib/TV Shows/Sample Show/Season 02"
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "TV Shows/Sample Show",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "Season 02/Sample Show - S02E03.mkv",
+                2,
+                "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                "title"
+              ],
+              [
+                "Season 02/Sample Show - S02E04.mkv",
+                2,
+                "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                "title"
+              ],
+              [
+                "bromelia-22222222.json",
+                8,
+                "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-merge-into-a-folder-that-is-not-there-yet",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-22222222.json": "record 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "TV Shows/Sample Show",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/TV Shows/Sample Show",
+                "merge": true,
+                "items": [
+                  [
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                    false
+                  ],
+                  [
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                    false
+                  ],
+                  [
+                    "bromelia-22222222.json",
+                    "bromelia-22222222.json",
+                    "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Season 02/Sample Show - S02E03.mkv",
+                  2,
+                  "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                  "title"
+                ],
+                [
+                  "Season 02/Sample Show - S02E04.mkv",
+                  2,
+                  "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                  "title"
+                ],
+                [
+                  "bromelia-22222222.json",
+                  8,
+                  "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/TV Shows/Sample Show",
+            "files": [
+              "Season 02/Sample Show - S02E03.mkv",
+              "Season 02/Sample Show - S02E04.mkv",
+              "bromelia-22222222.json"
+            ],
+            "merged": true
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/TV Shows/Sample Show/bromelia-22222222.json": "record 2",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        }
+      }
+    },
+    {
+      "id": "a-file-in-the-way-stops-the-merge-before-anything-moves",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv": "someone else's",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-22222222.json": "record 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "TV Shows/Sample Show",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/TV Shows/Sample Show",
+                "merge": true,
+                "items": [
+                  [
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                    false
+                  ],
+                  [
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                    false
+                  ],
+                  [
+                    "bromelia-22222222.json",
+                    "bromelia-22222222.json",
+                    "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Season 02/Sample Show - S02E03.mkv",
+                  2,
+                  "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                  "title"
+                ],
+                [
+                  "Season 02/Sample Show - S02E04.mkv",
+                  2,
+                  "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                  "title"
+                ],
+                [
+                  "bromelia-22222222.json",
+                  8,
+                  "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "fs.alreadyExists",
+              "params": {
+                "path": "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv"
+              }
+            }
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv": "someone else's",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-22222222.json": "record 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "db": {
+          "units": [],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "a-commit-to-an-offline-library-writes-nothing",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "library.offline",
+              "params": {
+                "library": "Library",
+                "path": "/lib"
+              }
+            }
+          }
+        ],
+        "files": {
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "a-unit-without-sha256sums-is-not-committed",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "fs.notFound",
+              "params": {
+                "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS"
+              }
+            }
+          }
+        ],
+        "db": {
+          "units": [],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "a-destination-outside-the-library-is-refused",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/elsewhere/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "library.notFound"
+            }
+          }
+        ],
+        "db": {
+          "units": [],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "quarantine-keeps-the-files-apart",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "ops": [
+          "start",
+          {
+            "quarantine": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ],
+              "tag": "READ ERRORS"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/_Quarantine/Sample Movie [READ ERRORS]",
+            "files": [
+              "Sample Movie - Playlist 00001.mkv",
+              "Sample Movie - Playlist 00002.mkv",
+              "bromelia-00000000.json"
+            ],
+            "merged": false
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/_Quarantine/Sample Movie [READ ERRORS]/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/_Quarantine/Sample Movie [READ ERRORS]/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/_Quarantine/Sample Movie [READ ERRORS]/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/_Quarantine/Sample Movie [READ ERRORS]/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "_Quarantine/Sample Movie [READ ERRORS]",
+              "state": "quarantined",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "quarantine-picks-a-free-name",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/_Quarantine/Sample Movie [READ ERRORS]/x.mkv": "earlier"
+        },
+        "ops": [
+          "start",
+          {
+            "quarantine": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ],
+              "tag": "READ ERRORS"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/_Quarantine/Sample Movie [READ ERRORS] (2)",
+            "files": [
+              "Sample Movie - Playlist 00001.mkv",
+              "Sample Movie - Playlist 00002.mkv",
+              "bromelia-00000000.json"
+            ],
+            "merged": false
+          }
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "_Quarantine/Sample Movie [READ ERRORS] (2)",
+              "state": "quarantined",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "a-move-that-fails-part-way-keeps-the-intent-and-rolls-forward",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-22222222.json": "record 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "fail": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv",
+                "reason": "EIO"
+              }
+            },
+            "times": 1
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "TV Shows/Sample Show",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/TV Shows/Sample Show",
+                "merge": true,
+                "items": [
+                  [
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                    false
+                  ],
+                  [
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                    false
+                  ],
+                  [
+                    "bromelia-22222222.json",
+                    "bromelia-22222222.json",
+                    "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Season 02/Sample Show - S02E03.mkv",
+                  2,
+                  "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                  "title"
+                ],
+                [
+                  "Season 02/Sample Show - S02E04.mkv",
+                  2,
+                  "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                  "title"
+                ],
+                [
+                  "bromelia-22222222.json",
+                  8,
+                  "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                  "title"
+                ]
+              ]
+            }
+          },
+          {
+            "dump": "intents"
+          },
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv",
+                "reason": "EIO"
+              }
+            }
+          },
+          [
+            [
+              "00000000-0000-4000-8000-000000000101",
+              [
+                "0 Season 02/Sample Show - S02E03.mkv Season 02/Sample Show - S02E03.mkv moved",
+                "1 Season 02/Sample Show - S02E04.mkv Season 02/Sample Show - S02E04.mkv",
+                "2 bromelia-22222222.json bromelia-22222222.json"
+              ]
+            ]
+          ],
+          [
+            {
+              "unitId": "00000000-0000-4000-8000-000000000101",
+              "destination": "/lib/TV Shows/Sample Show",
+              "files": [
+                "Season 02/Sample Show - S02E03.mkv",
+                "Season 02/Sample Show - S02E04.mkv",
+                "bromelia-22222222.json"
+              ],
+              "merged": true
+            }
+          ]
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/TV Shows/Sample Show/bromelia-22222222.json": "record 2",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\ncef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "TV Shows/Sample Show",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "Season 02/Sample Show - S02E03.mkv",
+                2,
+                "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                "title"
+              ],
+              [
+                "Season 02/Sample Show - S02E04.mkv",
+                2,
+                "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                "title"
+              ],
+              [
+                "bromelia-22222222.json",
+                8,
+                "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-folder-moved-by-merging-that-fails-half-way-continues",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/BDMV/index.bdmv": "index",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/BDMV/STREAM/00001.m2ts": "stream 1",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/BDMV/STREAM/00002.m2ts": "stream 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "0ba819cf98cd3cdc62f9cdaf64288234c2699cd3c7ec53c6b5d6704885fe782c  BDMV/STREAM/00001.m2ts\nf60558136c21e5f60e684c0d8a90224582c90183eae8afce4f76408542d748b6  BDMV/STREAM/00002.m2ts\n1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6  BDMV/index.bdmv\n"
+        },
+        "dirs": [
+          "/lib/Backups/Disc/BDMV/STREAM"
+        ],
+        "fail": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/BDMV/STREAM/00002.m2ts",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/BDMV/STREAM/00002.m2ts",
+                "reason": "EIO"
+              }
+            },
+            "times": 1
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Backups/Disc",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Backups/Disc",
+                "merge": true,
+                "items": [
+                  [
+                    "BDMV",
+                    "BDMV",
+                    null,
+                    true
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "BDMV/STREAM/00001.m2ts",
+                  8,
+                  "0ba819cf98cd3cdc62f9cdaf64288234c2699cd3c7ec53c6b5d6704885fe782c",
+                  "title"
+                ],
+                [
+                  "BDMV/STREAM/00002.m2ts",
+                  8,
+                  "f60558136c21e5f60e684c0d8a90224582c90183eae8afce4f76408542d748b6",
+                  "title"
+                ],
+                [
+                  "BDMV/index.bdmv",
+                  5,
+                  "1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6",
+                  "title"
+                ]
+              ]
+            }
+          },
+          {
+            "dump": "intents"
+          },
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/BDMV/STREAM/00002.m2ts",
+                "reason": "EIO"
+              }
+            }
+          },
+          [
+            [
+              "00000000-0000-4000-8000-000000000101",
+              [
+                "0 BDMV BDMV dir"
+              ]
+            ]
+          ],
+          [
+            {
+              "unitId": "00000000-0000-4000-8000-000000000101",
+              "destination": "/lib/Backups/Disc",
+              "files": [
+                "BDMV/STREAM/00001.m2ts",
+                "BDMV/STREAM/00002.m2ts",
+                "BDMV/index.bdmv"
+              ],
+              "merged": true
+            }
+          ]
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Backups/Disc/BDMV/index.bdmv": "index",
+          "/lib/Backups/Disc/BDMV/STREAM/00001.m2ts": "stream 1",
+          "/lib/Backups/Disc/BDMV/STREAM/00002.m2ts": "stream 2",
+          "/lib/Backups/Disc/SHA256SUMS": "0ba819cf98cd3cdc62f9cdaf64288234c2699cd3c7ec53c6b5d6704885fe782c  BDMV/STREAM/00001.m2ts\nf60558136c21e5f60e684c0d8a90224582c90183eae8afce4f76408542d748b6  BDMV/STREAM/00002.m2ts\n1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6  BDMV/index.bdmv\n"
+        },
+        "dirs": [
+          "/",
+          "/lib",
+          "/lib/.bromelia",
+          "/lib/.bromelia/staging",
+          "/lib/Backups",
+          "/lib/Backups/Disc",
+          "/lib/Backups/Disc/BDMV",
+          "/lib/Backups/Disc/BDMV/STREAM"
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Backups/Disc",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "BDMV/STREAM/00001.m2ts",
+                8,
+                "0ba819cf98cd3cdc62f9cdaf64288234c2699cd3c7ec53c6b5d6704885fe782c",
+                "title"
+              ],
+              [
+                "BDMV/STREAM/00002.m2ts",
+                8,
+                "f60558136c21e5f60e684c0d8a90224582c90183eae8afce4f76408542d748b6",
+                "title"
+              ],
+              [
+                "BDMV/index.bdmv",
+                5,
+                "1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-crash-at-commit-afterintent-rolls-forward",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "crashAt": "commit.afterIntent",
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          },
+          {
+            "dump": "intents"
+          },
+          "restart",
+          "start",
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "crashed": "commit.afterIntent"
+          },
+          [
+            [
+              "00000000-0000-4000-8000-000000000101",
+              [
+                "0 Sample Movie - Playlist 00001.mkv Sample Movie - Playlist 00001.mkv",
+                "1 Sample Movie - Playlist 00002.mkv Sample Movie - Playlist 00002.mkv",
+                "2 bromelia-00000000.json bromelia-00000000.json"
+              ]
+            ]
+          ],
+          "ok",
+          "ok",
+          [
+            {
+              "unitId": "00000000-0000-4000-8000-000000000101",
+              "destination": "/lib/Movies/Sample Movie",
+              "files": [
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "bromelia-00000000.json"
+              ],
+              "merged": false
+            }
+          ]
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "Sample Movie - Playlist 00001.mkv",
+                44,
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                "title"
+              ],
+              [
+                "Sample Movie - Playlist 00002.mkv",
+                44,
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                "title"
+              ],
+              [
+                "bromelia-00000000.json",
+                33,
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-crash-at-commit-aftermove-1-rolls-forward",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "crashAt": "commit.afterMove:1",
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          },
+          {
+            "dump": "intents"
+          },
+          "restart",
+          "start",
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "crashed": "commit.afterMove:1"
+          },
+          [
+            [
+              "00000000-0000-4000-8000-000000000101",
+              [
+                "0 Sample Movie - Playlist 00001.mkv Sample Movie - Playlist 00001.mkv moved",
+                "1 Sample Movie - Playlist 00002.mkv Sample Movie - Playlist 00002.mkv",
+                "2 bromelia-00000000.json bromelia-00000000.json"
+              ]
+            ]
+          ],
+          "ok",
+          "ok",
+          [
+            {
+              "unitId": "00000000-0000-4000-8000-000000000101",
+              "destination": "/lib/Movies/Sample Movie",
+              "files": [
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "bromelia-00000000.json"
+              ],
+              "merged": false
+            }
+          ]
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "Sample Movie - Playlist 00001.mkv",
+                44,
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                "title"
+              ],
+              [
+                "Sample Movie - Playlist 00002.mkv",
+                44,
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                "title"
+              ],
+              [
+                "bromelia-00000000.json",
+                33,
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-crash-at-commit-beforedone-rolls-forward",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "crashAt": "commit.beforeDone",
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          },
+          {
+            "dump": "intents"
+          },
+          "restart",
+          "start",
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "crashed": "commit.beforeDone"
+          },
+          [
+            [
+              "00000000-0000-4000-8000-000000000101",
+              [
+                "0 Sample Movie - Playlist 00001.mkv Sample Movie - Playlist 00001.mkv moved",
+                "1 Sample Movie - Playlist 00002.mkv Sample Movie - Playlist 00002.mkv moved",
+                "2 bromelia-00000000.json bromelia-00000000.json moved"
+              ]
+            ]
+          ],
+          "ok",
+          "ok",
+          [
+            {
+              "unitId": "00000000-0000-4000-8000-000000000101",
+              "destination": "/lib/Movies/Sample Movie",
+              "files": [
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "bromelia-00000000.json"
+              ],
+              "merged": false
+            }
+          ]
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "Sample Movie - Playlist 00001.mkv",
+                44,
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                "title"
+              ],
+              [
+                "Sample Movie - Playlist 00002.mkv",
+                44,
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                "title"
+              ],
+              [
+                "bromelia-00000000.json",
+                33,
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-crash-after-merging-the-sums-rolls-forward-without-merging-twice",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-22222222.json": "record 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "crashAt": "commit.beforeDone",
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "TV Shows/Sample Show",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/TV Shows/Sample Show",
+                "merge": true,
+                "items": [
+                  [
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                    false
+                  ],
+                  [
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                    false
+                  ],
+                  [
+                    "bromelia-22222222.json",
+                    "bromelia-22222222.json",
+                    "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Season 02/Sample Show - S02E03.mkv",
+                  2,
+                  "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                  "title"
+                ],
+                [
+                  "Season 02/Sample Show - S02E04.mkv",
+                  2,
+                  "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                  "title"
+                ],
+                [
+                  "bromelia-22222222.json",
+                  8,
+                  "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                  "title"
+                ]
+              ]
+            }
+          },
+          "restart",
+          "start",
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "crashed": "commit.beforeDone"
+          },
+          "ok",
+          "ok",
+          [
+            {
+              "unitId": "00000000-0000-4000-8000-000000000101",
+              "destination": "/lib/TV Shows/Sample Show",
+              "files": [
+                "Season 02/Sample Show - S02E03.mkv",
+                "Season 02/Sample Show - S02E04.mkv",
+                "bromelia-22222222.json"
+              ],
+              "merged": true
+            }
+          ]
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/TV Shows/Sample Show/bromelia-22222222.json": "record 2",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\ncef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "TV Shows/Sample Show",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": [],
+          "unitFiles": {
+            "00000000-0000-4000-8000-000000000101": [
+              [
+                "Season 02/Sample Show - S02E03.mkv",
+                2,
+                "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                "title"
+              ],
+              [
+                "Season 02/Sample Show - S02E04.mkv",
+                2,
+                "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                "title"
+              ],
+              [
+                "bromelia-22222222.json",
+                8,
+                "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                "title"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "roll-forward-never-claims-a-file-it-did-not-move",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "crashAt": "commit.afterMove:1",
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          },
+          "restart",
+          {
+            "fs": {
+              "put": {
+                "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "changed"
+              }
+            }
+          },
+          "start",
+          "rollForward",
+          {
+            "dump": "intents"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "crashed": "commit.afterMove:1"
+          },
+          "ok",
+          "ok",
+          "ok",
+          [
+            {
+              "error": {
+                "code": "fs.alreadyExists",
+                "params": {
+                  "path": "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv"
+                }
+              }
+            }
+          ],
+          [
+            [
+              "00000000-0000-4000-8000-000000000101",
+              [
+                "0 Sample Movie - Playlist 00001.mkv Sample Movie - Playlist 00001.mkv moved",
+                "1 Sample Movie - Playlist 00002.mkv Sample Movie - Playlist 00002.mkv",
+                "2 bromelia-00000000.json bromelia-00000000.json"
+              ]
+            ]
+          ]
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "roll-forward-waits-for-an-offline-library",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "crashAt": "commit.afterIntent",
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          },
+          "restart",
+          {
+            "fs": {
+              "moveAway": "/lib"
+            }
+          },
+          "start",
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "crashed": "commit.afterIntent"
+          },
+          "ok",
+          "ok",
+          "ok",
+          [
+            {
+              "error": {
+                "code": "library.offline",
+                "params": {
+                  "library": "Library",
+                  "path": "/lib"
+                }
+              }
+            }
+          ]
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a-commit-tried-again-finishes-the-open-intent",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E01.mkv": "e1",
+          "/lib/TV Shows/Sample Show/Season 02/Sample Show - S02E02.mkv": "e2",
+          "/lib/TV Shows/Sample Show/bromelia-11111111.json": "record 1",
+          "/lib/TV Shows/Sample Show/SHA256SUMS": "8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa  Season 02/Sample Show - S02E01.mkv\nac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb  Season 02/Sample Show - S02E02.mkv\n3dba37bb0871edefb95b6655128dbe1922522f17be0cd1089ef7dd45c9badcd1  bromelia-11111111.json\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E03.mkv": "e3",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv": "e4",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-22222222.json": "record 2",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631  Season 02/Sample Show - S02E03.mkv\n449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353  Season 02/Sample Show - S02E04.mkv\n55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801  bromelia-22222222.json\n"
+        },
+        "fail": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv",
+                "reason": "EIO"
+              }
+            },
+            "times": 1
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "TV Shows/Sample Show",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/TV Shows/Sample Show",
+                "merge": true,
+                "items": [
+                  [
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                    false
+                  ],
+                  [
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                    false
+                  ],
+                  [
+                    "bromelia-22222222.json",
+                    "bromelia-22222222.json",
+                    "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Season 02/Sample Show - S02E03.mkv",
+                  2,
+                  "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                  "title"
+                ],
+                [
+                  "Season 02/Sample Show - S02E04.mkv",
+                  2,
+                  "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                  "title"
+                ],
+                [
+                  "bromelia-22222222.json",
+                  8,
+                  "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                  "title"
+                ]
+              ]
+            }
+          },
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "TV Shows/Sample Show",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/TV Shows/Sample Show",
+                "merge": true,
+                "items": [
+                  [
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "Season 02/Sample Show - S02E03.mkv",
+                    "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                    false
+                  ],
+                  [
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "Season 02/Sample Show - S02E04.mkv",
+                    "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                    false
+                  ],
+                  [
+                    "bromelia-22222222.json",
+                    "bromelia-22222222.json",
+                    "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Season 02/Sample Show - S02E03.mkv",
+                  2,
+                  "cef7fc13a38180936ffa2635489088778e059f07a5d1beda53f1719d35577631",
+                  "title"
+                ],
+                [
+                  "Season 02/Sample Show - S02E04.mkv",
+                  2,
+                  "449777124b1466a8ed667d0dd4c0620993f59e20fb27b3fa8894e957f8762353",
+                  "title"
+                ],
+                [
+                  "bromelia-22222222.json",
+                  8,
+                  "55f3858e9bf30865a06984a61ea4e7c0f078549cd1106a11281ab39ff8cd7801",
+                  "title"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Season 02/Sample Show - S02E04.mkv",
+                "reason": "EIO"
+              }
+            }
+          },
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/TV Shows/Sample Show",
+            "files": [
+              "Season 02/Sample Show - S02E03.mkv",
+              "Season 02/Sample Show - S02E04.mkv",
+              "bromelia-22222222.json"
+            ],
+            "merged": true
+          }
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "TV Shows/Sample Show",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "a-folder-that-cannot-be-synced-leaves-the-unit-committing",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "fail": [
+          {
+            "op": "syncDirectory",
+            "path": "/lib/Movies",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "sync",
+                "path": "/lib/Movies",
+                "reason": "EIO"
+              }
+            },
+            "times": 1
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          },
+          "rollForward"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "sync",
+                "path": "/lib/Movies",
+                "reason": "EIO"
+              }
+            }
+          },
+          [
+            {
+              "unitId": "00000000-0000-4000-8000-000000000101",
+              "destination": "/lib/Movies/Sample Movie",
+              "files": [
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "bromelia-00000000.json"
+              ],
+              "merged": false
+            }
+          ]
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": []
+        }
+      }
+    },
+    {
+      "id": "a-second-commit-of-a-unit-being-written-is-refused",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "hold": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ],
+              "wait": false
+            }
+          },
+          {
+            "held": "rename"
+          },
+          {
+            "commit": {
+              "unit": {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "path": "Movies/Sample Movie",
+                "name": "Sample Movie"
+              },
+              "intent": {
+                "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+                "destination": "/lib/Movies/Sample Movie",
+                "merge": false,
+                "items": [
+                  [
+                    "Sample Movie - Playlist 00001.mkv",
+                    "Sample Movie - Playlist 00001.mkv",
+                    "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                    false
+                  ],
+                  [
+                    "Sample Movie - Playlist 00002.mkv",
+                    "Sample Movie - Playlist 00002.mkv",
+                    "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                    false
+                  ],
+                  [
+                    "bromelia-00000000.json",
+                    "bromelia-00000000.json",
+                    "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                    false
+                  ]
+                ]
+              },
+              "files": [
+                [
+                  "Sample Movie - Playlist 00001.mkv",
+                  44,
+                  "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                  "title"
+                ],
+                [
+                  "Sample Movie - Playlist 00002.mkv",
+                  44,
+                  "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                  "title"
+                ],
+                [
+                  "bromelia-00000000.json",
+                  33,
+                  "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                  "title"
+                ]
+              ]
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "destination": "/lib/Movies/Sample Movie",
+            "files": [
+              "Sample Movie - Playlist 00001.mkv",
+              "Sample Movie - Playlist 00002.mkv",
+              "bromelia-00000000.json"
+            ],
+            "merged": false
+          },
+          1,
+          {
+            "error": {
+              "code": "commit.inProgress",
+              "params": {
+                "unit": "00000000-0000-4000-8000-000000000101"
+              }
+            }
+          },
+          "ok"
+        ],
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "path": "Movies/Sample Movie",
+              "state": "committed",
+              "committedAt": "2026-10-02T20:00:00.000Z"
+            }
+          ],
+          "intents": []
+        }
+      }
+    }
+  ]
+}

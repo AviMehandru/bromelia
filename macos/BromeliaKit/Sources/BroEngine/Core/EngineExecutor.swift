@@ -62,6 +62,19 @@ public final class EngineExecutor: Sendable {
         return value
     }
 
+    /// Starts `work` as a task of its own on the actor and returns at once (a service checking several things side by
+    /// side). Swift starts the task on the actor, not through the mailbox, so `activity` counts it until it starts;
+    /// from there its `worker` calls count. C# and C start their worker at once, which counts it already.
+    @EngineActor
+    public func spawn(_ work: @escaping @EngineActor @Sendable () async -> Void) {
+        let counts = counts
+        counts.lock.withLock { counts.resuming += 1 }
+        Task { @EngineActor in
+            counts.lock.withLock { counts.resuming -= 1 }
+            await work()
+        }
+    }
+
     /// Runs `work` on a worker (off the executor); its result or its error comes back on the executor, through the
     /// mailbox: after everything the work posted before it returned (a step's last progress, its log lines).
     @EngineActor

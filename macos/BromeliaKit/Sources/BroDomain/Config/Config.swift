@@ -2,7 +2,7 @@ import BroFoundation
 
 /// A configuration, version 3 (shared/schema/config-3.json): the document as decoded (keys in schema order, defaults
 /// filled outside profiles, unknown keys dropped) and the issues decoding found. Typed views of its entries:
-/// `profiles`, `drives`, `steps`, `rules`.
+/// `profiles`, `drives`, `libraries`, `steps`, `rules`.
 public struct Config: Sendable, Equatable {
     public var document: JsonValue
     public var issues: [Issue]
@@ -14,6 +14,7 @@ public struct Config: Sendable, Equatable {
 
     public static func profiles(_ config: Config) -> [Profile] { (config.document["profiles"]?.array ?? []).map(Profile.init) }
     public static func drives(_ config: Config) -> [DriveEntry] { (config.document["drives"]?.array ?? []).map(DriveEntry.decode) }
+    public static func libraries(_ config: Config) -> [LibraryEntry] { (config.document["libraries"]?.array ?? []).map(LibraryEntry.decode) }
     public static func steps(_ config: Config) -> [StepDefinition] { (config.document["steps"]?.array ?? []).map(StepDefinition.decode) }
     public static func rules(_ config: Config) -> [Rule] { (config.document["rules"]?.array ?? []).map(Rule.decode) }
 

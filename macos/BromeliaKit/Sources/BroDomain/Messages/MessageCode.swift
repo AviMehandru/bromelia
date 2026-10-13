@@ -293,6 +293,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case commitRolledForward = "commit.rolledForward"
     case commitMerged = "commit.merged"
     case commitQuarantined = "commit.quarantined"
+    case commitInProgress = "commit.inProgress"
     case libraryOffline = "library.offline"
     case libraryNone = "library.none"
     case libraryBack = "library.back"

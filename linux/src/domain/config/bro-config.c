@@ -48,6 +48,12 @@ bro_config_drives (const BroConfig *c)
 }
 
 GPtrArray *
+bro_config_libraries (const BroConfig *c)
+{
+  return list_of (c, "libraries", (Decode) bro_library_entry_decode, (GDestroyNotify) bro_library_entry_free);
+}
+
+GPtrArray *
 bro_config_steps (const BroConfig *c)
 {
   return list_of (c, "steps", (Decode) bro_step_definition_decode, (GDestroyNotify) bro_step_definition_free);

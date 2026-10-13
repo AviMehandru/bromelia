@@ -18,6 +18,9 @@ typedef struct {
 BroCommitItem *bro_commit_item_new (void);
 void bro_commit_item_free (BroCommitItem *value);
 
+/* A deep copy. */
+BroCommitItem *bro_commit_item_copy (const BroCommitItem *value);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroCommitItem, bro_commit_item_free)
 
 G_END_DECLS

@@ -19,3 +19,16 @@ bro_library_port_staging_directory (BroLibraryPort *self, const char *library_id
 {
   return BRO_LIBRARY_PORT_GET_IFACE (self)->staging_directory (self, library_id, job_id, error);
 }
+
+BroCommitResult *
+bro_library_port_commit (BroLibraryPort *self, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, BroBroError **error)
+{
+  return BRO_LIBRARY_PORT_GET_IFACE (self)->commit (self, unit, intent, files, error);
+}
+
+BroCommitResult *
+bro_library_port_quarantine (BroLibraryPort *self, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, const char *tag,
+                             BroBroError **error)
+{
+  return BRO_LIBRARY_PORT_GET_IFACE (self)->quarantine (self, unit, intent, files, tag, error);
+}

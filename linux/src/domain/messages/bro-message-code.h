@@ -298,6 +298,7 @@ typedef enum {
   BRO_MSG_COMMIT_ROLLED_FORWARD, /* commit.rolledForward */
   BRO_MSG_COMMIT_MERGED, /* commit.merged */
   BRO_MSG_COMMIT_QUARANTINED, /* commit.quarantined */
+  BRO_MSG_COMMIT_IN_PROGRESS, /* commit.inProgress */
   BRO_MSG_LIBRARY_OFFLINE, /* library.offline */
   BRO_MSG_LIBRARY_NONE, /* library.none */
   BRO_MSG_LIBRARY_BACK, /* library.back */

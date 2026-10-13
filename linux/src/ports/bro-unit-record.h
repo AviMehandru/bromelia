@@ -50,6 +50,9 @@ typedef struct {
 BroUnitRecord *bro_unit_record_new (void);
 void bro_unit_record_free (BroUnitRecord *value);
 
+/* A deep copy. */
+BroUnitRecord *bro_unit_record_copy (const BroUnitRecord *value);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroUnitRecord, bro_unit_record_free)
 
 G_END_DECLS

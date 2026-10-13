@@ -295,6 +295,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "commit.rolledForward",
   "commit.merged",
   "commit.quarantined",
+  "commit.inProgress",
   "library.offline",
   "library.none",
   "library.back",

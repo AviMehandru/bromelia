@@ -20,6 +20,9 @@ typedef struct {
 BroUnitFile *bro_unit_file_new (void);
 void bro_unit_file_free (BroUnitFile *value);
 
+/* A deep copy. */
+BroUnitFile *bro_unit_file_copy (const BroUnitFile *value);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroUnitFile, bro_unit_file_free)
 
 G_END_DECLS

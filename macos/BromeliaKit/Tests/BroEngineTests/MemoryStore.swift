@@ -103,6 +103,10 @@ struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries
     func openRaw(_ device: String) throws(BroError) -> any SectorReader { fatalError("not used") }
     func require(_ libraryId: String) throws(BroError) -> LibraryHandle { fatalError("not used") }
     func stagingDirectory(_ libraryId: String, jobId: Id) throws(BroError) -> String { fatalError("not used") }
+    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile]) async throws(BroError) -> CommitResult { fatalError("not used") }
+    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String) async throws(BroError) -> CommitResult {
+        fatalError("not used")
+    }
     func archivedBefore(_ fingerprint: String) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func find(_ driveId: String) -> DriveLocation? { fatalError("not used") }
     func invocation(_ profile: EffectiveProfile, selectionOverride: String?, jobDirectory: String) throws(BroError) -> MakemkvInvocation {

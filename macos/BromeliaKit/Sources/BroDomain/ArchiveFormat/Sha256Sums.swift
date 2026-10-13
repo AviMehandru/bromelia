@@ -32,7 +32,7 @@ public enum Sha256Sums {
         return render(merged.map { SumEntry(path: $0.key, sha256: $0.value) })
     }
 
-    /// SHA-256 of bytes in memory, lower-case hex (files are hashed by the adapters, streaming).
+    /// SHA-256 of bytes in memory, lower-case hex (a file is hashed as a stream with `Sha256Hasher`).
     public static func hash(_ bytes: [UInt8]) -> String {
         SHA256.hash(data: bytes).map { b in
             let h = String(b, radix: 16)

@@ -33,6 +33,6 @@ public static class Sha256Sums
         return Render(merged.Select(kv => new SumEntry(kv.Key, kv.Value)));
     }
 
-    /// <summary>SHA-256 of bytes in memory, lower-case hex (files are hashed by the adapters, streaming).</summary>
+    /// <summary>SHA-256 of bytes in memory, lower-case hex (a file is hashed as a stream with <see cref="Sha256Hasher"/>).</summary>
     public static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 }

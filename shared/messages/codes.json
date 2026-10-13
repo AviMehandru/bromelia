@@ -1982,6 +1982,14 @@
       },
       "today": "JobRunner.finishOutput marked folders"
     },
+    "commit.inProgress": {
+      "kind": "error",
+      "params": {
+        "unit": "string"
+      },
+      "http": 409,
+      "today": "new: LibraryService.commit, one write per unit at a time (review L3-9)"
+    },
     "library.offline": {
       "kind": "problem",
       "params": {
