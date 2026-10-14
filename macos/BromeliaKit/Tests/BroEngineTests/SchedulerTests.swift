@@ -2,6 +2,7 @@ import BroDomain
 import BroEngine
 import BroFoundation
 import BroTestSupport
+import Foundation
 import Testing
 
 @EngineActor
@@ -136,6 +137,24 @@ final class SchedulerHarness {
         }
     }
 
+    /// Nothing is left to run: no posted action, and no grant or cancellation whose request hasn't recorded it.
+    /// A barrier isn't enough: the Scheduler wakes a waiting request through `EngineExecutor.suspend`, and Swift runs
+    /// it again on the actor, outside the mailbox, so it can still be waiting after the barrier's action has run.
+    nonisolated func settled() async -> Bool {
+        await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+            // Posted alone (no barrier after it), so the executor's activity counts only the scheduler's own work.
+            if !world.executor.post({ [world] in done.resume(returning: world.executor.activity == 0) }) { done.resume(returning: true) }
+        }
+    }
+
+    nonisolated func settle() async throws {
+        let until = Date().addingTimeInterval(10)
+        while !(await settled()) {
+            if Date() > until { throw FixtureError("the scheduler didn't settle") }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+
     func queuesJson() -> JsonValue {
         let q = scheduler.queues()
         func names(_ ids: [Id]) -> JsonValue { .array(ids.map { .string(name(of: $0)) }) }
@@ -154,7 +173,7 @@ struct SchedulerTests {
             do {
                 for op in given["ops"]!.array! {
                     try await h.run(op)
-                    await h.world.executor.barrier()
+                    try await h.settle()
                 }
                 let (granted, states, waits, queues, leases, events) = await (h.granted.sorted { $0.seq < $1.seq }.map(\.name), h.states, h.waits, h.queuesJson(),
                                                                                LeaseSnapshot.json(h.scheduler.leases()),
