@@ -1,9 +1,10 @@
 {
   "functions": [
     "HomeDirIsolation.prepare",
-    "HomeDirIsolation.scrubKey"
+    "HomeDirIsolation.scrubKey",
+    "HomeDirIsolation.recover"
   ],
-  "description": "What HomeDirIsolation writes for one makemkvcon run (plan §10.3; macOS and Linux in production, all three in tests). Paths are relative to an empty temporary folder, <root> in the expectations; given.before are files already there. expect.files lists every file under workDirectory afterwards; modes are POSIX permission bits (checked where the OS has them). expect.files is what is there while the run holds the lease (after prepare and firstOutput, which changes nothing). release removes the app_Key line from settings.conf, whatever wrote it (the registration key shouldn't wait in the job's folder for retention); expect.afterRelease lists the files then, when they differ; the rest stays with the job. given.call scrubKey: the engine crashed before releasing, and startup recovery calls HomeDirIsolation.scrubKey(workDirectory) on a new instance instead (afterRelease is then what it leaves). given.unreadableDuringRun replaces those files with folders while the run holds the lease, so the key can't be removed. expect.releaseProblem is the code release (or scrubKey) reports, none when absent.",
+  "description": "What HomeDirIsolation writes for one makemkvcon run (plan §10.3; macOS and Linux in production, all three in tests). Paths are relative to an empty temporary folder, <root> in the expectations; given.before are files already there. expect.files lists every file under workDirectory afterwards; modes are POSIX permission bits (checked where the OS has them). expect.files is what is there while the run holds the lease (after prepare and firstOutput, which changes nothing). release removes the app_Key line from settings.conf, whatever wrote it (the registration key shouldn't wait in the job's folder for retention); expect.afterRelease lists the files then, when they differ; the rest stays with the job. given.call scrubKey: the engine crashed before releasing, and startup recovery calls HomeDirIsolation.scrubKey(workDirectory) on a new instance instead (afterRelease is then what it leaves); given.call recover: the same through the port, SettingsIsolation.recover([workDirectory]) (releaseProblem is then its first problem). given.unreadableDuringRun replaces those files with folders while the run holds the lease, so the key can't be removed. expect.releaseProblem is the code release (or scrubKey, or recover) reports, none when absent.",
   "cases": [
     {
       "id": "home-macos",
@@ -146,6 +147,34 @@
       }
     },
     {
+      "id": "home-key-scrubbed-by-recover",
+      "from": [
+        "review L3-3: startup recovery scrubs the key from the home of every run the engine never released, through SettingsIsolation.recover"
+      ],
+      "given": {
+        "layout": "linux",
+        "settings": {
+          "dvd_MinimumTitleLength": "30",
+          "app_Key": "T-abc"
+        },
+        "profileXml": null,
+        "workDirectory": "jobs/7/home",
+        "call": "recover"
+      },
+      "expect": {
+        "environment": {
+          "HOME": "<root>/jobs/7/home"
+        },
+        "profilePath": null,
+        "files": {
+          "jobs/7/home/.MakeMKV/settings.conf": "#\n# MakeMKV settings file. Written by Bromelia for one makemkvcon run.\n# Changes made here are overwritten before every job.\n#\n\napp_Key = \"T-abc\"\ndvd_MinimumTitleLength = \"30\"\n"
+        },
+        "afterRelease": {
+          "jobs/7/home/.MakeMKV/settings.conf": "#\n# MakeMKV settings file. Written by Bromelia for one makemkvcon run.\n# Changes made here are overwritten before every job.\n#\n\ndvd_MinimumTitleLength = \"30\"\n"
+        }
+      }
+    },
+    {
       "id": "home-key-cannot-be-removed",
       "given": {
         "layout": "linux",
@@ -166,6 +195,30 @@
         "files": {},
         "releaseProblem": "makemkv.keyNotRemoved",
         "rule": "A key that can't be removed is reported (makemkv.keyNotRemoved, a warning on the run), not skipped without a word"
+      }
+    },
+    {
+      "id": "home-key-cannot-be-removed-by-recover",
+      "given": {
+        "layout": "linux",
+        "settings": {
+          "app_Key": "T-abc"
+        },
+        "profileXml": null,
+        "workDirectory": "home",
+        "unreadableDuringRun": [
+          "home/.MakeMKV/settings.conf"
+        ],
+        "call": "recover"
+      },
+      "expect": {
+        "environment": {
+          "HOME": "<root>/home"
+        },
+        "profilePath": null,
+        "files": {},
+        "releaseProblem": "makemkv.keyNotRemoved",
+        "rule": "recover reports a key it can't remove (makemkv.keyNotRemoved) instead of going on without a word"
       }
     }
   ]

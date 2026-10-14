@@ -6,7 +6,7 @@ import BroPorts
 /// holding its own settings.conf (0600: it may hold the registration key) and the generated profile. The files stay
 /// with the job, except the key: release removes the app_Key line from settings.conf, whatever wrote it, so the key
 /// doesn't wait in the job's folder for retention. A run that never released its lease (the engine crashed) leaves the
-/// key there; startup recovery removes it with `scrubKey(_:)`.
+/// key there; startup recovery removes it with `recover(_:)`.
 public final class HomeDirIsolation: SettingsIsolation {
     private let fs: any FileSystem
     private let layout: HomeLayout
@@ -29,6 +29,9 @@ public final class HomeDirIsolation: SettingsIsolation {
         }
         return Lease(fs: fs, home: home, conf: confPath(home), profile: profile)
     }
+
+    /// Scrubs the key from every home (`scrubKey(_:)`); the problems, in order.
+    public func recover(_ workDirectories: [String]) -> [BroMessage] { workDirectories.compactMap { scrubKey($0) } }
 
     private func confPath(_ home: String) -> String { home + (layout == .macos ? "/Library/MakeMKV" : "/.MakeMKV") + "/settings.conf" }
 

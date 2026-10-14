@@ -3,7 +3,7 @@
  * and the generated profile. The files stay with the job, except the key: release removes the app_Key line from
  * settings.conf, whatever wrote it, so the key doesn't wait in the job's folder for retention. A run that never
  * released its lease (the engine crashed) leaves the key there; startup recovery removes it with
- * bro_home_dir_isolation_scrub_key. */
+ * bro_home_dir_isolation_recover. */
 #pragma once
 
 #include "bro-file-system.h"
@@ -28,5 +28,9 @@ BroIsolationLease *bro_home_dir_isolation_prepare (BroHomeDirIsolation *self, co
  * a run the engine never released (it crashed). makemkv.keyNotRemoved when the file is there but can't be rewritten
  * (free with bro_bro_message_free); NULL otherwise. */
 BroBroMessage *bro_home_dir_isolation_scrub_key (BroHomeDirIsolation *self, const char *work_directory);
+
+/* Scrubs the key from every home (char * @work_directories; bro_home_dir_isolation_scrub_key); the problems, in order,
+ * as a new array of BroBroMessage that frees them. */
+GPtrArray *bro_home_dir_isolation_recover (BroHomeDirIsolation *self, GPtrArray *work_directories);
 
 G_END_DECLS

@@ -154,11 +154,24 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         reg.Values["dvd_MinimumTitleLength"] = "30";
         reg.Values["app_Key"] = "T-beta";
         File.WriteAllBytes(Snapshot, left);
-        Assert.True(Isolation(reg).Recover());
+        Assert.Empty(Isolation(reg).Recover(new[] { "C:\\unused\\home" }));
         Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
         Assert.Equal("M-purchased", reg.Get("app_Key"));
         Assert.False(File.Exists(Snapshot));
-        Assert.False(Isolation(reg).Recover());
+        reg.Log.Clear();
+        Assert.Empty(Isolation(reg).Recover(Array.Empty<string>()));
+        Assert.Empty(reg.Log); // nothing left to put back
+
+        // A registry that refuses: the snapshot stays for the next try, and recovery says so.
+        reg.Values["dvd_MinimumTitleLength"] = "30";
+        File.WriteAllBytes(Snapshot, left);
+        reg.Fails = true;
+        var problems = Isolation(reg).Recover(Array.Empty<string>());
+        Assert.Equal(MessageCode.MakemkvRegistryNotRestored, Assert.Single(problems).Code);
+        Assert.True(File.Exists(Snapshot));
+        reg.Fails = false;
+        Assert.Empty(Isolation(reg).Recover(Array.Empty<string>()));
+        Assert.Equal("120", reg.Get("dvd_MinimumTitleLength"));
 
         // Again, found by the next run instead: its snapshot holds the user's values, not the leftover ones.
         reg.Values["dvd_MinimumTitleLength"] = "30";

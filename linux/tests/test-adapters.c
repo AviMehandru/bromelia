@@ -1003,11 +1003,21 @@ isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
       }
   }
   home_same_files (failures, id, run->work_directory, want_files, "while running");
-  /* "scrubKey": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs the home. */
+  /* "scrubKey" / "recover": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs the
+   * home. */
   if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (given, "call"), NULL), "scrubKey") == 0)
     {
       g_autoptr (BroHomeDirIsolation) again = bro_home_dir_isolation_new (BRO_FILE_SYSTEM (fs), layout);
       problem = bro_home_dir_isolation_scrub_key (again, run->work_directory);
+    }
+  else if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (given, "call"), NULL), "recover") == 0)
+    {
+      g_autoptr (BroHomeDirIsolation) again = bro_home_dir_isolation_new (BRO_FILE_SYSTEM (fs), layout);
+      g_autoptr (GPtrArray) homes = g_ptr_array_new ();
+      g_autoptr (GPtrArray) problems = NULL;
+      g_ptr_array_add (homes, run->work_directory);
+      problems = bro_settings_isolation_recover (BRO_SETTINGS_ISOLATION (again), homes);
+      problem = problems->len > 0 ? g_ptr_array_steal_index (problems, 0) : NULL;
     }
   else
     problem = bro_isolation_lease_release (lease);
@@ -1493,6 +1503,17 @@ ri_prepare (BroSettingsIsolation *i, const BroMakemkvRunSettings *settings, BroB
   return BRO_ISOLATION_LEASE (lease);
 }
 
+static GPtrArray *
+ri_recover (BroSettingsIsolation *i, GPtrArray *work_directories)
+{
+  TestRecordingIsolation *self = TEST_RECORDING_ISOLATION (i);
+  GString *line = g_string_new ("recover");
+  for (guint n = 0; n < work_directories->len; n++)
+    g_string_append_printf (line, " %s", (const char *) g_ptr_array_index (work_directories, n));
+  g_ptr_array_add (self->log, g_string_free (line, FALSE));
+  return g_ptr_array_new_with_free_func ((GDestroyNotify) bro_bro_message_free);
+}
+
 static void
 test_recording_isolation_finalize (GObject *o)
 {
@@ -1503,7 +1524,12 @@ test_recording_isolation_finalize (GObject *o)
 
 static void test_recording_isolation_class_init (TestRecordingIsolationClass *k) { G_OBJECT_CLASS (k)->finalize = test_recording_isolation_finalize; }
 static void test_recording_isolation_init (TestRecordingIsolation *self) { self->log = g_ptr_array_new_with_free_func (g_free); }
-static void test_recording_isolation_iface_init (BroSettingsIsolationInterface *iface) { iface->prepare = ri_prepare; }
+static void
+test_recording_isolation_iface_init (BroSettingsIsolationInterface *iface)
+{
+  iface->prepare = ri_prepare;
+  iface->recover = ri_recover;
+}
 
 /* Finds makemkvcon at path (NULL: nowhere). */
 #define TEST_TYPE_FIXED_LOCATOR (test_fixed_locator_get_type ())

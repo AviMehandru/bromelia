@@ -167,6 +167,11 @@ final class RecordingIsolation: SettingsIsolation, @unchecked Sendable {
         return Lease(owner: self, settings: settings)
     }
 
+    func recover(_ workDirectories: [String]) -> [BroMessage] {
+        add((["recover"] + workDirectories).joined(separator: " "))
+        return []
+    }
+
     struct Lease: IsolationLease {
         let owner: RecordingIsolation
         let settings: MakemkvRunSettings

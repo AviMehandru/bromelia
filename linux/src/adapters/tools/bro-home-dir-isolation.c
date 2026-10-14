@@ -166,6 +166,19 @@ bro_home_dir_isolation_scrub_key (BroHomeDirIsolation *self, const char *work_di
   return scrub (self->fs, conf);
 }
 
+GPtrArray *
+bro_home_dir_isolation_recover (BroHomeDirIsolation *self, GPtrArray *work_directories)
+{
+  GPtrArray *problems = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_bro_message_free);
+  for (guint i = 0; i < work_directories->len; i++)
+    {
+      BroBroMessage *problem = bro_home_dir_isolation_scrub_key (self, g_ptr_array_index (work_directories, i));
+      if (problem)
+        g_ptr_array_add (problems, problem);
+    }
+  return problems;
+}
+
 static gboolean
 write_text (BroFileSystem *fs, const char *path, const char *text, int mode, BroBroError **error)
 {
@@ -205,6 +218,12 @@ prepare_vfunc (BroSettingsIsolation *self, const BroMakemkvRunSettings *settings
   return bro_home_dir_isolation_prepare (BRO_HOME_DIR_ISOLATION (self), settings, error);
 }
 
+static GPtrArray *
+recover_vfunc (BroSettingsIsolation *self, GPtrArray *work_directories)
+{
+  return bro_home_dir_isolation_recover (BRO_HOME_DIR_ISOLATION (self), work_directories);
+}
+
 static void
 bro_home_dir_isolation_finalize (GObject *object)
 {
@@ -227,6 +246,7 @@ static void
 bro_home_dir_isolation_iface_init (BroSettingsIsolationInterface *iface)
 {
   iface->prepare = prepare_vfunc;
+  iface->recover = recover_vfunc;
 }
 
 BroHomeDirIsolation *

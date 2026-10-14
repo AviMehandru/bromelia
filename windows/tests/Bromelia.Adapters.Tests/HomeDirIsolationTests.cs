@@ -58,10 +58,14 @@ public sealed class HomeDirIsolationTests : IDisposable
                 foreach (var m in want.AsObject!) Assert.True(m.Value.AsString == File.ReadAllText(P(m.Key)), when + ": " + m.Key);
             }
             SameFiles(expect["files"]!, "while running");
-            // "scrubKey": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs the home.
-            var problem = given["call"]?.AsString == "scrubKey"
-                ? new HomeDirIsolation(new DiskFileSystem(), layout).ScrubKey(work)
-                : lease.Release();
+            // "scrubKey" / "recover": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs
+            // the home.
+            var problem = given["call"]?.AsString switch
+            {
+                "scrubKey" => new HomeDirIsolation(new DiskFileSystem(), layout).ScrubKey(work),
+                "recover" => new HomeDirIsolation(new DiskFileSystem(), layout).Recover(new[] { work }).FirstOrDefault(),
+                _ => lease.Release(),
+            };
             SameFiles(expect["afterRelease"] ?? expect["files"]!, "after release");
             Assert.Equal(expect["releaseProblem"]?.AsString, problem is null ? null : MessageCode.Wire(problem.Code));
 

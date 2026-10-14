@@ -14,3 +14,10 @@ bro_settings_isolation_prepare (BroSettingsIsolation *self, const BroMakemkvRunS
   g_return_val_if_fail (BRO_IS_SETTINGS_ISOLATION (self), NULL);
   return BRO_SETTINGS_ISOLATION_GET_IFACE (self)->prepare (self, settings, error);
 }
+
+GPtrArray *
+bro_settings_isolation_recover (BroSettingsIsolation *self, GPtrArray *work_directories)
+{
+  g_return_val_if_fail (BRO_IS_SETTINGS_ISOLATION (self), NULL);
+  return BRO_SETTINGS_ISOLATION_GET_IFACE (self)->recover (self, work_directories);
+}

@@ -115,6 +115,12 @@ internal sealed class RecordingIsolation : ISettingsIsolation
         return new Lease(this, settings);
     }
 
+    public IReadOnlyList<BroMessage> Recover(IReadOnlyList<string> workDirectories)
+    {
+        Log.Add("recover " + string.Join(" ", workDirectories));
+        return Array.Empty<BroMessage>();
+    }
+
     sealed class Lease : IIsolationLease
     {
         readonly RecordingIsolation _owner;

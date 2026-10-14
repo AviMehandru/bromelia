@@ -8480,6 +8480,17 @@
           "swift": "SettingsIsolation.prepare(_:)",
           "cs": "SettingsIsolation.Prepare",
           "c": "bro_settings_isolation_prepare"
+        },
+        {
+          "name": "SettingsIsolation.recover",
+          "params": [
+            "workDirectories"
+          ],
+          "returns": "[BroMessage]",
+          "doc": "At startup (RecoveryService), for the runs the engine never released: HOME folders lose the app_Key line of their settings.conf; the registry gets back the user's values a crash left in the snapshot file. What it couldn't do, as warnings; empty when all went well (owner, 2026-10-14).",
+          "swift": "SettingsIsolation.recover(_:)",
+          "cs": "SettingsIsolation.Recover",
+          "c": "bro_settings_isolation_recover"
         }
       ]
     },
@@ -10497,10 +10508,21 @@
             "workDirectory"
           ],
           "returns": "BroMessage?",
-          "doc": "Removes the app_Key line from the settings.conf of a run's home, as release does: for the home of a run the engine never released (it crashed). Startup recovery calls it for interrupted jobs.",
+          "doc": "Removes the app_Key line from the settings.conf of a run's home, as release does: for the home of a run the engine never released (it crashed). recover calls it for each home.",
           "swift": "HomeDirIsolation.scrubKey(_:)",
           "cs": "HomeDirIsolation.ScrubKey",
           "c": "bro_home_dir_isolation_scrub_key"
+        },
+        {
+          "name": "HomeDirIsolation.recover",
+          "params": [
+            "workDirectories"
+          ],
+          "returns": "[BroMessage]",
+          "doc": "SettingsIsolation.recover: scrubKey for each home; the problems, in order.",
+          "swift": "HomeDirIsolation.recover(_:)",
+          "cs": "HomeDirIsolation.Recover",
+          "c": "bro_home_dir_isolation_recover"
         }
       ]
     },
@@ -10509,7 +10531,7 @@
       "folder": "Platform",
       "cFolder": "platform",
       "csRoot": "windows/src/Bromelia.Adapters.Windows",
-      "doc": "SettingsIsolation on Windows (plan §10.3): makemkvcon reads HKCU\\Software\\MakeMKV, so each launch writes the run's values there (clearing the other catalogue keys) and restores the user's values on the first output line, the exit or after 15 s; launches are serialised. The user's values wait in a snapshot file (<data>\\run\\makemkv-registry.json) until they are back, so a crash can't lose them: Recover() at startup, or the next launch, puts them back.",
+      "doc": "SettingsIsolation on Windows (plan §10.3): makemkvcon reads HKCU\\Software\\MakeMKV, so each launch writes the run's values there (clearing the other catalogue keys) and restores the user's values on the first output line, the exit or after 15 s; launches are serialised. The user's values wait in a snapshot file (<data>\\run\\makemkv-registry.json) until they are back, so a crash can't lose them: recover() at startup, or the next launch, puts them back.",
       "phase": 2,
       "types": [
         {
@@ -10565,6 +10587,19 @@
           ],
           "why": "Windows only.",
           "cs": "RegistrySwapIsolation.Prepare"
+        },
+        {
+          "name": "RegistrySwapIsolation.recover",
+          "params": [
+            "workDirectories"
+          ],
+          "returns": "[BroMessage]",
+          "only": [
+            "cs"
+          ],
+          "why": "Windows only.",
+          "doc": "SettingsIsolation.recover: puts back the values of a snapshot a crash left; makemkv.registryNotRestored (the file kept for the next try) or makemkv.registryFailed.",
+          "cs": "RegistrySwapIsolation.Recover"
         },
         {
           "name": "MakemkvRegistry.get",

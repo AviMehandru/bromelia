@@ -11,7 +11,7 @@ namespace Bromelia.Adapters;
 /// folder, holding its own settings.conf (0600: it may hold the registration key) and the generated profile. The
 /// files stay with the job, except the key: release removes the app_Key line from settings.conf, whatever wrote it, so
 /// the key doesn't wait in the job's folder for retention. A run that never released its lease (the engine crashed)
-/// leaves the key there; startup recovery removes it with <see cref="ScrubKey"/>.</summary>
+/// leaves the key there; startup recovery removes it with <see cref="Recover"/>.</summary>
 public sealed class HomeDirIsolation : ISettingsIsolation
 {
     readonly IFileSystem _fs;
@@ -38,6 +38,10 @@ public sealed class HomeDirIsolation : ISettingsIsolation
         }
         return new Lease(_fs, home, ConfPath(home), profile);
     }
+
+    /// <summary>Scrubs the key from every home (<see cref="ScrubKey"/>); the problems, in order.</summary>
+    public IReadOnlyList<BroMessage> Recover(IReadOnlyList<string> workDirectories) =>
+        workDirectories.Select(ScrubKey).Where(p => p != null).Select(p => p!).ToList();
 
     string ConfPath(string home) => home + (_layout == HomeLayout.Macos ? "/Library/MakeMKV" : "/.MakeMKV") + "/settings.conf";
 

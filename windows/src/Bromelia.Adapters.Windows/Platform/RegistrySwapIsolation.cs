@@ -44,13 +44,21 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
         _restoreAfter = TimeSpan.FromSeconds(restoreAfter?.Seconds ?? 15);
     }
 
-    /// <summary>Puts back the values of a snapshot a crash left behind; whether there was one. Fails with
-    /// makemkv.registryNotRestored when they can't all be put back (the file stays for the next try), and with
+    /// <summary>Puts back the values of a snapshot a crash left behind (the work folders hold nothing to undo here).
+    /// makemkv.registryNotRestored when they can't all be put back (the file stays for the next try), and
     /// makemkv.registryFailed when the file isn't a snapshot.</summary>
-    public bool Recover()
+    public IReadOnlyList<BroMessage> Recover(IReadOnlyList<string> workDirectories)
     {
         Launch.Wait();
-        try { return RecoverLeftover(); }
+        try
+        {
+            RecoverLeftover();
+            return Array.Empty<BroMessage>();
+        }
+        catch (BroFailure f)
+        {
+            return new[] { new BroMessage(MessageCode.Parse(f.Error.Code) ?? MessageCode.MakemkvRegistryFailed, f.Error.Params, Severity.Warning) };
+        }
         finally { Launch.Release(); }
     }
 

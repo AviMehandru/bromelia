@@ -49,10 +49,14 @@ struct HomeDirIsolationTests {
                 }
             }
             try sameFiles(expect["files"]!, "while running")
-            // "scrubKey": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs the home.
-            let problem = given["call"]?.string == "scrubKey"
-                ? HomeDirIsolation(fs: PlatformFileSystem(), layout: HomeLayout(rawValue: given["layout"]!.string!)!).scrubKey(work)
-                : lease.release()
+            // "scrubKey" / "recover": the engine crashed before releasing; startup recovery (a new HomeDirIsolation) scrubs
+            // the home.
+            let fresh = HomeDirIsolation(fs: PlatformFileSystem(), layout: HomeLayout(rawValue: given["layout"]!.string!)!)
+            let problem = switch given["call"]?.string {
+            case "scrubKey": fresh.scrubKey(work)
+            case "recover": fresh.recover([work]).first
+            default: lease.release()
+            }
             try sameFiles(expect["afterRelease"] ?? expect["files"]!, "after release")
             try Fixtures.same(expect["releaseProblem"]?.string, problem?.code.rawValue, "releaseProblem")
 

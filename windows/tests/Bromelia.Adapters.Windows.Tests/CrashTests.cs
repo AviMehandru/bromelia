@@ -64,7 +64,7 @@ public sealed class CrashTests : IDisposable
             Assert.NotEqual(0, TestProbe.Run("registry", _dir, name));
             Assert.Equal("run", registry.Get(name));
             Assert.True(File.Exists(snapshot));
-            Assert.True(new RegistrySwapIsolation(new PlatformFileSystem(), registry, new[] { name }, snapshot).Recover());
+            Assert.Empty(new RegistrySwapIsolation(new PlatformFileSystem(), registry, new[] { name }, snapshot).Recover(Array.Empty<string>()));
             Assert.Equal("user", registry.Get(name));
             Assert.False(File.Exists(snapshot));
         }
