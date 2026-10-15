@@ -71,8 +71,8 @@ fakes_find (BroDriveLookup *lookup, const char *drive_id)
 }
 
 static BroMakemkvInvocation *
-fakes_invocation (BroMakemkvSetup *setup, const BroEffectiveProfile *profile, const char *selection_override, const char *job_directory,
-                  BroBroError **error)
+fakes_invocation (BroMakemkvSetup *setup, const BroConfig *config, const BroEffectiveProfile *profile, const char *selection_override,
+                  const char *job_directory, BroBroError **error)
 {
   BroJsonValue *min = bro_json_value_member (bro_json_value_member (profile->profile, "makemkv"), "minLengthSeconds");
   g_autofree char *length = min && min->kind == BRO_JSON_VALUE_INTEGER ? g_strdup_printf ("%" G_GINT64_FORMAT, min->integer) : g_strdup ("null");

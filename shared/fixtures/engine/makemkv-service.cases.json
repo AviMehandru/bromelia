@@ -1,0 +1,725 @@
+{
+  "description": "MakemkvService.invocation (MakemkvSetup, plan §11.1, session A 2026-10-15): what one makemkvcon run gets. Given: config (the job's configuration document, through ConfigCodec.decode); configId (the drive entry; the profile is ProfileResolver.resolve(config, configId, no facts, no session)); selectionOverride; jobDirectory (default /data/jobs/j1); the service's dataDir (default /home/u/.MakeMKV), home (/home/u) and user settings file (<dataDir>/settings.conf; userSettings is its text, absent: no such file, null: the service has none, as on Windows; userSettingsFails {code, params}: reading it fails so); the real ConfigService behind it, with a system keystore holding secrets {name: value} (keystoreFails {name: {code, params}}: that secret's get fails so), an empty secrets folder and the BROMELIA_SECRET_* environment. Expect: settings (the run's settings.conf, exactly), profileXml (null, or {name, selection}: the generated profile's <name> and app_DefaultSelectionString), options {profilePath, minLengthSeconds, cacheMB, directIO, extraArguments, scan}, workDirectory, dataDir, stallTimeout (seconds; null: none), transcript; or error {code, params} (the call fails).",
+  "cases": [
+    {
+      "id": "nothing-configured",
+      "from": [
+        "rearchitecture-plan §11.1 MakemkvService; windows Bromelia.Core MakeMKVEnvironment.Prepare"
+      ],
+      "given": {
+        "config": {
+          "version": 3
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "global-then-profile-then-drive-settings",
+      "from": [
+        "windows AppConfig.EffectiveSettings; config-3.json makemkv.settings, profiles[].makemkv.settings, drives[].makemkvSettings"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "makemkv": {
+                "settings": {
+                  "dvd_MinimumTitleLength": "30",
+                  "io_ErrorRetryCount": "2"
+                }
+              }
+            }
+          ],
+          "drives": [
+            {
+              "id": "left",
+              "match": {
+                "driveName": "BD-RE LEFT 1.00"
+              },
+              "makemkvSettings": {
+                "io_ErrorRetryCount": "5"
+              }
+            }
+          ],
+          "makemkv": {
+            "settings": {
+              "dvd_MinimumTitleLength": "120",
+              "app_Proxy": "",
+              "app_ccextractor": "/opt/cc"
+            }
+          }
+        },
+        "configId": "left"
+      },
+      "expect": {
+        "settings": {
+          "app_ccextractor": "/opt/cc",
+          "dvd_MinimumTitleLength": "30",
+          "io_ErrorRetryCount": "5",
+          "app_DataDir": "/home/u/.MakeMKV"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "the-key-from-the-secrets-wins",
+      "from": [
+        "windows AppConfig.EffectiveSettings (RegistrationKey over the installed key); rearchitecture-plan §24 secrets"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "secrets": {
+          "makemkv.key": "T-keystore"
+        },
+        "userSettings": "app_Key = \"M-installed\"\ndvd_MinimumTitleLength = \"999\"\n"
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_Key": "T-keystore"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "the-key-from-the-environment",
+      "from": [
+        "rearchitecture-plan §24: keystore, then BROMELIA_SECRET_<NAME>"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "environment": {
+          "BROMELIA_SECRET_MAKEMKV_KEY": "T-environment"
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_Key": "T-environment"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "the-installed-key-when-none-is-configured",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (InstalledSettings app_Key, macOS and Linux); config-3.json makemkv.registrationKey: null = the key MakeMKV is registered with"
+      ],
+      "given": {
+        "config": {
+          "version": 3
+        },
+        "userSettings": "app_Key = \"M-installed\"\ndvd_MinimumTitleLength = \"999\"\n"
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_Key": "M-installed"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "a-configured-key-without-a-value-falls-back-to-the-installed-one",
+      "from": [
+        "new: a secret named in the configuration but set nowhere"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "userSettings": "app_Key = \"M-installed\"\ndvd_MinimumTitleLength = \"999\"\n"
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_Key": "M-installed"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "an-installed-file-without-a-key",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare"
+      ],
+      "given": {
+        "config": {
+          "version": 3
+        },
+        "userSettings": "app_DataDir = \"/elsewhere\"\n"
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "windows-keeps-its-key-in-the-registry",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (UsesRegistry: neither app_DataDir nor the installed key)"
+      ],
+      "given": {
+        "config": {
+          "version": 3
+        },
+        "userSettings": null,
+        "dataDir": ""
+      },
+      "expect": {
+        "settings": {},
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "a-keystore-failure-is-the-call's",
+      "from": [
+        "rearchitecture-plan §24; ConfigService.secret: the first failure when no source has it"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "keystoreFails": {
+          "makemkv.key": {
+            "code": "keystore.failed",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "locked"
+            }
+          }
+        },
+        "userSettings": "app_Key = \"M-installed\"\ndvd_MinimumTitleLength = \"999\"\n"
+      },
+      "expect": {
+        "error": {
+          "code": "keystore.failed",
+          "params": {
+            "name": "makemkv.key",
+            "reason": "locked"
+          }
+        }
+      }
+    },
+    {
+      "id": "an-unreadable-user-settings-file-is-the-call's",
+      "from": [
+        "new: MakeMKV can't read it either (it runs as the same user)"
+      ],
+      "given": {
+        "config": {
+          "version": 3
+        },
+        "userSettings": "app_Key = \"M-installed\"\ndvd_MinimumTitleLength = \"999\"\n",
+        "userSettingsFails": {
+          "code": "fs.failed",
+          "params": {
+            "operation": "read",
+            "path": "/home/u/.MakeMKV/settings.conf",
+            "reason": "Permission denied"
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "fs.failed",
+          "params": {
+            "operation": "read",
+            "path": "/home/u/.MakeMKV/settings.conf",
+            "reason": "Permission denied"
+          }
+        }
+      }
+    },
+    {
+      "id": "a-generated-profile",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (ProfileMode.Generated); ProfileBuilder.Build"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "makemkv": {
+                "profile": {
+                  "mode": "generated",
+                  "generated": {
+                    "name": "Archive",
+                    "selectionRule": "-sel:all,+sel:eng"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_DefaultSelectionString": "-sel:all,+sel:eng"
+        },
+        "profileXml": {
+          "name": "Archive",
+          "selection": "-sel:all,+sel:eng"
+        },
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "a-generated-profile-without-a-rule",
+      "from": [
+        "windows ProfileBuilder.Build (MakeMKV's default rule)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "makemkv": {
+                "profile": {
+                  "mode": "generated"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV"
+        },
+        "profileXml": {
+          "name": "Bromelia",
+          "selection": "-sel:all,+sel:(favlang|nolang|single),-sel:(havemulti|havecore),-sel:mvcvideo,=100:all,-10:favlang"
+        },
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "hand-picked-tracks-override-the-generated-rule",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (selectionOverride)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "makemkv": {
+                "profile": {
+                  "mode": "generated",
+                  "generated": {
+                    "selectionRule": "-sel:all,+sel:eng"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "selectionOverride": "+sel:all"
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_DefaultSelectionString": "+sel:all"
+        },
+        "profileXml": {
+          "name": "Bromelia",
+          "selection": "+sel:all"
+        },
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "a-custom-profile-file",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (ProfileMode.CustomFile, Paths.ExpandUser)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "makemkv": {
+                "profile": {
+                  "mode": "customFile",
+                  "customPath": "~/Profiles/mine.mmcp.xml"
+                }
+              }
+            }
+          ]
+        },
+        "selectionOverride": "+sel:all"
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_DefaultSelectionString": "+sel:all"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": "/home/u/Profiles/mine.mmcp.xml",
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "a-custom-profile-without-a-path",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (an empty custom path: no --profile)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "makemkv": {
+                "profile": {
+                  "mode": "customFile"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "makemkvs-own-profile-with-an-override",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (default mode)"
+      ],
+      "given": {
+        "config": {
+          "version": 3
+        },
+        "selectionOverride": "+sel:all"
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV",
+          "app_DefaultSelectionString": "+sel:all"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "the-profiles-switches",
+      "from": [
+        "windows MakeMKVEnvironment.CommonSwitches (minlength, cache, directio, extra arguments)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default",
+              "makemkv": {
+                "minLengthSeconds": 120,
+                "cacheMB": 1024,
+                "directIO": false,
+                "extraArguments": "--debug=/tmp/x"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": 120,
+          "cacheMB": 1024,
+          "directIO": false,
+          "extraArguments": "--debug=/tmp/x",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "no-stall-timeout",
+      "from": [
+        "config-3.json limits.stallTimeoutMinutes: 0 = never"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "limits": {
+            "stallTimeoutMinutes": 0
+          }
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/.MakeMKV"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": null,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    },
+    {
+      "id": "a-data-folder-of-its-own",
+      "from": [
+        "windows MakeMKVEnvironment.Prepare (app_DataDir from a layer, Paths.ExpandUser)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "makemkv": {
+            "settings": {
+              "app_DataDir": "~/MKV data"
+            }
+          }
+        }
+      },
+      "expect": {
+        "settings": {
+          "app_DataDir": "/home/u/MKV data"
+        },
+        "profileXml": null,
+        "options": {
+          "profilePath": null,
+          "minLengthSeconds": null,
+          "cacheMB": null,
+          "directIO": null,
+          "extraArguments": "",
+          "scan": false
+        },
+        "workDirectory": "/data/jobs/j1/home",
+        "dataDir": "/home/u/.MakeMKV",
+        "stallTimeout": 1800,
+        "transcript": "/data/jobs/j1/makemkv.txt"
+      }
+    }
+  ]
+}

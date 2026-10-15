@@ -60,7 +60,7 @@ public sealed class VideoStepsTests
                 d["generation"]?.AsInteger, d["label"]?.AsString ?? "", d["flags"]?.AsInteger is { } f ? new DiscFlags((int)f) : null);
         }
 
-        public MakemkvInvocation Invocation(EffectiveProfile profile, string? selectionOverride, string jobDirectory)
+        public MakemkvInvocation Invocation(Config config, EffectiveProfile profile, string? selectionOverride, string jobDirectory)
         {
             lock (Calls)
                 Calls.Add($"invocation {selectionOverride ?? "-"} minLength={profile.Profile["makemkv"]?["minLengthSeconds"]?.AsInteger?.ToString(CultureInfo.InvariantCulture) ?? "null"}");

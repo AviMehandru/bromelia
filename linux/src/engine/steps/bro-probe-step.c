@@ -75,7 +75,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   if (request->session)
     _bro_step_log (context, BRO_MSG_DISC_READING_AGAIN, NULL, BRO_SEVERITY_INFO);
   bro_progress_reporter_report (context->progress, 0, operation, NULL);
-  g_autoptr (BroMakemkvInvocation) invocation = bro_makemkv_setup_invocation (context->makemkv_setup, profile, NULL, context->job_directory, error);
+  g_autoptr (BroMakemkvInvocation) invocation = bro_makemkv_setup_invocation (context->makemkv_setup, context->config, profile, NULL, context->job_directory, error);
   if (!invocation)
     return NULL;
   g_autoptr (BroMakemkvSink) sink = bro_makemkv_sink_new (context->progress, context->log, operation);

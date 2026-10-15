@@ -28,7 +28,8 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
                              generation: d["generation"]?.int, label: d["label"]?.string ?? "", flags: d["flags"]?.int.map { DiscFlags(raw: Int($0)) })
     }
 
-    func invocation(_ profile: EffectiveProfile, selectionOverride: String?, jobDirectory: String) throws(BroError) -> MakemkvInvocation {
+    func invocation(_ config: Config, profile: EffectiveProfile, selectionOverride: String?, jobDirectory: String) throws(BroError)
+        -> MakemkvInvocation {
         call("invocation \(selectionOverride ?? "-") minLength=\(profile.profile["makemkv"]?["minLengthSeconds"]?.int.map { String($0) } ?? "null")")
         return MakemkvInvocation(settings: MakemkvRunSettings(settings: [:], dataDir: "", workDirectory: jobDirectory), options: MakemkvOptions())
     }

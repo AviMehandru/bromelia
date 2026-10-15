@@ -115,7 +115,7 @@ struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries
     }
     func archivedBefore(_ fingerprint: String) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func find(_ driveId: String) -> DriveLocation? { fatalError("not used") }
-    func invocation(_ profile: EffectiveProfile, selectionOverride: String?, jobDirectory: String) throws(BroError) -> MakemkvInvocation {
+    func invocation(_ config: Config, profile: EffectiveProfile, selectionOverride: String?, jobDirectory: String) throws(BroError) -> MakemkvInvocation {
         fatalError("not used")
     }
 }

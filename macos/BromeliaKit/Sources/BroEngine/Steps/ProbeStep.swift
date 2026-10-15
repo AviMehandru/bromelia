@@ -29,7 +29,7 @@ public struct ProbeStep: Step {
         let operation = BroMessage(.discOpReading)
         if request.session != nil { context.log.log(BroMessage(.discReadingAgain)) }
         context.progress.report(0, operation: operation, current: nil)
-        let invocation = try context.makemkvSetup.invocation(profile, selectionOverride: nil, jobDirectory: context.jobDirectory)
+        let invocation = try context.makemkvSetup.invocation(context.config, profile: profile, selectionOverride: nil, jobDirectory: context.jobDirectory)
         let read = try await context.tools.makemkv.listing(source, invocation: invocation,
                                                            sink: MakemkvSink(progress: context.progress, log: context.log, operation: operation),
                                                            cancel: context.cancel)

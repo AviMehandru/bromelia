@@ -14282,20 +14282,6 @@
           "c": "bro_drive_lookup_find"
         },
         {
-          "name": "MakemkvSetup.invocation",
-          "params": [
-            "profile",
-            "selectionOverride",
-            "jobDirectory"
-          ],
-          "returns": "MakemkvInvocation",
-          "doc": "selectionOverride: app_DefaultSelectionString for this run (hand-picked tracks: +sel:all).",
-          "throws": true,
-          "swift": "MakemkvSetup.invocation(_:selectionOverride:jobDirectory:)",
-          "cs": "MakemkvSetup.Invocation",
-          "c": "bro_makemkv_setup_invocation"
-        },
-        {
           "name": "LibraryPort.commit",
           "params": [
             "unit",
@@ -14360,6 +14346,21 @@
           "swift": "JobLog.append(_:jobDirectory:lines:)",
           "cs": "JobLog.Append",
           "c": "bro_job_log_append"
+        },
+        {
+          "name": "MakemkvSetup.invocation",
+          "params": [
+            "config",
+            "profile",
+            "selectionOverride",
+            "jobDirectory"
+          ],
+          "returns": "MakemkvInvocation",
+          "doc": "Under the configuration the job started with (its makemkv.settings, registration key and limits.stallTimeoutMinutes). selectionOverride: app_DefaultSelectionString for this run (hand-picked tracks: +sel:all).",
+          "throws": true,
+          "swift": "MakemkvSetup.invocation(_:profile:selectionOverride:jobDirectory:)",
+          "cs": "MakemkvSetup.Invocation",
+          "c": "bro_makemkv_setup_invocation"
         }
       ]
     },
@@ -14655,7 +14656,7 @@
       "layer": "engine",
       "folder": "Services",
       "cFolder": "services",
-      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService, LibraryService and RecoveryService. shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json, recovery-service.cases.json.",
+      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService, LibraryService, RecoveryService and MakemkvService (phase 3 part). shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json, recovery-service.cases.json, makemkv-service.cases.json.",
       "phase": 3,
       "types": [
         {
@@ -14762,6 +14763,24 @@
           "c": {
             "name": "BroRecoveryService",
             "file": "linux/src/engine/services/bro-recovery-service.h"
+          }
+        },
+        {
+          "name": "MakemkvService",
+          "kind": "class",
+          "doc": "MakeMKV as the engine sets it up (plan §11.1), as far as phase 3 needs it: implements MakemkvSetup. A run's settings are SettingsLayers.merge of makemkv.settings and the profile's, with the registration key (makemkv.registrationKey through ConfigService.secret, else the key in the user's settings.conf on macOS and Linux) and the user's MakeMKV data folder; the generated or custom profile file; the profile's switches; the job's home and makemkv.txt; limits.stallTimeoutMinutes. Version, registration and the beta key are phase 5. shared/fixtures/engine/makemkv-service.cases.json.",
+          "phase": 3,
+          "swift": {
+            "name": "MakemkvService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/MakemkvService.swift"
+          },
+          "cs": {
+            "name": "MakemkvService",
+            "file": "windows/src/Bromelia.Engine/Services/MakemkvService.cs"
+          },
+          "c": {
+            "name": "BroMakemkvService",
+            "file": "linux/src/engine/services/bro-makemkv-service.h"
           }
         }
       ],

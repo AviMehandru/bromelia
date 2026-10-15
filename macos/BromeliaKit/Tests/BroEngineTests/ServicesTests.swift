@@ -24,7 +24,7 @@ private func scope(_ j: JsonValue?) -> ProblemScope? {
     return ProblemScope(kind: ProblemScopeKind(rawValue: j["kind"]!.string!)!, id: j["id"]!.string!)
 }
 
-private final class ConfigFiles: FileSystem, @unchecked Sendable {
+final class ConfigFiles: FileSystem, @unchecked Sendable {
     private let lock = NSLock()
     private var bytes: [UInt8]?
     private var writtenMode: Int?
@@ -78,7 +78,7 @@ private final class ConfigFiles: FileSystem, @unchecked Sendable {
     func volume(_ path: String) throws(BroError) -> VolumeInfo { throw BroError("test.unsupported") }
 }
 
-private final class FakeKeystore: Keystore, @unchecked Sendable {
+final class FakeKeystore: Keystore, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [String: String] = [:]
     var fails: [String: JsonValue] = [:]
@@ -114,7 +114,7 @@ private final class FakeKeystore: Keystore, @unchecked Sendable {
     }
 }
 
-private final class FakeKv: KeyValueRepository, @unchecked Sendable {
+final class FakeKv: KeyValueRepository, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [String: JsonValue] = [:]
     private let gate: ConfigFiles

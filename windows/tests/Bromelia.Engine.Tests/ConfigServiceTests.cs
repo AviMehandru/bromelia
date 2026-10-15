@@ -22,7 +22,7 @@ public sealed class ConfigServiceTests
     /// <summary>A document as ConfigCodec.decode leaves it, so a case can write it short.</summary>
     static JsonValue Norm(JsonValue doc) => ConfigCodec.Decode(JsonValue.EncodeCanonical(doc)).Document;
 
-    sealed class Files : IFileSystem
+    internal sealed class Files : IFileSystem
     {
         readonly object _lock = new();
         public byte[]? Bytes;
@@ -75,7 +75,7 @@ public sealed class ConfigServiceTests
         public VolumeInfo Volume(string path) => throw new NotSupportedException();
     }
 
-    sealed class Keystore : IKeystore
+    internal sealed class Keystore : IKeystore
     {
         readonly object _lock = new();
         public readonly SortedDictionary<string, string> Values = new(StringComparer.Ordinal);
@@ -108,7 +108,7 @@ public sealed class ConfigServiceTests
         }
     }
 
-    sealed class Kv : IKeyValueRepository
+    internal sealed class Kv : IKeyValueRepository
     {
         readonly object _lock = new();
         public readonly SortedDictionary<string, JsonValue> Values = new(StringComparer.Ordinal);

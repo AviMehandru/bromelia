@@ -9,8 +9,8 @@ bro_makemkv_setup_default_init (BroMakemkvSetupInterface *iface)
 }
 
 BroMakemkvInvocation *
-bro_makemkv_setup_invocation (BroMakemkvSetup *self, const BroEffectiveProfile *profile, const char *selection_override,
-                              const char *job_directory, BroBroError **error)
+bro_makemkv_setup_invocation (BroMakemkvSetup *self, const BroConfig *config, const BroEffectiveProfile *profile,
+                              const char *selection_override, const char *job_directory, BroBroError **error)
 {
-  return BRO_MAKEMKV_SETUP_GET_IFACE (self)->invocation (self, profile, selection_override, job_directory, error);
+  return BRO_MAKEMKV_SETUP_GET_IFACE (self)->invocation (self, config, profile, selection_override, job_directory, error);
 }

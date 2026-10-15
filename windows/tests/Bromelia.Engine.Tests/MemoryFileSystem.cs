@@ -10,6 +10,8 @@ internal sealed class MemoryFileSystem : IFileSystem
     readonly object _lock = new();
     readonly Dictionary<string, byte[]> _files = new();
     readonly HashSet<string> _folders = new() { "/" };
+    /// <summary>Reads of these paths fail so.</summary>
+    public readonly Dictionary<string, BroError> ReadFails = new();
 
     public bool Exists(string path)
     {
@@ -19,7 +21,8 @@ internal sealed class MemoryFileSystem : IFileSystem
     public byte[] Read(string path)
     {
         lock (_lock)
-            return _files.TryGetValue(path, out var b) ? b
+            return ReadFails.TryGetValue(path, out var fails) ? throw new BroFailure(fails)
+                : _files.TryGetValue(path, out var b) ? b
                 : throw new BroFailure(new BroError("fs.notFound", ("path", JsonValue.Of(path))));
     }
 

@@ -29,7 +29,7 @@ public sealed class ProbeStep : IStep
         var operation = new BroMessage(MessageCode.DiscOpReading);
         if (request.Session != null) context.Log.Log(new BroMessage(MessageCode.DiscReadingAgain));
         context.Progress.Report(0, operation);
-        var invocation = context.MakemkvSetup.Invocation(profile, null, context.JobDirectory);
+        var invocation = context.MakemkvSetup.Invocation(context.Config, profile, null, context.JobDirectory);
         var read = await context.Tools.Makemkv.Listing(source, invocation, new MakemkvSink(context.Progress, context.Log, operation), context.Cancel);
         var run = read.Run;
         foreach (var problem in new[] { run.IsolationWarning, run.TranscriptProblem, run.SettingsProblem })
