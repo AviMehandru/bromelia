@@ -12,6 +12,7 @@
 #define FILE_MODE 0644
 #define STAGING ".bromelia"
 #define QUARANTINE_FOLDER "_Quarantine"
+#define INCOMPLETE_NOTE "INCOMPLETE.txt"
 #define CHECK_EVERY_SECONDS 30
 #define SUMS "SHA256SUMS"
 
@@ -1645,4 +1646,85 @@ bro_library_service_roll_forward (BroLibraryService *self, const BroCommitIntent
   result = complete (self, root, intent, NULL, error);
   unclaim (self, intent->unit_id);
   return result;
+}
+
+GPtrArray *
+bro_library_service_staging_folders (BroLibraryService *self, const char *library_id, BroBroError **error)
+{
+  g_autofree char *name = NULL;
+  g_autofree char *root = NULL;
+  g_autofree char *staging = NULL;
+  g_autoptr (GPtrArray) entries = NULL;
+  GPtrArray *folders;
+  if (!configured (self, library_id, &name, &root, error) || !check_marker (self, library_id, name, root, error))
+    return NULL;
+  staging = g_strconcat (root, "/" STAGING "/staging", NULL);
+  folders = g_ptr_array_new_with_free_func (g_free);
+  if (!is_folder (self, staging))
+    return folders;
+  entries = bro_file_system_list (self->fs, staging, error);
+  if (!entries)
+    {
+      g_ptr_array_unref (folders);
+      return NULL;
+    }
+  for (guint i = 0; i < entries->len; i++)
+    if (((BroDirectoryEntry *) entries->pdata[i])->is_directory)
+      g_ptr_array_add (folders, g_strdup (((BroDirectoryEntry *) entries->pdata[i])->name));
+  g_ptr_array_sort (folders, ordinal);
+  return folders;
+}
+
+char *
+bro_library_service_set_aside (BroLibraryService *self, const char *library_id, const char *folder, const char *name, GBytes *note,
+                               BroBroError **error)
+{
+  g_autofree char *library_name = NULL;
+  g_autofree char *root = NULL;
+  g_autofree char *staging = NULL;
+  g_autofree char *quarantine = NULL;
+  g_autofree char *wanted = NULL;
+  g_autofree char *chosen = NULL;
+  g_autofree char *note_path = NULL;
+  g_autofree char *parent = NULL;
+  g_autoptr (GPtrArray) files = NULL;
+  g_autoptr (GPtrArray) entries = NULL;
+  g_autoptr (GPtrArray) names = NULL;
+  char *dest;
+  if (!configured (self, library_id, &library_name, &root, error) || !check_marker (self, library_id, library_name, root, error))
+    return NULL;
+  staging = g_strconcat (root, "/" STAGING "/staging/", folder, NULL);
+  if (!is_folder (self, staging))
+    {
+      fail_path (error, BRO_MSG_FS_NOT_FOUND, staging);
+      return NULL;
+    }
+  files = g_ptr_array_new_with_free_func (g_free);
+  if (!walk (self, staging, "", files, error))
+    return NULL;
+  if (files->len == 0)
+    {
+      remove_empty (self, staging, error);
+      return NULL;
+    }
+  note_path = g_strconcat (staging, "/" INCOMPLETE_NOTE, NULL);
+  quarantine = g_strconcat (root, "/" QUARANTINE_FOLDER, NULL);
+  if (!bro_file_system_write_atomically (self->fs, note_path, note, FILE_MODE, error) || !ensure_folders (self, root, quarantine, error)
+      || !(entries = bro_file_system_list (self->fs, quarantine, error)))
+    return NULL;
+  names = g_ptr_array_new ();
+  for (guint i = 0; i < entries->len; i++)
+    g_ptr_array_add (names, ((BroDirectoryEntry *) entries->pdata[i])->name);
+  g_ptr_array_add (names, NULL);
+  wanted = g_strdup_printf ("%s [INCOMPLETE]", name);
+  chosen = bro_conflict_namer_next (wanted, (const char *const *) names->pdata, TRUE);
+  dest = g_strconcat (quarantine, "/", chosen, NULL);
+  parent = parent_of (staging);
+  if (!bro_file_system_rename (self->fs, staging, dest, error) || !bro_file_system_sync_directory (self->fs, quarantine, error)
+      || !bro_file_system_sync_directory (self->fs, parent, error))
+    {
+      g_free (dest);
+      return NULL;
+    }
+  return dest;
 }

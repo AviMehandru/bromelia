@@ -26,10 +26,10 @@ private func parent(_ p: String) -> String {
 
 private func lastName(_ p: String) -> String { String(p[p.index(after: p.lastIndex(of: "/")!)...]) }
 
-private func ordinal(_ a: String, _ b: String) -> Bool { a.utf8.lexicographicallyPrecedes(b.utf8) }
+func ordinal(_ a: String, _ b: String) -> Bool { a.utf8.lexicographicallyPrecedes(b.utf8) }
 
 /// Files and folders in memory, with the platform adapters' rules; calls can be made to fail or wait.
-private final class Tree: FileSystem, @unchecked Sendable {
+final class Tree: FileSystem, @unchecked Sendable {
     private let lock = NSLock()
     var files: [String: [UInt8]] = [:]
     var dirs: Set<String> = ["/"]
@@ -240,7 +240,7 @@ private final class Tree: FileSystem, @unchecked Sendable {
 }
 
 /// The libraries table and the unit tables in memory; a unit's library must be stored (the foreign key).
-private final class Db: LibraryRepository, UnitRepository, @unchecked Sendable {
+final class Db: LibraryRepository, UnitRepository, @unchecked Sendable {
     private let lock = NSLock()
     var libraries: [String: LibraryRecord] = [:]
     var units: [String: UnitRecord] = [:]

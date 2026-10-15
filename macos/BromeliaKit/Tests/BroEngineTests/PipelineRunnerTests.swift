@@ -162,9 +162,17 @@ final class PipelineHarness {
             var seq = 0
             for d in j["done"]?.array ?? [] {
                 let k = StepKind(rawValue: d["kind"]!.string!)!
-                try await store.save(StepRecord(jobId: id, seq: seq, kind: k, state: .succeeded, attempt: 1, startedAt: world.clock.now(),
-                                                finishedAt: world.clock.now(), output: StepOutput(kind: k, data: d["output"] ?? .object([]))))
+                try await store.save(StepRecord(jobId: id, seq: seq, kind: k, state: StepState(rawValue: d["state"]?.string ?? "succeeded")!, attempt: 1,
+                                                startedAt: world.clock.now(), finishedAt: world.clock.now(),
+                                                output: StepOutput(kind: k, data: d["output"] ?? .object([]))))
                 seq += 1
+            }
+            if let log = j["log"] {
+                let lines = FakeStep.strings(log).enumerated().map { n, c in
+                    LogLineDto(seq: Int64(n + 1), t: world.clock.now(), severity: .info, code: MessageCode(rawValue: c)!, params: [])
+                }
+                try fs.createDirectory("/data/jobs/\(id.value)", parentsMustExist: false)
+                try fs.writeAtomically("/data/jobs/\(id.value)/log.jsonl", bytes: JobLog.encode(lines), mode: 0o600)
             }
         }
     }

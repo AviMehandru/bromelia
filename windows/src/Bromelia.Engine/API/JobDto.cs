@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Bromelia.Domain;
 using Bromelia.Foundation;
+using Bromelia.Ports;
 
 namespace Bromelia.Engine;
 
@@ -30,6 +31,12 @@ public sealed record JobDto(
     string? Fingerprint,
     JobTotals? Counts)
 {
+    /// <summary>The stored job as clients see it, without what only a running job has (progress, blockedBy, decision,
+    /// position, counts).</summary>
+    public static JobDto Of(JobRecord record) => new(record.Id, record.Kind, record.State, record.Outcome, record.Queue, null, record.ParentId,
+        record.DriveId, record.Request.SessionId, record.Title, record.Mode, record.Automatic, record.CreatedAt, record.StartedAt, record.FinishedAt,
+        null, null, null, record.Error, record.UnitId, null, record.Fingerprint, null);
+
     public static JsonValue Json(JobDto job)
     {
         var m = new List<KeyValuePair<string, JsonValue>>();

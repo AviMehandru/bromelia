@@ -12,7 +12,7 @@ namespace Bromelia.Engine.Tests;
 /// file system and database in memory.</summary>
 public sealed class LibraryServiceTests
 {
-    static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+    internal static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
     const long Free = 5_000_000_000;
 
     static JsonValue ErrorJson(BroError e)
@@ -22,7 +22,7 @@ public sealed class LibraryServiceTests
         return JsonValue.Of(("error", new JsonValue.Object(m)));
     }
 
-    static BroFailure Failure(JsonValue j) =>
+    internal static BroFailure Failure(JsonValue j) =>
         new(new BroError(j["code"]!.AsString!, j["params"] as JsonValue.Object ?? new JsonValue.Object(new List<KeyValuePair<string, JsonValue>>())));
 
     /// <summary>Thrown at the crash point: the commit stops there, as a killed engine would.</summary>
@@ -33,7 +33,7 @@ public sealed class LibraryServiceTests
     }
 
     /// <summary>Files and folders in memory, with the platform adapters' rules; calls can be made to fail or wait.</summary>
-    sealed class Tree : IFileSystem
+    internal sealed class Tree : IFileSystem
     {
         readonly object _lock = new();
         public readonly SortedDictionary<string, byte[]> Files = new(StringComparer.Ordinal);
@@ -266,7 +266,7 @@ public sealed class LibraryServiceTests
     }
 
     /// <summary>The libraries table and the unit tables in memory; a unit's library must be stored (the foreign key).</summary>
-    sealed class Db : ILibraryRepository, IUnitRepository
+    internal sealed class Db : ILibraryRepository, IUnitRepository
     {
         readonly object _lock = new();
         public readonly SortedDictionary<string, LibraryRecord> Libraries = new(StringComparer.Ordinal);
@@ -347,7 +347,7 @@ public sealed class LibraryServiceTests
         public Task MarkMissing(Id unitId) => throw new NotSupportedException();
     }
 
-    sealed class ConfigBox : IConfigSource
+    internal sealed class ConfigBox : IConfigSource
     {
         public Config Value = Of(JsonValue.Of());
         public Config Current() => Value;

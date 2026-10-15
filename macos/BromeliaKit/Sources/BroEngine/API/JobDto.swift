@@ -1,5 +1,6 @@
 import BroDomain
 import BroFoundation
+import BroPorts
 
 /// A job, as clients see it (dtos.json Job). Optional members are left out of the JSON when absent.
 public struct JobDto: Sendable, Equatable {
@@ -26,6 +27,15 @@ public struct JobDto: Sendable, Equatable {
     public var outputPath: String?
     public var fingerprint: String?
     public var counts: JobTotals?
+
+    /// The stored job as clients see it, without what only a running job has (progress, blockedBy, decision, position,
+    /// counts).
+    public static func of(_ r: JobRecord) -> JobDto {
+        JobDto(id: r.id, kind: r.kind, state: r.state, outcome: r.outcome, queue: r.queue, position: nil, parentId: r.parentId, driveId: r.driveId,
+               sessionId: r.request.sessionId, title: r.title, mode: r.mode, automatic: r.automatic, createdAt: r.createdAt,
+               startedAt: r.startedAt, finishedAt: r.finishedAt, progress: nil, blockedBy: nil, decision: nil, error: r.error, unitId: r.unitId,
+               outputPath: nil, fingerprint: r.fingerprint, counts: nil)
+    }
 
     public init(id: Id, kind: JobKind, state: JobState, outcome: Outcome?, queue: Queue, position: Int?, parentId: Id?, driveId: String?,
                 sessionId: Id?, title: String, mode: String?, automatic: Bool, createdAt: Instant, startedAt: Instant?, finishedAt: Instant?,

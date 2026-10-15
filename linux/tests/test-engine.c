@@ -1156,6 +1156,7 @@ test_engine_executor (void)
 #include "test-steps.inc"
 #include "test-services.inc"
 #include "test-library.inc"
+#include "test-recovery.inc"
 
 int
 main (int argc, char **argv)
@@ -1174,6 +1175,7 @@ main (int argc, char **argv)
   g_test_add_func ("/engine/problem-service", test_problem_service);
   g_test_add_func ("/engine/config-service", test_config_service);
   g_test_add_func ("/engine/library-service", test_library_service);
+  g_test_add_func ("/engine/recovery-service", test_recovery_service);
   g_test_add_func ("/engine/sha256-hasher", test_sha256_hasher);
   return g_test_run ();
 }

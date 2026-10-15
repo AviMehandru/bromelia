@@ -3,6 +3,7 @@
 
 #include "bro-cancellation-source.h"
 #include "bro-job-dto.h"
+#include "bro-job-log.h"
 #include "bro-job-outcome.h"
 #include "bro-job-planner.h"
 #include "bro-log-line-dto.h"
@@ -114,6 +115,7 @@ typedef struct {
   BroDecisionDto *decision;
   Waiter *waiter;
   gint64 log_seq;
+  GBytes *log_before; /* the log file as an earlier run (or recovery) left it; this run's lines follow */
   GPtrArray *log;     /* BroLogLineDto */
   gboolean directory_made;
   BroConfig *config;  /* read when the job starts */
@@ -151,6 +153,7 @@ live_unref (gpointer data)
   bro_bro_message_free (l->blocked_by);
   bro_decision_dto_free (l->decision);
   waiter_unref (l->waiter);
+  g_clear_pointer (&l->log_before, g_bytes_unref);
   g_ptr_array_unref (l->log);
   bro_config_free (l->config);
   g_ptr_array_unref (l->outputs);
@@ -171,33 +174,10 @@ job_directory (BroPipelineRunner *self, const BroId *id)
 static BroJobDto *
 dto (Live *l)
 {
-  BroJobRecord *r = l->record;
-  BroJobDto *d = bro_job_dto_new ();
-  d->id = r->id;
-  d->kind = r->kind;
-  d->state = r->state;
-  d->has_outcome = r->has_outcome;
-  d->outcome = r->outcome;
-  d->queue = r->queue;
-  d->has_parent_id = r->has_parent_id;
-  d->parent_id = r->parent_id;
-  d->drive_id = g_strdup (r->drive_id);
-  d->session_id = r->request && r->request->session_id ? g_memdup2 (r->request->session_id, sizeof (BroId)) : NULL;
-  d->title = g_strdup (r->title);
-  d->mode = g_strdup (r->mode);
-  d->automatic = r->automatic;
-  d->created_at = r->created_at;
-  d->has_started_at = r->has_started_at;
-  d->started_at = r->started_at;
-  d->has_finished_at = r->has_finished_at;
-  d->finished_at = r->finished_at;
+  BroJobDto *d = bro_job_dto_of (l->record);
   d->progress = bro_progress_dto_copy (l->progress);
   d->blocked_by = l->blocked_by ? bro_bro_message_copy (l->blocked_by) : NULL;
   d->decision = bro_decision_dto_copy (l->decision);
-  d->error = bro_bro_error_copy (r->error);
-  d->has_unit_id = r->has_unit_id;
-  d->unit_id = r->unit_id;
-  d->fingerprint = g_strdup (r->fingerprint);
   return d;
 }
 
@@ -226,7 +206,7 @@ typedef struct {
   BroStore *store;
   BroJobRecord *record;     /* to save, or loaded */
   BroStepRecord *step;      /* to save */
-  GPtrArray *found;         /* completed steps */
+  GPtrArray *found;         /* steps done */
   BroStep *run_step;
   BroStepContext *context;
   BroStepReport *report;
@@ -532,34 +512,13 @@ end_work (gpointer data, BroBroError **error)
     return FALSE;
   if (w->log)
     {
-      g_autofree char *path = g_strconcat (w->log_directory, "/log.jsonl", NULL);
+      g_autofree char *path = g_strconcat (w->log_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
       if (w->make_directory && !bro_file_system_create_directory (w->fs, w->log_directory, FALSE, error))
         return FALSE;
       if (!bro_file_system_write_atomically (w->fs, path, w->log, 0600, error))
         return FALSE;
     }
   return TRUE;
-}
-
-/* The canonical encoding on one line: its line breaks and their indentation are formatting only (a string never
- * holds a raw line break), so every platform writes the same bytes. */
-static void
-append_json_line (GString *out, BroJsonValue *value)
-{
-  g_autoptr (GBytes) bytes = bro_json_value_encode_canonical (value);
-  gsize n;
-  const char *s = g_bytes_get_data (bytes, &n);
-  for (gsize i = 0; i < n; i++)
-    {
-      if (s[i] != '\n')
-        {
-          g_string_append_c (out, s[i]);
-          continue;
-        }
-      while (i + 1 < n && s[i + 1] == ' ')
-        i++;
-    }
-  g_string_append_c (out, '\n');
 }
 
 static void
@@ -662,17 +621,12 @@ step_done (gpointer data, const BroBroError *error)
   end->step->error = bro_bro_error_copy (failed);
   if (l->log->len > 0)
     {
-      GString *text = g_string_new ("");
-      for (guint i = 0; i < l->log->len; i++)
-        {
-          g_autoptr (BroJsonValue) line = bro_log_line_dto_json (g_ptr_array_index (l->log, i));
-          g_autoptr (BroJsonValue) without = bro_json_value_new_object ();
-          for (guint k = 0; k < line->keys->len; k++)
-            if (strcmp (g_ptr_array_index (line->keys, k), "seq") != 0)
-              bro_json_value_set (without, g_ptr_array_index (line->keys, k), bro_json_value_ref (g_ptr_array_index (line->items, k)));
-          append_json_line (text, without);
-        }
-      end->log = g_string_free_to_bytes (text);
+      g_autoptr (GBytes) added = bro_job_log_encode (l->log);
+      GByteArray *all = g_byte_array_new ();
+      if (l->log_before)
+        g_byte_array_append (all, g_bytes_get_data (l->log_before, NULL), g_bytes_get_size (l->log_before));
+      g_byte_array_append (all, g_bytes_get_data (added, NULL), g_bytes_get_size (added));
+      end->log = g_byte_array_free_to_bytes (all);
       end->log_directory = job_directory (self, &l->id);
       end->fs = g_object_ref (self->environment->fs);
       end->make_directory = !l->directory_made;
@@ -771,12 +725,20 @@ next_step (Live *l)
     conclude (l, g_steal_pointer (&error));
 }
 
+/* What an earlier run (or recovery) left: the steps done and the log file. */
 static gboolean
 completed_work (gpointer data, BroBroError **error)
 {
   Work *w = data;
-  w->found = bro_step_repository_completed (bro_store_steps (w->store), w->live->id, error);
-  return w->found != NULL;
+  g_autofree char *log_file = g_strconcat (w->log_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+  g_autoptr (GPtrArray) rows = NULL;
+  if (bro_file_system_exists (w->fs, log_file) && !(w->log = bro_file_system_read (w->fs, log_file, error)))
+    return FALSE;
+  rows = bro_step_repository_load (bro_store_steps (w->store), w->live->id, error);
+  if (!rows)
+    return FALSE;
+  w->found = bro_job_planner_done (rows);
+  return TRUE;
 }
 
 static void
@@ -789,11 +751,23 @@ completed_done (gpointer data, const BroBroError *error)
       conclude (l, bro_bro_error_copy (error));
       return;
     }
+  if (w->log)
+    {
+      gsize n;
+      const char *bytes = g_bytes_get_data (w->log, &n);
+      l->log_before = g_bytes_ref (w->log);
+      for (gsize i = 0; i < n; i++)
+        if (bytes[i] == '\n')
+          l->log_seq++;
+      l->directory_made = n > 0;
+    }
   for (guint i = 0; i < w->found->len; i++)
     {
       BroStepRecord *s = g_ptr_array_index (w->found, i);
+      BroStepResult *result = bro_step_result_new (s->kind, s->state);
+      result->error = bro_bro_error_copy (s->error);
       g_ptr_array_add (l->outputs, s->output ? bro_step_output_copy (s->output) : bro_step_output_new (s->kind, bro_json_value_new_object (), NULL));
-      g_ptr_array_add (l->results, bro_step_result_new (s->kind, s->state));
+      g_ptr_array_add (l->results, result);
     }
   l->seq = w->found->len;
   bro_scheduler_submit (l->runner->scheduler, &l->id, l->record->queue);
@@ -807,6 +781,8 @@ planned (Live *l)
   l->steps = g_array_copy (l->record->plan->steps);
   l->config = l->runner->environment->config ? bro_config_source_current (l->runner->environment->config)
                                              : bro_config_new (bro_json_value_new_object (), NULL);
+  w->fs = g_object_ref (l->runner->environment->fs);
+  w->log_directory = job_directory (l->runner, &l->id);
   bro_engine_executor_worker (l->runner->executor, completed_work, completed_done, w, work_free);
 }
 

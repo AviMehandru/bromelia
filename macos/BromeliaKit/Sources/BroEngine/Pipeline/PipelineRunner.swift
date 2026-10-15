@@ -19,6 +19,8 @@ public final class PipelineRunner {
         var blockedBy: BroMessage?
         var decision: (question: DecisionDto, answer: CheckedContinuation<Result<String, BroError>, Never>)?
         var logSeq: Int64 = 0
+        /// The log file as an earlier run (or recovery) left it; this run's lines follow.
+        var logBefore: [UInt8] = []
         var log: [LogLineDto] = []
         var directoryMade = false
         var config: Config?
@@ -112,9 +114,14 @@ public final class PipelineRunner {
         }
         l.steps = plan.steps
         l.config = environment.config.current()
-        let done = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().completed(jobId) }
+        let fs = environment.fs
+        let logFile = jobDirectory(jobId) + "/" + JobLog.fileName
+        l.logBefore = try await executor.worker { () throws(BroError) -> [UInt8] in fs.exists(logFile) ? try fs.read(logFile) : [] }
+        l.logSeq = Int64(l.logBefore.filter { $0 == UInt8(ascii: "\n") }.count)
+        l.directoryMade = !l.logBefore.isEmpty
+        let done = JobPlanner.done(try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) })
         var outputs = done.map { $0.output ?? StepOutput(kind: $0.kind, data: .object([])) }
-        var results = done.map { StepResult(kind: $0.kind, state: $0.state) }
+        var results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error) }
         scheduler.submit(jobId, queue: l.record.queue)
         var cancelled = false
         var seq = done.count
@@ -239,11 +246,11 @@ public final class PipelineRunner {
     }
 
     private func dto(_ l: Live) -> JobDto {
-        let r = l.record
-        return JobDto(id: r.id, kind: r.kind, state: r.state, outcome: r.outcome, queue: r.queue, position: nil, parentId: r.parentId,
-                      driveId: r.driveId, sessionId: r.request.sessionId, title: r.title, mode: r.mode, automatic: r.automatic,
-                      createdAt: r.createdAt, startedAt: r.startedAt, finishedAt: r.finishedAt, progress: l.progress, blockedBy: l.blockedBy,
-                      decision: l.decision?.question, error: r.error, unitId: r.unitId, outputPath: nil, fingerprint: r.fingerprint, counts: nil)
+        var dto = JobDto.of(l.record)
+        dto.progress = l.progress
+        dto.blockedBy = l.blockedBy
+        dto.decision = l.decision?.question
+        return dto
     }
 
     fileprivate func onProgress(_ l: Live, _ seq: Int, _ fraction: Double, _ operation: BroMessage, _ current: String?) {
@@ -277,40 +284,19 @@ public final class PipelineRunner {
         setState(l, .awaitingDecision)
     }
 
-    /// jobs/<id>/log.jsonl: one JSON object per line ({t, severity, code, params}), written whole after each step.
+    /// jobs/<id>/log.jsonl (JobLog): what was there when the job started, then this run's lines, written whole after each
+    /// step.
     private func writeLog(_ l: Live) async throws(BroError) {
         if l.log.isEmpty { return }
         let directory = jobDirectory(l.record.id)
-        var text = ""
-        for line in l.log {
-            guard case let .object(members) = LogLineDto.json(line) else { continue }
-            text += PipelineRunner.jsonLine(.object(members.filter { $0.key != "seq" })) + "\n"
-        }
-        let bytes = Array(text.utf8)
+        let bytes = l.logBefore + JobLog.encode(l.log)
         let makeDirectory = !l.directoryMade
         l.directoryMade = true
         let fs = environment.fs
         try await executor.worker { () throws(BroError) in
             if makeDirectory { try fs.createDirectory(directory, parentsMustExist: false) }
-            try fs.writeAtomically(directory + "/log.jsonl", bytes: bytes, mode: 0o600)
+            try fs.writeAtomically(directory + "/" + JobLog.fileName, bytes: bytes, mode: 0o600)
         }
-    }
-
-    /// The canonical encoding on one line: its line breaks and their indentation are formatting only (a string never
-    /// holds a raw line break), so every platform writes the same bytes.
-    static func jsonLine(_ value: JsonValue) -> String {
-        let canonical = Array(JsonValue.encodeCanonical(value))
-        var out: [UInt8] = []
-        var i = 0
-        while i < canonical.count {
-            if canonical[i] == UInt8(ascii: "\n") {
-                while i + 1 < canonical.count && canonical[i + 1] == UInt8(ascii: " ") { i += 1 }
-            } else {
-                out.append(canonical[i])
-            }
-            i += 1
-        }
-        return String(decoding: out, as: UTF8.self)
     }
 
     private func jobDirectory(_ jobId: Id) -> String { environment.dataDirectory + "/jobs/" + jobId.value }

@@ -1362,6 +1362,9 @@ archive_format_case (const char *id, BroJsonValue *given, BroJsonValue *expect, 
     if (J (expect, "isOwnFile")) {
       g_autoptr (BroJsonValue) a = bro_json_value_new_bool (bro_archive_files_is_own_file (v->string));
       bro_test_same_json (failures, id, "own file", J (expect, "isOwnFile"), a);
+    } else if (J (expect, "isLeftover")) {
+      g_autoptr (BroJsonValue) a = bro_json_value_new_bool (bro_archive_files_is_leftover (v->string));
+      bro_test_same_json (failures, id, "leftover", J (expect, "isLeftover"), a);
     } else {
       g_autoptr (BroJsonValue) a = bro_json_value_new_bool (bro_archive_files_is_metadata_file (v->string));
       bro_test_same_json (failures, id, "metadata file", J (expect, "isMetadataFile"), a);

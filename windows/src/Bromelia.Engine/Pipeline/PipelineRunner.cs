@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using Bromelia.Domain;
 using Bromelia.Foundation;
@@ -38,6 +37,8 @@ public sealed class PipelineRunner
         public BroMessage? BlockedBy;
         public (DecisionDto Question, TaskCompletionSource<string> Answer)? Decision;
         public long LogSeq;
+        /// <summary>The log file as an earlier run (or recovery) left it; this run's lines follow.</summary>
+        public byte[] LogBefore = Array.Empty<byte>();
         public readonly List<LogLineDto> Log = new();
         public bool DirectoryMade;
         public Config? Config;
@@ -124,9 +125,13 @@ public sealed class PipelineRunner
         }
         live.Steps = plan.Steps.ToList();
         live.Config = _env.Config.Current();
-        var done = await _executor.Worker(() => _store.Steps().Completed(jobId));
+        var logFile = JobDirectory(jobId) + "/" + JobLog.FileName;
+        live.LogBefore = await _executor.Worker(() => _env.Fs.Exists(logFile) ? _env.Fs.Read(logFile) : Array.Empty<byte>());
+        live.LogSeq = live.LogBefore.Count(b => b == (byte)'\n');
+        live.DirectoryMade = live.LogBefore.Length > 0;
+        var done = JobPlanner.Done(await _executor.Worker(() => _store.Steps().Load(jobId)));
         var outputs = done.Select(s => s.Output ?? new StepOutput(s.Kind, Empty)).ToList();
-        var results = done.Select(s => new StepResult(s.Kind, s.State)).ToList();
+        var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error)).ToList();
         _scheduler.Submit(jobId, live.Record.Queue);
         bool cancelled = false;
         for (int seq = done.Count; seq < live.Steps.Count; seq++)
@@ -256,13 +261,7 @@ public sealed class PipelineRunner
         }
     }
 
-    JobDto Dto(Live live)
-    {
-        var r = live.Record;
-        return new JobDto(r.Id, r.Kind, r.State, r.Outcome, r.Queue, null, r.ParentId, r.DriveId, r.Request.SessionId, r.Title, r.Mode,
-            r.Automatic, r.CreatedAt, r.StartedAt, r.FinishedAt, live.Progress, live.BlockedBy, live.Decision?.Question, r.Error, r.UnitId,
-            null, r.Fingerprint, null);
-    }
+    JobDto Dto(Live live) => JobDto.Of(live.Record) with { Progress = live.Progress, BlockedBy = live.BlockedBy, Decision = live.Decision?.Question };
 
     void OnProgress(Live live, int seq, double fraction, BroMessage operation, string? current)
     {
@@ -299,45 +298,21 @@ public sealed class PipelineRunner
         SetState(live, JobState.AwaitingDecision);
     }
 
-    /// <summary>jobs/&lt;id&gt;/log.jsonl: one JSON object per line ({t, severity, code, params}), written whole after
-    /// each step.</summary>
+    /// <summary>jobs/&lt;id&gt;/log.jsonl (JobLog): what was there when the job started, then this run's lines, written
+    /// whole after each step.</summary>
     async Task WriteLog(Live live)
     {
         if (live.Log.Count == 0) return;
         var directory = JobDirectory(live.Record.Id);
-        var text = new StringBuilder();
-        foreach (var line in live.Log)
-        {
-            var members = ((JsonValue.Object)LogLineDto.Json(line)).Members.Where(m => m.Key != "seq").ToList();
-            text.Append(JsonLine(new JsonValue.Object(members))).Append('\n');
-        }
-        var bytes = Encoding.UTF8.GetBytes(text.ToString());
+        var bytes = live.LogBefore.Concat(JobLog.Encode(live.Log)).ToArray();
         var makeDirectory = !live.DirectoryMade;
         live.DirectoryMade = true;
         await _executor.Worker(() =>
         {
             if (makeDirectory) _env.Fs.CreateDirectory(directory, parentsMustExist: false);
-            _env.Fs.WriteAtomically(directory + "/log.jsonl", bytes, 0x180); // 0600
+            _env.Fs.WriteAtomically(directory + "/" + JobLog.FileName, bytes, 0x180); // 0600
             return true;
         });
-    }
-
-    /// <summary>The canonical encoding on one line: its line breaks and their indentation are formatting only (a
-    /// string never holds a raw line break), so every platform writes the same bytes.</summary>
-    static string JsonLine(JsonValue value)
-    {
-        var canonical = Encoding.UTF8.GetString(JsonValue.EncodeCanonical(value));
-        var sb = new StringBuilder();
-        for (int i = 0; i < canonical.Length; i++)
-        {
-            if (canonical[i] != '\n')
-            {
-                sb.Append(canonical[i]);
-                continue;
-            }
-            while (i + 1 < canonical.Length && canonical[i + 1] == ' ') i++;
-        }
-        return sb.ToString();
     }
 
     string JobDirectory(Id jobId) => _env.DataDirectory + "/jobs/" + jobId.Value;

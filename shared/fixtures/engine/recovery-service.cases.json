@@ -1,0 +1,2166 @@
+{
+  "functions": [
+    "RecoveryService.recover",
+    "LibraryService.stagingFolders",
+    "LibraryService.setAside"
+  ],
+  "description": "RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint: the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted, its staging kept. A running resumeFrom step with a checkpoint: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job; a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<job title or folder, Sanitizer.component> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], []) each rendered by the MessageRenderer, one per line; removed instead when it holds no file). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as JSON). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
+  "cases": [
+    {
+      "id": "nothing-to-recover",
+      "given": {
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "isolation": [
+          "recover"
+        ],
+        "eventLines": [],
+        "problems": [],
+        "files": {}
+      }
+    },
+    {
+      "id": "a-queued-job-is-requeued",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "queued",
+            "plan": null,
+            "rows": []
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "isolation": [
+          "recover /data/jobs/j1/home"
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": null,
+            "mediaGeneration": null
+          }
+        },
+        "steps": {
+          "j1": []
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.requeued"
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ]
+      }
+    },
+    {
+      "id": "a-job-stopped-before-acquire-goes-on-where-it-stopped",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "waitingForResources",
+            "plan": [
+              "probe",
+              "reconcile",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "reconcile",
+                "state": "skipped"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              }
+            ]
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "reconcile",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "reconcile skipped",
+            "identify succeeded",
+            "plan succeeded"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.requeued"
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "a skipped step counts as done; acquire never started, so nothing was interrupted (recovery-requeued-before-acquire)"
+      }
+    },
+    {
+      "id": "a-rip-interrupted-during-acquire-is-interrupted-and-keeps-its-staging",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/title_t00.mkv": "half a title"
+        },
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "running"
+              }
+            ]
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "interrupted",
+            "error": {
+              "code": "recovery.interrupted",
+              "params": {
+                "step": "acquire"
+              }
+            }
+          }
+        },
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire interrupted"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "error",
+              "code": "recovery.interrupted",
+              "params": {
+                "step": "acquire"
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobFinished j1 interrupted recovery.interrupted"
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/title_t00.mkv": "half a title"
+        },
+        "rule": "plan §20.4: interrupted, staging kept so the rip can be continued (recovery-interrupted-during-acquire)"
+      }
+    },
+    {
+      "id": "a-complete-backup-checkpoint-resumes-acquire-without-the-disc",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "awaitMedia",
+                "state": "succeeded"
+              },
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "running",
+                "checkpoint": {
+                  "backup": "complete"
+                }
+              }
+            ],
+            "driveId": "drive",
+            "automatic": true,
+            "mediaGeneration": 4
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": 4
+          }
+        },
+        "steps": {
+          "j1": [
+            "awaitMedia succeeded",
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire running checkpoint"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.resumed",
+              "params": {
+                "step": "acquire"
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "plan §15.8: backup then MKV resumes from a checkpoint the step left, even for an automatic job whose disc is gone"
+      }
+    },
+    {
+      "id": "a-step-that-cannot-resume-interrupts-even-with-a-checkpoint",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "running",
+                "checkpoint": {
+                  "backup": "complete"
+                }
+              }
+            ]
+          }
+        ],
+        "resumability": {
+          "acquire": "notResumable"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "interrupted",
+            "error": {
+              "code": "recovery.interrupted",
+              "params": {
+                "step": "acquire"
+              }
+            }
+          }
+        },
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire interrupted checkpoint"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "error",
+              "code": "recovery.interrupted",
+              "params": {
+                "step": "acquire"
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobFinished j1 interrupted recovery.interrupted"
+        ]
+      }
+    },
+    {
+      "id": "a-job-past-release-resumes-at-its-step",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "awaitMedia",
+                "state": "skipped"
+              },
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "skipped"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "running"
+              }
+            ],
+            "driveId": "drive",
+            "automatic": true,
+            "mediaGeneration": 5
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": 5
+          }
+        },
+        "steps": {
+          "j1": [
+            "awaitMedia skipped",
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "verifyRips skipped",
+            "name succeeded",
+            "seal running"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.resumed",
+              "params": {
+                "step": "seal"
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "plan §20.4: after Release, resumes automatically, in the processing queue (recovery-resumes-after-release)"
+      }
+    },
+    {
+      "id": "automatic-jobs-before-acquire-are-cancelled",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan"
+            ],
+            "rows": [
+              {
+                "kind": "awaitMedia",
+                "state": "succeeded"
+              },
+              {
+                "kind": "probe",
+                "state": "running"
+              }
+            ],
+            "driveId": "drive",
+            "automatic": true,
+            "mediaGeneration": 3
+          },
+          {
+            "id": "j2",
+            "title": "Disc",
+            "state": "queued",
+            "plan": null,
+            "rows": [],
+            "driveId": "drive",
+            "automatic": true,
+            "mediaGeneration": 4
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 2
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan"
+            ],
+            "mediaGeneration": 3,
+            "outcome": "cancelled",
+            "error": {
+              "code": "disc.changed",
+              "params": {
+                "why": {
+                  "code": "disc.changed.generation"
+                }
+              }
+            }
+          },
+          "j2": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": null,
+            "mediaGeneration": 4,
+            "outcome": "cancelled",
+            "error": {
+              "code": "disc.changed",
+              "params": {
+                "why": {
+                  "code": "disc.changed.generation"
+                }
+              }
+            }
+          }
+        },
+        "steps": {
+          "j1": [
+            "awaitMedia succeeded",
+            "probe interrupted"
+          ],
+          "j2": []
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "error",
+              "code": "disc.changed",
+              "params": {
+                "why": {
+                  "code": "disc.changed.generation"
+                }
+              }
+            }
+          ],
+          "j2": [
+            {
+              "severity": "error",
+              "code": "disc.changed",
+              "params": {
+                "why": {
+                  "code": "disc.changed.generation"
+                }
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobFinished j1 cancelled disc.changed",
+          "jobFinished j2 cancelled disc.changed"
+        ],
+        "rule": "owner 2026-10-14: generations don't outlive the engine, so a queued automatic job can't know its disc is still there; the new run's insert starts a fresh job (recovery-automatic-job-disc-changed)"
+      }
+    },
+    {
+      "id": "a-manual-drive-job-before-acquire-starts-again-from-the-first-step",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "waitingForResources",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              }
+            ],
+            "driveId": "drive",
+            "mediaGeneration": 3
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": null,
+            "mediaGeneration": null
+          }
+        },
+        "steps": {
+          "j1": [
+            "probe pending",
+            "identify pending",
+            "plan pending"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.requeued"
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "owner 2026-10-14: the disc may have changed while the engine was down, so Probe (and Reconcile) read the drive again"
+      }
+    },
+    {
+      "id": "a-drive-job-past-acquire-is-not-cancelled",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "awaitMedia",
+                "state": "succeeded"
+              },
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "running"
+              }
+            ],
+            "driveId": "drive",
+            "automatic": true,
+            "mediaGeneration": 6
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": 6
+          }
+        },
+        "steps": {
+          "j1": [
+            "awaitMedia succeeded",
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release running"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.resumed",
+              "params": {
+                "step": "release"
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ]
+      }
+    },
+    {
+      "id": "a-job-whose-steps-all-ended-is-finished",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "probe",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "notify",
+                "state": "succeeded"
+              }
+            ]
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "succeeded"
+          }
+        },
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "notify succeeded"
+          ]
+        },
+        "logs": {
+          "j1": []
+        },
+        "eventLines": [
+          "jobFinished j1 succeeded"
+        ],
+        "rule": "the engine stopped between the last step and the job's record: JobOutcome.decide from the stored steps"
+      }
+    },
+    {
+      "id": "a-step-that-ended-before-the-job-did-decides-its-outcome",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "failed",
+                "error": {
+                  "code": "process.abandoned",
+                  "params": {
+                    "tool": "makemkvcon"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "j2",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "probe",
+              "plan"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "cancelled"
+              }
+            ]
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 2
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "failed",
+            "error": {
+              "code": "process.abandoned",
+              "params": {
+                "tool": "makemkvcon"
+              }
+            }
+          },
+          "j2": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "plan"
+            ],
+            "mediaGeneration": null,
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire failed"
+          ],
+          "j2": [
+            "probe cancelled"
+          ]
+        },
+        "logs": {
+          "j1": [],
+          "j2": []
+        },
+        "eventLines": [
+          "jobFinished j1 failed process.abandoned",
+          "jobFinished j2 cancelled job.cancelledByUser"
+        ]
+      }
+    },
+    {
+      "id": "a-job-awaiting-a-decision-asks-again",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "awaitingDecision",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "decide",
+              "acquire",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "decide",
+                "state": "running"
+              }
+            ],
+            "decision": {
+              "id": "d1",
+              "question": {
+                "code": "decision.archivedBefore"
+              }
+            }
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "decide",
+              "acquire",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "decide running"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.requeued"
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "the question was in memory only: the job goes back to its queue and Decide asks again"
+      }
+    },
+    {
+      "id": "unreleased-homes-are-scrubbed-and-the-registry-put-back",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "queued",
+            "plan": null,
+            "rows": []
+          },
+          {
+            "id": "j2",
+            "title": "Disc",
+            "state": "queued",
+            "plan": null,
+            "rows": []
+          }
+        ],
+        "isolationProblems": [
+          {
+            "code": "makemkv.keyNotRemoved",
+            "params": {
+              "path": "/data/jobs/j2/home/.MakeMKV/settings.conf",
+              "reason": "denied"
+            },
+            "severity": "warning"
+          },
+          {
+            "code": "makemkv.registryNotRestored",
+            "params": {
+              "path": "/data/run/makemkv-registry.json"
+            },
+            "severity": "warning"
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 2
+            }
+          }
+        ],
+        "isolation": [
+          "recover /data/jobs/j1/home /data/jobs/j2/home"
+        ],
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.requeued"
+            }
+          ],
+          "j2": [
+            {
+              "severity": "warning",
+              "code": "makemkv.keyNotRemoved",
+              "params": {
+                "path": "/data/jobs/j2/home/.MakeMKV/settings.conf",
+                "reason": "denied"
+              }
+            },
+            {
+              "severity": "info",
+              "code": "recovery.requeued"
+            }
+          ]
+        },
+        "problems": [
+          {
+            "id": "makemkv.registryNotRestored",
+            "code": "makemkv.registryNotRestored",
+            "params": {
+              "path": "/data/run/makemkv-registry.json"
+            },
+            "severity": "warning",
+            "raisedAt": "2026-10-02T20:00:00.000Z"
+          }
+        ],
+        "eventLines": [
+          "problemRaised makemkv.registryNotRestored",
+          "jobChanged j1 queued",
+          "jobChanged j2 queued"
+        ],
+        "rule": "review L3-3: every unfinished job's home loses its key (HomeDirIsolation.scrubKey through SettingsIsolation.recover), and a leftover registry snapshot is put back; what fails is logged on its job, or raised"
+      }
+    },
+    {
+      "id": "an-open-commit-is-rolled-forward",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/j1/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/.SHA256SUMS.bromelia-tmp-0a1b2c3d": "half a SHA256SUMS"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                false
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101"
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.resumed",
+              "params": {
+                "step": "commit"
+              }
+            },
+            {
+              "severity": "warning",
+              "code": "commit.rolledForward",
+              "params": {
+                "unit": "00000000-0000-4000-8000-000000000101"
+              }
+            }
+          ]
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "plan §22.3: a crash between 4 and 6 rolls forward at startup; the temporary file of the SHA256SUMS write it interrupted goes (recovery-commit-rolled-forward)"
+      }
+    },
+    {
+      "id": "a-commit-that-cannot-roll-forward-keeps-its-intent",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/j1/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/.SHA256SUMS.bromelia-tmp-0a1b2c3d": "half a SHA256SUMS"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                false
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101"
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.resumed",
+              "params": {
+                "step": "commit"
+              }
+            },
+            {
+              "severity": "warning",
+              "code": "library.offline",
+              "params": {
+                "library": "Library",
+                "path": "/lib"
+              }
+            }
+          ]
+        },
+        "files": {
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/j1/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/.SHA256SUMS.bromelia-tmp-0a1b2c3d": "half a SHA256SUMS"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "I2: nothing is written to a library without its marker; the job's Commit step rolls the intent forward once it is back"
+      }
+    },
+    {
+      "id": "staging-of-an-open-commit-is-never-set-aside",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "fs.alreadyExists",
+              "params": {
+                "path": "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv"
+              }
+            }
+          ]
+        },
+        "rule": "I5: a file in the way stops the roll forward (never claimed, never replaced), and the intent's staging stays where the commit will look for it, even when no unfinished job owns it"
+      }
+    },
+    {
+      "id": "leftover-staging-is-set-aside",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j1/.title_t01.mkv.part-1a2b3c4d": "temp",
+          "/lib/.bromelia/staging/j2/title_t00.mkv": "interrupted rip",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "abandoned rip",
+          "/lib/.bromelia/staging/j5/.x.bromelia-tmp-00ff": "temp",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv": "from before"
+        },
+        "dirs": [
+          "/lib/.bromelia/staging/j5/sub"
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "waitingForResources",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              }
+            ]
+          },
+          {
+            "id": "j2",
+            "title": "Kept",
+            "state": "finished",
+            "plan": [
+              "probe"
+            ],
+            "rows": [],
+            "outcome": "interrupted",
+            "error": {
+              "code": "recovery.interrupted",
+              "params": {
+                "step": "acquire"
+              }
+            }
+          },
+          {
+            "id": "j3",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe"
+            ],
+            "rows": [],
+            "outcome": "failed",
+            "error": {
+              "code": "process.abandoned",
+              "params": {
+                "tool": "makemkvcon"
+              }
+            }
+          },
+          {
+            "id": "j5",
+            "title": "Other",
+            "state": "finished",
+            "plan": [
+              "probe"
+            ],
+            "rows": [],
+            "outcome": "cancelled"
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j2/title_t00.mkv": "interrupted rip",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv": "from before",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE] (2)/title_t00.mkv": "abandoned rip",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE] (2)/INCOMPLETE.txt": "archive.note.title jobId=j3 outcome=failed\narchive.note.notFinished\nprocess.abandoned tool=makemkvcon\n",
+          "/lib/_Quarantine/zz [INCOMPLETE]/a.mkv": "unknown",
+          "/lib/_Quarantine/zz [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=zz outcome=interrupted\narchive.note.notFinished\n"
+        },
+        "dirsUnder": {
+          "/lib/.bromelia/staging": [
+            "/lib/.bromelia/staging/j1",
+            "/lib/.bromelia/staging/j2"
+          ]
+        },
+        "rule": "review L3-3 and P1-3: a staging folder no job will continue (an abandoned process may have written it) goes to _Quarantine with an INCOMPLETE.txt note, never reused or deleted; an interrupted job keeps its own; one that holds no file is removed; temporary files go"
+      }
+    },
+    {
+      "id": "an-offline-librarys-staging-is-left-alone",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown"
+        },
+        "problems": [],
+        "eventLines": [],
+        "rule": "I2: without its marker, nothing in the library is touched (LibraryService.start raises library.offline)"
+      }
+    },
+    {
+      "id": "temporary-files-in-the-data-folder-are-removed",
+      "given": {
+        "files": {
+          "/data/.config.json.bromelia-tmp-1a2b3c4d": "temp",
+          "/data/config.json": "{}",
+          "/data/run/.makemkv-registry.json.bromelia-tmp-9f": "temp",
+          "/data/jobs/j9/.disc.iso.part-1a2b3c4d": "temp",
+          "/data/jobs/j9/report.part-2.txt": "kept",
+          "/data/jobs/j9/home/.MakeMKV/settings.conf": "kept",
+          "/data/.hidden": "kept"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/data/config.json": "{}",
+          "/data/jobs/j9/report.part-2.txt": "kept",
+          "/data/jobs/j9/home/.MakeMKV/settings.conf": "kept",
+          "/data/.hidden": "kept"
+        },
+        "rule": "review L3-3: .<name>.bromelia-tmp-<id> (writeAtomically) and .<name>.part-<id> (DataImager) are what a stopped write leaves"
+      }
+    },
+    {
+      "id": "a-library-that-does-not-answer-holds-startup-at-most-30-s",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown"
+        },
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "queued",
+            "plan": null,
+            "rows": []
+          }
+        ],
+        "hold": [
+          {
+            "op": "list",
+            "path": "/lib/.bromelia/staging"
+          }
+        ],
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          "recovered",
+          {
+            "advance": 29
+          },
+          "recovered",
+          {
+            "advance": 1
+          },
+          "recovered",
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          },
+          false,
+          "ok",
+          false,
+          "ok",
+          true,
+          "ok"
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/_Quarantine/zz [INCOMPLETE]/a.mkv": "unknown",
+          "/lib/_Quarantine/zz [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=zz outcome=interrupted\narchive.note.notFinished\n"
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.requeued"
+            }
+          ]
+        },
+        "rule": "review L3-9: a frozen share can't keep the engine from starting; the work goes on, and finishes when the share answers"
+      }
+    }
+  ]
+}

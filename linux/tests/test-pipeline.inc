@@ -1,5 +1,6 @@
 /* test-pipeline.inc: shared/fixtures/engine/pipeline-runner.cases.json and job-planner.cases.json (included by
  * test-engine.c, after test-scheduler.inc). */
+#include "bro-job-log.h"
 #include "bro-job-planner.h"
 #include "bro-pipeline-runner.h"
 
@@ -12,7 +13,10 @@ struct _TestMemoryStore {
   GObject parent_instance;
   GMutex lock;
   GHashTable *jobs;  /* id → BroJobRecord */
+  GPtrArray *order;  /* job ids in the order they were inserted */
   GHashTable *steps; /* "id/seq" → BroStepRecord */
+  BroUnitRepository *units;         /* nullable: a test that needs units sets it */
+  BroLibraryRepository *libraries;  /* nullable */
 };
 
 static void store_iface_init (BroStoreInterface *iface);
@@ -25,6 +29,8 @@ G_DEFINE_FINAL_TYPE_WITH_CODE (TestMemoryStore, test_memory_store, G_TYPE_OBJECT
 
 static BroJobRepository *store_jobs (BroStore *s) { return BRO_JOB_REPOSITORY (s); }
 static BroStepRepository *store_steps (BroStore *s) { return BRO_STEP_REPOSITORY (s); }
+static BroUnitRepository *store_units (BroStore *s) { return TEST_MEMORY_STORE (s)->units; }
+static BroLibraryRepository *store_libraries (BroStore *s) { return TEST_MEMORY_STORE (s)->libraries; }
 
 static gboolean
 store_transaction (BroStore *s, BroStoreBlockFunc block, gpointer data, BroBroError **error)
@@ -43,6 +49,8 @@ store_iface_init (BroStoreInterface *iface)
 {
   iface->jobs = store_jobs;
   iface->steps = store_steps;
+  iface->units = store_units;
+  iface->libraries = store_libraries;
   iface->transaction = store_transaction;
   iface->migrate = store_migrate;
 }
@@ -52,9 +60,28 @@ job_put (BroJobRepository *repo, const BroJobRecord *job, BroBroError **error)
 {
   TestMemoryStore *self = TEST_MEMORY_STORE (repo);
   g_mutex_lock (&self->lock);
+  if (!g_hash_table_contains (self->jobs, job->id.value))
+    g_ptr_array_add (self->order, g_strdup (job->id.value));
   g_hash_table_replace (self->jobs, g_strdup (job->id.value), bro_job_record_copy (job));
   g_mutex_unlock (&self->lock);
   return TRUE;
+}
+
+/* Unfinished jobs, in the order they were inserted. */
+static GPtrArray *
+job_active (BroJobRepository *repo, BroBroError **error)
+{
+  TestMemoryStore *self = TEST_MEMORY_STORE (repo);
+  GPtrArray *found = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_job_record_free);
+  g_mutex_lock (&self->lock);
+  for (guint i = 0; i < self->order->len; i++)
+    {
+      BroJobRecord *r = g_hash_table_lookup (self->jobs, self->order->pdata[i]);
+      if (r->state != BRO_JOB_STATE_FINISHED)
+        g_ptr_array_add (found, bro_job_record_copy (r));
+    }
+  g_mutex_unlock (&self->lock);
+  return found;
 }
 
 static BroJobRecord *
@@ -74,6 +101,7 @@ store_jobs_iface_init (BroJobRepositoryInterface *iface)
   iface->insert = job_put;
   iface->update = job_put;
   iface->load = job_load;
+  iface->active = job_active;
 }
 
 static gboolean
@@ -137,7 +165,10 @@ test_memory_store_finalize (GObject *object)
 {
   TestMemoryStore *self = TEST_MEMORY_STORE (object);
   g_hash_table_unref (self->jobs);
+  g_ptr_array_unref (self->order);
   g_hash_table_unref (self->steps);
+  g_clear_object (&self->units);
+  g_clear_object (&self->libraries);
   g_mutex_clear (&self->lock);
   G_OBJECT_CLASS (test_memory_store_parent_class)->finalize (object);
 }
@@ -153,6 +184,7 @@ test_memory_store_init (TestMemoryStore *self)
 {
   g_mutex_init (&self->lock);
   self->jobs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_job_record_free);
+  self->order = g_ptr_array_new_with_free_func (g_free);
   self->steps = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_step_record_free);
 }
 
@@ -946,9 +978,29 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
           s->seq = k;
           s->kind = sk;
           s->state = BRO_STEP_STATE_SUCCEEDED;
+          if (bro_json_value_member (d, "state"))
+            g_assert_true (bro_step_state_from_wire (bro_json_value_get_string (bro_json_value_member (d, "state"), ""), &s->state));
           s->attempt = 1;
           s->output = bro_step_output_new (sk, out ? bro_json_value_ref (out) : bro_json_value_new_object (), NULL);
           bro_step_repository_save (BRO_STEP_REPOSITORY (h.store), s, NULL);
+        }
+      if ((done = bro_json_value_member (j, "log")))
+        {
+          g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);
+          g_autofree char *directory = g_strconcat ("/data/jobs/", jid->value, NULL);
+          g_autoptr (GBytes) bytes = NULL;
+          g_autofree char *path = NULL;
+          for (guint k = 0; k < bro_json_value_length (done); k++)
+            {
+              BroMessageCode code;
+              BroInstant at = { START_MS };
+              g_assert_true (bro_message_code_parse (bro_json_value_get_string (bro_json_value_at (done, k), ""), &code));
+              g_ptr_array_add (lines, bro_log_line_dto_new (k + 1, at, BRO_SEVERITY_INFO, code, NULL));
+            }
+          bytes = bro_job_log_encode (lines);
+          path = g_strconcat (directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+          bro_file_system_create_directory (BRO_FILE_SYSTEM (h.fs), directory, FALSE, NULL);
+          bro_file_system_write_atomically (BRO_FILE_SYSTEM (h.fs), path, bytes, 0600, NULL);
         }
     }
   ops = bro_json_value_member (given, "ops");

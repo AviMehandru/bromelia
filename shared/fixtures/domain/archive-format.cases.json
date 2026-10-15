@@ -4,11 +4,12 @@
     "Sha256Sums.render",
     "Sha256Sums.merge",
     "ArchiveFiles.isOwnFile",
+    "ArchiveFiles.isLeftover",
     "ArchiveFiles.isMetadataFile",
     "ArchiveFiles.expand",
     "VerifyResult.compare"
   ],
-  "description": "SHA256SUMS, Bromelia's own file names (not reported as unlisted), media server metadata files (not in SHA256SUMS), and the verdict of a check. A check's per-file input says whether the file hashed the same, changed, is missing or unreadable.",
+  "description": "SHA256SUMS, Bromelia's own file names (not reported as unlisted), media server metadata files (not in SHA256SUMS), and the verdict of a check. A check's per-file input says whether the file hashed the same, changed, is missing or unreadable. isLeftover: .<name>.bromelia-tmp-<id> (writeAtomically) and .<name>.part-<id> (DataImager), what a stopped write leaves.",
   "cases": [
     {
       "id": "sha256-abc",
@@ -364,6 +365,66 @@
       },
       "expect": {
         "isMetadataFile": false
+      }
+    },
+    {
+      "id": "leftover-atomic-write",
+      "from": [
+        "review L3-3: startup recovery removes what a stopped write leaves"
+      ],
+      "given": {
+        "name": ".SHA256SUMS.bromelia-tmp-0a1b2c3d"
+      },
+      "expect": {
+        "isLeftover": true
+      }
+    },
+    {
+      "id": "leftover-image-part",
+      "from": [
+        "review L3-3: startup recovery removes what a stopped write leaves"
+      ],
+      "given": {
+        "name": ".disc.iso.part-1a2b3c4d"
+      },
+      "expect": {
+        "isLeftover": true
+      }
+    },
+    {
+      "id": "leftover-not-hidden",
+      "from": [
+        "review L3-3: startup recovery removes what a stopped write leaves"
+      ],
+      "given": {
+        "name": "report.part-2.txt"
+      },
+      "expect": {
+        "isLeftover": false
+      }
+    },
+    {
+      "id": "leftover-hidden-but-ours",
+      "from": [
+        "review L3-3: startup recovery removes what a stopped write leaves"
+      ],
+      "given": {
+        "name": ".bromelia-library"
+      },
+      "expect": {
+        "isLeftover": false
+      }
+    },
+    {
+      "id": "leftover-hidden-other",
+      "from": [
+        "review L3-3: startup recovery removes what a stopped write leaves"
+      ],
+      "given": {
+        "name": ".DS_Store"
+      },
+      "expect": {
+        "isLeftover": false
       }
     },
     {

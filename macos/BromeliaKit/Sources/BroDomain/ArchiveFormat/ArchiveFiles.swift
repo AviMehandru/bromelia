@@ -14,6 +14,12 @@ public enum ArchiveFiles {
             || name == "INCOMPLETE.txt" || name == "READ ERRORS.txt"
     }
 
+    /// What a write that was stopped leaves behind: .<name>.bromelia-tmp-<id> (FileSystem.writeAtomically) and
+    /// .<name>.part-<id> (DataImager). Startup recovery removes them (review L3-3).
+    public static func isLeftover(_ name: String) -> Bool {
+        name.hasPrefix(".") && (name.contains(".bromelia-tmp-") || name.contains(".part-"))
+    }
+
     /// Files written for media servers, which SHA256SUMS doesn't list (servers may rewrite them): .nfo files and
     /// poster.jpg.
     public static func isMetadataFile(_ name: String) -> Bool {

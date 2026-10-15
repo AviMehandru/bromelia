@@ -26,6 +26,8 @@ struct ArchiveFormatTests {
             } else if let name = given["name"]?.string {
                 if let own = expect["isOwnFile"] {
                     try Fixtures.same(own.bool, ArchiveFiles.isOwnFile(name), "own file")
+                } else if let left = expect["isLeftover"] {
+                    try Fixtures.same(left.bool, ArchiveFiles.isLeftover(name), "leftover")
                 } else {
                     try Fixtures.same(expect["isMetadataFile"]?.bool, ArchiveFiles.isMetadataFile(name), "metadata file")
                 }

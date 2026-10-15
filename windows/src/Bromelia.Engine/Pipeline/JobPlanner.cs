@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.Linq;
 using Bromelia.Domain;
+using Bromelia.Ports;
 
 namespace Bromelia.Engine;
 
@@ -19,5 +21,19 @@ public static class JobPlanner
         steps.Add(StepKind.Identify);
         steps.Add(StepKind.Plan);
         return steps;
+    }
+
+    /// <summary>The steps a run doesn't do again (plan §12.3): the leading ones, by seq, that succeeded or were skipped,
+    /// or failed after the commit (JobOutcome.afterCommit: the runner went on after them).</summary>
+    public static IReadOnlyList<StepRecord> Done(IReadOnlyList<StepRecord> steps)
+    {
+        var done = new List<StepRecord>();
+        foreach (var s in steps.OrderBy(s => s.Seq))
+        {
+            var finished = s.State is StepState.Succeeded or StepState.Skipped || (s.State == StepState.Failed && JobOutcome.AfterCommit(s.Kind));
+            if (s.Seq != done.Count || !finished) break;
+            done.Add(s);
+        }
+        return done;
     }
 }

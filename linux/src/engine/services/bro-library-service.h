@@ -64,4 +64,16 @@ void bro_library_service_attach (BroLibraryService *self, const char *library_id
  * files read from the destination's SHA256SUMS. On a worker, never the executor. NULL and @error set on failure. */
 BroCommitResult *bro_library_service_roll_forward (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **error);
 
+/* The folders in the library's .bromelia/staging (one per job, named by its id), in ordinal order (char *, the caller
+ * frees the array), once the marker checks out (from the configuration itself, so it works before start). On a
+ * worker, never the executor. NULL and @error set on failure. */
+GPtrArray *bro_library_service_staging_folders (BroLibraryService *self, const char *library_id, BroBroError **error);
+
+/* A staging folder no job will continue goes to <library>/_Quarantine/<ConflictNamer('<@name> [INCOMPLETE]')> with
+ * @note as INCOMPLETE.txt (written first, so the folder arrives marked: I1), never reused or deleted (review L3-3,
+ * P1-3); the folders are synced. The new path (yours to free); NULL when the folder held no file and was removed
+ * instead (@error unset), or on failure (@error set). On a worker, never the executor. */
+char *bro_library_service_set_aside (BroLibraryService *self, const char *library_id, const char *folder, const char *name, GBytes *note,
+                                     BroBroError **error);
+
 G_END_DECLS

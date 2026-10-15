@@ -139,8 +139,17 @@ public sealed class PipelineRunnerTests
                 foreach (var d in j["done"]?.AsArray ?? new List<JsonValue>())
                 {
                     var k = EnumWire.Parse<StepKind>(d["kind"]!.AsString)!.Value;
-                    ((IStepRepository)Store).Save(new StepRecord(id, seq++, k, StepState.Succeeded, 1, W.Clock.Now(), W.Clock.Now(),
+                    var state = EnumWire.Parse<StepState>(d["state"]?.AsString ?? "succeeded")!.Value;
+                    ((IStepRepository)Store).Save(new StepRecord(id, seq++, k, state, 1, W.Clock.Now(), W.Clock.Now(),
                         new StepOutput(k, d["output"] ?? EmptyObject))).Wait();
+                }
+                if (j["log"] is { } log)
+                {
+                    long line = 0;
+                    var lines = Strings(log).Select(c => new LogLineDto(++line, W.Clock.Now(), Severity.Info, MessageCode.Parse(c)!.Value,
+                        new JsonValue.Object(new List<KeyValuePair<string, JsonValue>>()))).ToList();
+                    Fs.CreateDirectory($"/data/jobs/{id.Value}", parentsMustExist: false);
+                    Fs.WriteAtomically($"/data/jobs/{id.Value}/log.jsonl", JobLog.Encode(lines), 0x180);
                 }
             }
         }

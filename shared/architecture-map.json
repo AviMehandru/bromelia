@@ -4558,6 +4558,18 @@
           "swift": "Sha256Hasher.finish()",
           "cs": "Sha256Hasher.Finish",
           "c": "bro_sha256_hasher_finish"
+        },
+        {
+          "name": "ArchiveFiles.isLeftover",
+          "params": [
+            "name"
+          ],
+          "returns": "Bool",
+          "doc": "What a stopped write leaves: .<name>.bromelia-tmp-<id> (writeAtomically) and .<name>.part-<id> (DataImager); startup recovery removes them (review L3-3).",
+          "phase": 3,
+          "swift": "ArchiveFiles.isLeftover(_:)",
+          "cs": "ArchiveFiles.IsLeftover",
+          "c": "bro_archive_files_is_leftover"
         }
       ]
     },
@@ -13643,6 +13655,17 @@
           "swift": "LibraryDto.json(_:)",
           "cs": "LibraryDto.Json",
           "c": "bro_library_dto_json"
+        },
+        {
+          "name": "JobDto.of",
+          "params": [
+            "record"
+          ],
+          "returns": "JobDto",
+          "doc": "The stored job as clients see it, without what only a running job has (progress, blockedBy, decision, position, counts).",
+          "swift": "JobDto.of(_:)",
+          "cs": "JobDto.Of",
+          "c": "bro_job_dto_of"
         }
       ]
     },
@@ -14039,6 +14062,23 @@
             "name": "BroCommitResult",
             "file": "linux/src/engine/pipeline/bro-commit-result.h"
           }
+        },
+        {
+          "name": "JobLog",
+          "kind": "namespace",
+          "doc": "A job's log file, <data>/jobs/<id>/log.jsonl (plan §16): {t, severity, code, params} per line, canonical on one line.",
+          "swift": {
+            "name": "JobLog",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/JobLog.swift"
+          },
+          "cs": {
+            "name": "JobLog",
+            "file": "windows/src/Bromelia.Engine/Pipeline/JobLog.cs"
+          },
+          "c": {
+            "name": "BroJobLog",
+            "file": "linux/src/engine/pipeline/bro-job-log.h"
+          }
         }
       ],
       "functions": [
@@ -14275,6 +14315,41 @@
           "swift": "LibraryPort.quarantine(_:intent:files:tag:)",
           "cs": "LibraryPort.Quarantine",
           "c": "bro_library_port_quarantine"
+        },
+        {
+          "name": "JobPlanner.done",
+          "params": [
+            "steps"
+          ],
+          "returns": "[StepRecord]",
+          "doc": "The steps a run doesn't do again: the leading ones by seq that succeeded or were skipped, or failed after the commit.",
+          "swift": "JobPlanner.done(_:)",
+          "cs": "JobPlanner.Done",
+          "c": "bro_job_planner_done"
+        },
+        {
+          "name": "JobLog.encode",
+          "params": [
+            "lines"
+          ],
+          "returns": "Bytes",
+          "doc": "The lines, each ended by a line break (seq left out).",
+          "swift": "JobLog.encode(_:)",
+          "cs": "JobLog.Encode",
+          "c": "bro_job_log_encode"
+        },
+        {
+          "name": "JobLog.append",
+          "params": [
+            "fs",
+            "jobDirectory",
+            "lines"
+          ],
+          "doc": "Adds the lines to the end of the job folder's log (made when missing), written atomically, 0600.",
+          "throws": true,
+          "swift": "JobLog.append(_:jobDirectory:lines:)",
+          "cs": "JobLog.Append",
+          "c": "bro_job_log_append"
         }
       ]
     },
@@ -14570,7 +14645,7 @@
       "layer": "engine",
       "folder": "Services",
       "cFolder": "services",
-      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService and LibraryService. shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json.",
+      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService, LibraryService and RecoveryService. shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json, recovery-service.cases.json.",
       "phase": 3,
       "types": [
         {
@@ -14660,6 +14735,23 @@
           "c": {
             "name": "BroLibraryService",
             "file": "linux/src/engine/services/bro-library-service.h"
+          }
+        },
+        {
+          "name": "RecoveryService",
+          "kind": "class",
+          "doc": "Runs once at startup (plan §20.4, §15.8, review L3-3, L3-9): unfinished jobs requeued, resumed or finished by where each stopped and its step's resumability; open commit intents rolled forward; staging no job will continue set aside; temporary files removed. Library work takes at most 30 s of the startup.",
+          "swift": {
+            "name": "RecoveryService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/RecoveryService.swift"
+          },
+          "cs": {
+            "name": "RecoveryService",
+            "file": "windows/src/Bromelia.Engine/Services/RecoveryService.cs"
+          },
+          "c": {
+            "name": "BroRecoveryService",
+            "file": "linux/src/engine/services/bro-recovery-service.h"
           }
         }
       ],
@@ -14888,6 +14980,48 @@
           "swift": "LibraryService.rollForward(_:)",
           "cs": "LibraryService.RollForward",
           "c": "bro_library_service_roll_forward"
+        },
+        {
+          "name": "LibraryService.stagingFolders",
+          "params": [
+            "libraryId"
+          ],
+          "returns": "[String]",
+          "doc": "The job folders in the library's .bromelia/staging, once the marker checks out (works before start).",
+          "throws": true,
+          "async": true,
+          "swift": "LibraryService.stagingFolders(_:)",
+          "cs": "LibraryService.StagingFolders",
+          "c": "bro_library_service_staging_folders"
+        },
+        {
+          "name": "LibraryService.setAside",
+          "params": [
+            "libraryId",
+            "folder",
+            "name",
+            "note"
+          ],
+          "returns": "String?",
+          "doc": "A staging folder no job will continue goes to _Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with the note as INCOMPLETE.txt; one with no file is removed (null) (review L3-3, owner 2026-10-14).",
+          "throws": true,
+          "async": true,
+          "swift": "LibraryService.setAside(_:folder:name:note:)",
+          "cs": "LibraryService.SetAside",
+          "c": "bro_library_service_set_aside"
+        },
+        {
+          "name": "RecoveryService.recover",
+          "params": [],
+          "returns": "BroMessage?",
+          "doc": "recovery.summary{count} when the last engine left jobs unfinished; null otherwise. On the executor.",
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "swift": "RecoveryService.recover()",
+          "cs": "RecoveryService.Recover",
+          "c": "bro_recovery_service_recover"
         }
       ]
     },
@@ -14981,6 +15115,44 @@
           "swift": "LibraryRepository.setSeen(_:online:at:)",
           "cs": "LibraryRepository.SetSeen",
           "c": "bro_library_repository_set_seen"
+        }
+      ]
+    },
+    "ports/message-renderer": {
+      "layer": "ports",
+      "folder": "",
+      "cFolder": "",
+      "doc": "The MessageRenderer port (plan §16; owner 2026-10-14): the engine reaches the host's renderer of shared/messages for text people read, such as INCOMPLETE.txt. The adapters come with the composition roots.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "MessageRenderer",
+          "kind": "protocol",
+          "doc": "The text of a message in the configured language.",
+          "swift": {
+            "name": "MessageRenderer",
+            "file": "macos/BromeliaKit/Sources/BroPorts/MessageRenderer.swift"
+          },
+          "cs": {
+            "name": "IMessageRenderer",
+            "file": "windows/src/Bromelia.Ports/IMessageRenderer.cs"
+          },
+          "c": {
+            "name": "BroMessageRenderer",
+            "file": "linux/src/ports/bro-message-renderer.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "MessageRenderer.render",
+          "params": [
+            "message"
+          ],
+          "returns": "String",
+          "swift": "MessageRenderer.render(_:)",
+          "cs": "MessageRenderer.Render",
+          "c": "bro_message_renderer_render"
         }
       ]
     }

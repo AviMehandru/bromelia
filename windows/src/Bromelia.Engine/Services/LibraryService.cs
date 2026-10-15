@@ -23,6 +23,7 @@ public sealed class LibraryService : ILibraryPort
     const int FileMode = 0x1A4; // 0644
     const string Staging = ".bromelia";
     const string QuarantineFolder = "_Quarantine";
+    const string IncompleteNote = "INCOMPLETE.txt";
     static readonly Duration CheckEvery = new(30);
     static readonly MessageCode[] ReasonCodes = { MessageCode.LibraryOffline, MessageCode.LibraryNotAttached, MessageCode.LibraryMarkerMismatch };
 
@@ -197,6 +198,43 @@ public sealed class LibraryService : ILibraryPort
         {
             Unclaim(intent.UnitId);
         }
+    });
+
+    /// <summary>The folders in the library's .bromelia/staging (one per job, named by its id), in ordinal order,
+    /// once the marker checks out (from the configuration itself, so it works before <see cref="Start"/>). Any thread
+    /// but the executor.</summary>
+    public Task<IReadOnlyList<string>> StagingFolders(string libraryId) => _executor.Worker(async () =>
+    {
+        var lib = await Configured(libraryId).ConfigureAwait(false);
+        await CheckMarker(lib).ConfigureAwait(false);
+        var staging = lib.Path + "/" + Staging + "/staging";
+        if (!IsFolder(staging)) return (IReadOnlyList<string>)Array.Empty<string>();
+        return _fs.List(staging).Where(e => e.IsDirectory).Select(e => e.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+    });
+
+    /// <summary>A staging folder no job will continue goes to &lt;library&gt;/_Quarantine/&lt;ConflictNamer('&lt;name&gt;
+    /// [INCOMPLETE]')&gt; with <paramref name="note"/> as INCOMPLETE.txt (written first, so the folder arrives marked: I1),
+    /// never reused or deleted (review L3-3, P1-3); one that holds no file is removed instead (null). The folders are
+    /// synced. Any thread but the executor.</summary>
+    public Task<string?> SetAside(string libraryId, string folder, string name, byte[] note) => _executor.Worker(async () =>
+    {
+        var lib = await Configured(libraryId).ConfigureAwait(false);
+        await CheckMarker(lib).ConfigureAwait(false);
+        var staging = lib.Path + "/" + Staging + "/staging/" + folder;
+        if (!IsFolder(staging)) throw NotFound(staging);
+        if (!Walk(staging).Any())
+        {
+            RemoveEmpty(staging);
+            return (string?)null;
+        }
+        _fs.WriteAtomically(staging + "/" + IncompleteNote, note, FileMode);
+        var quarantine = lib.Path + "/" + QuarantineFolder;
+        EnsureFolders(lib.Path, quarantine);
+        var dest = quarantine + "/" + ConflictNamer.Next(name + " [INCOMPLETE]", _fs.List(quarantine).Select(e => e.Name).ToList(), isFolder: true);
+        _fs.Rename(staging, dest);
+        _fs.SyncDirectory(quarantine);
+        _fs.SyncDirectory(Parent(staging));
+        return dest;
     });
 
     // ---- marker checks (executor) ---------------------------------------------------------------------------------

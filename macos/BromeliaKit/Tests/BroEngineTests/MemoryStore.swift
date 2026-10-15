@@ -8,6 +8,7 @@ import Foundation
 final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendable {
     private let lock = NSLock()
     private var jobsById: [Id: JobRecord] = [:]
+    private var order: [Id] = [] // jobs in the order they were inserted
     private var stepsByKey: [String: StepRecord] = [:]
 
     func jobs() -> any JobRepository { self }
@@ -24,10 +25,15 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
     func transaction<T: Sendable>(_ block: @Sendable (any Store) async throws(BroError) -> T) async throws(BroError) -> T { try await block(self) }
     func migrate() async throws(BroError) {}
 
-    func insert(_ job: JobRecord) async throws(BroError) { lock.withLock { jobsById[job.id] = job } }
+    func insert(_ job: JobRecord) async throws(BroError) {
+        lock.withLock {
+            if jobsById[job.id] == nil { order.append(job.id) }
+            jobsById[job.id] = job
+        }
+    }
     func update(_ job: JobRecord) async throws(BroError) { lock.withLock { jobsById[job.id] = job } }
     func load(_ jobId: Id) async throws(BroError) -> JobRecord? { lock.withLock { jobsById[jobId] } }
-    func active() async throws(BroError) -> [JobRecord] { lock.withLock { jobsById.values.filter { $0.state != .finished } } }
+    func active() async throws(BroError) -> [JobRecord] { lock.withLock { order.compactMap { jobsById[$0] }.filter { $0.state != .finished } } }
     func query(_ query: JobQuery) async throws(BroError) -> [JobRecord] { lock.withLock { Array(jobsById.values) } }
 
     func save(_ step: StepRecord) async throws(BroError) { lock.withLock { stepsByKey["\(step.jobId.value)/\(step.seq)"] = step } }

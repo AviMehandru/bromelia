@@ -20,6 +20,11 @@ public static class ArchiveFiles
         || OwnLog.IsMatch(name)
         || name is "INCOMPLETE.txt" or "READ ERRORS.txt";
 
+    /// <summary>What a write that was stopped leaves behind: .&lt;name&gt;.bromelia-tmp-&lt;id&gt; (FileSystem.writeAtomically)
+    /// and .&lt;name&gt;.part-&lt;id&gt; (DataImager). Startup recovery removes them (review L3-3).</summary>
+    public static bool IsLeftover(string name) =>
+        name.StartsWith(".", StringComparison.Ordinal) && (name.Contains(".bromelia-tmp-", StringComparison.Ordinal) || name.Contains(".part-", StringComparison.Ordinal));
+
     /// <summary>Files written for media servers, which SHA256SUMS doesn't list (servers may rewrite them): .nfo
     /// files and poster.jpg.</summary>
     public static bool IsMetadataFile(string name) =>

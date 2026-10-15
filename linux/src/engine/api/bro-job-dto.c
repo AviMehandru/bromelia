@@ -98,3 +98,32 @@ bro_job_dto_json (const BroJobDto *job)
     }
   return o;
 }
+
+BroJobDto *
+bro_job_dto_of (const BroJobRecord *record)
+{
+  BroJobDto *d = bro_job_dto_new ();
+  d->id = record->id;
+  d->kind = record->kind;
+  d->state = record->state;
+  d->has_outcome = record->has_outcome;
+  d->outcome = record->outcome;
+  d->queue = record->queue;
+  d->has_parent_id = record->has_parent_id;
+  d->parent_id = record->parent_id;
+  d->drive_id = g_strdup (record->drive_id);
+  d->session_id = record->request && record->request->session_id ? g_memdup2 (record->request->session_id, sizeof (BroId)) : NULL;
+  d->title = g_strdup (record->title);
+  d->mode = g_strdup (record->mode);
+  d->automatic = record->automatic;
+  d->created_at = record->created_at;
+  d->has_started_at = record->has_started_at;
+  d->started_at = record->started_at;
+  d->has_finished_at = record->has_finished_at;
+  d->finished_at = record->finished_at;
+  d->error = bro_bro_error_copy (record->error);
+  d->has_unit_id = record->has_unit_id;
+  d->unit_id = record->unit_id;
+  d->fingerprint = g_strdup (record->fingerprint);
+  return d;
+}

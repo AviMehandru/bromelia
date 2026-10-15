@@ -6,6 +6,7 @@
 #include "bro-id.h"
 #include "bro-instant.h"
 #include "bro-job-kind.h"
+#include "bro-job-record.h"
 #include "bro-job-state.h"
 #include "bro-job-totals.h"
 #include "bro-outcome.h"
@@ -52,6 +53,10 @@ void bro_job_dto_free (BroJobDto *job);
 
 /* Free with bro_json_value_unref. */
 BroJsonValue *bro_job_dto_json (const BroJobDto *job);
+
+/* The stored job as clients see it, without what only a running job has (progress, blockedBy, decision, position,
+ * counts). */
+BroJobDto *bro_job_dto_of (const BroJobRecord *record);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (BroJobDto, bro_job_dto_free)
 

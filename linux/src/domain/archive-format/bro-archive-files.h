@@ -11,6 +11,10 @@ G_BEGIN_DECLS
  * bromelia-1a2b3c4d-log.txt …), and the INCOMPLETE / READ ERRORS notes. */
 gboolean bro_archive_files_is_own_file (const char *name);
 
+/* What a write that was stopped leaves behind: .<name>.bromelia-tmp-<id> (FileSystem.writeAtomically) and
+ * .<name>.part-<id> (DataImager). Startup recovery removes them (review L3-3). */
+gboolean bro_archive_files_is_leftover (const char *name);
+
 /* Files written for media servers, which SHA256SUMS doesn't list (servers may rewrite them): .nfo files and
  * poster.jpg. */
 gboolean bro_archive_files_is_metadata_file (const char *name);

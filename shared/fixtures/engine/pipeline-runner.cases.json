@@ -1,5 +1,5 @@
 {
-  "description": "PipelineRunner (plan §12.3, §20): the only code that moves a job between states. run(job) loads the job's record; its steps are the record's plan, or JobPlanner.initial(request) when it has none (stored as the plan). Steps that already succeeded (job_steps) are not run again. The configuration is read once, when the job starts (owner, 2026-10-11): every step of the run sees that snapshot, even when it changes while the job runs. The job is submitted to its queue. For each step from the first one not done: the job's progress names the step (step, stepIndex, stepCount, fraction of the job so far, operation job.op.starting), the runner asks the Scheduler for the step's resources (while it waits, the job is waitingForResources or blocked, with blockedBy), the job becomes running, the step runs on a worker with a StepContext (the job's snapshot with every earlier step's output, its cancellation token, progress, log, decisions, tools, …), then the lease goes back, the step's record is stored and stepFinished is published. A Release step also gives back the job's drives and moves it to the processing queue. A step's report may append steps (Plan decides the rest of the list), skip (the step is skipped and the job goes on), fail (with its error), or carry what the outcome needs (read errors, quarantine, a MakeMKV notice, a reason to skip the whole job, whether a failure counts). The runner stops at the first failed step, unless the step comes after the commit (JobOutcome.afterCommit): those failures are recorded and the job goes on. Progress is coalesced to one jobChanged per 100 ms per job (the last value of a step goes out when it ends). Log lines go out as jobLog events at once and are written to jobs/<id>/log.jsonl ({t, severity, code, params}) when each step ends. A decision makes the job awaitingDecision until decide(job, answer) gives one of the answers (job.notAwaitingDecision when it isn't waiting for one; server.badRequest for another answer). cancel(job) cancels the job's token: a waiting request or a decision ends at once, a running step sees it; the job ends cancelled. At the end JobOutcome.decide gives the outcome, the record is finished, the Scheduler forgets the job and jobFinished is published. The harness uses a real executor, Scheduler and EventBus, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, and fake steps that do what 'steps' says; jobs get ids in the order given (00000000-0000-4000-8000-000000000001, …). Fake step behaviour: drive (the job's driveId as its drive), resources {drives, acquisition, libraryWrites, cpu, io}, output (its data; default {}), echo <kind> (its data is that earlier step's), append [kinds], skipped, fail {code, params}, readErrors, quarantined, notice (keyExpired, evaluationNotStarted, versionTooOld, libreDriveRequired), skipJob {code, params}, affectsOutcome, progress [[fraction, code], …] (reported one after another), log [codes], ask {id, question, answers} (its data is {answer}), gate <name> (waits until 'open', or fails with job.cancelled when cancelled), config <key> (its data is {key: that member of the context's configuration document}). Ops: run <job>; open <gate>; cancel <job>; decide {job, answer, expectError}; advance <ms>; library {id, online} (Scheduler.setLibraryOffline with library.offline {library: id}); config <document> (what the configuration source gives from then on). Given: config (the configuration document; default {}), jobs [{name, kind (videoDisc), title (its name), driveId, automatic, queue (acquisition), plan (none: the planner's), done [{kind, output}] (stored as succeeded steps)}], steps {kind: behaviour} (a kind not listed just succeeds). After each op the harness waits until every job runs no step, waits at a gate, waits for resources or a decision, or has finished. Expect: outcomes {job: {outcome, error}}; lines {job: [what was published about it, in order]}: 'changed <state> <progress.step>' (+ ' progress <currentFraction in percent>' when the step reported some, ' blockedBy <code>', ' decision <id>'), 'step <kind> <state>', 'log <code>', 'finished <outcome>' (+ ' <error code>'); queueLines ['<queue>: <jobs>' for every queueChanged]; steps {job: ['<kind> <state>' stored, by seq]}; records {job: {state, outcome, plan}}; logFile {job: [codes in jobs/<id>/log.jsonl]}; outputs {job: {kind: data}} (stored step outputs); events (every published event, EngineEvent.json, for the cases that list them).",
+  "description": "PipelineRunner (plan §12.3, §20): the only code that moves a job between states. run(job) loads the job's record; its steps are the record's plan, or JobPlanner.initial(request) when it has none (stored as the plan). Steps already done (JobPlanner.done: the leading ones by seq that succeeded or were skipped, or failed after the commit) are not run again, and the log file keeps what an earlier run wrote. The configuration is read once, when the job starts (owner, 2026-10-11): every step of the run sees that snapshot, even when it changes while the job runs. The job is submitted to its queue. For each step from the first one not done: the job's progress names the step (step, stepIndex, stepCount, fraction of the job so far, operation job.op.starting), the runner asks the Scheduler for the step's resources (while it waits, the job is waitingForResources or blocked, with blockedBy), the job becomes running, the step runs on a worker with a StepContext (the job's snapshot with every earlier step's output, its cancellation token, progress, log, decisions, tools, …), then the lease goes back, the step's record is stored and stepFinished is published. A Release step also gives back the job's drives and moves it to the processing queue. A step's report may append steps (Plan decides the rest of the list), skip (the step is skipped and the job goes on), fail (with its error), or carry what the outcome needs (read errors, quarantine, a MakeMKV notice, a reason to skip the whole job, whether a failure counts). The runner stops at the first failed step, unless the step comes after the commit (JobOutcome.afterCommit): those failures are recorded and the job goes on. Progress is coalesced to one jobChanged per 100 ms per job (the last value of a step goes out when it ends). Log lines go out as jobLog events at once and are written to jobs/<id>/log.jsonl ({t, severity, code, params}) when each step ends. A decision makes the job awaitingDecision until decide(job, answer) gives one of the answers (job.notAwaitingDecision when it isn't waiting for one; server.badRequest for another answer). cancel(job) cancels the job's token: a waiting request or a decision ends at once, a running step sees it; the job ends cancelled. At the end JobOutcome.decide gives the outcome, the record is finished, the Scheduler forgets the job and jobFinished is published. The harness uses a real executor, Scheduler and EventBus, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, and fake steps that do what 'steps' says; jobs get ids in the order given (00000000-0000-4000-8000-000000000001, …). Fake step behaviour: drive (the job's driveId as its drive), resources {drives, acquisition, libraryWrites, cpu, io}, output (its data; default {}), echo <kind> (its data is that earlier step's), append [kinds], skipped, fail {code, params}, readErrors, quarantined, notice (keyExpired, evaluationNotStarted, versionTooOld, libreDriveRequired), skipJob {code, params}, affectsOutcome, progress [[fraction, code], …] (reported one after another), log [codes], ask {id, question, answers} (its data is {answer}), gate <name> (waits until 'open', or fails with job.cancelled when cancelled), config <key> (its data is {key: that member of the context's configuration document}). Ops: run <job>; open <gate>; cancel <job>; decide {job, answer, expectError}; advance <ms>; library {id, online} (Scheduler.setLibraryOffline with library.offline {library: id}); config <document> (what the configuration source gives from then on). Given: config (the configuration document; default {}), jobs [{name, kind (videoDisc), title (its name), driveId, automatic, queue (acquisition), plan (none: the planner's), done [{kind, output, state}] (stored steps, by seq; state succeeded unless given), log [codes] (lines already in jobs/<id>/log.jsonl, as an earlier run or recovery left them)}], steps {kind: behaviour} (a kind not listed just succeeds). After each op the harness waits until every job runs no step, waits at a gate, waits for resources or a decision, or has finished. Expect: outcomes {job: {outcome, error}}; lines {job: [what was published about it, in order]}: 'changed <state> <progress.step>' (+ ' progress <currentFraction in percent>' when the step reported some, ' blockedBy <code>', ' decision <id>'), 'step <kind> <state>', 'log <code>', 'finished <outcome>' (+ ' <error code>'); queueLines ['<queue>: <jobs>' for every queueChanged]; steps {job: ['<kind> <state>' stored, by seq]}; records {job: {state, outcome, plan}}; logFile {job: [codes in jobs/<id>/log.jsonl]}; outputs {job: {kind: data}} (stored step outputs); events (every published event, EngineEvent.json, for the cases that list them).",
   "functions": [
     "PipelineRunner.run",
     "PipelineRunner.cancel",
@@ -1248,6 +1248,127 @@
             }
           }
         }
+      }
+    },
+    {
+      "id": "skipped-steps-are-done-too",
+      "given": {
+        "jobs": [
+          {
+            "name": "j",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "plan"
+            ],
+            "done": [
+              {
+                "kind": "awaitMedia",
+                "state": "skipped"
+              },
+              {
+                "kind": "probe",
+                "output": {
+                  "titles": 2
+                }
+              }
+            ]
+          }
+        ],
+        "steps": {
+          "plan": {
+            "echo": "probe"
+          }
+        },
+        "ops": [
+          {
+            "run": "j"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "j": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "j": [
+            "changed running plan",
+            "step plan succeeded",
+            "finished succeeded"
+          ]
+        },
+        "steps": {
+          "j": [
+            "awaitMedia skipped",
+            "probe succeeded",
+            "plan succeeded"
+          ]
+        },
+        "outputs": {
+          "j": {
+            "awaitMedia": {},
+            "probe": {
+              "titles": 2
+            },
+            "plan": {
+              "titles": 2
+            }
+          }
+        },
+        "rule": "a resumed job goes on after a skipped step too, not one step early (recovery resumes jobs; plan §12.3)"
+      }
+    },
+    {
+      "id": "a-resumed-job-keeps-its-log",
+      "given": {
+        "jobs": [
+          {
+            "name": "j",
+            "plan": [
+              "probe",
+              "plan"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              }
+            ],
+            "log": [
+              "recovery.requeued"
+            ]
+          }
+        ],
+        "steps": {
+          "plan": {
+            "log": [
+              "recovery.resumedFromBackup"
+            ]
+          }
+        },
+        "ops": [
+          {
+            "run": "j"
+          }
+        ]
+      },
+      "expect": {
+        "lines": {
+          "j": [
+            "changed running plan",
+            "log recovery.resumedFromBackup",
+            "step plan succeeded",
+            "finished succeeded"
+          ]
+        },
+        "logFile": {
+          "j": [
+            "recovery.requeued",
+            "recovery.resumedFromBackup"
+          ]
+        },
+        "rule": "the lines recovery (or an earlier run) wrote stay in log.jsonl"
       }
     },
     {

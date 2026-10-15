@@ -15,6 +15,7 @@ public final class LibraryService: LibraryPort {
     private nonisolated static let fileMode = 0o644
     private nonisolated static let staging = ".bromelia"
     private nonisolated static let quarantineFolder = "_Quarantine"
+    private nonisolated static let incompleteNote = "INCOMPLETE.txt"
     private nonisolated static let reasonCodes: [MessageCode] = [.libraryOffline, .libraryNotAttached, .libraryMarkerMismatch]
 
     private nonisolated let executor: EngineExecutor
@@ -195,6 +196,42 @@ public final class LibraryService: LibraryPort {
             try claim(intent.unitId)
             defer { unclaim(intent.unitId) }
             return try await complete(lib.path, intent, nil)
+        }
+    }
+
+    /// The folders in the library's .bromelia/staging (one per job, named by its id), in ordinal order, once the marker
+    /// checks out (from the configuration itself, so it works before `start()`). Any thread but the executor.
+    public nonisolated func stagingFolders(_ libraryId: String) async throws(BroError) -> [String] {
+        let lib = try await configured(libraryId)
+        return try await executor.worker { [self] () async throws(BroError) -> [String] in
+            try await checkMarker(lib)
+            let staging = lib.path + "/" + Self.staging + "/staging"
+            guard try isFolder(staging) else { return [] }
+            return try fs.list(staging).filter(\.isDirectory).map(\.name).sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }
+        }
+    }
+
+    /// A staging folder no job will continue goes to <library>/_Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with
+    /// `note` as INCOMPLETE.txt (written first, so the folder arrives marked: I1), never reused or deleted (review L3-3,
+    /// P1-3); one that holds no file is removed instead (nil). The folders are synced. Any thread but the executor.
+    public nonisolated func setAside(_ libraryId: String, folder: String, name: String, note: [UInt8]) async throws(BroError) -> String? {
+        let lib = try await configured(libraryId)
+        return try await executor.worker { [self] () async throws(BroError) -> String? in
+            try await checkMarker(lib)
+            let staging = lib.path + "/" + Self.staging + "/staging/" + folder
+            guard try isFolder(staging) else { throw Self.notFound(staging) }
+            if try walk(staging).isEmpty {
+                try removeEmpty(staging)
+                return nil
+            }
+            try fs.writeAtomically(staging + "/" + Self.incompleteNote, bytes: note, mode: Self.fileMode)
+            let quarantine = lib.path + "/" + Self.quarantineFolder
+            try ensureFolders(lib.path, quarantine)
+            let dest = quarantine + "/" + ConflictNamer.next(name + " [INCOMPLETE]", existing: try fs.list(quarantine).map(\.name), isFolder: true)
+            try fs.rename(staging, to: dest)
+            try fs.syncDirectory(quarantine)
+            try fs.syncDirectory(Self.parent(staging))
+            return dest
         }
     }
 

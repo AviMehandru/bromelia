@@ -12,6 +12,12 @@ bro_archive_files_is_own_file (const char *name)
 }
 
 gboolean
+bro_archive_files_is_leftover (const char *name)
+{
+  return name[0] == '.' && (strstr (name, ".bromelia-tmp-") != NULL || strstr (name, ".part-") != NULL);
+}
+
+gboolean
 bro_archive_files_is_metadata_file (const char *name)
 {
   gsize n = strlen (name);

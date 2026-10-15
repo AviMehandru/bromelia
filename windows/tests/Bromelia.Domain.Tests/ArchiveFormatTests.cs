@@ -30,6 +30,7 @@ public class ArchiveFormatTests
         else if (given["name"] is { } name)
         {
             if (expect["isOwnFile"] is { } own) Same(own.AsBool, ArchiveFiles.IsOwnFile(name.AsString!), "own file");
+            else if (expect["isLeftover"] is { } left) Same(left.AsBool, ArchiveFiles.IsLeftover(name.AsString!), "leftover");
             else Same(expect["isMetadataFile"]!.AsBool, ArchiveFiles.IsMetadataFile(name.AsString!), "metadata file");
         }
         else if (given["sums"] is { } sums)
