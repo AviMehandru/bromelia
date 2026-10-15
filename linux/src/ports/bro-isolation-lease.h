@@ -15,6 +15,7 @@ struct _BroIsolationLeaseInterface {
 
   GHashTable *(*environment) (BroIsolationLease *self);
   char *(*profile_path) (BroIsolationLease *self);
+  BroBroMessage *(*warning) (BroIsolationLease *self);
   void (*first_output) (BroIsolationLease *self);
   BroBroMessage *(*release) (BroIsolationLease *self);
 };
@@ -24,6 +25,11 @@ GHashTable *bro_isolation_lease_environment (BroIsolationLease *self);
 
 /* The profile file for --profile, when there is one. Free with g_free. NULL when there is none. */
 char *bro_isolation_lease_profile_path (BroIsolationLease *self);
+
+/* Why the run's settings may not hold, known once they are in place: makemkv.guiRunning (Windows: the MakeMKV GUI was
+ * open while the registry held the run's values, and it may write its own back), or NULL (owner, 2026-10-15, review
+ * L3-5). Free with bro_bro_message_free. */
+BroBroMessage *bro_isolation_lease_warning (BroIsolationLease *self);
 
 /* makemkvcon has read its settings (its first output line). */
 void bro_isolation_lease_first_output (BroIsolationLease *self);

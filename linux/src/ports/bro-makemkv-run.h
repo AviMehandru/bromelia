@@ -1,6 +1,7 @@
 /* bro-makemkv-run.h: one run: its outcome, the first key, version or drive notice, the LibreDrive detail, MakeMKV's
  * version, process.noTranscript when its transcript couldn't be written, and what giving its settings back reported
- * (bro_isolation_lease_release: makemkv.keyNotRemoved, makemkv.registryNotRestored). */
+ * (bro_isolation_lease_release: makemkv.keyNotRemoved, makemkv.registryNotRestored), and the isolation's warning when
+ * its settings were put in place (bro_isolation_lease_warning: makemkv.guiRunning). */
 #pragma once
 
 #include "bro-makemkv-notice.h"
@@ -16,6 +17,7 @@ typedef struct {
   char *version;            /* nullable */
   BroBroMessage *transcript_problem; /* nullable */
   BroBroMessage *settings_problem;   /* nullable */
+  BroBroMessage *isolation_warning;  /* nullable */
 } BroMakemkvRun;
 
 /* Everything zero. */

@@ -108,6 +108,8 @@ internal sealed class RecordingIsolation : ISettingsIsolation
     public readonly List<string> Log = new();
     /// <summary>What release reports.</summary>
     public BroMessage? ReleaseProblem;
+    /// <summary>The leases' warning.</summary>
+    public BroMessage? Warning;
 
     public IIsolationLease Prepare(MakemkvRunSettings settings)
     {
@@ -128,6 +130,7 @@ internal sealed class RecordingIsolation : ISettingsIsolation
         public Lease(RecordingIsolation owner, MakemkvRunSettings settings) { _owner = owner; _settings = settings; }
         public IReadOnlyDictionary<string, string> Environment() => new Dictionary<string, string> { ["HOME"] = _settings.WorkDirectory };
         public string? ProfilePath() => _settings.ProfileXml is null ? null : _settings.WorkDirectory + "/profile.mmcp.xml";
+        public BroMessage? Warning() => _owner.Warning;
         public void FirstOutput() => _owner.Log.Add("firstOutput");
         public BroMessage? Release()
         {

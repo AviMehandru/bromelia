@@ -133,6 +133,7 @@ fakes_listing (BroMakemkv *makemkv, const BroMakemkvSource *source, const BroMak
   read->run->libre_drive = g_strdup (bro_json_value_get_string (bro_json_value_member (m, "libreDrive"), NULL));
   read->run->transcript_problem = fakes_message (bro_json_value_member (m, "transcriptProblem"), BRO_SEVERITY_WARNING);
   read->run->settings_problem = fakes_message (bro_json_value_member (m, "settingsProblem"), BRO_SEVERITY_WARNING);
+  read->run->isolation_warning = fakes_message (bro_json_value_member (m, "isolationWarning"), BRO_SEVERITY_WARNING);
   return read;
 }
 

@@ -88,6 +88,7 @@ public sealed class MakemkvTool : IMakemkv
         var exe = Executable();
         var before = destination is null ? null : NamesBefore(destination);
         var lease = _isolation.Prepare(invocation.Settings);
+        var warning = lease.Warning();
         MakemkvRun run;
         BroMessage? settingsProblem;
         try
@@ -118,7 +119,7 @@ public sealed class MakemkvTool : IMakemkv
         {
             settingsProblem = lease.Release();
         }
-        return run with { SettingsProblem = settingsProblem };
+        return run with { SettingsProblem = settingsProblem, IsolationWarning = warning };
     }
 
     /// <summary>Feeds the process's lines as robot events; <paramref name="onEvent"/> returns a reason to stop it.</summary>

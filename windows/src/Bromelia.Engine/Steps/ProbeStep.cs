@@ -9,7 +9,8 @@ namespace Bromelia.Engine;
 /// that disc. A listing without titles fails with disc.noTitles and MakeMKV's notice (an expired key, LibreDrive
 /// required), except for a backup, which goes on as today with the opened listing (disc.usingOpenedListing) or without
 /// one (disc.continuingWithoutListing). Logs disc.found, the LibreDrive detail and what the run's isolation or
-/// transcript reported. Data: ProbeOutput.</summary>
+/// transcript reported (the isolation's warning, the transcript's problem, then what giving the settings back
+/// reported). Data: ProbeOutput.</summary>
 public sealed class ProbeStep : IStep
 {
     public StepKind Kind => StepKind.Probe;
@@ -31,7 +32,7 @@ public sealed class ProbeStep : IStep
         var invocation = context.MakemkvSetup.Invocation(profile, null, context.JobDirectory);
         var read = await context.Tools.Makemkv.Listing(source, invocation, new MakemkvSink(context.Progress, context.Log, operation), context.Cancel);
         var run = read.Run;
-        foreach (var problem in new[] { run.TranscriptProblem, run.SettingsProblem })
+        foreach (var problem in new[] { run.IsolationWarning, run.TranscriptProblem, run.SettingsProblem })
             if (problem != null) context.Log.Log(problem with { Severity = Severity.Warning });
         if (run.Outcome.Status == StatusWord.Cancelled || context.Cancel.IsCancelled)
             return new StepReport(Empty, Error: new BroError(MessageCode.Wire(MessageCode.JobCancelled)));

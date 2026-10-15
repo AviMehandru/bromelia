@@ -92,7 +92,8 @@ public sealed class VideoStepsTests
                 new List<string>());
             BroMessage? Problem(string key) => m[key] is { } p ? MessageOf(p, Severity.Warning) : null;
             return Task.FromResult(new ListingRun(builder.Build(),
-                new MakemkvRun(outcome, NoticeOf(m["notice"]?.AsString), m["libreDrive"]?.AsString, null, Problem("transcriptProblem"), Problem("settingsProblem"))));
+                new MakemkvRun(outcome, NoticeOf(m["notice"]?.AsString), m["libreDrive"]?.AsString, null, Problem("transcriptProblem"), Problem("settingsProblem"),
+                    Problem("isolationWarning"))));
         }
 
         public Task<IReadOnlyList<MakemkvDrive>> ScanDrives(CancellationToken cancel) => throw new NotSupportedException();

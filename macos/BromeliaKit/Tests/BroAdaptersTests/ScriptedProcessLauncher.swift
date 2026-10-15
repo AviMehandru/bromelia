@@ -161,6 +161,8 @@ final class RecordingIsolation: SettingsIsolation, @unchecked Sendable {
     func add(_ s: String) { lock.withLock { entries.append(s) } }
     /// What release reports.
     var releaseProblem: BroMessage?
+    /// The leases' warning.
+    var warning: BroMessage?
 
     func prepare(_ settings: MakemkvRunSettings) throws(BroError) -> any IsolationLease {
         add("prepare")
@@ -177,6 +179,7 @@ final class RecordingIsolation: SettingsIsolation, @unchecked Sendable {
         let settings: MakemkvRunSettings
         func environment() -> [String: String] { ["HOME": settings.workDirectory] }
         func profilePath() -> String? { settings.profileXml == nil ? nil : settings.workDirectory + "/profile.mmcp.xml" }
+        func warning() -> BroMessage? { owner.warning }
         func firstOutput() { owner.add("firstOutput") }
         @discardableResult
         func release() -> BroMessage? {

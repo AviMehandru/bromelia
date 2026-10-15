@@ -65,7 +65,8 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
         }
         return ListingRun(listing: builder.build(),
                           run: MakemkvRun(outcome: outcome, notice: notice, libreDrive: m["libreDrive"]?.string,
-                                          transcriptProblem: message(m["transcriptProblem"], .warning), settingsProblem: message(m["settingsProblem"], .warning)))
+                                          transcriptProblem: message(m["transcriptProblem"], .warning), settingsProblem: message(m["settingsProblem"], .warning),
+                                          isolationWarning: message(m["isolationWarning"], .warning)))
     }
 
     func scanDrives(_ cancel: CancellationToken) async throws(BroError) -> [MakemkvDrive] { fatalError("not used") }

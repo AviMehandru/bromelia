@@ -28,6 +28,7 @@ struct HomeDirIsolationTests {
             let work = p(given["workDirectory"]!.string!)
             let run = MakemkvRunSettings(settings: settings, profileXml: given["profileXml"]?.string, dataDir: "/unused", workDirectory: work)
             let lease = try HomeDirIsolation(fs: PlatformFileSystem(), layout: HomeLayout(rawValue: given["layout"]!.string!)!).prepare(run)
+            try Fixtures.check(lease.warning() == nil, "the lease never warns")
             lease.firstOutput()
             for (name, text) in given["duringRun"]?.members ?? [] { try Data((text.string ?? "").utf8).write(to: URL(fileURLWithPath: p(name))) }
             for name in given["unreadableDuringRun"]?.array ?? [] {

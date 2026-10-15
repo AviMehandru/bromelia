@@ -83,7 +83,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   if (!read)
     return NULL;
   const BroMakemkvRun *run = read->run;
-  const BroBroMessage *problems[] = { run->transcript_problem, run->settings_problem };
+  const BroBroMessage *problems[] = { run->isolation_warning, run->transcript_problem, run->settings_problem };
   for (guint i = 0; i < G_N_ELEMENTS (problems); i++)
     if (problems[i]) {
       g_autoptr (BroBroMessage) warning = bro_bro_message_copy (problems[i]);

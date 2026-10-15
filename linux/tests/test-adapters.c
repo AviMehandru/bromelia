@@ -986,6 +986,11 @@ isolation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
       bro_test_fail (failures, id, "prepare failed: %s", error ? error->code : "?");
       return TRUE;
     }
+  {
+    g_autoptr (BroBroMessage) warning = bro_isolation_lease_warning (lease);
+    if (warning)
+      bro_test_fail (failures, id, "the lease warned: %s", bro_message_code_wire (warning->code));
+  }
   bro_isolation_lease_first_output (lease);
   {
     BroJsonValue *during = bro_json_value_member (given, "duringRun");
@@ -1425,6 +1430,7 @@ struct _TestRecordingIsolation {
   GObject parent_instance;
   GPtrArray *log;
   char *release_problem; /* the reason release reports in makemkv.keyNotRemoved, or NULL */
+  gboolean warns;        /* the leases' warning is makemkv.guiRunning */
 };
 
 #define TEST_TYPE_RECORDING_LEASE (test_recording_lease_get_type ())
@@ -1450,6 +1456,12 @@ rl_environment (BroIsolationLease *l)
 }
 
 static char *rl_profile (BroIsolationLease *l) { return g_strdup (TEST_RECORDING_LEASE (l)->profile); }
+static BroBroMessage *
+rl_warning (BroIsolationLease *l)
+{
+  return TEST_RECORDING_LEASE (l)->owner->warns ? bro_bro_message_new (BRO_MSG_MAKEMKV_GUI_RUNNING, NULL, BRO_SEVERITY_WARNING) : NULL;
+}
+
 static void rl_first (BroIsolationLease *l) { g_ptr_array_add (TEST_RECORDING_LEASE (l)->owner->log, g_strdup ("firstOutput")); }
 static BroBroMessage *
 rl_release (BroIsolationLease *l)
@@ -1483,6 +1495,7 @@ test_recording_lease_iface_init (BroIsolationLeaseInterface *iface)
 {
   iface->environment = rl_environment;
   iface->profile_path = rl_profile;
+  iface->warning = rl_warning;
   iface->first_output = rl_first;
   iface->release = rl_release;
 }
@@ -1710,6 +1723,7 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
   launcher->delete_dir = g_strdup (destination);
   launcher->transcript_fails = bro_json_value_get_bool (bro_json_value_member (given, "transcriptFails"), FALSE);
   isolation->release_problem = g_strdup (bro_json_value_get_string (bro_json_value_member (given, "releaseProblem"), NULL));
+  isolation->warns = bro_json_value_get_bool (bro_json_value_member (given, "isolationWarning"), FALSE);
   launcher->cancel = cancel_source;
   locator->path = mk && mk->kind == BRO_JSON_VALUE_NULL ? NULL : g_strdup ("/opt/makemkvcon");
   tool = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), BRO_FILE_SYSTEM (fs), BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
@@ -1842,6 +1856,8 @@ makemkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
                         run && run->transcript_problem ? bro_message_code_wire (run->transcript_problem->code) : NULL);
   bro_test_same_string (failures, id, "settingsProblem", bro_json_value_get_string (bro_json_value_member (expect, "settingsProblem"), NULL),
                         run && run->settings_problem ? bro_message_code_wire (run->settings_problem->code) : NULL);
+  bro_test_same_string (failures, id, "isolationWarning", bro_json_value_get_string (bro_json_value_member (expect, "isolationWarning"), NULL),
+                        run && run->isolation_warning ? bro_message_code_wire (run->isolation_warning->code) : NULL);
   if ((v = bro_json_value_member (expect, "produced")))
     {
       g_autofree char *want = joined_strings (v);

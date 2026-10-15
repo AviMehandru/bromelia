@@ -93,6 +93,9 @@ public sealed class HomeDirIsolation : ISettingsIsolation
 
         public string? ProfilePath() => _profile;
 
+        /// <summary>None: the run's settings are its own files, which nothing else reads or writes.</summary>
+        public BroMessage? Warning() => null;
+
         public void FirstOutput() { }
 
         public BroMessage? Release() => Scrub(_fs, _conf);

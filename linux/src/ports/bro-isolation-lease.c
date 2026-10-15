@@ -22,6 +22,13 @@ bro_isolation_lease_profile_path (BroIsolationLease *self)
   return BRO_ISOLATION_LEASE_GET_IFACE (self)->profile_path (self);
 }
 
+BroBroMessage *
+bro_isolation_lease_warning (BroIsolationLease *self)
+{
+  g_return_val_if_fail (BRO_IS_ISOLATION_LEASE (self), NULL);
+  return BRO_ISOLATION_LEASE_GET_IFACE (self)->warning (self);
+}
+
 void
 bro_isolation_lease_first_output (BroIsolationLease *self)
 {

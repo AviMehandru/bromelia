@@ -2,7 +2,8 @@ import BroDomain
 
 /// One run: its outcome, the first key, version or drive notice, the LibreDrive detail, MakeMKV's version,
 /// process.noTranscript when its transcript couldn't be written, and what giving its settings back reported
-/// (IsolationLease.release: makemkv.keyNotRemoved, makemkv.registryNotRestored).
+/// (IsolationLease.release: makemkv.keyNotRemoved, makemkv.registryNotRestored), and the isolation's warning when its
+/// settings were put in place (IsolationLease.warning: makemkv.guiRunning).
 public struct MakemkvRun: Sendable, Equatable {
     public var outcome: RunOutcome
     public var notice: MakemkvNotice?
@@ -10,14 +11,16 @@ public struct MakemkvRun: Sendable, Equatable {
     public var version: String?
     public var transcriptProblem: BroMessage?
     public var settingsProblem: BroMessage?
+    public var isolationWarning: BroMessage?
 
     public init(outcome: RunOutcome, notice: MakemkvNotice? = nil, libreDrive: String? = nil, version: String? = nil,
-                transcriptProblem: BroMessage? = nil, settingsProblem: BroMessage? = nil) {
+                transcriptProblem: BroMessage? = nil, settingsProblem: BroMessage? = nil, isolationWarning: BroMessage? = nil) {
         self.outcome = outcome
         self.notice = notice
         self.libreDrive = libreDrive
         self.version = version
         self.transcriptProblem = transcriptProblem
         self.settingsProblem = settingsProblem
+        self.isolationWarning = isolationWarning
     }
 }

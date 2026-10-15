@@ -8521,6 +8521,15 @@
           "c": "bro_isolation_lease_environment"
         },
         {
+          "name": "IsolationLease.warning",
+          "params": [],
+          "returns": "BroMessage?",
+          "doc": "Why the run's settings may not hold, known once they are in place: makemkv.guiRunning (Windows: the MakeMKV GUI was open while the registry held the run's values, and it may write its own back), or nil (owner, 2026-10-15, review L3-5).",
+          "swift": "IsolationLease.warning()",
+          "cs": "IsolationLease.Warning",
+          "c": "bro_isolation_lease_warning"
+        },
+        {
           "name": "IsolationLease.firstOutput",
           "params": [],
           "swift": "IsolationLease.firstOutput()",
@@ -12985,9 +12994,10 @@
             "libreDrive",
             "version",
             "transcriptProblem",
-            "settingsProblem"
+            "settingsProblem",
+            "isolationWarning"
           ],
-          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, MakeMKV's version, the warning when its transcript couldn't be written, and what giving its settings back reported (IsolationLease.release).",
+          "doc": "One run: its outcome (RunOutcome), the first key, version or drive notice, the LibreDrive detail, MakeMKV's version, the warning when its transcript couldn't be written, what giving its settings back reported (IsolationLease.release), and the isolation's warning (IsolationLease.warning).",
           "swift": {
             "name": "MakemkvRun",
             "file": "macos/BromeliaKit/Sources/BroPorts/MakemkvRun.swift"

@@ -198,6 +198,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   g_autoptr (GPtrArray) produced = NULL;
   g_autoptr (BroBroMessage) transcript_problem = NULL;
   g_autoptr (BroBroMessage) settings_problem = NULL;
+  g_autoptr (BroBroMessage) isolation_warning = NULL;
   g_autoptr (BroIsolationLease) lease = NULL;
   g_autoptr (BroProcessSpec) spec = NULL;
   g_autofree char *profile = NULL;
@@ -218,6 +219,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   lease = bro_settings_isolation_prepare (self->isolation, invocation->settings, error);
   if (!lease)
     return NULL;
+  isolation_warning = bro_isolation_lease_warning (lease);
   profile = bro_isolation_lease_profile_path (lease);
   if (profile)
     options.profile_path = profile;
@@ -260,6 +262,7 @@ isolated (BroMakemkvTool *self, Call call, BroRunProduct product, const BroMakem
   run->version = g_strdup (accumulator->makemkv_version);
   run->transcript_problem = g_steal_pointer (&transcript_problem);
   run->settings_problem = g_steal_pointer (&settings_problem);
+  run->isolation_warning = g_steal_pointer (&isolation_warning);
   return run;
 }
 

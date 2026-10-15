@@ -78,6 +78,7 @@ public final class MakemkvTool: Makemkv {
         let exe = try executable()
         let before = try destination.map { (d: String) throws(BroError) in try namesBefore(d) }
         let lease = try isolation.prepare(invocation.settings)
+        let warning = lease.warning()
         var released = false
         defer { if !released { lease.release() } }
         var options = invocation.options
@@ -106,7 +107,8 @@ public final class MakemkvTool: Makemkv {
         released = true
         let settingsProblem = lease.release()
         return MakemkvRun(outcome: outcome, notice: accumulator.problem, libreDrive: accumulator.libreDrive, version: accumulator.makemkvVersion,
-                          transcriptProblem: started.process?.transcriptProblem(), settingsProblem: settingsProblem)
+                          transcriptProblem: started.process?.transcriptProblem(), settingsProblem: settingsProblem,
+                          isolationWarning: warning)
     }
 
     /// Feeds the process's lines as robot events; `handle` returns a reason to stop it.

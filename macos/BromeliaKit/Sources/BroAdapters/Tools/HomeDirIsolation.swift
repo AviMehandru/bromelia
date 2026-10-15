@@ -68,6 +68,8 @@ public final class HomeDirIsolation: SettingsIsolation {
         let profile: String?
         func environment() -> [String: String] { ["HOME": home] }
         func profilePath() -> String? { profile }
+        /// None: the run's settings are its own files, which nothing else reads or writes.
+        func warning() -> BroMessage? { nil }
         func firstOutput() {}
 
         @discardableResult

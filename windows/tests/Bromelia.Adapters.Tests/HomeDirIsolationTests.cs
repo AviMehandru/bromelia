@@ -42,6 +42,7 @@ public sealed class HomeDirIsolationTests : IDisposable
             var settings = given["settings"]!.AsObject!.ToDictionary(m => m.Key, m => m.Value.AsString!);
             var run = new MakemkvRunSettings(settings, given["profileXml"]!.AsString, "/unused", P(given["workDirectory"]!.AsString!));
             var lease = new HomeDirIsolation(new DiskFileSystem(), layout).Prepare(run);
+            Assert.Null(lease.Warning());
             lease.FirstOutput();
             foreach (var m in given["duringRun"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()) File.WriteAllText(P(m.Key), m.Value.AsString);
             foreach (var f in given["unreadableDuringRun"]?.AsArray ?? new List<JsonValue>())

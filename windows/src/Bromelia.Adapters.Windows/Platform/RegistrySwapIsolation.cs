@@ -18,7 +18,8 @@ namespace Bromelia.Adapters.Windows;
 /// The user's values are written to a snapshot file (in an owner-only folder: it can hold app_Key) before anything
 /// changes, and the file is removed once every value is back. A crash, a service stop or a power cut in between leaves
 /// the file: <see cref="Recover"/> (at startup) or the next Prepare puts those values back first, and a run never
-/// starts while they can't be (makemkv.registryNotRestored).</summary>
+/// starts while they can't be (makemkv.registryNotRestored). When the MakeMKV GUI is open while the run's values are in
+/// place, the lease warns (makemkv.guiRunning): the GUI may write its own preferences back over them (review L3-5).</summary>
 public sealed class RegistrySwapIsolation : ISettingsIsolation
 {
     /// <summary>One launch at a time in this process: the registry is per user, not per job.</summary>
@@ -29,19 +30,36 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
     readonly IReadOnlyCollection<string> _catalogKeys;
     readonly string _snapshotFile;
     readonly TimeSpan _restoreAfter;
+    readonly Func<bool> _guiRunning;
 
     /// <param name="catalogKeys">Every key of shared/catalog/settings-catalog.json.</param>
     /// <param name="snapshotFile">Where the user's values wait while a run's are in place
     /// (&lt;data&gt;\run\makemkv-registry.json); its folder is made owner-only.</param>
     /// <param name="restoreAfter">When the values come back if makemkvcon says nothing (15 s).</param>
+    /// <param name="guiRunning">Whether the MakeMKV GUI is open (default: a process named makemkv, which makemkvcon
+    /// isn't).</param>
     public RegistrySwapIsolation(IFileSystem fs, IMakemkvRegistry registry, IReadOnlyCollection<string> catalogKeys, string snapshotFile,
-        Duration? restoreAfter = null)
+        Duration? restoreAfter = null, Func<bool>? guiRunning = null)
     {
         _fs = fs;
         _registry = registry;
         _catalogKeys = catalogKeys;
         _snapshotFile = snapshotFile;
         _restoreAfter = TimeSpan.FromSeconds(restoreAfter?.Seconds ?? 15);
+        _guiRunning = guiRunning ?? GuiRunning;
+    }
+
+    /// <summary>A process named makemkv (the GUI, makemkv.exe) is running; false when the processes can't be
+    /// listed (only a warning depends on it).</summary>
+    static bool GuiRunning()
+    {
+        try
+        {
+            var found = System.Diagnostics.Process.GetProcessesByName("makemkv");
+            foreach (var p in found) p.Dispose();
+            return found.Length > 0;
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
     }
 
     /// <summary>Puts back the values of a snapshot a crash left behind (the work folders hold nothing to undo here).
@@ -92,7 +110,8 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
                 if (settings.Settings.TryGetValue(name, out var value)) _registry.Set(name, value);
                 else if (snapshot[name] != null) _registry.Remove(name);
             }
-            return new Lease(this, snapshot, profile);
+            var warning = _guiRunning() ? new BroMessage(MessageCode.MakemkvGuiRunning, Severity.Warning) : null;
+            return new Lease(this, snapshot, profile, warning);
         }
         catch (Exception e) when (e is UnauthorizedAccessException or SecurityException or System.IO.IOException)
         {
@@ -163,21 +182,25 @@ public sealed class RegistrySwapIsolation : ISettingsIsolation
         readonly RegistrySwapIsolation _owner;
         readonly Dictionary<string, string?> _snapshot;
         readonly string? _profile;
+        readonly BroMessage? _warning;
         readonly Timer _timer;
         int _restored;
         volatile bool _notRestored;
 
-        public Lease(RegistrySwapIsolation owner, Dictionary<string, string?> snapshot, string? profile)
+        public Lease(RegistrySwapIsolation owner, Dictionary<string, string?> snapshot, string? profile, BroMessage? warning)
         {
             _owner = owner;
             _snapshot = snapshot;
             _profile = profile;
+            _warning = warning;
             _timer = new Timer(_ => GiveBack(), null, owner._restoreAfter, Timeout.InfiniteTimeSpan);
         }
 
         public IReadOnlyDictionary<string, string> Environment() => new Dictionary<string, string>();
 
         public string? ProfilePath() => _profile;
+
+        public BroMessage? Warning() => _warning;
 
         public void FirstOutput() => GiveBack();
 

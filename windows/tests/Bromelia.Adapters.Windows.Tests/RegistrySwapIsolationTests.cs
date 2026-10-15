@@ -41,8 +41,8 @@ public sealed class RegistrySwapIsolationTests : IDisposable
     /// that need one step aside and ASnapshotOnANetworkShareIsRefused runs instead.</summary>
     bool OnShare => OwnerOnly.IsOnNetworkShare(_root);
 
-    RegistrySwapIsolation Isolation(FakeRegistry reg, Duration? restoreAfter = null) =>
-        new(new PlatformFileSystem(), reg, Catalog, Snapshot, restoreAfter);
+    RegistrySwapIsolation Isolation(FakeRegistry reg, Duration? restoreAfter = null, Func<bool>? guiRunning = null) =>
+        new(new PlatformFileSystem(), reg, Catalog, Snapshot, restoreAfter, guiRunning ?? (() => false));
 
     [Fact]
     public void TheRunsValuesAreInPlaceUntilMakemkvconHasReadThem()
@@ -73,6 +73,29 @@ public sealed class RegistrySwapIsolationTests : IDisposable
         var writes = reg.Log.Count;
         lease.Release(); // once only
         Assert.Equal(writes, reg.Log.Count);
+    }
+
+    /// <summary>Review L3-5 (owner, 2026-10-15): the MakeMKV GUI open while the run's values are in place may write its
+    /// own back, so the lease warns; the run still goes ahead.</summary>
+    [Fact]
+    public void TheLeaseWarnsWhenTheMakemkvGuiIsOpen()
+    {
+        if (!OperatingSystem.IsWindows() || OnShare) return;
+        var reg = new FakeRegistry();
+        var checks = 0;
+        var open = Isolation(reg, guiRunning: () => { checks++; return true; }).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30" }));
+        Assert.Equal(1, checks);
+        Assert.Equal("30", reg.Get("dvd_MinimumTitleLength"));
+        var warning = open.Warning();
+        Assert.Equal(MessageCode.MakemkvGuiRunning, warning?.Code);
+        Assert.Equal(Severity.Warning, warning?.Severity);
+        Assert.Null(open.Release());
+        var closed = Isolation(reg).Prepare(Run(new() { ["dvd_MinimumTitleLength"] = "30" }));
+        Assert.Null(closed.Warning());
+        closed.Release();
+        // The real check runs (this test process isn't the GUI).
+        var real = new RegistrySwapIsolation(new PlatformFileSystem(), reg, Catalog, Snapshot).Prepare(Run(new()));
+        real.Release();
     }
 
     [Fact]

@@ -6,7 +6,8 @@ import BroFoundation
 /// disc. A listing without titles fails with disc.noTitles and MakeMKV's notice (an expired key, LibreDrive required),
 /// except for a backup, which goes on as today with the opened listing (disc.usingOpenedListing) or without one
 /// (disc.continuingWithoutListing). Logs disc.found, the LibreDrive detail and what the run's isolation or transcript
-/// reported. Data: ProbeOutput.
+/// reported (the isolation's warning, the transcript's problem, then what giving the settings back reported). Data:
+/// ProbeOutput.
 public struct ProbeStep: Step {
     public init() {}
 
@@ -33,7 +34,7 @@ public struct ProbeStep: Step {
                                                            sink: MakemkvSink(progress: context.progress, log: context.log, operation: operation),
                                                            cancel: context.cancel)
         let run = read.run
-        for case var problem? in [run.transcriptProblem, run.settingsProblem] {
+        for case var problem? in [run.isolationWarning, run.transcriptProblem, run.settingsProblem] {
             problem.severity = .warning
             context.log.log(problem)
         }

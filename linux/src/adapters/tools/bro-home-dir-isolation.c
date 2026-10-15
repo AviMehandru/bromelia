@@ -102,6 +102,13 @@ scrub (BroFileSystem *fs, const char *conf)
   return NULL;
 }
 
+/* None: the run's settings are its own files, which nothing else reads or writes. */
+static BroBroMessage *
+lease_warning (BroIsolationLease *lease)
+{
+  return NULL;
+}
+
 static BroBroMessage *
 lease_release (BroIsolationLease *lease)
 {
@@ -136,6 +143,7 @@ bro_home_lease_iface_init (BroIsolationLeaseInterface *iface)
 {
   iface->environment = lease_environment;
   iface->profile_path = lease_profile_path;
+  iface->warning = lease_warning;
   iface->first_output = lease_nothing;
   iface->release = lease_release;
 }
