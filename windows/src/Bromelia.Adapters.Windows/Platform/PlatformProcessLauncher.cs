@@ -16,8 +16,8 @@ using Bromelia.Ports;
 namespace Bromelia.Adapters.Windows;
 
 /// <summary>Starts processes in a Job Object and watches them (plan §10.3): stalls, stopping, abandonment 30 s after
-/// the kill, output read for 5 s after exit (longer only while lines wait for a reader that is still taking them), a
-/// transcript of every line. Lines are cut at 64 KiB
+/// the kill, output read for 5 s after exit (then what the pipes hold is still taken, so nothing written before the exit
+/// is lost, however slow the reader), a transcript of every line. Lines are cut at 64 KiB
 /// (<see cref="LineSplitter"/>) and at most <see cref="QueuedLines"/>, or <see cref="QueuedBytes"/> of text, wait to be
 /// read: then the reading waits too, so the tool waits to write (nothing is lost) and that wait doesn't count as
 /// silence.
@@ -66,20 +66,20 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         /// <summary>The Job Object, until <see cref="Finish"/> closes it (guarded by <see cref="_gate"/>).</summary>
         IntPtr _job;
         readonly ProcessSpec _spec;
-        readonly Channel<OutputLine> _lines = Channel.CreateBounded<OutputLine>(new BoundedChannelOptions(QueuedLines)
-        {
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.Wait,
-        });
+        /// <summary>The lines waiting to be read; a pump waits while there are <see cref="QueuedLines"/> of them, unless
+        /// the pumps are draining. (Not SingleReader: that reader can't count.)</summary>
+        readonly Channel<OutputLine> _lines = Channel.CreateUnbounded<OutputLine>();
         /// <summary>Pumps waiting for room in <see cref="_lines"/>: the tool isn't silent, nobody is reading.</summary>
         int _waitingForRoom;
-        /// <summary>When the reader last took a line.</summary>
-        long _lastTaken = Environment.TickCount64;
         /// <summary>The text of the lines in <see cref="_lines"/>; a pump waits while it is <see cref="QueuedBytes"/>.</summary>
         long _queuedBytes;
         /// <summary>Released when the reader takes a line: room, maybe.</summary>
         readonly SemaphoreSlim _taken = new(0, int.MaxValue);
         volatile bool _ended;
+        /// <summary>The pumps take what the pipes hold now, without waiting for room, then stop.</summary>
+        volatile bool _draining;
+        /// <summary>The pumps still reading (guarded by <see cref="_gate"/>).</summary>
+        readonly List<PumpThread> _pumps = new();
         readonly object _gate = new();
         readonly TaskCompletionSource _killed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         readonly Transcript? _transcript;
@@ -95,7 +95,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _process = process;
             _job = job;
             _transcript = transcript;
-            var pumps = new[] { Pump(process.StandardOutput.BaseStream, OutputSource.Stdout), Pump(process.StandardError.BaseStream, OutputSource.Stderr) };
+            var pumps = new[] { Pump(PipeOf(process.StandardOutput.BaseStream), OutputSource.Stdout), Pump(PipeOf(process.StandardError.BaseStream), OutputSource.Stderr) };
             if (spec.StallTimeout is not null) _watchdog = new Timer(_ => Watch(), null, Tick, Tick);
             _exit = Finish(pumps);
         }
@@ -157,7 +157,6 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         {
             await foreach (var line in _lines.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                Interlocked.Exchange(ref _lastTaken, Environment.TickCount64);
                 Interlocked.Add(ref _queuedBytes, -Encoding.UTF8.GetByteCount(line.Text));
                 if (_taken.CurrentCount == 0) _taken.Release();
                 yield return line;
@@ -227,49 +226,124 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _killed.TrySetResult();
         }
 
-        async Task Pump(Stream stream, OutputSource source)
+        /// <summary>The pipe under a redirected stream, read directly: only <see cref="Pump"/> reads it.</summary>
+        static SafeHandle PipeOf(Stream stream) => stream switch
+        {
+            FileStream file => file.SafeFileHandle,
+            System.IO.Pipes.PipeStream pipe => pipe.SafePipeHandle,
+            _ => throw new InvalidOperationException($"a redirected stream that isn't a pipe: {stream.GetType()}"),
+        };
+
+        /// <summary>A pump's thread, for <see cref="Native.CancelSynchronousIo"/> while it is in ReadFile.</summary>
+        sealed class PumpThread
+        {
+            public IntPtr Handle;
+            public volatile bool InRead;
+        }
+
+        /// <summary>Reads the pipe on a thread of its own.</summary>
+        Task Pump(SafeHandle pipe, OutputSource source)
+        {
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            new Thread(() =>
+            {
+                try
+                {
+                    Read(pipe, source);
+                    done.SetResult();
+                }
+                catch (Exception e)
+                {
+                    done.SetException(e);
+                }
+            }) { IsBackground = true, Name = $"bro-process-{source}" }.Start();
+            return done.Task;
+        }
+
+        /// <summary>Reads the pipe to its end, or until the pumps drain: then it reads what the pipe holds at that moment,
+        /// and no more (a child left behind may go on writing), and stops. Everything written before the exit is by then in
+        /// the pipe or already read, so none of it is lost however late this pump runs. A drain cancels a ReadFile that is
+        /// still waiting (CancelSynchronousIo): one the kernel has already filled returns its bytes, one still waiting
+        /// returns none, so the cancel loses nothing.</summary>
+        void Read(SafeHandle pipe, OutputSource source)
         {
             var splitter = new LineSplitter();
             var buffer = new byte[65536];
-            int n;
-            while ((n = await stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+            var me = new PumpThread { Handle = Native.CurrentThreadForCancel() };
+            lock (_gate) _pumps.Add(me);
+            void Deliver(int n)
             {
                 Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
-                foreach (var line in splitter.Feed(buffer.AsSpan(0, n))) await Emit(line, source).ConfigureAwait(false);
+                foreach (var line in splitter.Feed(buffer.AsSpan(0, n))) Emit(line, source);
             }
-            if (splitter.Finish() is { } last) await Emit(last, source).ConfigureAwait(false);
+            try
+            {
+                var atEnd = false;
+                while (!_draining)
+                {
+                    me.InRead = true;
+                    var read = Native.ReadPipe(pipe, buffer, buffer.Length, out var n, out var error);
+                    me.InRead = false;
+                    if (read)
+                        Deliver(n);
+                    else if (error != Native.ErrorOperationAborted)
+                    {
+                        atEnd = true;
+                        break;
+                    }
+                }
+                for (var left = atEnd ? 0 : Native.BytesInPipe(pipe); left > 0;)
+                {
+                    if (!Native.ReadPipe(pipe, buffer, Math.Min(left, buffer.Length), out var n, out _) || n == 0) break;
+                    left -= n;
+                    Deliver(n);
+                }
+                if (splitter.Finish() is { } last) Emit(last, source);
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _pumps.Remove(me);
+                    if (me.Handle != IntPtr.Zero) Native.CloseHandle(me.Handle);
+                    me.Handle = IntPtr.Zero;
+                }
+            }
         }
 
-        /// <summary>Into the transcript, then the queue; when the queue is full this waits for room (a line after the
-        /// end is dropped).</summary>
-        async Task Emit(string line, OutputSource source)
+        /// <summary>Cancels the ReadFile each pump is waiting in, if any.</summary>
+        void CancelReads()
+        {
+            lock (_gate)
+                foreach (var pump in _pumps)
+                    if (pump.InRead && pump.Handle != IntPtr.Zero) Native.CancelSynchronousIo(pump.Handle);
+        }
+
+        bool Full() => _lines.Reader.Count >= QueuedLines || Interlocked.Read(ref _queuedBytes) >= QueuedBytes;
+
+        /// <summary>Into the transcript, then the queue; when the queue is full this waits for room, unless the pumps are
+        /// draining (a line after the end is dropped).</summary>
+        void Emit(string line, OutputSource source)
         {
             _transcript?.Write(line);
             var item = new OutputLine(source, line, Now());
-            if (Interlocked.Read(ref _queuedBytes) >= QueuedBytes)
+            if (Full() && !_draining)
             {
                 Interlocked.Increment(ref _waitingForRoom);
                 try
                 {
-                    while (Interlocked.Read(ref _queuedBytes) >= QueuedBytes && !_ended) await _taken.WaitAsync(Tick).ConfigureAwait(false);
+                    while (Full() && !_ended && !_draining) _taken.Wait(Tick);
                 }
                 finally
                 {
                     Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
                     Interlocked.Decrement(ref _waitingForRoom);
                 }
-                if (_ended) return;
             }
-            Interlocked.Add(ref _queuedBytes, Encoding.UTF8.GetByteCount(line));
-            if (_lines.Writer.TryWrite(item)) return;
-            Interlocked.Increment(ref _waitingForRoom);
-            try { await _lines.Writer.WriteAsync(item).ConfigureAwait(false); }
-            catch (ChannelClosedException) { }
-            finally
-            {
-                Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
-                Interlocked.Decrement(ref _waitingForRoom);
-            }
+            if (_ended) return;
+            var bytes = Encoding.UTF8.GetByteCount(line);
+            Interlocked.Add(ref _queuedBytes, bytes);
+            if (!_lines.Writer.TryWrite(item)) Interlocked.Add(ref _queuedBytes, -bytes); // the end came first
         }
 
         async Task<ProcessExit> Finish(Task[] pumps)
@@ -277,18 +351,24 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             var exited = _process.WaitForExitAsync();
             var abandon = _killed.Task.ContinueWith(_ => Task.Delay(TimeSpan.FromSeconds(30)), TaskScheduler.Default).Unwrap();
             var abandoned = await Task.WhenAny(exited, abandon).ConfigureAwait(false) != exited;
-            // Output normally ends with the process. A child it left behind may keep the pipes open: stop reading 5 s after
-            // the exit, unless lines are still waiting for a reader that keeps taking them (its backlog isn't dropped).
-            // Queued lines count too: a pump between two waits for room isn't counted, and ending then would drop what
-            // it hasn't read yet.
+            // Output normally ends with the process. A child it left behind may keep the pipes open: 5 s after the exit the
+            // pumps drain (they take what the pipes hold then, without waiting for room) and stop. The end waits for them,
+            // not for a deadline: a pump the system hasn't run yet may still have, in its pipe, lines written before the
+            // exit.
             if (!abandoned)
             {
-                var exitedAt = Environment.TickCount64;
                 var all = Task.WhenAll(pumps);
-                bool Reading() => Environment.TickCount64 - exitedAt < 5000
-                                  || ((Volatile.Read(ref _waitingForRoom) > 0 || _lines.Reader.Count > 0)
-                                      && Environment.TickCount64 - Interlocked.Read(ref _lastTaken) < 5000);
-                while (!all.IsCompleted && Reading()) await Task.WhenAny(all, Task.Delay(Tick)).ConfigureAwait(false);
+                await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
+                _draining = true;
+                _taken.Release(); // a pump waiting for room stops waiting
+                // Again each tick: a pump may enter ReadFile just after a cancel.
+                for (CancelReads(); !all.IsCompleted; CancelReads()) await Task.WhenAny(all, Task.Delay(Tick)).ConfigureAwait(false);
+                await all.ConfigureAwait(false);
+            }
+            else
+            {
+                _draining = true; // the pumps stop, and a line they still read is dropped
+                CancelReads();
             }
             _watchdog?.Dispose();
             _watchdog = null;
@@ -475,6 +555,41 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool CloseHandle(IntPtr handle);
+
+        public const int ErrorOperationAborted = 995;
+        const uint THREAD_TERMINATE = 0x0001;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool PeekNamedPipe(SafeHandle pipe, IntPtr buffer, uint size, IntPtr read, out uint available, IntPtr left);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool ReadFile(SafeHandle file, byte[] buffer, uint size, out uint read, IntPtr overlapped);
+
+        [DllImport("kernel32.dll")]
+        static extern uint GetCurrentThreadId();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr OpenThread(uint access, bool inherit, uint threadId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CancelSynchronousIo(IntPtr thread);
+
+        /// <summary>The bytes waiting in a pipe; 0 once it has ended.</summary>
+        public static int BytesInPipe(SafeHandle pipe) =>
+            PeekNamedPipe(pipe, IntPtr.Zero, 0, IntPtr.Zero, out var available, IntPtr.Zero) ? (int)Math.Min(available, int.MaxValue) : 0;
+
+        /// <summary>A blocking read of up to <paramref name="size"/> bytes; false with the Win32 error at the end
+        /// (ERROR_BROKEN_PIPE) or when cancelled (<see cref="ErrorOperationAborted"/>).</summary>
+        public static bool ReadPipe(SafeHandle pipe, byte[] buffer, int size, out int read, out int error)
+        {
+            var ok = ReadFile(pipe, buffer, (uint)size, out var n, IntPtr.Zero);
+            error = ok ? 0 : Marshal.GetLastWin32Error();
+            read = (int)n;
+            return ok;
+        }
+
+        /// <summary>A handle to the calling thread that CancelSynchronousIo accepts; zero if Windows refuses one.</summary>
+        public static IntPtr CurrentThreadForCancel() => OpenThread(THREAD_TERMINATE, false, GetCurrentThreadId());
 
         /// <summary>A job whose processes end when its last handle closes (the engine crashing included); zero
         /// when Windows refuses one.</summary>

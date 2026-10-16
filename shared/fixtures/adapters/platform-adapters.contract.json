@@ -120,7 +120,7 @@
     {
       "id": "output-drained",
       "from": [
-        "docs/architecture.md#stopping-processes (output read for at most 5 more seconds after exit)"
+        "docs/architecture.md#stopping-processes (output read for 5 more seconds after exit, then what the pipes hold)"
       ],
       "given": {
         "command": [
@@ -135,7 +135,7 @@
           "done"
         ],
         "exitCode": 0,
-        "rule": "The 5 s count from the last progress (see a-slow-reader-gets-everything)."
+        "rule": "The 5 s count from the exit; then the readers take what the pipes hold at that moment and stop (nothing-written-before-the-exit-is-lost)."
       }
     },
     {
@@ -209,7 +209,28 @@
       },
       "expect": {
         "lines": "all 30000, in order",
-        "rule": "the launcher keeps reading for 5 s after an exit, and longer while lines wait for a reader that is still taking them: a slow reader loses nothing (lines still queued count as waiting, not only a launcher thread blocked for room); a child left holding the pipe still doesn't hold up the end (output-drained)"
+        "rule": "a slow reader loses nothing: lines queued before the end stay readable after it, and what the pipe still held 5 s after the exit is taken then (nothing-written-before-the-exit-is-lost)"
+      }
+    },
+    {
+      "id": "nothing-written-before-the-exit-is-lost",
+      "from": [
+        "late-output-goes-nowhere lost its only line on Linux under load (2026-10-15): 5 s after the exit the launcher stopped reading, and dropped what its reader hadn't queued yet (a reader thread not yet run, or one waiting for room)"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "sleep 20 & seq 1 10001; sleep 1; seq 10002 10500"
+        ],
+        "windows": "cmd: start /b cmd /c \"ping -n 20 127.0.0.1 >nul\", for /L 1..10001 echo, ping -n 2, for /L 10002..10500 echo",
+        "then": "wait for the end before reading any line (give up after 30 s), then read every line"
+      },
+      "expect": {
+        "endsWithin": 12,
+        "exitCode": 0,
+        "lines": "all 10500, in order",
+        "rule": "5 s after the exit the readers drain: each takes what its pipe holds at that moment (everything the tool wrote before it ended is there or already read), queues it without waiting for room, and stops; the end waits for the readers, never for a deadline alone, and never for the reader of the lines. A child left behind that goes on writing is cut off there (late-output-goes-nowhere). On Windows a read still waiting is cancelled (CancelSynchronousIo), which never loses bytes the read already has."
       }
     },
     {

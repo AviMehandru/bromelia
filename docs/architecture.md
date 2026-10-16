@@ -171,7 +171,9 @@ Linux each tool runs in a process group of its own and the signals go to the who
 it is killed once the tool has ended); on Windows the tool's Job Object is ended with it. What a tool that
 ended by itself left running is left alone. A watchdog stops a `makemkvcon` run that prints nothing for
 the stall timeout, but only while the tool itself still runs. Once a process has ended, its output is read
-for at most 5 more seconds (a child it left behind may keep the pipe open), and a process that is still
+for 5 more seconds (a child it left behind may keep the pipe open); then the readers take what the pipes
+hold at that moment and stop, so nothing the tool wrote before it ended is lost, however slow the system or
+the reader (Windows cancels a read still waiting with `CancelSynchronousIo`). A process that is still
 there 30 s after SIGKILL — stuck in the kernel on a hung drive — is abandoned so the job can end. On Linux all of this runs on a watchdog
 thread per process, so it doesn't depend on a main loop.
 

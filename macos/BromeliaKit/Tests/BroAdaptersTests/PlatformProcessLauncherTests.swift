@@ -152,6 +152,34 @@ import Testing
         #expect(lines == (1...30000).map(String.init))
     }
 
+    /// nothing-written-before-the-exit-is-lost: nobody reads until the run has ended, and a child left behind holds the
+    /// pipe. By the end of the 5 s after the exit the queue is full, a line waits for room and more lines wait in the
+    /// pipe: the run still ends, and every line is still there to read.
+    @Test func nothingWrittenBeforeTheExitIsLost() async throws {
+        let queued = PlatformProcessLauncher.queuedLines
+        let start = ContinuousClock.now
+        let p = try launcher.start(spec("/bin/sh", "-c", "sleep 20 & seq 1 \(queued + 1); sleep 1; seq \(queued + 2) 10500"))
+        final class Ended: @unchecked Sendable {
+            let lock = NSLock()
+            var exit: ProcessExit?
+        }
+        let ended = Ended()
+        Task {
+            let exit = await p.wait()
+            ended.lock.withLock { ended.exit = exit }
+        }
+        // A run that waited for its reader would never end.
+        while ended.lock.withLock({ ended.exit }) == nil && elapsed(since: start) < 30 {
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
+        let exit = try #require(ended.lock.withLock { ended.exit })
+        #expect(exit.status == 0)
+        #expect(elapsed(since: start) < 12)
+        var lines: [String] = []
+        for await line in p.lines() { lines.append(line.text) }
+        #expect(lines == (1...10500).map(String.init))
+    }
+
     /// process-group
     @Test func stopEndsTheWholeGroup() async throws {
         let pidFile = dir + "/child.pid"

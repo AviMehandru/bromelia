@@ -1,7 +1,7 @@
 /* bro-platform-process-launcher.h: BroPlatformProcessLauncher: starts processes in their own process group
  * (g_spawn + setpgid) and watches them from a thread of their own: stalls, stop escalation (INT →) TERM → KILL
- * 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (longer only while lines wait for a reader that
- * is still taking them), a transcript of every line. Lines are cut at 64 KiB (they end with " [cut]") and at most
+ * 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (then what the pipes hold is still taken, so
+ * nothing written before the exit is lost, however slow the reader), a transcript of every line. Lines are cut at 64 KiB (they end with " [cut]") and at most
  * BRO_QUEUED_LINES, or BRO_QUEUED_BYTES of text, wait to be read: then the reading waits too, so the tool waits to write
  * (nothing is lost) and that wait doesn't count as silence.
  *

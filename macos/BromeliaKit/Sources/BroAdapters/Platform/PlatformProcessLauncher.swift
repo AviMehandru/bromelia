@@ -5,8 +5,9 @@ import Darwin
 import Foundation
 
 /// Starts processes with posix_spawn in their own process group and watches them (plan §10.3): stalls, stop
-/// escalation (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (longer only
-/// while lines wait for a reader that is still taking them), a transcript of every line. Lines are cut at 64 KiB
+/// escalation (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (then what the
+/// pipes hold is still taken, so nothing written before the exit is lost, however slow the reader), a transcript of
+/// every line. Lines are cut at 64 KiB
 /// (LineSplitter) and at most `queuedLines`, or `queuedBytes` of text, wait to be read: then the reading waits too, so
 /// the tool waits to write (nothing is lost) and that wait doesn't count as silence. Foundation's Process isn't used: it can't start a process
 /// group.
@@ -113,10 +114,9 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
     private var lineWaiters: [CheckedContinuation<OutputLine?, Never>] = []
     private var ended = false        // no more lines: the reader gets what is queued, then nil
     private var waitingForRoom = 0   // readers waiting for the queue: the tool isn't silent, nobody is reading
-    private var lastTaken: Double    // when the reader last took a line
     private var lastOutput: Double
     private var readersLeft = 2
-    private var stopReading = false
+    private var draining = false     // the readers take what the pipes hold now, without waiting for room, then stop
     private var waitStatus: Int32?
     private var exitedAt: Double?
     private var reason: StopReason?
@@ -132,7 +132,6 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         self.spec = spec
         self.transcript = transcript
         lastOutput = Self.clock()
-        lastTaken = lastOutput
     }
 
     static func clock() -> Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1e9 }
@@ -247,7 +246,6 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
                     queueHead = 0
                     takenBytes = 0
                 }
-                lastTaken = Self.clock()
                 cond.broadcast()   // room for a waiting reader
                 cond.unlock()
                 c.resume(returning: line)
@@ -261,13 +259,13 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         }
     }
 
-    /// Queues a line (into the transcript first); when the queue is full, waits for room. A line after the end is
-    /// dropped.
+    /// Queues a line (into the transcript first); when the queue is full, waits for room, unless the readers are
+    /// draining. A line after the end is dropped.
     private func emit(_ line: OutputLine) {
         transcript?.write(line.text)
         cond.lock()
         var waited = false
-        while (queue.count - queueHead >= PlatformProcessLauncher.queuedLines || queuedBytes >= PlatformProcessLauncher.queuedBytes) && !ended {
+        while (queue.count - queueHead >= PlatformProcessLauncher.queuedLines || queuedBytes >= PlatformProcessLauncher.queuedBytes) && !ended && !draining {
             waitingForRoom += 1
             cond.wait()
             waitingForRoom -= 1
@@ -280,7 +278,6 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         }
         if !lineWaiters.isEmpty {
             let waiter = lineWaiters.removeFirst()
-            lastTaken = Self.clock()
             cond.unlock()
             waiter.resume(returning: line)
             return
@@ -330,27 +327,51 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         }
     }
 
+    /// FIONREAD (`_IOR('f', 127, int)`), which Swift doesn't import.
+    private static let bytesWaiting = UInt(0x4004_667F)
+
+    /// Reads the pipe to its end, or until the launcher drains: then it reads what the pipe holds at that moment, and no
+    /// more (a child left behind may go on writing), and stops. Everything written before the exit is by then in the
+    /// pipe or already read, so none of it is lost however late this thread runs.
     private func read(_ fd: Int32, _ source: OutputSource) {
         var splitter = LineSplitter()
         var buffer = [UInt8](repeating: 0, count: 65536)
         var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        loop: while true {
-            cond.lock()
-            let quit = stopReading
-            cond.unlock()
-            if quit { break }
-            let ready = poll(&poller, 1, 250)
-            if ready == 0 || (ready < 0 && errno == EINTR) { continue }
-            let n = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
-            if n < 0 && errno == EINTR { continue }
-            if n <= 0 { break loop }
+        func deliver(_ n: Int) {
             cond.lock()
             lastOutput = Self.clock()
             cond.unlock()
             for text in splitter.feed(buffer[0..<n]) { emit(OutputLine(stream: source, text: text, at: Self.now())) }
         }
-        if let last = splitter.finish() { emit(OutputLine(stream: source, text: last, at: Self.now())) }
+        var atEnd = false
+        while true {
+            cond.lock()
+            let quit = draining
+            cond.unlock()
+            if quit { break }
+            let ready = poll(&poller, 1, 250)
+            if ready == 0 || (ready < 0 && errno == EINTR) { continue }
+            if ready < 0 { break }
+            let n = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
+            if n < 0 && (errno == EINTR || errno == EAGAIN) { continue }
+            if n <= 0 {
+                atEnd = true
+                break
+            }
+            deliver(n)
+        }
+        var left: Int32 = 0
+        if !atEnd && ioctl(fd, Self.bytesWaiting, &left) == 0 {
+            while left > 0 {
+                let n = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, min(Int(left), $0.count)) }
+                if n < 0 && errno == EINTR { continue }
+                if n <= 0 { break }
+                left -= Int32(n)
+                deliver(n)
+            }
+        }
         close(fd)
+        if let last = splitter.finish() { emit(OutputLine(stream: source, text: last, at: Self.now())) }
         cond.lock()
         readersLeft -= 1
         cond.broadcast()
@@ -368,18 +389,20 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
             }
             escalate(now)
             if waitStatus == nil, let killedAt, now - killedAt >= 30 {
-                stopReading = true
+                draining = true   // the readers stop; a line they still read is dropped
                 finish(ProcessExit(status: -1, stalled: stalled, abandoned: true, cancelled: cancelled))
                 break
             }
             if let exitedAt, let status = waitStatus {
-                // Output normally ends with the process; a child it left behind may keep a pipe open: stop reading 5 s
-                // after the exit, unless lines are still waiting for a reader that keeps taking them. Queued lines count
-                // too: each take wakes this thread as well, often just after a reader has queued a line and before it
-                // waits for room again, and ending then would drop what it hasn't read yet.
-                let backlog = (waitingForRoom > 0 || queueHead < queue.count) && now - lastTaken < 5
-                if readersLeft == 0 || (now - exitedAt >= 5 && !backlog) {
-                    stopReading = true
+                // Output normally ends with the process; a child it left behind may keep a pipe open: 5 s after the
+                // exit the readers drain (they take what the pipes hold then, without waiting for room) and stop. The
+                // end waits for them, not for a deadline: a reader the system hasn't run yet may still hold, in its
+                // pipe, lines written before the exit.
+                if !draining && now - exitedAt >= 5 {
+                    draining = true
+                    cond.broadcast()   // readers waiting for room stop waiting
+                }
+                if readersLeft == 0 {
                     let exited = (status & 0x7f) == 0
                     finish(exited ? ProcessExit(status: Int((status >> 8) & 0xff), stalled: stalled, cancelled: cancelled)
                                   : ProcessExit(status: -1, signal: Int(status & 0x7f), stalled: stalled, cancelled: cancelled))
@@ -398,7 +421,7 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
         ended = true
         let readers = queueHead < queue.count ? [] : lineWaiters
         if queueHead >= queue.count { lineWaiters = [] }
-        cond.broadcast()   // readers waiting for room drop their lines
+        cond.broadcast()   // readers still waiting for room (abandoned) drop their lines
         for c in readers { c.resume(returning: nil) }
         if let transcript {
             var ending = exit.abandoned ? "abandoned" : exit.signal.map { "signal \($0)" } ?? "exit status \(exit.status)"

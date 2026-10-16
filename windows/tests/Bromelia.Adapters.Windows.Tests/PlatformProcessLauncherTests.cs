@@ -204,6 +204,27 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         Assert.Equal(Enumerable.Range(1, 30000).Select(i => i.ToString()), lines);
     }
 
+    /// <summary>Nobody reads until the run has ended, and a child left behind holds the pipe. By the end of the 5 s
+    /// after the exit the queue is full, a line waits for room and more lines wait in the pipe: the run still ends, and
+    /// every line is still there to read.</summary>
+    [Fact] // nothing-written-before-the-exit-is-lost
+    public async Task NothingWrittenBeforeTheExitIsLost()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var queued = PlatformProcessLauncher.QueuedLines;
+        var script = Script("nothing-lost.cmd", "@echo off\nstart /b cmd /c \"ping -n 20 127.0.0.1 >nul\"\n"
+            + $"for /L %%i in (1,1,{queued + 1}) do echo %%i\nping -n 2 127.0.0.1 >nul\nfor /L %%i in ({queued + 2},1,10500) do echo %%i\n");
+        var watch = Stopwatch.StartNew();
+        var p = _launcher.Start(Spec(script));
+        var wait = p.Wait();
+        Assert.True(await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(30))) == wait, "a run that waited for its reader would never end");
+        Assert.Equal(0, (await wait).Status);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), watch.Elapsed.ToString());
+        var lines = new List<string>();
+        await foreach (var l in p.Lines()) lines.Add(l.Text);
+        Assert.Equal(Enumerable.Range(1, 10500).Select(i => i.ToString()), lines);
+    }
+
     [Fact] // process-group
     public void StopEndsTheWholeJob()
     {

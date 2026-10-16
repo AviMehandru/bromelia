@@ -317,6 +317,32 @@ test_slow_reader_gets_everything (void)
   g_assert_cmpuint (n, ==, 30000);
 }
 
+/* nothing-written-before-the-exit-is-lost: nobody reads until the run has ended, and a child left behind holds the pipe.
+ * By the end of the 5 s after the exit the queue is full, a line waits for room and more lines wait in the pipe: the run
+ * still ends (without waiting for the reader or the child), and every line is still there to read. */
+static void
+test_nothing_before_the_exit_is_lost (void)
+{
+  g_autofree char *script = g_strdup_printf ("sleep 20 & seq 1 %d; sleep 1; seq %d 10500", BRO_QUEUED_LINES + 1, BRO_QUEUED_LINES + 2);
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/sh", "-c", script, NULL);
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  gint64 t0 = g_get_monotonic_time ();
+  g_autoptr (BroRunningProcess) p = start (spec);
+  BroProcessExit exit;
+  alarm (30); /* a run that waited for its reader would never end */
+  exit = bro_running_process_wait (p);
+  alarm (0);
+  g_assert_cmpint (exit.status, ==, 0);
+  g_assert_cmpfloat (since (t0), <, 12);
+  run (p, lines);
+  g_assert_cmpuint (lines->len, ==, 10500);
+  for (guint i = 0; i < lines->len; i++)
+    {
+      g_autofree char *want = g_strdup_printf ("stdout:%u", i + 1);
+      g_assert_cmpstr (lines->pdata[i], ==, want);
+    }
+}
+
 static void
 test_process_group (void)
 {
@@ -2087,6 +2113,7 @@ main (int argc, char **argv)
   g_test_add_func ("/process/long-line", test_long_line);
   g_test_add_func ("/process/slow-reader-holds-the-tool", test_slow_reader_holds_the_tool);
   g_test_add_func ("/process/slow-reader-gets-everything", test_slow_reader_gets_everything);
+  g_test_add_func ("/process/nothing-before-the-exit-is-lost", test_nothing_before_the_exit_is_lost);
   g_test_add_func ("/process/process-group", test_process_group);
   g_test_add_func ("/process/transcript", test_transcript);
   g_test_add_func ("/process/transcript-missing", test_transcript_missing);
