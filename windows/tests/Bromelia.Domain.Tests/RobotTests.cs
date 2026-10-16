@@ -141,6 +141,14 @@ public class RobotTests
             }
             else if (expect["driveId"] is { } driveId)
                 Same(driveId.AsString, DriveJoin.DriveId(given["identification"]!.AsString!, given["device"]!.AsString!), "drive id");
+            else if (expect["joined"] is { } joined)
+            {
+                var mk = given["makemkv"]!.AsArray!.Select(l => MakemkvDrive.From(Robot.ParseLine(l.AsString!)!)!).ToList();
+                var os = given["os"]!.AsArray!.Select(o => new OsDrive(o["device"]!.AsString!, o["identification"]?.AsString ?? "", o["mountPath"]?.AsString)).ToList();
+                var got = DriveJoin.Join(mk, os).Select(j => JsonValue.Of(("driveId", JsonValue.Of(j.DriveId)),
+                    ("index", j.Makemkv is { } m ? JsonValue.Of(m.Index) : JsonValue.Null.Instance), ("os", JsonValue.Of(j.Os?.Device))));
+                Same(joined, JsonValue.Of(got), "joined");
+            }
             else return false;
             return true;
         });

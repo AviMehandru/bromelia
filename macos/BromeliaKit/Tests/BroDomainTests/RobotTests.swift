@@ -142,6 +142,16 @@ struct RobotTests {
                 try Fixtures.same(entry.string, DriveJoin.entryFor(drives, drive: driveOf(given["drive"]))?.id, "entry")
             } else if let id = expect["driveId"] {
                 try Fixtures.same(id.string, DriveJoin.driveId(given["identification"]?.string ?? "", device: given["device"]?.string ?? ""), "drive id")
+            } else if let joined = expect["joined"] {
+                let mk = (given["makemkv"]?.array ?? []).compactMap { Robot.parseLine($0.string!).flatMap(MakemkvDrive.from) }
+                let os = (given["os"]?.array ?? []).map {
+                    OsDrive(device: $0["device"]!.string!, identification: $0["identification"]?.string ?? "", mountPath: $0["mountPath"]?.string)
+                }
+                let got = DriveJoin.join(mk, osDrives: os).map { j -> JsonValue in
+                    .object([("driveId", .string(j.driveId)), ("index", j.makemkv.map { .integer(Int64($0.index)) } ?? .null),
+                             ("os", j.os.map { .string($0.device) } ?? .null)])
+                }
+                try Fixtures.same(joined, JsonValue.array(got), "joined")
             } else {
                 return false
             }

@@ -399,6 +399,30 @@ drive_join_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtr
   } else if (J (expect, "driveId")) {
     g_autofree char *actual = bro_drive_join_drive_id (JS (given, "identification"), JS (given, "device"));
     bro_test_same_string (failures, id, "drive id", JS (expect, "driveId"), actual);
+  } else if (J (expect, "joined")) {
+    g_autoptr (GPtrArray) mk = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_makemkv_drive_free);
+    g_autoptr (GPtrArray) os = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_os_drive_free);
+    BroJsonValue *lines = J (given, "makemkv"), *list = J (given, "os");
+    for (guint i = 0; i < bro_json_value_length (lines); i++) {
+      g_autoptr (BroRobotEvent) e = bro_robot_parse_line (bro_json_value_get_string (bro_json_value_at (lines, i), ""));
+      g_ptr_array_add (mk, bro_makemkv_drive_from (e));
+    }
+    for (guint i = 0; i < bro_json_value_length (list); i++) {
+      BroJsonValue *o = bro_json_value_at (list, i);
+      g_ptr_array_add (os, bro_os_drive_new (JS (o, "device"), bro_json_value_get_string (J (o, "identification"), ""),
+                                             bro_json_value_get_string (J (o, "mountPath"), NULL)));
+    }
+    g_autoptr (GPtrArray) joined = bro_drive_join_join (mk, os);
+    g_autoptr (BroJsonValue) actual = bro_json_value_new_array ();
+    for (guint i = 0; i < joined->len; i++) {
+      const BroJoinedDrive *j = joined->pdata[i];
+      BroJsonValue *o = bro_json_value_new_object ();
+      bro_json_value_set (o, "driveId", bro_json_value_new_string (j->drive_id));
+      bro_json_value_set (o, "index", j->makemkv ? bro_json_value_new_integer (j->makemkv->index) : bro_json_value_new_null ());
+      bro_json_value_set (o, "os", j->os ? bro_json_value_new_string (j->os->device) : bro_json_value_new_null ());
+      bro_json_value_append (actual, o);
+    }
+    bro_test_same_json (failures, id, "joined", J (expect, "joined"), actual);
   } else if (J (expect, "shortModel")) {
     g_autofree char *actual = bro_drive_join_short_model (JS (given, "identification"));
     bro_test_same_string (failures, id, "short model", JS (expect, "shortModel"), actual);

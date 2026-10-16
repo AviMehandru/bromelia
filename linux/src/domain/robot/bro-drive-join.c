@@ -47,28 +47,70 @@ bro_drive_join_drive_id (const char *identification, const char *device)
   return g_strdup_printf ("drv-%.16s", hash);
 }
 
+/* @o, not yet @used, has an identification that is part of @m's. */
+static gboolean
+candidate (const BroMakemkvDrive *m, const BroOsDrive *o, gboolean used)
+{
+  g_autofree char *name = normalize (o->identification ? o->identification : "");
+  g_autofree char *whole = normalize (m->identification);
+  return !used && name[0] && strstr (whole, name) != NULL;
+}
+
 GPtrArray *
 bro_drive_join_join (GPtrArray *makemkv_drives, GPtrArray *os_drives)
 {
   GPtrArray *joined = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_joined_drive_free);
+  g_autoptr (GPtrArray) present = g_ptr_array_new ();
   g_autofree gboolean *used = g_new0 (gboolean, os_drives->len + 1);
-  for (guint i = 0; i < makemkv_drives->len; i++) {
-    const BroMakemkvDrive *m = makemkv_drives->pdata[i];
-    if (!bro_makemkv_drive_is_present (m))
+  for (guint i = 0; i < makemkv_drives->len; i++)
+    if (bro_makemkv_drive_is_present (makemkv_drives->pdata[i]))
+      g_ptr_array_add (present, makemkv_drives->pdata[i]);
+  g_autofree int *paired = g_new (int, present->len + 1);
+  for (guint i = 0; i < present->len; i++) {
+    const BroMakemkvDrive *m = present->pdata[i];
+    paired[i] = -1;
+    if (!m->device[0])
       continue;
-    BroOsDrive *os = NULL;
-    if (m->device[0]) {
-      g_autofree char *key = device_key (m->device);
-      for (guint k = 0; k < os_drives->len && !os; k++) {
-        const BroOsDrive *o = os_drives->pdata[k];
-        g_autofree char *ok = device_key (o->device);
-        if (!used[k] && strcmp (ok, key) == 0) {
-          used[k] = TRUE;
-          os = bro_os_drive_copy (o);
-        }
+    g_autofree char *key = device_key (m->device);
+    for (guint k = 0; k < os_drives->len && paired[i] < 0; k++) {
+      const BroOsDrive *o = os_drives->pdata[k];
+      g_autofree char *ok = device_key (o->device);
+      if (!used[k] && strcmp (ok, key) == 0) {
+        used[k] = TRUE;
+        paired[i] = (int) k;
       }
     }
+  }
+  /* An identification match only when it is the only one both ways; decided before any is taken. */
+  g_autofree int *by_name = g_new (int, present->len + 1);
+  for (guint i = 0; i < present->len; i++) {
+    by_name[i] = -1;
+    if (paired[i] >= 0)
+      continue;
+    int found = -1, count = 0;
+    for (guint k = 0; k < os_drives->len; k++)
+      if (candidate (present->pdata[i], os_drives->pdata[k], used[k])) {
+        found = (int) k;
+        count++;
+      }
+    if (count != 1)
+      continue;
+    int others = 0;
+    for (guint j = 0; j < present->len; j++)
+      if (paired[j] < 0 && candidate (present->pdata[j], os_drives->pdata[found], used[found]))
+        others++;
+    if (others == 1)
+      by_name[i] = found;
+  }
+  for (guint i = 0; i < present->len; i++)
+    if (by_name[i] >= 0) {
+      paired[i] = by_name[i];
+      used[by_name[i]] = TRUE;
+    }
+  for (guint i = 0; i < present->len; i++) {
+    const BroMakemkvDrive *m = present->pdata[i];
     g_autofree char *id = bro_drive_join_drive_id (m->identification, m->device);
+    BroOsDrive *os = paired[i] >= 0 ? bro_os_drive_copy (os_drives->pdata[paired[i]]) : NULL;
     g_ptr_array_add (joined, bro_joined_drive_new (id, bro_makemkv_drive_copy (m), os));
   }
   for (guint k = 0; k < os_drives->len; k++) {

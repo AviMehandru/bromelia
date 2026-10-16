@@ -1,0 +1,2753 @@
+{
+  "description": "DriveService (plan §11.1, §15.2; session A 2026-10-15) on a real executor, event bus, problem service and EngineClock over a manual clock (it starts at 2026-10-02T20:00:00.000Z). Fakes: Makemkv.scanDrives gives makemkv (DRV lines, through Robot.parseLine and MakemkvDrive.from) or fails with scanFails {code, params}; DeviceMonitor.currentDrives gives os [{device, identification, mountPath}] and start keeps the sink; DriveControl.probeContent says video, eject fails with ejectFails {code, params} when given, closeTray works; DriveRepository holds stored (rows: id, identification, model, lastDevice, configId, firstSeenAt, lastSeenAt). config is the configuration document (ConfigCodec.decode; default {version: 3}). Calls are recorded in order: 'monitor.start', 'scan', 'probe <device>', 'eject <device>', 'closeTray <device>'. Ops, each on the executor and settled (executor activity 0) before the next: 'start' (DriveService.start); set {makemkv?, os?, scanFails? (null: scans work again)} (what later scans see; no scan); device {type: driveAppeared | driveVanished | mediaArrived | mediaRemoved | trayOpened | mounted | unmounted, device, path?} (the monitor's sink, from another thread); advance (seconds); lease {drives [{drive, job}], acquisitions} (publishes leaseChanged, job counts 0); config (a new document: the source's, then configChanged); rescan; eject (a drive id); closeTray (a drive id); closeAll; 'drives' (DriveService.drives); find (a drive id: DriveLookup.find). Expect: results (one per op: the drives (dtos.json Drive, optional members left out when absent), find's DriveLocation {makemkvIndex, device, configId, generation, label, flags (raw)} or null, a command's {error {code, params}} when it failed; null otherwise); events (every driveChanged, driveRemoved, mediumArrived, mediumRemoved, problemRaised, problemCleared, with its seq and at, in order; the leaseChanged and configChanged the harness publishes take seqs too); calls (exactly); problems (the active ones at the end, as dtos.json Problem); stored (the rows at the end, by id). An expectation left out isn't checked.",
+  "cases": [
+    {
+      "id": "start-lists-the-drives",
+      "from": [
+        "README.md (drive model, device, tray state, disc label and type)",
+        "rearchitecture-plan §15.1 driveService.start"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE_DISC\",\"/dev/rdisk4\"",
+          "DRV:1,0,999,0,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"\",\"/dev/rdisk6\"",
+          "DRV:2,256,999,0,\"\",\"\",\"\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60",
+            "mountPath": "/Volumes/MOVIE_DISC"
+          },
+          {
+            "device": "/dev/disk6",
+            "identification": "MATSHITA DVD-R UJ8C2"
+          }
+        ],
+        "ops": [
+          "start",
+          "drives"
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          [
+            {
+              "id": "drv-86920bcfd062b640",
+              "name": "HL-DT-ST BD-RE WH16NS60",
+              "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+              "device": "/dev/rdisk4",
+              "makemkvIndex": 0,
+              "connected": true,
+              "state": "present",
+              "medium": {
+                "generation": 1,
+                "label": "MOVIE_DISC",
+                "type": "bd",
+                "typeText": "Blu-ray (AACS)",
+                "flags": [
+                  "blurayFiles",
+                  "aacsFiles"
+                ],
+                "content": "video",
+                "mountPath": "/Volumes/MOVIE_DISC"
+              },
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            },
+            {
+              "id": "drv-de63b28f402c2eb5",
+              "name": "MATSHITA DVD-R UJ8C2",
+              "identification": "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00",
+              "device": "/dev/rdisk6",
+              "makemkvIndex": 1,
+              "connected": true,
+              "state": "empty",
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            }
+          ]
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE_DISC",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": "/Volumes/MOVIE_DISC"
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-de63b28f402c2eb5",
+                "name": "MATSHITA DVD-R UJ8C2",
+                "identification": "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00",
+                "device": "/dev/rdisk6",
+                "makemkvIndex": 1,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          }
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk4"
+        ],
+        "problems": [],
+        "stored": [
+          {
+            "id": "drv-86920bcfd062b640",
+            "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+            "model": "HL-DT-ST BD-RE WH16NS60",
+            "lastDevice": "/dev/rdisk4",
+            "configId": null,
+            "firstSeenAt": "2026-10-02T20:00:00.000Z",
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          },
+          {
+            "id": "drv-de63b28f402c2eb5",
+            "identification": "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00",
+            "model": "MATSHITA DVD-R UJ8C2",
+            "lastDevice": "/dev/rdisk6",
+            "configId": null,
+            "firstSeenAt": "2026-10-02T20:00:00.000Z",
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-disc-already-in-at-start-does-not-arrive",
+      "from": [
+        "scenario automation-rip-on-insert (a disc already in the drive when the engine starts doesn't start a rip)"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"OLD\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start"
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "OLD",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "each-disc-inserted-arrives-with-the-next-generation",
+      "from": [
+        "rearchitecture-plan §15.2 (state[drive] = .present(medium{generation: g+1}), MediumArrived)",
+        "scenario automation-one-disc-after-another"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"FIRST\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "device": {
+              "type": "mediaArrived",
+              "device": "/dev/disk4"
+            }
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"\""
+              ]
+            }
+          },
+          {
+            "device": {
+              "type": "mediaRemoved",
+              "device": "/dev/disk4"
+            }
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"SECOND\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "device": {
+              "type": "mediaArrived",
+              "device": "/dev/disk4"
+            }
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "makemkvIndex": 0,
+            "device": "/dev/rdisk4",
+            "configId": null,
+            "generation": 2,
+            "label": "SECOND",
+            "flags": 12
+          }
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "FIRST",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumArrived",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1,
+              "medium": {
+                "generation": 1,
+                "label": "FIRST",
+                "type": "bd",
+                "typeText": "Blu-ray (AACS)",
+                "flags": [
+                  "blurayFiles",
+                  "aacsFiles"
+                ],
+                "content": "video",
+                "mountPath": null
+              }
+            }
+          },
+          {
+            "seq": 4,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumRemoved",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1
+            }
+          },
+          {
+            "seq": 5,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/disk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 6,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 2,
+                  "label": "SECOND",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 7,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumArrived",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 2,
+              "medium": {
+                "generation": 2,
+                "label": "SECOND",
+                "type": "bd",
+                "typeText": "Blu-ray (AACS)",
+                "flags": [
+                  "blurayFiles",
+                  "aacsFiles"
+                ],
+                "content": "video",
+                "mountPath": null
+              }
+            }
+          }
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "scan",
+          "probe /dev/rdisk4",
+          "scan",
+          "scan",
+          "probe /dev/rdisk4"
+        ]
+      }
+    },
+    {
+      "id": "a-disc-swapped-between-two-scans-is-a-new-one",
+      "from": [
+        "new: a label or flags that changed while the drive stayed present is another disc"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"FIRST\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,2,999,1,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"OTHER\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "FIRST",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumRemoved",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 2,
+                  "label": "OTHER",
+                  "type": "dvd",
+                  "typeText": "DVD",
+                  "flags": [
+                    "dvdFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 4,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumArrived",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 2,
+              "medium": {
+                "generation": 2,
+                "label": "OTHER",
+                "type": "dvd",
+                "typeText": "DVD",
+                "flags": [
+                  "dvdFiles"
+                ],
+                "content": "video",
+                "mountPath": null
+              }
+            }
+          }
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk4",
+          "scan",
+          "probe /dev/rdisk4"
+        ]
+      }
+    },
+    {
+      "id": "a-known-disc-is-not-read-again",
+      "from": [
+        "new: what is on a disc is read once, when it arrives"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "rescan": {}
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk4",
+          "scan",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "a-drive-plugged-in-with-a-disc-arrives",
+      "from": [
+        "windows AppState.ApplyScan (a drive seen for the first time after the first scan, with a disc)"
+      ],
+      "given": {
+        "makemkv": [],
+        "os": [],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"NEW\",\"/dev/rdisk4\""
+              ],
+              "os": [
+                {
+                  "device": "/dev/disk4",
+                  "identification": "HL-DT-ST BD-RE WH16NS60"
+                }
+              ]
+            }
+          },
+          {
+            "device": {
+              "type": "driveAppeared",
+              "device": "/dev/disk4"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "NEW",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumArrived",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1,
+              "medium": {
+                "generation": 1,
+                "label": "NEW",
+                "type": "bd",
+                "typeText": "Blu-ray (AACS)",
+                "flags": [
+                  "blurayFiles",
+                  "aacsFiles"
+                ],
+                "content": "video",
+                "mountPath": null
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "loading-and-unmounting-have-no-disc-yet",
+      "from": [
+        "shared/fixtures/drive-scan.txt states 3 and 257"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,3,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\"",
+          "DRV:1,257,999,0,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"\",\"/dev/rdisk6\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          },
+          {
+            "device": "/dev/disk6",
+            "identification": "MATSHITA DVD-R UJ8C2"
+          }
+        ],
+        "ops": [
+          "start",
+          "drives"
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          [
+            {
+              "id": "drv-86920bcfd062b640",
+              "name": "HL-DT-ST BD-RE WH16NS60",
+              "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+              "device": "/dev/rdisk4",
+              "makemkvIndex": 0,
+              "connected": true,
+              "state": "loading",
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            },
+            {
+              "id": "drv-de63b28f402c2eb5",
+              "name": "MATSHITA DVD-R UJ8C2",
+              "identification": "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00",
+              "device": "/dev/rdisk6",
+              "makemkvIndex": 1,
+              "connected": true,
+              "state": "unmounting",
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "configured-drives-that-are-not-connected-stay-listed",
+      "from": [
+        "scenario drives-list-and-states",
+        "macos DriveDetectionTests.disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "drives": [
+            {
+              "id": "gone",
+              "name": "Old drive",
+              "match": {
+                "driveName": "BD-RE GONE 1.00"
+              }
+            }
+          ]
+        },
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE_DISC\",\"/dev/rdisk4\"",
+          "DRV:1,1,999,0,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"\",\"/dev/rdisk6\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          },
+          {
+            "device": "/dev/disk6",
+            "identification": "MATSHITA DVD-R UJ8C2"
+          }
+        ],
+        "ops": [
+          "start",
+          "drives"
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          [
+            {
+              "id": "drv-86920bcfd062b640",
+              "name": "HL-DT-ST BD-RE WH16NS60",
+              "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+              "device": "/dev/rdisk4",
+              "makemkvIndex": 0,
+              "connected": true,
+              "state": "present",
+              "medium": {
+                "generation": 1,
+                "label": "MOVIE_DISC",
+                "type": "bd",
+                "typeText": "Blu-ray (AACS)",
+                "flags": [
+                  "blurayFiles",
+                  "aacsFiles"
+                ],
+                "content": "video",
+                "mountPath": null
+              },
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            },
+            {
+              "id": "drv-de63b28f402c2eb5",
+              "name": "MATSHITA DVD-R UJ8C2",
+              "identification": "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00",
+              "device": "/dev/rdisk6",
+              "makemkvIndex": 1,
+              "connected": true,
+              "state": "trayOpen",
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            },
+            {
+              "id": "drv-a987c25d7c68984b",
+              "configId": "gone",
+              "name": "Old drive",
+              "identification": "",
+              "device": "",
+              "makemkvIndex": null,
+              "connected": false,
+              "state": "unavailable",
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "a-configured-drive-seen-before-keeps-its-id",
+      "from": [
+        "new: the stored drive with that entry gives the id (its identification may not be the entry's match)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "drives": [
+            {
+              "id": "gone",
+              "name": "Old drive",
+              "match": {
+                "driveName": "BD-RE GONE 1.00"
+              }
+            }
+          ]
+        },
+        "stored": [
+          {
+            "id": "drv-00000000000000aa",
+            "identification": "BD-RE GONE 1.00 SERIAL",
+            "model": "GONE 1.00 SERIAL",
+            "lastDevice": "/dev/sr3",
+            "configId": "gone",
+            "firstSeenAt": "2026-09-01T10:00:00.000Z",
+            "lastSeenAt": "2026-09-30T10:00:00.000Z"
+          }
+        ],
+        "makemkv": [],
+        "os": [],
+        "ops": [
+          "start",
+          "drives"
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          [
+            {
+              "id": "drv-00000000000000aa",
+              "configId": "gone",
+              "name": "Old drive",
+              "identification": "BD-RE GONE 1.00 SERIAL",
+              "device": "",
+              "makemkvIndex": null,
+              "connected": false,
+              "state": "unavailable",
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "a-drive-left-out-of-a-scan-keeps-its-disc",
+      "from": [
+        "macos DriveDetectionTests.aDriveLeftOutOfOneScanIsNotANewDisc",
+        "windows DriveDetectionTests.ADriveLeftOutOfOneScanIsNotANewDisc",
+        "linux /state/drive-left-out-of-a-scan",
+        "scenario automation-rescans-dont-duplicate"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "makemkv": []
+            }
+          },
+          {
+            "rescan": {}
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          {
+            "makemkvIndex": 0,
+            "device": "/dev/rdisk4",
+            "configId": null,
+            "generation": 1,
+            "label": "MOVIE",
+            "flags": 12
+          },
+          null,
+          null
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-drive-the-os-no-longer-lists-is-gone",
+      "from": [
+        "windows AppState.ApplyScan (drives no scan lists)",
+        "events.json DriveRemoved (a drive without a configuration entry was disconnected)"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "makemkv": [],
+              "os": []
+            }
+          },
+          {
+            "rescan": {}
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          },
+          "drives"
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          null,
+          []
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumRemoved",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveRemoved",
+            "data": {
+              "driveId": "drv-86920bcfd062b640"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-configured-drive-unplugged-stays-listed",
+      "from": [
+        "macos DriveDetectionTests.disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults",
+        "dtos.json Drive.connected",
+        "new: the OS's driveVanished wins over a drive list that still has the device"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "drives": [
+            {
+              "id": "left",
+              "name": "Left",
+              "match": {
+                "driveName": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325"
+              },
+              "profile": "archive",
+              "automation": {
+                "ripOnInsert": true
+              }
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            },
+            {
+              "id": "archive",
+              "name": "Archive"
+            }
+          ]
+        },
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "makemkv": []
+            }
+          },
+          {
+            "device": {
+              "type": "driveVanished",
+              "device": "/dev/disk4"
+            }
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "configId": "left",
+                "name": "Left",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "archive",
+                "ripOnInsert": true
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumRemoved",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "configId": "left",
+                "name": "Left",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "",
+                "makemkvIndex": null,
+                "connected": false,
+                "state": "unavailable",
+                "busy": false,
+                "profileId": "archive",
+                "ripOnInsert": true
+              }
+            }
+          }
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk4",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "a-drive-a-job-holds-keeps-what-it-had",
+      "from": [
+        "windows AppState.ApplyScan (a busy drive keeps its old entry: MakeMKV can't see a drive in use)",
+        "internal-events.json LeaseChanged"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "lease": {
+              "drives": [
+                {
+                  "drive": "drv-86920bcfd062b640",
+                  "job": "00000000-0000-4000-8000-000000000001"
+                }
+              ],
+              "acquisitions": 1
+            }
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "rescan": {}
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "lease": {
+              "drives": [],
+              "acquisitions": 0
+            }
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": true,
+                "jobId": "00000000-0000-4000-8000-000000000001",
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 5,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 6,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "mediumRemoved",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1
+            }
+          },
+          {
+            "seq": 7,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scans-every-poll-interval",
+      "from": [
+        "config-3.json automation.pollIntervalSeconds (default 10)",
+        "rearchitecture-plan §15.1 (timers)"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "advance": 10
+          },
+          {
+            "advance": 10
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "scan",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "no-polling-at-zero",
+      "from": [
+        "config-3.json automation.pollIntervalSeconds: 0 = only on OS media events"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "advance": 60
+          },
+          {
+            "device": {
+              "type": "mediaArrived",
+              "device": "/dev/disk4"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "no-scans-while-ripping-until-it-ends",
+      "from": [
+        "windows AppState.RefreshDrivesAsync (no scan while a job runs unless PollWhileRipping)",
+        "config-3.json automation.pollWhileRipping"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "lease": {
+              "drives": [],
+              "acquisitions": 1
+            }
+          },
+          {
+            "advance": 30
+          },
+          {
+            "device": {
+              "type": "mediaArrived",
+              "device": "/dev/disk4"
+            }
+          },
+          {
+            "lease": {
+              "drives": [],
+              "acquisitions": 0
+            }
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "polls-while-ripping-when-configured",
+      "from": [
+        "config-3.json automation.pollWhileRipping"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollWhileRipping": true
+          }
+        },
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "lease": {
+              "drives": [],
+              "acquisitions": 1
+            }
+          },
+          {
+            "advance": 10
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "an-asked-for-scan-runs-while-ripping",
+      "from": [
+        "windows AppState.RefreshDrivesAsync(force: true)"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "lease": {
+              "drives": [],
+              "acquisitions": 1
+            }
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "the-poll-interval-follows-the-configuration",
+      "from": [
+        "rearchitecture-plan §15.7 (ConfigChanged)"
+      ],
+      "given": {
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "config": {
+              "version": 3,
+              "automation": {
+                "pollIntervalSeconds": 30
+              }
+            }
+          },
+          {
+            "advance": 10
+          },
+          {
+            "advance": 20
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "eject-then-scan",
+      "from": [
+        "windows AppState.EjectAsync (eject, wait 3 s, scan)",
+        "scenario drives-tray-control"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "eject": "drv-86920bcfd062b640"
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,1,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "advance": 3
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:03.000Z",
+            "type": "mediumRemoved",
+            "data": {
+              "driveId": "drv-86920bcfd062b640",
+              "generation": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:03.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "trayOpen",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          }
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk4",
+          "eject /dev/rdisk4",
+          "scan"
+        ]
+      }
+    },
+    {
+      "id": "a-failed-eject-is-the-commands",
+      "from": [
+        "windows AppState.EjectAsync (\"Could not eject\")",
+        "codes.json drive.ejectFailed"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ejectFails": {
+          "code": "drive.ejectFailed",
+          "params": {
+            "device": "/dev/rdisk4",
+            "reason": "busy"
+          }
+        },
+        "ops": [
+          "start",
+          {
+            "eject": "drv-86920bcfd062b640"
+          },
+          {
+            "advance": 3
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "error": {
+              "code": "drive.ejectFailed",
+              "params": {
+                "device": "/dev/rdisk4",
+                "reason": "busy"
+              }
+            }
+          },
+          null
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk4",
+          "eject /dev/rdisk4"
+        ]
+      }
+    },
+    {
+      "id": "a-drive-that-is-not-connected-is-not-found",
+      "from": [
+        "codes.json drive.notFound (404)"
+      ],
+      "given": {
+        "makemkv": [],
+        "os": [],
+        "ops": [
+          "start",
+          {
+            "eject": "drv-86920bcfd062b640"
+          },
+          {
+            "closeTray": "drv-86920bcfd062b640"
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "error": {
+              "code": "drive.notFound",
+              "params": {
+                "driveId": "drv-86920bcfd062b640"
+              }
+            }
+          },
+          {
+            "error": {
+              "code": "drive.notFound",
+              "params": {
+                "driveId": "drv-86920bcfd062b640"
+              }
+            }
+          },
+          null
+        ]
+      }
+    },
+    {
+      "id": "a-tray-that-stays-open-after-close-tray-is-reported",
+      "from": [
+        "scenario drives-tray-without-motor",
+        "macos DriveDetectionTests.aTrayThatStaysOpenAfterCloseIsReported",
+        "windows AppState.CheckTrayCloseRequests"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,1,999,0,\"BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112\",\"\",\"/dev/sr1\""
+        ],
+        "os": [
+          {
+            "device": "/dev/sr1",
+            "identification": "HL-DT-ST BD-RE BP50NB40"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "closeTray": "drv-efc6d29521ef0440"
+          },
+          {
+            "advance": 5
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112\",\"\",\"/dev/sr1\""
+              ]
+            }
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-efc6d29521ef0440",
+                "name": "HL-DT-ST BD-RE BP50NB40",
+                "identification": "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112",
+                "device": "/dev/sr1",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "trayOpen",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:05.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "drive.trayStillOpen:drive:drv-efc6d29521ef0440",
+                "code": "drive.trayStillOpen",
+                "params": {
+                  "drive": "HL-DT-ST BD-RE BP50NB40"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "drive",
+                  "id": "drv-efc6d29521ef0440"
+                },
+                "raisedAt": "2026-10-02T20:00:05.000Z"
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:05.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-efc6d29521ef0440",
+                "name": "HL-DT-ST BD-RE BP50NB40",
+                "identification": "BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112",
+                "device": "/dev/sr1",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 4,
+            "at": "2026-10-02T20:00:05.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "drive.trayStillOpen:drive:drv-efc6d29521ef0440",
+              "code": "drive.trayStillOpen"
+            }
+          }
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "closeTray /dev/sr1",
+          "scan",
+          "scan"
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "a-tray-that-closes-is-not-reported",
+      "from": [
+        "windows AppState.CheckTrayCloseRequests"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,1,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "closeTray": "drv-86920bcfd062b640"
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "advance": 5
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "trayOpen",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:05.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          }
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "close-all-closes-every-empty-tray",
+      "from": [
+        "scenario drives-tray-control",
+        "windows AppState.CloseAllTraysAsync (drives without a disc)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,1,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\"",
+          "DRV:1,2,999,1,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"DVD\",\"/dev/rdisk6\"",
+          "DRV:2,0,999,0,\"BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112\",\"\",\"/dev/sr1\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          },
+          {
+            "device": "/dev/disk6",
+            "identification": "MATSHITA DVD-R UJ8C2"
+          },
+          {
+            "device": "/dev/sr1",
+            "identification": "HL-DT-ST BD-RE BP50NB40"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "closeAll": {}
+          },
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\"",
+                "DRV:1,2,999,1,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"DVD\",\"/dev/rdisk6\"",
+                "DRV:2,0,999,0,\"BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112\",\"\",\"/dev/sr1\""
+              ]
+            }
+          },
+          {
+            "advance": 5
+          }
+        ]
+      },
+      "expect": {
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk6",
+          "closeTray /dev/rdisk4",
+          "closeTray /dev/sr1",
+          "scan"
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "an-empty-drive-on-macos-uses-the-os-device",
+      "from": [
+        "memory: an empty drive on macOS has no device path in MakeMKV's DRV line",
+        "rules.cases.json drive-join-empty-drive-without-a-device"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,1,999,0,\"BD-RE HL-DT-ST BD-RE BP50NB40 1.00 KYVH9QJ3112\",\"\",\"\""
+        ],
+        "os": [
+          {
+            "device": "IOService:/AppleARMPE/arm-io/usb-drd1/BP50NB40/IOBDServices",
+            "identification": "HL-DT-ST BD-RE BP50NB40"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "find": "drv-efc6d29521ef0440"
+          },
+          {
+            "closeTray": "drv-efc6d29521ef0440"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "makemkvIndex": 0,
+            "device": "IOService:/AppleARMPE/arm-io/usb-drd1/BP50NB40/IOBDServices",
+            "configId": null,
+            "generation": null,
+            "label": "",
+            "flags": null
+          },
+          null
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "closeTray IOService:/AppleARMPE/arm-io/usb-drd1/BP50NB40/IOBDServices"
+        ]
+      }
+    },
+    {
+      "id": "mount-events-set-the-mount-path",
+      "from": [
+        "rearchitecture-plan §9 DeviceEvent mounted(path), unmounted",
+        "dtos.json Medium.mountPath"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "device": {
+              "type": "mounted",
+              "device": "/dev/disk4",
+              "path": "/Volumes/MOVIE"
+            }
+          },
+          {
+            "device": {
+              "type": "unmounted",
+              "device": "/dev/disk4"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": "/Volumes/MOVIE"
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          }
+        ],
+        "calls": [
+          "monitor.start",
+          "scan",
+          "probe /dev/rdisk4"
+        ]
+      }
+    },
+    {
+      "id": "a-failed-scan-is-a-problem-and-changes-nothing",
+      "from": [
+        "windows AppState.RefreshDrivesAsync (\"Drive scan failed\")",
+        "codes.json makemkv.driveScanFailed"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "scanFails": {
+                "code": "tool.missing",
+                "params": {
+                  "tool": "makemkvcon"
+                }
+              }
+            }
+          },
+          {
+            "rescan": {}
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          },
+          {
+            "set": {
+              "scanFails": null
+            }
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          {
+            "makemkvIndex": 0,
+            "device": "/dev/rdisk4",
+            "configId": null,
+            "generation": 1,
+            "label": "MOVIE",
+            "flags": 12
+          },
+          null,
+          null
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "present",
+                "medium": {
+                  "generation": 1,
+                  "label": "MOVIE",
+                  "type": "bd",
+                  "typeText": "Blu-ray (AACS)",
+                  "flags": [
+                    "blurayFiles",
+                    "aacsFiles"
+                  ],
+                  "content": "video",
+                  "mountPath": null
+                },
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "makemkv.driveScanFailed",
+                "code": "makemkv.driveScanFailed",
+                "params": {
+                  "reason": {
+                    "code": "tool.missing",
+                    "params": {
+                      "tool": "makemkvcon"
+                    }
+                  }
+                },
+                "severity": "error",
+                "raisedAt": "2026-10-02T20:00:00.000Z"
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "makemkv.driveScanFailed",
+              "code": "makemkv.driveScanFailed"
+            }
+          }
+        ],
+        "problems": []
+      }
+    },
+    {
+      "id": "the-configuration-names-the-drive",
+      "from": [
+        "rearchitecture-plan §15.7 (ConfigChanged)",
+        "scenario automation-rip-on-insert (drives: configId, name, ripOnInsert)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "config": {
+              "version": 3,
+              "drives": [
+                {
+                  "id": "left",
+                  "name": "Left",
+                  "match": {
+                    "driveName": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325"
+                  },
+                  "profile": "archive",
+                  "automation": {
+                    "ripOnInsert": true
+                  }
+                }
+              ],
+              "profiles": [
+                {
+                  "id": "default",
+                  "name": "Default"
+                },
+                {
+                  "id": "archive",
+                  "name": "Archive"
+                }
+              ]
+            }
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          },
+          {
+            "rescan": {}
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          {
+            "makemkvIndex": 0,
+            "device": "/dev/rdisk4",
+            "configId": "left",
+            "generation": null,
+            "label": "",
+            "flags": null
+          },
+          null
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "name": "HL-DT-ST BD-RE WH16NS60",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "default",
+                "ripOnInsert": false
+              }
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "driveChanged",
+            "data": {
+              "drive": {
+                "id": "drv-86920bcfd062b640",
+                "configId": "left",
+                "name": "Left",
+                "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+                "device": "/dev/rdisk4",
+                "makemkvIndex": 0,
+                "connected": true,
+                "state": "empty",
+                "busy": false,
+                "profileId": "archive",
+                "ripOnInsert": true
+              }
+            }
+          }
+        ],
+        "stored": [
+          {
+            "id": "drv-86920bcfd062b640",
+            "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+            "model": "HL-DT-ST BD-RE WH16NS60",
+            "lastDevice": "/dev/rdisk4",
+            "configId": "left",
+            "firstSeenAt": "2026-10-02T20:00:00.000Z",
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-renumbered-drive-keeps-its-id",
+      "from": [
+        "README.md (MakeMKV's drive numbering changes)",
+        "common.json DriveId (from the identification)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "automation": {
+            "pollIntervalSeconds": 0
+          }
+        },
+        "makemkv": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\"",
+          "DRV:1,0,999,0,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"\",\"/dev/rdisk6\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          },
+          {
+            "device": "/dev/disk6",
+            "identification": "MATSHITA DVD-R UJ8C2"
+          }
+        ],
+        "ops": [
+          "start",
+          {
+            "set": {
+              "makemkv": [
+                "DRV:0,0,999,0,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"\",\"/dev/rdisk6\"",
+                "DRV:1,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE\",\"/dev/rdisk4\""
+              ]
+            }
+          },
+          {
+            "rescan": {}
+          },
+          {
+            "find": "drv-86920bcfd062b640"
+          },
+          "drives"
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          {
+            "makemkvIndex": 1,
+            "device": "/dev/rdisk4",
+            "configId": null,
+            "generation": 1,
+            "label": "MOVIE",
+            "flags": 12
+          },
+          [
+            {
+              "id": "drv-de63b28f402c2eb5",
+              "name": "MATSHITA DVD-R UJ8C2",
+              "identification": "DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00",
+              "device": "/dev/rdisk6",
+              "makemkvIndex": 0,
+              "connected": true,
+              "state": "empty",
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            },
+            {
+              "id": "drv-86920bcfd062b640",
+              "name": "HL-DT-ST BD-RE WH16NS60",
+              "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+              "device": "/dev/rdisk4",
+              "makemkvIndex": 1,
+              "connected": true,
+              "state": "present",
+              "medium": {
+                "generation": 1,
+                "label": "MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray (AACS)",
+                "flags": [
+                  "blurayFiles",
+                  "aacsFiles"
+                ],
+                "content": "video",
+                "mountPath": null
+              },
+              "busy": false,
+              "profileId": "default",
+              "ripOnInsert": false
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "a-stored-drive-keeps-when-it-was-first-seen",
+      "from": [
+        "shared/schema/db drives (first_seen_at, last_seen_at)"
+      ],
+      "given": {
+        "stored": [
+          {
+            "id": "drv-86920bcfd062b640",
+            "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+            "model": "HL-DT-ST BD-RE WH16NS60",
+            "lastDevice": "/dev/rdisk2",
+            "configId": null,
+            "firstSeenAt": "2026-09-01T10:00:00.000Z",
+            "lastSeenAt": "2026-09-30T10:00:00.000Z"
+          }
+        ],
+        "makemkv": [
+          "DRV:0,0,999,0,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"\",\"/dev/rdisk4\""
+        ],
+        "os": [
+          {
+            "device": "/dev/disk4",
+            "identification": "HL-DT-ST BD-RE WH16NS60"
+          }
+        ],
+        "ops": [
+          "start"
+        ]
+      },
+      "expect": {
+        "stored": [
+          {
+            "id": "drv-86920bcfd062b640",
+            "identification": "BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325",
+            "model": "HL-DT-ST BD-RE WH16NS60",
+            "lastDevice": "/dev/rdisk4",
+            "configId": null,
+            "firstSeenAt": "2026-09-01T10:00:00.000Z",
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          }
+        ]
+      }
+    }
+  ]
+}

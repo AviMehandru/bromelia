@@ -2,20 +2,38 @@ import CryptoKit
 
 /// MakeMKV's drives ⇄ the OS's drives and the configuration's entries.
 public enum DriveJoin {
-    /// One entry per present MakeMKV drive, with the OS drive of the same device; then the OS drives MakeMKV
-    /// didn't report (their id comes from the device until MakeMKV names them).
+    /// One entry per present MakeMKV drive, with the OS drive of the same device, else the one OS drive whose
+    /// identification (vendor and product) is part of MakeMKV's when that pairing is unambiguous (macOS names a drive by
+    /// its IORegistry path, and MakeMKV gives an empty one no device); then the OS drives MakeMKV didn't report (their id
+    /// comes from the device until MakeMKV names them).
     public static func join(_ makemkvDrives: [MakemkvDrive], osDrives: [OsDrive]) -> [JoinedDrive] {
-        var joined: [JoinedDrive] = []
+        let present = makemkvDrives.filter(MakemkvDrive.isPresent)
+        var paired = [Int?](repeating: nil, count: present.count)
         var used = Set<Int>()
-        for m in makemkvDrives where MakemkvDrive.isPresent(m) {
-            var os: OsDrive?
-            if !m.device.isEmpty, let i = osDrives.indices.first(where: { !used.contains($0) && deviceKey(osDrives[$0].device) == deviceKey(m.device) }) {
-                used.insert(i)
-                os = osDrives[i]
+        for (i, m) in present.enumerated() where !m.device.isEmpty {
+            if let k = osDrives.indices.first(where: { !used.contains($0) && deviceKey(osDrives[$0].device) == deviceKey(m.device) }) {
+                used.insert(k)
+                paired[i] = k
             }
-            joined.append(JoinedDrive(driveId: driveId(m.identification, device: m.device), makemkv: m, os: os))
         }
-        for (i, o) in osDrives.enumerated() where !used.contains(i) {
+        func candidate(_ m: MakemkvDrive, _ k: Int) -> Bool {
+            let name = normalize(osDrives[k].identification)
+            return !used.contains(k) && !name.isEmpty && normalize(m.identification).contains(name)
+        }
+        let unpaired = present.indices.filter { paired[$0] == nil }
+        var byName: [(Int, Int)] = []
+        for i in unpaired {
+            let candidates = osDrives.indices.filter { candidate(present[i], $0) }
+            if candidates.count == 1 && unpaired.filter({ candidate(present[$0], candidates[0]) }).count == 1 { byName.append((i, candidates[0])) }
+        }
+        for (i, k) in byName {
+            paired[i] = k
+            used.insert(k)
+        }
+        var joined = present.indices.map { i in
+            JoinedDrive(driveId: driveId(present[i].identification, device: present[i].device), makemkv: present[i], os: paired[i].map { osDrives[$0] })
+        }
+        for (k, o) in osDrives.enumerated() where !used.contains(k) {
             joined.append(JoinedDrive(driveId: driveId("", device: o.device), makemkv: nil, os: o))
         }
         return joined

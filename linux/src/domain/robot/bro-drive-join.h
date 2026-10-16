@@ -6,9 +6,10 @@
 
 G_BEGIN_DECLS
 
-/* One entry per present MakeMKV drive (BroMakemkvDrive *), with the OS drive (BroOsDrive *) of the same device;
- * then the OS drives MakeMKV didn't report (their id comes from the device until MakeMKV names them). Returns
- * BroJoinedDrive *, owning copies. */
+/* One entry per present MakeMKV drive (BroMakemkvDrive *), with the OS drive (BroOsDrive *) of the same device, else
+ * the one OS drive whose identification (vendor and product) is part of MakeMKV's when that pairing is unambiguous
+ * (macOS names a drive by its IORegistry path, and MakeMKV gives an empty one no device); then the OS drives MakeMKV
+ * didn't report (their id comes from the device until MakeMKV names them). Returns BroJoinedDrive *, owning copies. */
 GPtrArray *bro_drive_join_join (GPtrArray *makemkv_drives, GPtrArray *os_drives);
 
 /* "drv-" and the first 16 hex digits of the SHA-256 of the normalised identification (lower case, runs of

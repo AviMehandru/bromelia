@@ -920,7 +920,8 @@
           "returns": "[JoinedDrive]",
           "swift": "DriveJoin.join(_:osDrives:)",
           "cs": "DriveJoin.Join",
-          "c": "bro_drive_join_join"
+          "c": "bro_drive_join_join",
+          "doc": "One entry per present MakeMKV drive, with the OS drive of the same device, else the one OS drive whose identification (vendor and product) is part of MakeMKV's when that pairing is unambiguous (macOS names a drive by its IORegistry path; session A 2026-10-15); then the OS drives MakeMKV didn't report."
         },
         {
           "name": "DriveJoin.driveId",
@@ -13590,6 +13591,116 @@
             "name": "BroLibraryDto",
             "file": "linux/src/engine/api/bro-library-dto.h"
           }
+        },
+        {
+          "name": "DriveDto",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "configId",
+            "name",
+            "identification",
+            "device",
+            "makemkvIndex",
+            "connected",
+            "state",
+            "medium",
+            "busy",
+            "jobId",
+            "profileId",
+            "ripOnInsert"
+          ],
+          "doc": "A drive, as clients see it (dtos.json Drive); the session and the countdown come with their services.",
+          "phase": 3,
+          "swift": {
+            "name": "DriveDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/DriveDto.swift"
+          },
+          "cs": {
+            "name": "DriveDto",
+            "file": "windows/src/Bromelia.Engine/API/DriveDto.cs"
+          },
+          "c": {
+            "name": "BroDriveDto",
+            "file": "linux/src/engine/api/bro-drive-dto.h"
+          }
+        },
+        {
+          "name": "MediumDto",
+          "kind": "struct",
+          "fields": [
+            "generation",
+            "label",
+            "type",
+            "typeText",
+            "flags",
+            "content",
+            "mountPath"
+          ],
+          "doc": "The disc in a drive (dtos.json Medium): its generation counts the drive's discs since the engine started.",
+          "phase": 3,
+          "swift": {
+            "name": "MediumDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/MediumDto.swift"
+          },
+          "cs": {
+            "name": "MediumDto",
+            "file": "windows/src/Bromelia.Engine/API/MediumDto.cs"
+          },
+          "c": {
+            "name": "BroMediumDto",
+            "file": "linux/src/engine/api/bro-medium-dto.h"
+          }
+        },
+        {
+          "name": "DriveStatus",
+          "kind": "enum",
+          "doc": "dtos.json Drive.state: MakeMKV's state of a connected drive; unavailable for a configured drive that isn't connected.",
+          "cases": [
+            "empty",
+            "trayOpen",
+            "loading",
+            "present",
+            "unavailable",
+            "unmounting"
+          ],
+          "phase": 3,
+          "swift": {
+            "name": "DriveStatus",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/DriveStatus.swift",
+            "cases": [
+              ".empty",
+              ".trayOpen",
+              ".loading",
+              ".present",
+              ".unavailable",
+              ".unmounting"
+            ]
+          },
+          "cs": {
+            "name": "DriveStatus",
+            "file": "windows/src/Bromelia.Engine/API/DriveStatus.cs",
+            "cases": [
+              "Empty",
+              "TrayOpen",
+              "Loading",
+              "Present",
+              "Unavailable",
+              "Unmounting"
+            ]
+          },
+          "c": {
+            "name": "BroDriveStatus",
+            "file": "linux/src/engine/api/bro-drive-status.h",
+            "cases": [
+              "BRO_DRIVE_STATUS_EMPTY",
+              "BRO_DRIVE_STATUS_TRAY_OPEN",
+              "BRO_DRIVE_STATUS_LOADING",
+              "BRO_DRIVE_STATUS_PRESENT",
+              "BRO_DRIVE_STATUS_UNAVAILABLE",
+              "BRO_DRIVE_STATUS_UNMOUNTING"
+            ]
+          }
         }
       ],
       "functions": [
@@ -13676,6 +13787,49 @@
           "swift": "JobDto.of(_:)",
           "cs": "JobDto.Of",
           "c": "bro_job_dto_of"
+        },
+        {
+          "name": "DriveDto.json",
+          "params": [
+            "drive"
+          ],
+          "returns": "JsonValue",
+          "doc": "Optional members left out when absent.",
+          "swift": "DriveDto.json(_:)",
+          "cs": "DriveDto.Json",
+          "c": "bro_drive_dto_json"
+        },
+        {
+          "name": "MediumDto.json",
+          "params": [
+            "medium"
+          ],
+          "returns": "JsonValue",
+          "swift": "MediumDto.json(_:)",
+          "cs": "MediumDto.Json",
+          "c": "bro_medium_dto_json"
+        },
+        {
+          "name": "MediumDto.flagNames",
+          "params": [
+            "flags"
+          ],
+          "returns": "[String]",
+          "doc": "dvdFiles, hdDvdFiles, blurayFiles, aacsFiles, bdsvmFiles, in that order.",
+          "swift": "MediumDto.flagNames(_:)",
+          "cs": "MediumDto.FlagNames",
+          "c": "bro_medium_dto_flag_names"
+        },
+        {
+          "name": "MediumDto.typeOf",
+          "params": [
+            "flags"
+          ],
+          "returns": "String",
+          "doc": "common.json DiscType from the flags (FormatDetector): dvd, bd, hddvd or disc.",
+          "swift": "MediumDto.typeOf(_:)",
+          "cs": "MediumDto.TypeOf",
+          "c": "bro_medium_dto_type_of"
         }
       ]
     },
@@ -14656,7 +14810,7 @@
       "layer": "engine",
       "folder": "Services",
       "cFolder": "services",
-      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService, LibraryService, RecoveryService and MakemkvService (phase 3 part). shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json, recovery-service.cases.json, makemkv-service.cases.json.",
+      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService, LibraryService, RecoveryService, MakemkvService and DriveService (their phase 3 parts). shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json, recovery-service.cases.json, makemkv-service.cases.json, drive-service.cases.json.",
       "phase": 3,
       "types": [
         {
@@ -14781,6 +14935,24 @@
           "c": {
             "name": "BroMakemkvService",
             "file": "linux/src/engine/services/bro-makemkv-service.h"
+          }
+        },
+        {
+          "name": "DriveService",
+          "kind": "class",
+          "doc": "The optical drives (plan §11.1, §15.2): scans (MakeMKV's list and the OS's, DriveJoin) at start, every automation.pollIntervalSeconds (not while an acquisition runs unless pollWhileRipping), on device events and after tray commands; media generations, mediumArrived (not for discs in at start) and mediumRemoved; busy drives keep their state; configured drives that aren't connected stay listed; drive.trayStillOpen; implements DriveLookup. shared/fixtures/engine/drive-service.cases.json.",
+          "phase": 3,
+          "swift": {
+            "name": "DriveService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/DriveService.swift"
+          },
+          "cs": {
+            "name": "DriveService",
+            "file": "windows/src/Bromelia.Engine/Services/DriveService.cs"
+          },
+          "c": {
+            "name": "BroDriveService",
+            "file": "linux/src/engine/services/bro-drive-service.h"
           }
         }
       ],
@@ -15051,6 +15223,90 @@
           "swift": "RecoveryService.recover()",
           "cs": "RecoveryService.Recover",
           "c": "bro_recovery_service_recover"
+        },
+        {
+          "name": "DriveService.start",
+          "params": [],
+          "doc": "Reads the stored drives, follows leases, the configuration and the OS's events, and scans; returns when the first scan is applied.",
+          "async": true,
+          "swift": "DriveService.start()",
+          "cs": "DriveService.Start",
+          "c": "bro_drive_service_start",
+          "cNames": [
+            "done"
+          ]
+        },
+        {
+          "name": "DriveService.stop",
+          "params": [],
+          "swift": "DriveService.stop()",
+          "cs": "DriveService.Stop",
+          "c": "bro_drive_service_stop"
+        },
+        {
+          "name": "DriveService.drives",
+          "params": [],
+          "returns": "[DriveDto]",
+          "doc": "The connected drives in MakeMKV's order, then the configured ones that aren't connected.",
+          "swift": "DriveService.drives()",
+          "cs": "DriveService.Drives",
+          "c": "bro_drive_service_drives"
+        },
+        {
+          "name": "DriveService.rescan",
+          "params": [],
+          "doc": "Scans now (also while an acquisition runs); returns when that scan is applied.",
+          "async": true,
+          "swift": "DriveService.rescan()",
+          "cs": "DriveService.Rescan",
+          "c": "bro_drive_service_rescan",
+          "cNames": [
+            "done"
+          ]
+        },
+        {
+          "name": "DriveService.eject",
+          "params": [
+            "driveId"
+          ],
+          "doc": "drive.notFound when it isn't connected, or DriveControl's failure; then scans 3 s later.",
+          "throws": true,
+          "async": true,
+          "swift": "DriveService.eject(_:)",
+          "cs": "DriveService.Eject",
+          "c": "bro_drive_service_eject",
+          "cNames": [
+            "drive_id",
+            "done"
+          ]
+        },
+        {
+          "name": "DriveService.closeTray",
+          "params": [
+            "driveId"
+          ],
+          "doc": "Then scans 5 s later; the first scan 4 s after the command raises drive.trayStillOpen when the tray is still open.",
+          "throws": true,
+          "async": true,
+          "swift": "DriveService.closeTray(_:)",
+          "cs": "DriveService.CloseTray",
+          "c": "bro_drive_service_close_tray",
+          "cNames": [
+            "drive_id",
+            "done"
+          ]
+        },
+        {
+          "name": "DriveService.closeAll",
+          "params": [],
+          "doc": "Closes the tray of every connected drive without a disc, then scans 5 s later.",
+          "async": true,
+          "swift": "DriveService.closeAll()",
+          "cs": "DriveService.CloseAll",
+          "c": "bro_drive_service_close_all",
+          "cNames": [
+            "done"
+          ]
         }
       ]
     },
