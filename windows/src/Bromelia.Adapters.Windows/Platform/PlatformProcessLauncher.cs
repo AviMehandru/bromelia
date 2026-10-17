@@ -46,6 +46,9 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
     /// <summary>Tests only: the pumps get no thread handle to cancel their reads, as if Windows refused one.</summary>
     internal static bool NoCancelHandleForTests;
 
+    /// <summary>Tests only: the redirected streams look like something other than a pipe.</summary>
+    internal static bool NotAPipeForTests;
+
     public IRunningProcess Start(ProcessSpec spec) => Running.Start(spec);
 
     /// <summary>The program and arguments actually run: the spec's interpreter first, else one chosen from the
@@ -110,7 +113,11 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _process = process;
             _job = job;
             _transcript = transcript;
-            var pumps = new[] { Pump(PipeOf(process.StandardOutput.BaseStream), OutputSource.Stdout), Pump(PipeOf(process.StandardError.BaseStream), OutputSource.Stderr) };
+            var stdout = PipeOf(process.StandardOutput.BaseStream);
+            var stderr = PipeOf(process.StandardError.BaseStream);
+            if (stdout is null || stderr is null)
+                Abandon($"its output isn't a pipe the launcher can read ({process.StandardOutput.BaseStream.GetType().Name})");
+            var pumps = new[] { Pump(stdout!, OutputSource.Stdout), Pump(stderr!, OutputSource.Stderr) };
             _pumpsReady.Wait();
             // A read that can't be cancelled could hold up the end for as long as a child left behind holds the pipe:
             // a tool the launcher can't watch to its end isn't run.
@@ -245,12 +252,13 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _killed.TrySetResult();
         }
 
-        /// <summary>The pipe under a redirected stream, read directly: only <see cref="Pump"/> reads it.</summary>
-        static SafeHandle PipeOf(Stream stream) => stream switch
+        /// <summary>The pipe under a redirected stream, read directly: only <see cref="Pump"/> reads it. Null if .NET
+        /// redirected to something else (a FileStream on .NET 8).</summary>
+        static SafeHandle? PipeOf(Stream stream) => NotAPipeForTests ? null : stream switch
         {
             FileStream file => file.SafeFileHandle,
             System.IO.Pipes.PipeStream pipe => pipe.SafePipeHandle,
-            _ => throw new InvalidOperationException($"a redirected stream that isn't a pipe: {stream.GetType()}"),
+            _ => null,
         };
 
         /// <summary>Ends a tool just started that can't be watched, and throws: Start reports process.couldNotStart.</summary>

@@ -253,6 +253,28 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         Assert.False(File.Exists(marker)); // the tool didn't go on unwatched
     }
 
+    /// <summary>Windows only: if .NET redirected the output to something other than a pipe, the launcher ends the tool
+    /// at once and reports that it couldn't start, rather than leave it running with nobody reading.</summary>
+    [Fact]
+    public void AToolWhoseOutputIsNotAPipeIsEndedAtOnce()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var marker = Path.Combine(_dir, "survived.txt");
+        var script = Script("survive.cmd", "@echo off\nping -n 3 127.0.0.1 >nul\necho x> \"" + marker + "\"\n");
+        PlatformProcessLauncher.NotAPipeForTests = true;
+        try
+        {
+            var e = Assert.Throws<BroFailure>(() => _launcher.Start(Spec(script)));
+            Assert.Equal("process.couldNotStart", e.Error.Code);
+        }
+        finally
+        {
+            PlatformProcessLauncher.NotAPipeForTests = false;
+        }
+        Thread.Sleep(TimeSpan.FromSeconds(4));
+        Assert.False(File.Exists(marker)); // the tool didn't go on unwatched
+    }
+
     [Fact] // a-reader-that-starts-late-loses-nothing
     public void AReaderThatStartsLateLosesNothing()
     {
