@@ -542,11 +542,15 @@ public class ReliabilityTests
         Directory.CreateDirectory(_root);
         try
         {
+            // The tool starts a child and keeps printing (a delay inside cmd: starting a process per line, such as ping,
+            // can itself take longer than the stall timeout on a busy machine) until the child has written its pid; only
+            // then does it go quiet (`then`) or end.
             void StartedChild(string pidFile, string then)
             {
-                var script = Path.Combine(_root, Path.GetFileNameWithoutExtension(pidFile) + ".cmd");
-                File.WriteAllText(script, "@echo off\r\nstart /b powershell -NoProfile -Command \"$PID | Out-File -Encoding ascii '" + pidFile
-                                          + "'; Start-Sleep 60\"\r\necho started\r\n" + then);
+                var script = Path.ChangeExtension(pidFile, ".cmd");
+                File.WriteAllText(script, "@echo off\r\necho starting\r\nstart /b powershell -NoProfile -Command \"$PID | Out-File -Encoding ascii '"
+                                          + pidFile + "'; Start-Sleep 60\"\r\n:wait\r\nif exist \"" + pidFile + "\" goto started\r\necho waiting\r\n"
+                                          + "for /l %%i in (1,1,2000) do rem\r\ngoto wait\r\n:started\r\necho started\r\n" + then);
             }
             string ReadPid(string pidFile)
             {
@@ -559,20 +563,31 @@ public class ReliabilityTests
                 while (ReadPid(pidFile).Length == 0 && DateTime.UtcNow < deadline) Thread.Sleep(100);
                 return int.Parse(ReadPid(pidFile));
             }
+            // On a busy machine a tool can take longer than the stall timeout to print its first line (cmd took 10 s once
+            // on the 4-CPU test VM), and the watchdog then stops it before it got where the test needs it. Such an attempt
+            // proves nothing either way, so it is tried again (at most 3 attempts); every other outcome is asserted.
+            (ProcessRunner.Result Result, string PidFile) Attempt(string name, string then, TimeSpan stall, Func<ProcessRunner.Result, string, bool> reached)
+            {
+                for (int attempt = 1; ; attempt++)
+                {
+                    var pidFile = Path.Combine(_root, name + attempt + ".pid");
+                    StartedChild(pidFile, then);
+                    var result = new ProcessRunner("cmd.exe", new[] { "/c", Path.ChangeExtension(pidFile, ".cmd") })
+                        .RunAsync(_ => { }, stallTimeout: stall).GetAwaiter().GetResult();
+                    if (reached(result, pidFile) || attempt == 3) return (result, pidFile);
+                }
+            }
 
-            var stuckPid = Path.Combine(_root, "stuck.pid");
-            StartedChild(stuckPid, "ping -n 60 127.0.0.1 >nul\r\n");
-            var stuck = new ProcessRunner("cmd.exe", new[] { "/c", Path.Combine(_root, "stuck.cmd") })
-                .RunAsync(_ => { }, stallTimeout: TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
+            // Stopped once its child is running: the child goes too.
+            var (stuck, stuckPid) = Attempt("stuck", "ping -n 60 127.0.0.1 >nul\r\n", TimeSpan.FromSeconds(8), (_, pidFile) => File.Exists(pidFile));
             Assert.True(stuck.Stalled);
             var child = WaitForPid(stuckPid);
             Thread.Sleep(500);
             Assert.Throws<ArgumentException>(() => Process.GetProcessById(child));
 
-            var quickPid = Path.Combine(_root, "quick.pid");
-            StartedChild(quickPid, "");
-            var quick = new ProcessRunner("cmd.exe", new[] { "/c", Path.Combine(_root, "quick.cmd") }).RunAsync(_ => { }, stallTimeout: TimeSpan.FromSeconds(2))
-                .GetAwaiter().GetResult();
+            // Ended by itself (the watchdog may still fire while its output is read afterwards): the child stays. Stopped
+            // by the watchdog before it ended (exit code -1) is the busy-machine case above.
+            var (quick, quickPid) = Attempt("quick", "", TimeSpan.FromSeconds(2), (r, _) => !(r.Stalled && r.ExitCode != 0));
             Assert.Equal(0, quick.ExitCode);
             using var left = Process.GetProcessById(WaitForPid(quickPid));
             Assert.False(left.HasExited);
