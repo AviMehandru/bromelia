@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -34,6 +35,9 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
     /// <summary>How much text (UTF-8) may wait to be read before the reading waits: long lines for a reader that has
     /// stopped can't hold more than about 16 MiB.</summary>
     public const int QueuedBytes = 16 * 1024 * 1024;
+
+    /// <summary>A line that makes a pump fail, for tests (nothing else makes one throw).</summary>
+    internal static string? FailOnLineForTests;
 
     public IRunningProcess Start(ProcessSpec spec) => Running.Start(spec);
 
@@ -241,7 +245,8 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             public volatile bool InRead;
         }
 
-        /// <summary>Reads the pipe on a thread of its own.</summary>
+        /// <summary>Reads the pipe on a thread of its own. A pump that fails stops the tool, which could otherwise block for
+        /// ever writing to a pipe nobody reads; <see cref="Finish"/> then ends the run and <see cref="Wait"/> throws.</summary>
         Task Pump(SafeHandle pipe, OutputSource source)
         {
             var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -254,6 +259,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
                 }
                 catch (Exception e)
                 {
+                    Stop(StopReason.Policy);
                     done.SetException(e);
                 }
             }) { IsBackground = true, Name = $"bro-process-{source}" }.Start();
@@ -325,6 +331,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         /// draining (a line after the end is dropped).</summary>
         void Emit(string line, OutputSource source)
         {
+            if (FailOnLineForTests is { } fail && line == fail) throw new InvalidOperationException("a pump failed (test)");
             _transcript?.Write(line);
             var item = new OutputLine(source, line, Now());
             if (Full() && !_draining)
@@ -354,7 +361,9 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             // Output normally ends with the process. A child it left behind may keep the pipes open: 5 s after the exit the
             // pumps drain (they take what the pipes hold then, without waiting for room) and stop. The end waits for them,
             // not for a deadline: a pump the system hasn't run yet may still have, in its pipe, lines written before the
-            // exit.
+            // exit. A pump that failed is rethrown from Wait() only once everything below is done, so the reader of the
+            // lines still gets an end.
+            Exception? pumpFailed = null;
             if (!abandoned)
             {
                 var all = Task.WhenAll(pumps);
@@ -363,7 +372,14 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
                 _taken.Release(); // a pump waiting for room stops waiting
                 // Again each tick: a pump may enter ReadFile just after a cancel.
                 for (CancelReads(); !all.IsCompleted; CancelReads()) await Task.WhenAny(all, Task.Delay(Tick)).ConfigureAwait(false);
-                await all.ConfigureAwait(false);
+                try
+                {
+                    await all.ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    pumpFailed = e;
+                }
             }
             else
             {
@@ -389,9 +405,11 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
                     _reason is StopReason.Cancelled or StopReason.Shutdown);
             if (_transcript is not null)
             {
+                if (pumpFailed is not null) _transcript.Write($"==== {Instant.Format(Now())} reading the output failed: {pumpFailed.Message}");
                 _transcript.Write($"==== {Instant.Format(Now())} {Transcript.Ending(exit)}");
                 _transcript.Dispose();
             }
+            if (pumpFailed is not null) ExceptionDispatchInfo.Capture(pumpFailed).Throw();
             return exit;
         }
     }

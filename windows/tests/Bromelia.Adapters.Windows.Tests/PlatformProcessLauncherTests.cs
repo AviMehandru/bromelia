@@ -207,6 +207,28 @@ public sealed class PlatformProcessLauncherTests : IDisposable
     /// <summary>Nobody reads until the run has ended, and a child left behind holds the pipe. By the end of the 5 s
     /// after the exit the queue is full, a line waits for room and more lines wait in the pipe: the run still ends, and
     /// every line is still there to read.</summary>
+    /// <summary>A pump that fails (Windows only: the other launchers' readers can't throw) still ends the lines, stops
+    /// the tool and makes Wait() throw: the run ends loudly instead of hanging the reader of the lines.</summary>
+    [Fact]
+    public async Task APumpThatFailsEndsTheRunLoudly()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        const string fault = "bromelia-pump-fault-test";
+        var script = Script("fault.cmd", $"@echo off\necho {fault}\nfor /L %%i in (1,1,20000) do echo %%i\n");
+        PlatformProcessLauncher.FailOnLineForTests = fault;
+        try
+        {
+            var p = _launcher.Start(Spec(script));
+            var read = Task.Run(async () => { await foreach (var _ in p.Lines()) { } });
+            Assert.True(await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(30))) == read, "the lines never ended");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => p.Wait());
+        }
+        finally
+        {
+            PlatformProcessLauncher.FailOnLineForTests = null;
+        }
+    }
+
     [Fact] // nothing-written-before-the-exit-is-lost
     public async Task NothingWrittenBeforeTheExitIsLost()
     {
