@@ -21,6 +21,10 @@ public final class PlatformProcessLauncher: ProcessLauncher {
     public static let queuedLines = 10000
     public static let queuedBytes = 16 * 1024 * 1024
 
+    /// Tests only: every reader thread started from now on waits this many seconds before it first reads, as one the
+    /// system is slow to run would. 0 turns it off.
+    nonisolated(unsafe) static var readerDelayForTests: Double = 0
+
     public init() {}
 
     public func start(_ spec: ProcessSpec) throws(BroError) -> any RunningProcess {
@@ -344,6 +348,7 @@ private final class SpawnedProcess: RunningProcess, @unchecked Sendable {
             for text in splitter.feed(buffer[0..<n]) { emit(OutputLine(stream: source, text: text, at: Self.now())) }
         }
         var atEnd = false
+        if PlatformProcessLauncher.readerDelayForTests > 0 { Thread.sleep(forTimeInterval: PlatformProcessLauncher.readerDelayForTests) }
         while true {
             cond.lock()
             let quit = draining

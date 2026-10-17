@@ -1,4 +1,4 @@
-import BroAdapters
+@testable import BroAdapters
 import BroDomain
 import BroFoundation
 import BroPorts
@@ -150,6 +150,18 @@ import Testing
         }
         _ = await p.wait()
         #expect(lines == (1...30000).map(String.init))
+    }
+
+    /// a-reader-that-starts-late-loses-nothing: the reader threads first read 5.5 s after the start, past the 5 s after
+    /// the exit, as one did under load on 2026-10-15 (late-output got no line): the line is still there.
+    @Test func aReaderThatStartsLateLosesNothing() async throws {
+        let start = ContinuousClock.now
+        PlatformProcessLauncher.readerDelayForTests = 5.5
+        defer { PlatformProcessLauncher.readerDelayForTests = 0 }
+        let (lines, exit) = await run(try launcher.start(spec("/bin/sh", "-c", "sleep 20 & echo early")))
+        #expect(exit.status == 0)
+        #expect(lines.map(\.text) == ["early"])
+        #expect(elapsed(since: start) < 10)
     }
 
     /// nothing-written-before-the-exit-is-lost: nobody reads until the run has ended, and a child left behind holds the

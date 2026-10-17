@@ -343,6 +343,26 @@ test_nothing_before_the_exit_is_lost (void)
     }
 }
 
+/* a-reader-that-starts-late-loses-nothing: the reader threads first read 5.5 s after the start, past the 5 s after the
+ * exit, as one did under load on 2026-10-15 (late-output got no line): the line is still there. */
+static void
+test_a_late_reader_loses_nothing (void)
+{
+  g_autoptr (BroProcessSpec) spec = spec_new ("/bin/sh", "-c", "sleep 20 & echo early", NULL);
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  gint64 t0 = g_get_monotonic_time ();
+  g_autoptr (BroRunningProcess) p = NULL;
+  BroProcessExit exit;
+  bro_platform_process_launcher_delay_readers_for_tests (5500);
+  p = start (spec);
+  exit = run (p, lines);
+  bro_platform_process_launcher_delay_readers_for_tests (0);
+  g_assert_cmpint (exit.status, ==, 0);
+  g_assert_cmpuint (lines->len, ==, 1);
+  g_assert_cmpstr (lines->pdata[0], ==, "stdout:early");
+  g_assert_cmpfloat (since (t0), <, 10);
+}
+
 static void
 test_process_group (void)
 {
@@ -2114,6 +2134,7 @@ main (int argc, char **argv)
   g_test_add_func ("/process/slow-reader-holds-the-tool", test_slow_reader_holds_the_tool);
   g_test_add_func ("/process/slow-reader-gets-everything", test_slow_reader_gets_everything);
   g_test_add_func ("/process/nothing-before-the-exit-is-lost", test_nothing_before_the_exit_is_lost);
+  g_test_add_func ("/process/a-late-reader-loses-nothing", test_a_late_reader_loses_nothing);
   g_test_add_func ("/process/process-group", test_process_group);
   g_test_add_func ("/process/transcript", test_transcript);
   g_test_add_func ("/process/transcript-missing", test_transcript_missing);

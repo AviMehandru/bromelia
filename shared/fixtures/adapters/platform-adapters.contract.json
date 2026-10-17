@@ -234,6 +234,29 @@
       }
     },
     {
+      "id": "a-reader-that-starts-late-loses-nothing",
+      "from": [
+        "late-output-goes-nowhere got no line under load on 2026-10-15 (macOS, ASan): its reader thread first ran after the 5 s that follow the exit"
+      ],
+      "given": {
+        "command": [
+          "/bin/sh",
+          "-c",
+          "sleep 20 & echo early"
+        ],
+        "windows": "cmd: start /b cmd /c \"ping -n 20 127.0.0.1 >nul\", then echo early",
+        "then": "the reader threads first read 5.5 s after the start (a test-only hook: Linux bro_platform_process_launcher_delay_readers_for_tests, macOS readerDelayForTests, Windows ReaderDelayForTests)"
+      },
+      "expect": {
+        "lines": [
+          "early"
+        ],
+        "exitCode": 0,
+        "endsWithin": 10,
+        "rule": "the end waits for a reader the system is slow to run; what the tool wrote before it ended is still taken from the pipe (nothing-written-before-the-exit-is-lost)"
+      }
+    },
+    {
       "id": "process-group",
       "from": [
         "rearchitecture-plan §10.3 (posix_spawn + process group; Job Object; setpgid)",

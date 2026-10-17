@@ -300,6 +300,14 @@ deliver (Reader *r, LineSplitter *splitter, const guint8 *bytes, gsize n, GPtrAr
   g_ptr_array_set_size (lines, 0);
 }
 
+static gint reader_delay_ms; /* bro_platform_process_launcher_delay_readers_for_tests */
+
+void
+bro_platform_process_launcher_delay_readers_for_tests (guint milliseconds)
+{
+  g_atomic_int_set (&reader_delay_ms, (gint) milliseconds);
+}
+
 static gboolean
 is_draining (BroSpawnedProcess *self)
 {
@@ -327,6 +335,8 @@ reader_thread (gpointer data)
   gssize n;
   char *last;
   g_unix_set_fd_nonblocking (r->fd, TRUE, NULL);
+  if (g_atomic_int_get (&reader_delay_ms) > 0)
+    g_usleep ((gulong) g_atomic_int_get (&reader_delay_ms) * 1000);
   while (!is_draining (self))
     {
       int ready = poll (&poller, 1, 250);

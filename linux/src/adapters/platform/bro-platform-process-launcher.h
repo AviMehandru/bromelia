@@ -25,6 +25,10 @@ G_DECLARE_FINAL_TYPE (BroPlatformProcessLauncher, bro_platform_process_launcher,
 
 BroPlatformProcessLauncher *bro_platform_process_launcher_new (void);
 
+/* Tests only: every reader thread started from now on waits @milliseconds before it first reads, as one the system is
+ * slow to run would. 0 turns it off. */
+void bro_platform_process_launcher_delay_readers_for_tests (guint milliseconds);
+
 /* Starts the process; NULL and @error set (process.couldNotStart) when it can't be started. Free with
  * g_object_unref; the process keeps running and being watched until it ends. */
 BroRunningProcess *bro_platform_process_launcher_start (BroPlatformProcessLauncher *self, const BroProcessSpec *spec,

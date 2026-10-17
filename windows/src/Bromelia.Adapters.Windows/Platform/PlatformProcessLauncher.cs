@@ -39,6 +39,10 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
     /// <summary>A line that makes a pump fail, for tests (nothing else makes one throw).</summary>
     internal static string? FailOnLineForTests;
 
+    /// <summary>Tests only: every pump started from now on waits this many milliseconds before it first reads, as one
+    /// the system is slow to run would. 0 turns it off.</summary>
+    internal static int ReaderDelayForTests;
+
     public IRunningProcess Start(ProcessSpec spec) => Running.Start(spec);
 
     /// <summary>The program and arguments actually run: the spec's interpreter first, else one chosen from the
@@ -285,6 +289,7 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             try
             {
                 var atEnd = false;
+                if (Volatile.Read(ref ReaderDelayForTests) is var delay and > 0) Thread.Sleep(delay);
                 while (!_draining)
                 {
                     me.InRead = true;

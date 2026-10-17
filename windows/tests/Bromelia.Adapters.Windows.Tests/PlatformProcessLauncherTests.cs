@@ -229,6 +229,28 @@ public sealed class PlatformProcessLauncherTests : IDisposable
         }
     }
 
+    /// <summary>The pumps first read 5.5 s after the start, past the 5 s after the exit, as a reader did under load on
+    /// 2026-10-15 (late-output got no line): the line is still there.</summary>
+    [Fact] // a-reader-that-starts-late-loses-nothing
+    public void AReaderThatStartsLateLosesNothing()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var script = Script("late-reader.cmd", "@echo off\nstart /b cmd /c \"ping -n 20 127.0.0.1 >nul\"\necho early\n");
+        var watch = Stopwatch.StartNew();
+        PlatformProcessLauncher.ReaderDelayForTests = 5500;
+        try
+        {
+            var (lines, exit) = Run(_launcher.Start(Spec(script)));
+            Assert.Equal(0, exit.Status);
+            Assert.Equal(new[] { "early" }, lines.Select(l => l.Text));
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+        }
+        finally
+        {
+            PlatformProcessLauncher.ReaderDelayForTests = 0;
+        }
+    }
+
     [Fact] // nothing-written-before-the-exit-is-lost
     public async Task NothingWrittenBeforeTheExitIsLost()
     {
