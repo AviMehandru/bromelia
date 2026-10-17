@@ -1,7 +1,8 @@
-title: After a restart, a queued automatic job whose drive now holds another disc is cancelled
+title: After a restart, a queued automatic job whose drive now holds another disc is cancelled; the new disc is ripped once it is inserted again
 from:
   - rearchitecture-plan §20.4 (automatic jobs are cancelled with disc.changed if the drive's media generation moved on)
   - docs/architecture.md#unfinished-jobs (the disc in the drive may have changed since)
+  - owner, 2026-10-17 (a disc already in the drive when the engine starts doesn't start a rip, after a restart too)
 given:
   configPatch: {automation: {defaults: {ripOnInsert: true, delaySeconds: 0}}}
   drives:
@@ -13,5 +14,11 @@ steps:
   - insert: {drive: drive, disc: {volume: ANOTHER, type: bluray, titles: [{duration: "0:00:10", source: 1}]}}
   - restart: {}
   - expect:
-      jobs: {count: 2}
+      note: The disc inserted while the engine was down was already in when it started, so it starts no rip (as in automation-rip-on-insert).
+      jobs: {count: 1}
       events: {include: [{type: jobFinished, data: {job: {outcome: cancelled, error: {code: disc.changed}}}}]}
+  - remove: {drive: drive}
+  - insert: {drive: drive, disc: {volume: ANOTHER, type: bluray, titles: [{duration: "0:00:10", source: 1}]}}
+  - expect:
+      jobs: {count: 2}
+      events: {include: [{type: jobChanged, data: {job: {automatic: true, title: ANOTHER}}}]}
