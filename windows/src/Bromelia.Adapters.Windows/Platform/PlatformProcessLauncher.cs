@@ -43,6 +43,9 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
     /// the system is slow to run would. 0 turns it off.</summary>
     internal static int ReaderDelayForTests;
 
+    /// <summary>Tests only: the pumps get no thread handle to cancel their reads, as if Windows refused one.</summary>
+    internal static bool NoCancelHandleForTests;
+
     public IRunningProcess Start(ProcessSpec spec) => Running.Start(spec);
 
     /// <summary>The program and arguments actually run: the spec's interpreter first, else one chosen from the
@@ -88,6 +91,10 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         volatile bool _draining;
         /// <summary>The pumps still reading (guarded by <see cref="_gate"/>).</summary>
         readonly List<PumpThread> _pumps = new();
+        /// <summary>Signalled by each pump once it has its thread handle.</summary>
+        readonly CountdownEvent _pumpsReady = new(2);
+        /// <summary>A pump got no thread handle, so a drain couldn't cancel its read.</summary>
+        volatile bool _uncancellable;
         readonly object _gate = new();
         readonly TaskCompletionSource _killed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         readonly Transcript? _transcript;
@@ -104,6 +111,10 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _job = job;
             _transcript = transcript;
             var pumps = new[] { Pump(PipeOf(process.StandardOutput.BaseStream), OutputSource.Stdout), Pump(PipeOf(process.StandardError.BaseStream), OutputSource.Stderr) };
+            _pumpsReady.Wait();
+            // A read that can't be cancelled could hold up the end for as long as a child left behind holds the pipe:
+            // a tool the launcher can't watch to its end isn't run.
+            if (_uncancellable) Abandon("Windows gave no thread handle to cancel a read of its output");
             if (spec.StallTimeout is not null) _watchdog = new Timer(_ => Watch(), null, Tick, Tick);
             _exit = Finish(pumps);
         }
@@ -242,6 +253,23 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _ => throw new InvalidOperationException($"a redirected stream that isn't a pipe: {stream.GetType()}"),
         };
 
+        /// <summary>Ends a tool just started that can't be watched, and throws: Start reports process.couldNotStart.</summary>
+        void Abandon(string reason)
+        {
+            _draining = true;
+            _ended = true;
+            Kill();
+            lock (_gate)
+            {
+                if (_job != IntPtr.Zero)
+                {
+                    Native.CloseHandle(_job);
+                    _job = IntPtr.Zero;
+                }
+            }
+            throw new InvalidOperationException(reason);
+        }
+
         /// <summary>A pump's thread, for <see cref="Native.CancelSynchronousIo"/> while it is in ReadFile.</summary>
         sealed class PumpThread
         {
@@ -279,8 +307,10 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         {
             var splitter = new LineSplitter();
             var buffer = new byte[65536];
-            var me = new PumpThread { Handle = Native.CurrentThreadForCancel() };
+            var me = new PumpThread { Handle = NoCancelHandleForTests ? IntPtr.Zero : Native.CurrentThreadForCancel() };
             lock (_gate) _pumps.Add(me);
+            if (me.Handle == IntPtr.Zero) _uncancellable = true;
+            _pumpsReady.Signal();
             void Deliver(int n)
             {
                 Interlocked.Exchange(ref _lastOutput, Environment.TickCount64);
@@ -597,6 +627,16 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool CancelSynchronousIo(IntPtr thread);
 
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetCurrentThread();
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr source, IntPtr targetProcess, out IntPtr target, uint access,
+            bool inherit, uint options);
+
         /// <summary>The bytes waiting in a pipe; 0 once it has ended.</summary>
         public static int BytesInPipe(SafeHandle pipe) =>
             PeekNamedPipe(pipe, IntPtr.Zero, 0, IntPtr.Zero, out var available, IntPtr.Zero) ? (int)Math.Min(available, int.MaxValue) : 0;
@@ -611,8 +651,16 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             return ok;
         }
 
-        /// <summary>A handle to the calling thread that CancelSynchronousIo accepts; zero if Windows refuses one.</summary>
-        public static IntPtr CurrentThreadForCancel() => OpenThread(THREAD_TERMINATE, false, GetCurrentThreadId());
+        /// <summary>A handle to the calling thread that CancelSynchronousIo accepts (OpenThread, else a duplicate of the
+        /// thread's pseudo handle); zero if Windows refuses both.</summary>
+        public static IntPtr CurrentThreadForCancel()
+        {
+            var thread = OpenThread(THREAD_TERMINATE, false, GetCurrentThreadId());
+            if (thread == IntPtr.Zero
+                && !DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), out thread, THREAD_TERMINATE, false, 0))
+                thread = IntPtr.Zero;
+            return thread;
+        }
 
         /// <summary>A job whose processes end when its last handle closes (the engine crashing included); zero
         /// when Windows refuses one.</summary>

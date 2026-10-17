@@ -231,6 +231,28 @@ public sealed class PlatformProcessLauncherTests : IDisposable
 
     /// <summary>The pumps first read 5.5 s after the start, past the 5 s after the exit, as a reader did under load on
     /// 2026-10-15 (late-output got no line): the line is still there.</summary>
+    /// <summary>Windows only: with no thread handle to cancel a pump's read, a child left holding the pipe could hold up
+    /// the end, so the launcher ends the tool at once and reports that it couldn't start.</summary>
+    [Fact]
+    public void AToolWhoseReadsCantBeCancelledIsEndedAtOnce()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var marker = Path.Combine(_dir, "survived.txt");
+        var script = Script("survive.cmd", "@echo off\nping -n 3 127.0.0.1 >nul\necho x> \"" + marker + "\"\n");
+        PlatformProcessLauncher.NoCancelHandleForTests = true;
+        try
+        {
+            var e = Assert.Throws<BroFailure>(() => _launcher.Start(Spec(script)));
+            Assert.Equal("process.couldNotStart", e.Error.Code);
+        }
+        finally
+        {
+            PlatformProcessLauncher.NoCancelHandleForTests = false;
+        }
+        Thread.Sleep(TimeSpan.FromSeconds(4));
+        Assert.False(File.Exists(marker)); // the tool didn't go on unwatched
+    }
+
     [Fact] // a-reader-that-starts-late-loses-nothing
     public void AReaderThatStartsLateLosesNothing()
     {
