@@ -1,0 +1,1618 @@
+{
+  "description": "JobService (plan §11.1, §13.1; owner 2026-10-17): creates jobs, runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones. create(request): a new id from the IdGenerator; the job goes into its queue (JobPlanner.queue(kind)) at once, in the order jobs are created, at the end of it; its record is stored (state queued, its place in the queue as position, the request, the planner's steps as its plan when there are any, createdAt now) before jobChanged announces it (with its position), then it runs. start() runs the jobs the store has unfinished (what RecoveryService left queued), in the store's order (queue, position, createdAt). Every active job's place in its queue is stored when it changes (a transaction that changes only the position). cancel(job): a job it runs is cancelled through the runner (one cancelled before its run starts runs no step); one nothing runs is finished at once as cancelled (job.cancelledByUser, jobFinished); a finished one stays as it is; job.notFound. retry(job): a finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by hand (not automatic, no media generation); job.notRetryable for any other (an interrupted one is continued in session D); job.notFound. decide(job, decisionId, answer): job.notAwaitingDecision unless the job waits for that question, server.badRequest for an answer it doesn't offer, job.notFound. move(job, by) and startNow(job): a job that waits to start a step (queued, waitingForResources, blocked) moves in its queue (stopping at the ends) or goes first and past the acquisitions cap; job.notQueued for one that runs a step, waits for an answer or has finished; job.notFound. query(q): newest first (createdAt, then id), a page of limit (1-500, default 50) from cursor (an offset as text), next (null on the last page) and total; running jobs as the runner sees them, waiting ones with their position; the states are the stored ones; server.badRequest for a bad limit or cursor. log(job, after): the lines after seq, including a running step's lines not yet written; job.notFound. The harness is pipeline-runner's (real executor, Scheduler, EventBus and PipelineRunner, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, the same fake steps) with a JobService over it and an IdGenerator that counts on from the given jobs (00000000-0000-4000-8000-000000000001, ...); a name it doesn't know (nosuch) is the id 00000000-0000-4000-8000-0000000000ff. Given: limits (SchedulerLimits: acquisitions), and per job also state (queued), outcome, position (0), automatic, mediaGeneration, created (an instant; default the clock's). Ops: start; create {as, kind (videoDisc), title (its name), driveId, automatic, mediaGeneration}; cancel <job> or {job, expectError}; retry {job, as, expectError}; decide {job, decisionId, answer, expectError}; move {job, by, expectError}; startNow <job> or {job, expectError}; open <gate>; steps {kind: behaviour} (from then on); query {states, outcomes, kind, queue, driveId, cursor, limit, expectError} and log {job, after, expectError} (their results, in order, are expect.queries and expect.logs); holdInserts / releaseInserts (the store's job inserts wait from then on until released; a held insert counts as parked). After each op the harness settles as pipeline-runner's does; an op's error is checked once the case's ops are done. Always: no jobChanged comes before the job's record is stored. Expect: outcomes, lines (pipeline-runner's, and 'changed queued - position <n>' for create's), queueLines, steps, outputs as pipeline-runner's; records {job: {state, outcome, queue, position, automatic, mediaGeneration, title, driveId, plan}} (only the members given; null: absent); queries [{items ['<job> <state>[ <outcome>][ position <n>][ step <progress.step>]'], next, total} or {error}]; logs [['<seq> <code>'] or {error}].",
+  "functions": [
+    "JobService.start",
+    "JobService.create",
+    "JobService.cancel",
+    "JobService.retry",
+    "JobService.decide",
+    "JobService.move",
+    "JobService.startNow",
+    "JobService.query",
+    "JobService.log",
+    "PipelineRunner.job",
+    "PipelineRunner.log",
+    "JobLog.decode",
+    "Scheduler.position"
+  ],
+  "cases": [
+    {
+      "id": "create-queues-stores-announces-and-runs",
+      "given": {
+        "jobs": [],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "j",
+              "title": "Disc"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "j": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "j": [
+            "changed queued - position 0",
+            "changed running probe",
+            "step probe succeeded",
+            "changed running identify",
+            "step identify succeeded",
+            "changed running plan",
+            "step plan succeeded",
+            "finished succeeded"
+          ]
+        },
+        "queueLines": [
+          "acquisition: j",
+          "acquisition: "
+        ],
+        "records": {
+          "j": {
+            "state": "finished",
+            "outcome": "succeeded",
+            "queue": "acquisition",
+            "position": 0,
+            "automatic": false,
+            "mediaGeneration": null,
+            "title": "Disc",
+            "plan": [
+              "probe",
+              "identify",
+              "plan"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "jobs-wait-in-the-order-they-were-created",
+      "given": {
+        "jobs": [],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "b",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "c",
+              "driveId": "d"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "lines": {
+          "a": [
+            "changed queued - position 0",
+            "changed running probe"
+          ],
+          "b": [
+            "changed queued - position 1",
+            "changed waitingForResources probe"
+          ],
+          "c": [
+            "changed queued - position 2",
+            "changed waitingForResources probe"
+          ]
+        },
+        "queueLines": [
+          "acquisition: a",
+          "acquisition: a b",
+          "acquisition: a b c"
+        ],
+        "records": {
+          "a": {
+            "state": "running",
+            "position": 0
+          },
+          "b": {
+            "state": "queued",
+            "position": 1
+          },
+          "c": {
+            "state": "queued",
+            "position": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "kinds-start-in-their-queues",
+      "given": {
+        "jobs": [],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "v",
+              "kind": "verify"
+            }
+          },
+          {
+            "create": {
+              "as": "r",
+              "kind": "runCommand"
+            }
+          },
+          {
+            "create": {
+              "as": "a",
+              "kind": "audioCd"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "records": {
+          "v": {
+            "queue": "maintenance",
+            "plan": null
+          },
+          "r": {
+            "queue": "processing",
+            "plan": null
+          },
+          "a": {
+            "queue": "acquisition",
+            "plan": null
+          }
+        },
+        "outcomes": {
+          "v": {
+            "outcome": "failed",
+            "error": {
+              "code": "internal.unexpected"
+            }
+          },
+          "r": {
+            "outcome": "failed",
+            "error": {
+              "code": "internal.unexpected"
+            }
+          },
+          "a": {
+            "outcome": "failed",
+            "error": {
+              "code": "internal.unexpected"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cancel-a-waiting-job",
+      "given": {
+        "jobs": [],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "b",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "c",
+              "driveId": "d"
+            }
+          },
+          {
+            "cancel": "b"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "b": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "lines": {
+          "b": [
+            "changed queued - position 1",
+            "changed waitingForResources probe",
+            "finished cancelled job.cancelledByUser"
+          ]
+        },
+        "queueLines": [
+          "acquisition: a",
+          "acquisition: a b",
+          "acquisition: a b c",
+          "acquisition: a c"
+        ],
+        "steps": {
+          "b": []
+        },
+        "records": {
+          "b": {
+            "state": "finished",
+            "outcome": "cancelled"
+          },
+          "c": {
+            "state": "queued",
+            "position": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "cancel-a-running-job",
+      "given": {
+        "jobs": [],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a",
+              "driveId": "d"
+            }
+          },
+          {
+            "cancel": "a"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "a": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "lines": {
+          "a": [
+            "changed queued - position 0",
+            "changed running probe",
+            "step probe cancelled",
+            "finished cancelled job.cancelledByUser"
+          ]
+        }
+      }
+    },
+    {
+      "id": "cancel-before-the-run-starts",
+      "given": {
+        "jobs": [],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "holdInserts": true
+          },
+          {
+            "create": {
+              "as": "a"
+            }
+          },
+          {
+            "cancel": "a"
+          },
+          {
+            "releaseInserts": true
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "a": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "lines": {
+          "a": [
+            "changed queued - position 0",
+            "finished cancelled job.cancelledByUser"
+          ]
+        },
+        "steps": {
+          "a": []
+        },
+        "records": {
+          "a": {
+            "state": "finished",
+            "outcome": "cancelled"
+          }
+        }
+      }
+    },
+    {
+      "id": "cancel-a-job-nothing-runs",
+      "given": {
+        "jobs": [
+          {
+            "name": "q"
+          }
+        ],
+        "ops": [
+          {
+            "cancel": "q"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "q": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "lines": {
+          "q": [
+            "finished cancelled job.cancelledByUser"
+          ]
+        },
+        "records": {
+          "q": {
+            "state": "finished",
+            "outcome": "cancelled"
+          }
+        }
+      }
+    },
+    {
+      "id": "cancel-a-finished-job-changes-nothing",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed"
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "cancel": "f"
+          },
+          {
+            "cancel": {
+              "job": "nosuch",
+              "expectError": "job.notFound"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "lines": {
+          "f": []
+        },
+        "records": {
+          "f": {
+            "state": "finished",
+            "outcome": "failed"
+          }
+        }
+      }
+    },
+    {
+      "id": "start-runs-the-unfinished-jobs-from-where-they-stopped",
+      "given": {
+        "jobs": [
+          {
+            "name": "x",
+            "driveId": "d1",
+            "position": 1,
+            "plan": [
+              "probe",
+              "identify"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              }
+            ]
+          },
+          {
+            "name": "y",
+            "driveId": "d2",
+            "position": 0,
+            "plan": [
+              "probe",
+              "identify"
+            ]
+          },
+          {
+            "name": "z",
+            "state": "finished",
+            "outcome": "succeeded"
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "x": {
+            "outcome": "succeeded"
+          },
+          "y": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "x": [
+            "changed running identify",
+            "step identify succeeded",
+            "finished succeeded"
+          ],
+          "y": [
+            "changed running probe",
+            "step probe succeeded",
+            "changed running identify",
+            "step identify succeeded",
+            "finished succeeded"
+          ],
+          "z": []
+        },
+        "steps": {
+          "x": [
+            "probe succeeded",
+            "identify succeeded"
+          ],
+          "y": [
+            "probe succeeded",
+            "identify succeeded"
+          ]
+        }
+      }
+    },
+    {
+      "id": "start-queues-them-in-the-stores-order",
+      "given": {
+        "jobs": [
+          {
+            "name": "x",
+            "driveId": "d1",
+            "position": 1,
+            "plan": [
+              "probe",
+              "identify"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              }
+            ]
+          },
+          {
+            "name": "y",
+            "driveId": "d2",
+            "position": 0,
+            "plan": [
+              "probe",
+              "identify"
+            ]
+          }
+        ],
+        "steps": {
+          "probe": {
+            "gate": "g"
+          },
+          "identify": {
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          }
+        ]
+      },
+      "expect": {
+        "queueLines": [
+          "acquisition: y",
+          "acquisition: y x"
+        ],
+        "lines": {
+          "x": [
+            "changed running identify"
+          ],
+          "y": [
+            "changed running probe"
+          ]
+        }
+      }
+    },
+    {
+      "id": "start-stores-the-places-the-queue-gives",
+      "given": {
+        "jobs": [
+          {
+            "name": "x",
+            "driveId": "d1",
+            "position": 7
+          },
+          {
+            "name": "y",
+            "driveId": "d2",
+            "position": 3
+          }
+        ],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          }
+        ]
+      },
+      "expect": {
+        "queueLines": [
+          "acquisition: y",
+          "acquisition: y x"
+        ],
+        "records": {
+          "x": {
+            "state": "running",
+            "position": 1
+          },
+          "y": {
+            "state": "running",
+            "position": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "retry-a-failed-job-as-a-new-job",
+      "given": {
+        "jobs": [],
+        "steps": {
+          "probe": {
+            "fail": {
+              "code": "process.savedNothing",
+              "params": {
+                "tool": "makemkvcon"
+              }
+            }
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a",
+              "title": "Disc",
+              "driveId": "d"
+            }
+          },
+          {
+            "steps": {
+              "probe": {}
+            }
+          },
+          {
+            "retry": {
+              "job": "a",
+              "as": "b"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "a": {
+            "outcome": "failed",
+            "error": {
+              "code": "process.savedNothing"
+            }
+          },
+          "b": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "b": [
+            "changed queued - position 0",
+            "changed running probe",
+            "step probe succeeded",
+            "changed running identify",
+            "step identify succeeded",
+            "changed running plan",
+            "step plan succeeded",
+            "finished succeeded"
+          ]
+        },
+        "records": {
+          "a": {
+            "state": "finished",
+            "outcome": "failed"
+          },
+          "b": {
+            "state": "finished",
+            "outcome": "succeeded",
+            "title": "Disc",
+            "driveId": "d",
+            "automatic": false
+          }
+        }
+      }
+    },
+    {
+      "id": "a-retry-is-started-by-hand",
+      "given": {
+        "jobs": [
+          {
+            "name": "a",
+            "state": "finished",
+            "outcome": "failed",
+            "driveId": "d",
+            "automatic": true,
+            "mediaGeneration": 4
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "retry": {
+              "job": "a",
+              "as": "b"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "b": {
+            "outcome": "succeeded"
+          }
+        },
+        "records": {
+          "b": {
+            "automatic": false,
+            "mediaGeneration": null,
+            "driveId": "d",
+            "plan": [
+              "probe",
+              "identify",
+              "plan"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "retry-needs-a-finished-job-that-didnt-succeed",
+      "given": {
+        "jobs": [
+          {
+            "name": "s",
+            "state": "finished",
+            "outcome": "succeeded"
+          },
+          {
+            "name": "i",
+            "state": "finished",
+            "outcome": "interrupted"
+          },
+          {
+            "name": "r",
+            "state": "finished",
+            "outcome": "succeededWithReadErrors"
+          },
+          {
+            "name": "p",
+            "state": "finished",
+            "outcome": "succeededStepsFailed"
+          },
+          {
+            "name": "k",
+            "state": "finished",
+            "outcome": "skipped"
+          },
+          {
+            "name": "c",
+            "state": "finished",
+            "outcome": "cancelled"
+          }
+        ],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "run",
+              "driveId": "d"
+            }
+          },
+          {
+            "retry": {
+              "job": "s",
+              "expectError": "job.notRetryable"
+            }
+          },
+          {
+            "retry": {
+              "job": "i",
+              "expectError": "job.notRetryable"
+            }
+          },
+          {
+            "retry": {
+              "job": "r",
+              "expectError": "job.notRetryable"
+            }
+          },
+          {
+            "retry": {
+              "job": "p",
+              "expectError": "job.notRetryable"
+            }
+          },
+          {
+            "retry": {
+              "job": "run",
+              "expectError": "job.notRetryable"
+            }
+          },
+          {
+            "retry": {
+              "job": "nosuch",
+              "expectError": "job.notFound"
+            }
+          },
+          {
+            "steps": {
+              "probe": {}
+            }
+          },
+          {
+            "retry": {
+              "job": "k",
+              "as": "k2"
+            }
+          },
+          {
+            "retry": {
+              "job": "c",
+              "as": "c2"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "k2": {
+            "outcome": "succeeded"
+          },
+          "c2": {
+            "outcome": "succeeded"
+          }
+        }
+      }
+    },
+    {
+      "id": "decide-answers-the-question",
+      "given": {
+        "jobs": [],
+        "steps": {
+          "identify": {
+            "ask": {
+              "id": "archivedBefore",
+              "question": {
+                "code": "decision.archivedBefore",
+                "params": {
+                  "folder": "/lib/Sample Movie",
+                  "day": "2026-10-01"
+                }
+              },
+              "answers": [
+                "ripAgain",
+                "skip"
+              ]
+            }
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a"
+            }
+          },
+          {
+            "decide": {
+              "job": "a",
+              "decisionId": "archivedBefore",
+              "answer": "ripAgain"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "a": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "a": [
+            "changed queued - position 0",
+            "changed running probe",
+            "step probe succeeded",
+            "changed running identify",
+            "changed awaitingDecision identify decision archivedBefore",
+            "changed running identify",
+            "step identify succeeded",
+            "changed running plan",
+            "step plan succeeded",
+            "finished succeeded"
+          ]
+        },
+        "outputs": {
+          "a": {
+            "identify": {
+              "answer": "ripAgain"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "decide-needs-that-question-and-one-of-its-answers",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed"
+          }
+        ],
+        "steps": {
+          "identify": {
+            "ask": {
+              "id": "archivedBefore",
+              "question": {
+                "code": "decision.archivedBefore",
+                "params": {
+                  "folder": "/lib/Sample Movie",
+                  "day": "2026-10-01"
+                }
+              },
+              "answers": [
+                "ripAgain",
+                "skip"
+              ]
+            }
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a"
+            }
+          },
+          {
+            "decide": {
+              "job": "a",
+              "decisionId": "another",
+              "answer": "ripAgain",
+              "expectError": "job.notAwaitingDecision"
+            }
+          },
+          {
+            "decide": {
+              "job": "a",
+              "decisionId": "archivedBefore",
+              "answer": "eject",
+              "expectError": "server.badRequest"
+            }
+          },
+          {
+            "decide": {
+              "job": "f",
+              "decisionId": "archivedBefore",
+              "answer": "ripAgain",
+              "expectError": "job.notAwaitingDecision"
+            }
+          },
+          {
+            "decide": {
+              "job": "nosuch",
+              "decisionId": "archivedBefore",
+              "answer": "ripAgain",
+              "expectError": "job.notFound"
+            }
+          },
+          {
+            "decide": {
+              "job": "a",
+              "decisionId": "archivedBefore",
+              "answer": "skip"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "a": {
+            "outcome": "succeeded"
+          }
+        },
+        "outputs": {
+          "a": {
+            "identify": {
+              "answer": "skip"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "move-reorders-waiting-jobs-and-stores-their-places",
+      "given": {
+        "jobs": [],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "b",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "c",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "e",
+              "driveId": "d"
+            }
+          },
+          {
+            "move": {
+              "job": "e",
+              "by": -1
+            }
+          },
+          {
+            "move": {
+              "job": "b",
+              "by": 9
+            }
+          },
+          {
+            "move": {
+              "job": "e",
+              "by": -5
+            }
+          }
+        ]
+      },
+      "expect": {
+        "queueLines": [
+          "acquisition: a",
+          "acquisition: a b",
+          "acquisition: a b c",
+          "acquisition: a b c e",
+          "acquisition: a b e c",
+          "acquisition: a e c b",
+          "acquisition: e a c b"
+        ],
+        "lines": {
+          "e": [
+            "changed queued - position 3",
+            "changed waitingForResources probe"
+          ]
+        },
+        "records": {
+          "e": {
+            "state": "queued",
+            "position": 0
+          },
+          "a": {
+            "state": "running",
+            "position": 1
+          },
+          "c": {
+            "state": "queued",
+            "position": 2
+          },
+          "b": {
+            "state": "queued",
+            "position": 3
+          }
+        }
+      }
+    },
+    {
+      "id": "move-and-start-now-need-a-waiting-job",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed"
+          }
+        ],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          },
+          "identify": {
+            "ask": {
+              "id": "archivedBefore",
+              "question": {
+                "code": "decision.archivedBefore",
+                "params": {
+                  "folder": "/lib/Sample Movie",
+                  "day": "2026-10-01"
+                }
+              },
+              "answers": [
+                "ripAgain",
+                "skip"
+              ]
+            }
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "q",
+              "driveId": "e"
+            }
+          },
+          {
+            "move": {
+              "job": "a",
+              "by": 1,
+              "expectError": "job.notQueued"
+            }
+          },
+          {
+            "startNow": {
+              "job": "a",
+              "expectError": "job.notQueued"
+            }
+          },
+          {
+            "move": {
+              "job": "f",
+              "by": -1,
+              "expectError": "job.notQueued"
+            }
+          },
+          {
+            "startNow": {
+              "job": "f",
+              "expectError": "job.notQueued"
+            }
+          },
+          {
+            "move": {
+              "job": "nosuch",
+              "by": -1,
+              "expectError": "job.notFound"
+            }
+          },
+          {
+            "startNow": {
+              "job": "nosuch",
+              "expectError": "job.notFound"
+            }
+          },
+          {
+            "open": "g"
+          },
+          {
+            "move": {
+              "job": "q",
+              "by": -1,
+              "expectError": "job.notQueued"
+            }
+          },
+          {
+            "startNow": {
+              "job": "q",
+              "expectError": "job.notQueued"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "lines": {
+          "q": [
+            "changed queued - position 1",
+            "changed running probe",
+            "step probe succeeded",
+            "changed running identify",
+            "changed awaitingDecision identify decision archivedBefore"
+          ]
+        }
+      }
+    },
+    {
+      "id": "start-now-puts-a-job-first-and-past-the-acquisitions-cap",
+      "given": {
+        "jobs": [],
+        "limits": {
+          "acquisitions": 1
+        },
+        "steps": {
+          "probe": {
+            "resources": {
+              "acquisition": true
+            },
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a"
+            }
+          },
+          {
+            "create": {
+              "as": "b"
+            }
+          },
+          {
+            "create": {
+              "as": "c"
+            }
+          },
+          {
+            "startNow": "c"
+          }
+        ]
+      },
+      "expect": {
+        "queueLines": [
+          "acquisition: a",
+          "acquisition: a b",
+          "acquisition: a b c",
+          "acquisition: c a b"
+        ],
+        "lines": {
+          "b": [
+            "changed queued - position 1",
+            "changed waitingForResources probe"
+          ],
+          "c": [
+            "changed queued - position 2",
+            "changed waitingForResources probe",
+            "changed running probe"
+          ]
+        },
+        "records": {
+          "c": {
+            "position": 0
+          },
+          "a": {
+            "position": 1
+          },
+          "b": {
+            "position": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "query-newest-first-a-page-at-a-time",
+      "given": {
+        "jobs": [
+          {
+            "name": "f1",
+            "state": "finished",
+            "outcome": "succeeded",
+            "created": "2026-10-01T10:00:00.000Z"
+          },
+          {
+            "name": "f2",
+            "state": "finished",
+            "outcome": "failed",
+            "created": "2026-10-01T11:00:00.000Z"
+          },
+          {
+            "name": "f3",
+            "state": "finished",
+            "outcome": "cancelled",
+            "created": "2026-10-01T12:00:00.000Z",
+            "driveId": "d"
+          }
+        ],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "r",
+              "driveId": "d"
+            }
+          },
+          {
+            "create": {
+              "as": "w",
+              "driveId": "d"
+            }
+          },
+          {
+            "query": {
+              "limit": 2
+            }
+          },
+          {
+            "query": {
+              "limit": 2,
+              "cursor": "2"
+            }
+          },
+          {
+            "query": {
+              "limit": 2,
+              "cursor": "4"
+            }
+          },
+          {
+            "query": {
+              "states": [
+                "finished"
+              ],
+              "outcomes": [
+                "failed",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "query": {
+              "states": [
+                "queued"
+              ]
+            }
+          },
+          {
+            "query": {
+              "driveId": "d",
+              "states": [
+                "running",
+                "finished"
+              ]
+            }
+          },
+          {
+            "query": {
+              "queue": "maintenance"
+            }
+          },
+          {
+            "query": {
+              "limit": 0,
+              "expectError": "server.badRequest"
+            }
+          },
+          {
+            "query": {
+              "limit": 501,
+              "expectError": "server.badRequest"
+            }
+          },
+          {
+            "query": {
+              "cursor": "two",
+              "expectError": "server.badRequest"
+            }
+          },
+          {
+            "query": {
+              "cursor": "-1",
+              "expectError": "server.badRequest"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "queries": [
+          {
+            "items": [
+              "w waitingForResources position 1 step probe",
+              "r running step probe"
+            ],
+            "next": "2",
+            "total": 5
+          },
+          {
+            "items": [
+              "f3 finished cancelled",
+              "f2 finished failed"
+            ],
+            "next": "4",
+            "total": 5
+          },
+          {
+            "items": [
+              "f1 finished succeeded"
+            ],
+            "next": null,
+            "total": 5
+          },
+          {
+            "items": [
+              "f3 finished cancelled",
+              "f2 finished failed"
+            ],
+            "next": null,
+            "total": 2
+          },
+          {
+            "items": [
+              "w waitingForResources position 1 step probe"
+            ],
+            "next": null,
+            "total": 1
+          },
+          {
+            "items": [
+              "r running step probe",
+              "f3 finished cancelled"
+            ],
+            "next": null,
+            "total": 2
+          },
+          {
+            "items": [],
+            "next": null,
+            "total": 0
+          },
+          {
+            "error": "server.badRequest"
+          },
+          {
+            "error": "server.badRequest"
+          },
+          {
+            "error": "server.badRequest"
+          },
+          {
+            "error": "server.badRequest"
+          }
+        ]
+      }
+    },
+    {
+      "id": "log-after-a-seq-with-a-running-steps-lines",
+      "given": {
+        "jobs": [
+          {
+            "name": "g",
+            "state": "finished",
+            "outcome": "failed",
+            "log": [
+              "recovery.requeued",
+              "recovery.resumed",
+              "recovery.interrupted"
+            ]
+          },
+          {
+            "name": "n",
+            "state": "finished",
+            "outcome": "failed"
+          }
+        ],
+        "steps": {
+          "probe": {
+            "log": [
+              "disc.found"
+            ]
+          },
+          "identify": {
+            "log": [
+              "identity.resolved"
+            ],
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "create": {
+              "as": "a"
+            }
+          },
+          {
+            "log": {
+              "job": "g",
+              "after": 1
+            }
+          },
+          {
+            "log": {
+              "job": "g",
+              "after": 0
+            }
+          },
+          {
+            "log": {
+              "job": "n",
+              "after": 0
+            }
+          },
+          {
+            "log": {
+              "job": "a",
+              "after": 0
+            }
+          },
+          {
+            "log": {
+              "job": "a",
+              "after": 1
+            }
+          },
+          {
+            "log": {
+              "job": "nosuch",
+              "after": 0,
+              "expectError": "job.notFound"
+            }
+          },
+          {
+            "open": "g"
+          },
+          {
+            "log": {
+              "job": "a",
+              "after": 0
+            }
+          }
+        ]
+      },
+      "expect": {
+        "logs": [
+          [
+            "2 recovery.resumed",
+            "3 recovery.interrupted"
+          ],
+          [
+            "1 recovery.requeued",
+            "2 recovery.resumed",
+            "3 recovery.interrupted"
+          ],
+          [],
+          [
+            "1 disc.found",
+            "2 identity.resolved"
+          ],
+          [
+            "2 identity.resolved"
+          ],
+          {
+            "error": "job.notFound"
+          },
+          [
+            "1 disc.found",
+            "2 identity.resolved"
+          ]
+        ]
+      }
+    }
+  ]
+}

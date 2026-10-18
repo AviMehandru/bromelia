@@ -25,10 +25,42 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
     func transaction<T: Sendable>(_ block: @Sendable (any Store) async throws(BroError) -> T) async throws(BroError) -> T { try await block(self) }
     func migrate() async throws(BroError) {}
 
+    private var holding = false
+    private var held: [(job: JobRecord, done: CheckedContinuation<Void, Never>)] = []
+
+    /// From now on job inserts wait until `releaseInserts()` (a test's way to act while one is written).
+    func holdInserts() { lock.withLock { holding = true } }
+
+    func releaseInserts() {
+        let ready = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            holding = false
+            for (job, _) in held { put(job) }
+            defer { held.removeAll() }
+            return held.map(\.done)
+        }
+        ready.forEach { $0.resume() }
+    }
+
+    /// Inserts waiting for `releaseInserts()`.
+    var heldInserts: Int { lock.withLock { held.count } }
+
+    /// The lock held.
+    private func put(_ job: JobRecord) {
+        if jobsById[job.id] == nil { order.append(job.id) }
+        jobsById[job.id] = job
+    }
+
     func insert(_ job: JobRecord) async throws(BroError) {
-        lock.withLock {
-            if jobsById[job.id] == nil { order.append(job.id) }
-            jobsById[job.id] = job
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            let now = lock.withLock { () -> Bool in
+                if holding {
+                    held.append((job, done))
+                    return false
+                }
+                put(job)
+                return true
+            }
+            if now { done.resume() }
         }
     }
     func update(_ job: JobRecord) async throws(BroError) { lock.withLock { jobsById[job.id] = job } }

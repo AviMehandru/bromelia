@@ -10,7 +10,12 @@ public final class PipelineRunner {
     /// A job while it runs.
     @EngineActor
     final class Live {
-        var record: JobRecord
+        /// Loaded when the run starts; until then the job is already live (it can be cancelled).
+        var loaded: JobRecord?
+        var record: JobRecord {
+            get { loaded! }
+            set { loaded = newValue }
+        }
         let cancel = CancellationSource()
         var steps: [StepKind] = []
         var seq = -1
@@ -23,9 +28,8 @@ public final class PipelineRunner {
         var logBefore: [UInt8] = []
         var log: [LogLineDto] = []
         var directoryMade = false
+        var logRead = false
         var config: Config?
-
-        init(record: JobRecord) { self.record = record }
     }
 
     private let executor: EngineExecutor
@@ -52,14 +56,22 @@ public final class PipelineRunner {
 
     // MARK: Commands
 
-    /// Runs the job to its end, or until it is cancelled; returns how it ended. job.notFound when there is no such job.
+    /// Runs the job to its end, or until it is cancelled; returns how it ended. The job is live (cancel reaches it) as soon
+    /// as this is called, before its record is loaded. job.notFound when there is no such job.
     public func run(_ jobId: Id) async throws(BroError) -> Decided {
-        let store = store
-        guard let record = try await executor.worker({ () async throws(BroError) -> JobRecord? in try await store.jobs().load(jobId) }) else {
-            throw BroError(MessageCode.wire(.jobNotFound), [("jobId", .string(jobId.value))])
-        }
-        let l = Live(record: record)
+        let l = Live()
         live[jobId] = l
+        let store = store
+        do throws(BroError) {
+            guard let record = try await executor.worker({ () async throws(BroError) -> JobRecord? in try await store.jobs().load(jobId) }) else {
+                throw BroError(MessageCode.wire(.jobNotFound), [("jobId", .string(jobId.value))])
+            }
+            l.loaded = record
+        } catch {
+            live.removeValue(forKey: jobId)
+            l.cancel.close()
+            throw error
+        }
         var decided: Decided
         do throws(BroError) {
             decided = try await runSteps(l)
@@ -80,6 +92,19 @@ public final class PipelineRunner {
             l.decision = nil
             d.answer.resume(returning: .failure(BroError(MessageCode.wire(.jobCancelled))))
         }
+    }
+
+    /// The job as it runs (progress, blockedBy, decision); nil when it isn't running here or its record isn't loaded yet.
+    public func job(_ jobId: Id) -> JobDto? {
+        guard let l = live[jobId], l.loaded != nil else { return nil }
+        return dto(l)
+    }
+
+    /// The running job's log: what the file held when it started, then this run's lines, written or not; nil when it
+    /// isn't running here or hasn't read its log yet.
+    public func log(_ jobId: Id) -> [LogLineDto]? {
+        guard let l = live[jobId], l.logRead else { return nil }
+        return JobLog.decode(l.logBefore) + l.log
     }
 
     /// Answers the job's question. job.notAwaitingDecision when it has none; server.badRequest for an answer the
@@ -118,6 +143,7 @@ public final class PipelineRunner {
         let logFile = jobDirectory(jobId) + "/" + JobLog.fileName
         l.logBefore = try await executor.worker { () throws(BroError) -> [UInt8] in fs.exists(logFile) ? try fs.read(logFile) : [] }
         l.logSeq = Int64(l.logBefore.filter { $0 == UInt8(ascii: "\n") }.count)
+        l.logRead = true
         l.directoryMade = !l.logBefore.isEmpty
         let done = JobPlanner.done(try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) })
         var outputs = done.map { $0.output ?? StepOutput(kind: $0.kind, data: .object([])) }
@@ -126,6 +152,10 @@ public final class PipelineRunner {
         var cancelled = false
         var seq = done.count
         while seq < l.steps.count {
+            if l.cancel.token.isCancelled { // cancelled between steps, or before the first
+                cancelled = true
+                break
+            }
             let kind = l.steps[seq]
             guard let step = registry.step(kind) else { throw PipelineRunner.unexpected("no step \(kind.rawValue)") }
             l.seq = seq
@@ -223,7 +253,12 @@ public final class PipelineRunner {
 
     // MARK: State and events
 
+    /// Stores the record, with the job's place in its queue as it is now (JobService stores it when it changes; a stale one
+    /// here would undo that).
     private func save(_ l: Live, _ record: JobRecord) async throws(BroError) {
+        var placed = record
+        placed.position = scheduler.position(record.id) ?? record.position
+        let record = placed
         l.record = record
         let store = store
         try await executor.worker { () async throws(BroError) in try await store.jobs().update(record) }

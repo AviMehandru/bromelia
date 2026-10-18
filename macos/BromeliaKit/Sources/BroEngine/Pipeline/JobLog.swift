@@ -17,6 +17,22 @@ public enum JobLog {
         return Array(text.utf8)
     }
 
+    /// The lines of a log file, each with its line number as its seq (from 1). A line that isn't a log line keeps its number
+    /// and is left out; so is an unfinished last line (no line break), as the runner counts.
+    public static func decode(_ bytes: [UInt8]) -> [LogLineDto] {
+        var lines: [LogLineDto] = []
+        let raw = bytes.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
+        for (i, text) in raw.dropLast().enumerated() {
+            guard let j = JsonValue.parse(Array(text)), let t = j["t"]?.string.flatMap(Instant.parse),
+                  let severity = j["severity"]?.string.flatMap(Severity.init(rawValue:)), let code = j["code"]?.string.flatMap(MessageCode.parse)
+            else { continue }
+            var params: [(key: String, value: JsonValue)] = []
+            if case let .object(members)? = j["params"] { params = members }
+            lines.append(LogLineDto(seq: Int64(i + 1), t: t, severity: severity, code: code, params: params))
+        }
+        return lines
+    }
+
     /// Adds the lines to the end of the job folder's log (the folder made when it isn't there), written atomically, 0600.
     public static func append(_ fs: any FileSystem, jobDirectory: String, lines: [LogLineDto]) throws(BroError) {
         if lines.isEmpty { return }

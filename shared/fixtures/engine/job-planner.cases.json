@@ -1,12 +1,256 @@
 {
-  "description": "JobPlanner.initial(request) (plan §15.2, §20.1): the steps a job starts with; PlanStep appends the rest. A video disc: awaitMedia when the rip is automatic and from a drive, probe, reconcile when a session made the choices, identify, plan. (readNavigation joins with the episode steps in phase 5.) Kinds whose steps aren't built yet get no steps (the runner then fails the job with internal.unexpected).",
-  "functions": ["JobPlanner.initial"],
+  "description": "JobPlanner.initial(request) (plan §15.2, §20.1): the steps a job starts with; PlanStep appends the rest. A video disc: awaitMedia when the rip is automatic and from a drive, probe, reconcile when a session made the choices, identify, plan. (readNavigation joins with the episode steps in phase 5.) Kinds whose steps aren't built yet get no steps (the runner then fails the job with internal.unexpected). JobPlanner.queue(kind) (plan §21): the queue a job starts in: a job that reads a disc (videoDisc, audioCd, dataDisc, readErrorRetry), acquisition; runCommand and transcode, processing; the archive's checks and copies (verify, replicate, parity, repair, rescan), maintenance. A case with expect.queue checks it.",
+  "functions": [
+    "JobPlanner.initial",
+    "JobPlanner.queue"
+  ],
   "cases": [
-    {"id": "a-disc-by-hand", "given": {"request": {"kind": "videoDisc", "title": "Disc", "driveId": "drv-0123456789abcdef"}}, "expect": {"steps": ["probe", "identify", "plan"]}},
-    {"id": "an-automatic-rip", "given": {"request": {"kind": "videoDisc", "title": "Disc", "driveId": "drv-0123456789abcdef", "automatic": true}}, "expect": {"steps": ["awaitMedia", "probe", "identify", "plan"]}},
-    {"id": "automatic-without-a-drive", "given": {"request": {"kind": "videoDisc", "title": "Disc", "automatic": true}}, "expect": {"steps": ["probe", "identify", "plan"]}},
-    {"id": "from-an-opened-disc", "given": {"request": {"kind": "videoDisc", "title": "Disc", "driveId": "drv-0123456789abcdef", "sessionId": "00000000-0000-4000-8000-0000000000aa"}}, "expect": {"steps": ["probe", "reconcile", "identify", "plan"]}},
-    {"id": "an-image", "given": {"request": {"kind": "videoDisc", "title": "Disc"}}, "expect": {"steps": ["probe", "identify", "plan"]}},
-    {"id": "not-built-yet", "given": {"request": {"kind": "verify", "title": "Library"}}, "expect": {"steps": []}}
+    {
+      "id": "a-disc-by-hand",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "Disc",
+          "driveId": "drv-0123456789abcdef"
+        }
+      },
+      "expect": {
+        "steps": [
+          "probe",
+          "identify",
+          "plan"
+        ]
+      }
+    },
+    {
+      "id": "an-automatic-rip",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "Disc",
+          "driveId": "drv-0123456789abcdef",
+          "automatic": true
+        }
+      },
+      "expect": {
+        "steps": [
+          "awaitMedia",
+          "probe",
+          "identify",
+          "plan"
+        ]
+      }
+    },
+    {
+      "id": "automatic-without-a-drive",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "Disc",
+          "automatic": true
+        }
+      },
+      "expect": {
+        "steps": [
+          "probe",
+          "identify",
+          "plan"
+        ]
+      }
+    },
+    {
+      "id": "from-an-opened-disc",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "Disc",
+          "driveId": "drv-0123456789abcdef",
+          "sessionId": "00000000-0000-4000-8000-0000000000aa"
+        }
+      },
+      "expect": {
+        "steps": [
+          "probe",
+          "reconcile",
+          "identify",
+          "plan"
+        ]
+      }
+    },
+    {
+      "id": "an-image",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "Disc"
+        }
+      },
+      "expect": {
+        "steps": [
+          "probe",
+          "identify",
+          "plan"
+        ]
+      }
+    },
+    {
+      "id": "not-built-yet",
+      "given": {
+        "request": {
+          "kind": "verify",
+          "title": "Library"
+        }
+      },
+      "expect": {
+        "steps": []
+      }
+    },
+    {
+      "id": "queue-videoDisc",
+      "given": {
+        "request": {
+          "kind": "videoDisc",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [
+          "probe",
+          "identify",
+          "plan"
+        ],
+        "queue": "acquisition"
+      }
+    },
+    {
+      "id": "queue-audioCd",
+      "given": {
+        "request": {
+          "kind": "audioCd",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "acquisition"
+      }
+    },
+    {
+      "id": "queue-dataDisc",
+      "given": {
+        "request": {
+          "kind": "dataDisc",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "acquisition"
+      }
+    },
+    {
+      "id": "queue-readErrorRetry",
+      "given": {
+        "request": {
+          "kind": "readErrorRetry",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "acquisition"
+      }
+    },
+    {
+      "id": "queue-runCommand",
+      "given": {
+        "request": {
+          "kind": "runCommand",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "processing"
+      }
+    },
+    {
+      "id": "queue-transcode",
+      "given": {
+        "request": {
+          "kind": "transcode",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "processing"
+      }
+    },
+    {
+      "id": "queue-verify",
+      "given": {
+        "request": {
+          "kind": "verify",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "maintenance"
+      }
+    },
+    {
+      "id": "queue-replicate",
+      "given": {
+        "request": {
+          "kind": "replicate",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "maintenance"
+      }
+    },
+    {
+      "id": "queue-parity",
+      "given": {
+        "request": {
+          "kind": "parity",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "maintenance"
+      }
+    },
+    {
+      "id": "queue-repair",
+      "given": {
+        "request": {
+          "kind": "repair",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "maintenance"
+      }
+    },
+    {
+      "id": "queue-rescan",
+      "given": {
+        "request": {
+          "kind": "rescan",
+          "title": "Job"
+        }
+      },
+      "expect": {
+        "steps": [],
+        "queue": "maintenance"
+      }
+    }
   ]
 }

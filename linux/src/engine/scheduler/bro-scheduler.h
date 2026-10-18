@@ -81,6 +81,9 @@ void bro_scheduler_set_library_offline (BroScheduler *self, const char *library_
 
 void bro_scheduler_update_limits (BroScheduler *self, const BroSchedulerLimits *limits);
 
+/* The job's place in its queue (0 is first); -1 when it is in none. */
+int bro_scheduler_position (BroScheduler *self, const BroId *job_id);
+
 /* Free with bro_queue_orders_free. */
 BroQueueOrders *bro_scheduler_queues (BroScheduler *self);
 

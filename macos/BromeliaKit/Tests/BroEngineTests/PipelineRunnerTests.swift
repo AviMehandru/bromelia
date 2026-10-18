@@ -10,25 +10,26 @@ import Testing
 final class Gates: @unchecked Sendable {
     private let lock = NSLock()
     private var opened: Set<String> = []
-    private var waiters: [(gate: String, job: Id, done: CheckedContinuation<Bool, Never>, id: Int)] = []
+    private var waiters: [(gate: String, job: Id, done: CheckedContinuation<Bool, Never>, id: Int, stubborn: Bool)] = []
     private var cancelledJobs: Set<Id> = []
     private var next = 0
 
-    /// True when the gate opened, false when the job was cancelled first.
-    func wait(_ gate: String, job: Id, cancel: CancellationToken) async -> Bool {
+    /// True when the gate opened, false when the job was cancelled first (never when `ignoresCancel`).
+    func wait(_ gate: String, job: Id, cancel: CancellationToken, ignoresCancel: Bool = false) async -> Bool {
         if lock.withLock({ opened.contains(gate) }) { return true }
         var unregister: (@Sendable () -> Void)?
         let result = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
             let id = lock.withLock { () -> Int? in
                 if opened.contains(gate) { return nil }
                 next += 1
-                waiters.append((gate, job, done, next))
+                waiters.append((gate, job, done, next, ignoresCancel))
                 return next
             }
             guard let id else {
                 done.resume(returning: true)
                 return
             }
+            if ignoresCancel { return }
             unregister = cancel.onCancel { [self] in
                 let w = lock.withLock { () -> CheckedContinuation<Bool, Never>? in
                     guard let i = waiters.firstIndex(where: { $0.id == id }) else { return nil }
@@ -53,17 +54,29 @@ final class Gates: @unchecked Sendable {
 
     func cancelled(_ job: Id) { lock.withLock { _ = cancelledJobs.insert(job) } }
 
-    /// The jobs waiting at a closed gate (not cancelled), one entry per waiting step.
-    func parked() -> [Id] { lock.withLock { waiters.map(\.job).filter { !cancelledJobs.contains($0) } } }
+    /// The jobs waiting at a closed gate (not cancelled, or at a gate that ignores the cancel), one entry per waiting step.
+    func parked() -> [Id] { lock.withLock { waiters.filter { $0.stubborn || !cancelledJobs.contains($0.job) }.map(\.job) } }
 
     func isCancelled(_ job: Id) -> Bool { lock.withLock { cancelledJobs.contains(job) } }
+}
+
+/// What each fake step does; the steps op changes it. Thread-safe.
+final class Behaviours: @unchecked Sendable {
+    private let lock = NSLock()
+    private var map: [StepKind: JsonValue] = [:]
+
+    subscript(kind: StepKind) -> JsonValue {
+        get { lock.withLock { map[kind] ?? .object([]) } }
+        set { lock.withLock { map[kind] = newValue } }
+    }
 }
 
 /// A step that does what the case says.
 struct FakeStep: Step {
     let kind: StepKind
-    let behaviour: JsonValue
+    let behaviours: Behaviours
     let gates: Gates
+    var behaviour: JsonValue { behaviours[kind] }
     var resumability: Resumability { .idempotent }
 
     static func strings(_ j: JsonValue?) -> [String] { (j?.array ?? []).map { $0.string! } }
@@ -96,7 +109,8 @@ struct FakeStep: Step {
             let answer = try await context.decisions.ask(question)
             data = .object([("answer", .string(answer))])
         }
-        if let gate = behaviour["gate"]?.string, !(await gates.wait(gate, job: context.job.id, cancel: context.cancel)) {
+        if let gate = behaviour["gate"]?.string,
+           !(await gates.wait(gate, job: context.job.id, cancel: context.cancel, ignoresCancel: behaviour["ignoresCancel"]?.bool == true)) {
             throw BroError(MessageCode.wire(.jobCancelled))
         }
         let notice: MakemkvNotice? = switch behaviour["notice"]?.string {
@@ -130,20 +144,36 @@ final class PipelineHarness {
     var events: [EngineEvent] = []
     var started: Set<String> = []
     var subscription: Subscription?
+    let behaviours = Behaviours()
+    let service: Bool
+    let ids: CountingIds
+    var jobService: JobService!
+    var calls: [(op: JsonValue, task: Task<Void, Never>)] = []
+    var callErrors: [Int: String] = [:]
+    var queries: [JsonValue] = []
+    var logs: [JsonValue] = []
+    var announcedUnstored: [String] = []
 
-    init(_ given: JsonValue) async throws {
+    /// `service`: job-service cases (cancel and decide go through the JobService).
+    init(_ given: JsonValue, service: Bool = false) async throws {
+        self.service = service
         let gates = Gates()
         self.gates = gates
         bus = EventBus(clock: world.clock)
-        scheduler = Scheduler(executor: world.executor, bus: bus, limits: SchedulerLimits())
-        let steps: [any Step] = StepKind.allCases.map { FakeStep(kind: $0, behaviour: given["steps"]?[$0.rawValue] ?? .object([]), gates: gates) }
+        scheduler = Scheduler(executor: world.executor, bus: bus, limits: SchedulerLimits(acquisitions: Int(given["limits"]?["acquisitions"]?.int ?? 0)))
+        for kind in StepKind.allCases { behaviours[kind] = given["steps"]?[kind.rawValue] ?? .object([]) }
+        let behaviours = behaviours
+        let steps: [any Step] = StepKind.allCases.map { FakeStep(kind: $0, behaviours: behaviours, gates: gates) }
+        ids = CountingIds(Int64(given["jobs"]!.array!.count))
         let unused = UnusedTools()
         if let document = given["config"] { config.document = document }
         let env = StepEnvironment(tools: ToolSet(makemkv: unused, matroska: unused), fs: fs, clock: world.clock, drives: unused, library: unused,
                                   catalog: unused, config: config, driveLookup: unused, makemkvSetup: unused, dataDirectory: "/data")
         runner = PipelineRunner(executor: world.executor, bus: bus, scheduler: scheduler, store: store, registry: StepRegistry(steps),
                                 environment: env, clock: world.engineClock)
-        subscription = bus.subscribe(types: []) { [unowned self] e in self.events.append(e) }
+        jobService = JobService(executor: world.executor, bus: bus, store: store, scheduler: scheduler, runner: runner, clock: world.engineClock,
+                                ids: ids, fs: fs, dataDirectory: "/data")
+        subscription = bus.subscribe(types: []) { [unowned self] e in self.onEvent(e) }
         var n = 0
         for j in given["jobs"]!.array! {
             n += 1
@@ -153,11 +183,15 @@ final class PipelineHarness {
             jobs.append((name, id))
             let kind = JobKind(rawValue: j["kind"]?.string ?? "videoDisc")!
             let title = j["title"]?.string ?? name
-            let request = JobRequest(kind: kind, title: title, automatic: j["automatic"]?.bool == true, driveId: j["driveId"]?.string)
+            let request = JobRequest(kind: kind, title: title, automatic: j["automatic"]?.bool == true, driveId: j["driveId"]?.string,
+                                     mediaGeneration: j["mediaGeneration"]?.int)
             let plan = j["plan"].map { JobPlan(steps: FakeStep.strings($0).map { StepKind(rawValue: $0)! }) }
-            let record = JobRecord(id: id, kind: kind, state: .queued, queue: Queue(rawValue: j["queue"]?.string ?? "acquisition")!, position: 0,
-                                   driveId: request.driveId, automatic: request.automatic, title: title, request: request, plan: plan,
-                                   createdAt: world.clock.now())
+            let state = JobState(rawValue: j["state"]?.string ?? "queued")!
+            let record = JobRecord(id: id, kind: kind, state: state, outcome: j["outcome"]?.string.flatMap(Outcome.init(rawValue:)),
+                                   queue: Queue(rawValue: j["queue"]?.string ?? "acquisition")!, position: Int(j["position"]?.int ?? 0),
+                                   driveId: request.driveId, mediaGeneration: request.mediaGeneration, automatic: request.automatic, title: title,
+                                   request: request, plan: plan, createdAt: j["created"]?.string.flatMap(Instant.parse) ?? world.clock.now(),
+                                   finishedAt: state == .finished ? world.clock.now() : nil)
             try await store.insert(record)
             var seq = 0
             for d in j["done"]?.array ?? [] {
@@ -177,7 +211,18 @@ final class PipelineHarness {
         }
     }
 
-    func id(_ name: String) -> Id { jobs.first { $0.name == name }!.id }
+    func id(_ name: String) -> Id { jobs.first { $0.name == name }?.id ?? Id("00000000-0000-4000-8000-0000000000ff") }
+
+    /// Every event; a jobFinished gives the job's outcome, a jobChanged must come after its record is stored.
+    func onEvent(_ e: EngineEvent) {
+        events.append(e)
+        guard e.type == .jobChanged || e.type == .jobFinished, let job = e.data["job"], let id = job["id"]?.string else { return }
+        if e.type == .jobChanged && store.job(Id(id)) == nil { announcedUnstored.append(id) }
+        if e.type == .jobFinished, let name = jobs.first(where: { $0.id.value == id })?.name {
+            outcomes[name] = Decided(outcome: Outcome(rawValue: job["outcome"]!.string!)!,
+                                     error: job["error"].map { BroError($0["code"]!.string!, $0["params"]?.members ?? []) })
+        }
+    }
     func name(_ id: String) -> String { jobs.first { $0.id.value == id }!.name }
 
     /// The engine has settled: everything still going on is parked (a step at a closed gate, a step waiting for an
@@ -189,13 +234,14 @@ final class PipelineHarness {
         for (name, id) in jobs where started.contains(name) && outcomes[name] == nil {
             let last = events.last { ($0.type == .jobChanged || $0.type == .jobFinished) && $0.data["job"]?["id"]?.string == id.value }
             let state = last?.data["job"]?["state"]?.string
+            if state == nil && service { continue } // a created job not stored yet (its insert held): the activity tells
             if state == "awaitingDecision" && !gates.isCancelled(id) {
                 parked += 1
             } else if !(state == "waitingForResources" || state == "blocked" || atGate.contains(id)) {
                 ok = false
             }
         }
-        return ok && world.executor.activity == parked
+        return ok && world.executor.activity == parked + store.heldInserts
     }
 
     nonisolated func settled() async -> Bool {
@@ -224,10 +270,10 @@ final class PipelineHarness {
             }
         case "open":
             gates.open(arg.string!)
-        case "cancel":
+        case "cancel" where !service:
             gates.cancelled(id(arg.string!))
             runner.cancel(id(arg.string!))
-        case "decide":
+        case "decide" where !service:
             var code: String?
             do throws(BroError) {
                 try runner.decide(id(arg["job"]!.string!), answer: arg["answer"]!.string!)
@@ -242,8 +288,99 @@ final class PipelineHarness {
         case "library":
             let lib = arg["id"]!.string!
             scheduler.setLibraryOffline(lib, reason: arg["online"]!.bool! ? nil : BroError(MessageCode.wire(.libraryOffline), [("library", .string(lib))]))
+        case "holdInserts":
+            store.holdInserts()
+        case "releaseInserts":
+            store.releaseInserts()
+        case "steps":
+            for (kind, behaviour) in arg.members! { behaviours[StepKind(rawValue: kind)!] = behaviour }
+        default:
+            guard service else { throw FixtureError("unknown op \(name)") }
+            let call = try serviceCall(name, arg)
+            let index = calls.count
+            let task = Task { @EngineActor in
+                do throws(BroError) { try await call() } catch { self.callErrors[index] = error.code }
+            }
+            calls.append((op, task))
+        }
+    }
+
+    /// A JobService op: what it calls. A job it creates gets its name now (the ids count).
+    func serviceCall(_ name: String, _ arg: JsonValue) throws -> @EngineActor () async throws(BroError) -> Void {
+        let job = arg.string.map { id($0) } ?? arg["job"]?.string.map { id($0) }
+        let s = jobService!
+        switch name {
+        case "start":
+            for (n, i) in jobs where store.job(i).map({ $0.state != .finished }) == true { started.insert(n) }
+            return { () async throws(BroError) in try await s.start() }
+        case "create":
+            let request = JobRequest(kind: JobKind(rawValue: arg["kind"]?.string ?? "videoDisc")!, title: arg["title"]?.string ?? arg["as"]!.string!,
+                                     automatic: arg["automatic"]?.bool == true, driveId: arg["driveId"]?.string, mediaGeneration: arg["mediaGeneration"]?.int)
+            register(arg["as"]!.string!)
+            return { () async throws(BroError) in _ = try await s.create(request) }
+        case "retry":
+            if let a = arg["as"]?.string { register(a) }
+            return { () async throws(BroError) in _ = try await s.retry(job!) }
+        case "cancel":
+            gates.cancelled(job!)
+            return { () async throws(BroError) in try await s.cancel(job!) }
+        case "decide":
+            let decision = arg["decisionId"]!.string!, answer = arg["answer"]!.string!
+            return { () async throws(BroError) in try await s.decide(job!, decisionId: decision, answer: answer) }
+        case "move":
+            let by = Int(arg["by"]!.int!)
+            return { () async throws(BroError) in try await s.move(job!, by: by) }
+        case "startNow":
+            return { () async throws(BroError) in try await s.startNow(job!) }
+        case "query":
+            let q = JobQueryDto(states: FakeStep.strings(arg["states"]).map { JobState(rawValue: $0)! },
+                                outcomes: FakeStep.strings(arg["outcomes"]).map { Outcome(rawValue: $0)! },
+                                kind: arg["kind"]?.string.flatMap(JobKind.init(rawValue:)), queue: arg["queue"]?.string.flatMap(Queue.init(rawValue:)),
+                                driveId: arg["driveId"]?.string, cursor: arg["cursor"]?.string, limit: Int(arg["limit"]?.int ?? Int64(JobQueryDto.defaultLimit)))
+            return { [unowned self] () async throws(BroError) in
+                do throws(BroError) {
+                    let page = try await s.query(q)
+                    queries.append(.object([("items", .array(page.items.map { .string(itemText($0)) })), ("next", page.next.map { .string($0) } ?? .null),
+                                            ("total", .integer(Int64(page.total)))]))
+                } catch {
+                    queries.append(.object([("error", .string(error.code))]))
+                    throw error
+                }
+            }
+        case "log":
+            let after = arg["after"]!.int!
+            return { [unowned self] () async throws(BroError) in
+                do throws(BroError) {
+                    let lines = try await s.log(job!, after: after)
+                    logs.append(.array(lines.map { .string("\($0.seq) \($0.code.rawValue)") }))
+                } catch {
+                    logs.append(.object([("error", .string(error.code))]))
+                    throw error
+                }
+            }
         default:
             throw FixtureError("unknown op \(name)")
+        }
+    }
+
+    func register(_ job: String) {
+        jobs.append((job, ids.peek()))
+        started.insert(job)
+    }
+
+    func itemText(_ j: JobDto) -> String {
+        var text = "\(name(j.id.value)) \(j.state.rawValue)"
+        if let o = j.outcome { text += " " + o.rawValue }
+        if let p = j.position { text += " position \(p)" }
+        if let progress = j.progress { text += " step " + progress.step.rawValue }
+        return text
+    }
+
+    /// Every JobService op has ended as it expects (its expectError, else no error).
+    func checkCalls() async throws {
+        for (i, call) in calls.enumerated() {
+            await call.task.value
+            try Fixtures.same(call.op.members!.first!.value["expectError"]?.string, callErrors[i], "error of \(call.op)")
         }
     }
 
@@ -255,6 +392,7 @@ final class PipelineHarness {
             case .jobChanged:
                 let job = e.data["job"]!
                 var text = "changed \(job["state"]!.string!) \(job["progress"]?["step"]?.string ?? "-")"
+                if let position = job["position"]?.int { text += " position \(position)" }
                 if let f = job["progress"]?["currentFraction"]?.double { text += " progress \(Int((f * 100).rounded()))" }
                 if let b = job["blockedBy"]?["code"]?.string { text += " blockedBy " + b }
                 if let d = job["decision"]?["id"]?.string { text += " decision " + d }
@@ -282,13 +420,37 @@ final class PipelineHarness {
     }
 }
 
-/// shared/fixtures/engine/pipeline-runner.cases.json and job-planner.cases.json.
+/// Ids that count: 00000000-0000-4000-8000-000000000001, … after the given jobs'.
+final class CountingIds: IdGenerator, @unchecked Sendable {
+    private let lock = NSLock()
+    private var n: Int64
+
+    init(_ given: Int64) { n = given }
+
+    static func id(_ n: Int64) -> Id {
+        let hex = String(n, radix: 16)
+        return Id("00000000-0000-4000-8000-" + String(repeating: "0", count: 12 - hex.count) + hex)
+    }
+
+    func next() -> Id { lock.withLock { n += 1; return CountingIds.id(n) } }
+
+    func peek() -> Id { lock.withLock { CountingIds.id(n + 1) } }
+}
+
+/// shared/fixtures/engine/pipeline-runner.cases.json, job-service.cases.json (the same harness with a JobService over the
+/// runner) and job-planner.cases.json.
 struct PipelineRunnerTests {
-    static func check(_ id: String, _ given: JsonValue, _ expect: JsonValue) async throws {
-        let h = try await PipelineHarness(given)
+    static func check(_ id: String, _ given: JsonValue, _ expect: JsonValue, service: Bool = false) async throws {
+        let h = try await PipelineHarness(given, service: service)
         for op in given["ops"]!.array! {
             try await h.run(op)
             try await h.settle()
+        }
+        try await h.checkCalls()
+        if service {
+            try Fixtures.same("", await h.announcedUnstored.joined(separator: " "), "jobs announced before they were stored")
+            if let q = expect["queries"] { try Fixtures.same(q, JsonValue.array(await h.queries), "queries") }
+            if let l = expect["logs"] { try Fixtures.same(l, JsonValue.array(await h.logs), "logs") }
         }
         let (outcomes, lines, queueLines, events) = await (h.outcomes, h.lines(), h.queueLines(), h.events.map(EngineEvent.json))
         for (name, want) in expect["outcomes"]?.members ?? [] {
@@ -309,9 +471,13 @@ struct PipelineRunnerTests {
         }
         for (name, want) in expect["records"]?.members ?? [] {
             let r = h.store.job(await h.id(name))!
-            try Fixtures.same(want["state"]!.string, r.state.rawValue, "record state of \(name)")
-            try Fixtures.same(want["outcome"]!.string, r.outcome?.rawValue, "record outcome of \(name)")
-            try Fixtures.same(FakeStep.strings(want["plan"]), r.plan!.steps.map(\.rawValue), "record plan of \(name)")
+            let got: [String: JsonValue] = [
+                "state": .string(r.state.rawValue), "outcome": r.outcome.map { .string($0.rawValue) } ?? .null, "queue": .string(r.queue.rawValue),
+                "position": .integer(Int64(r.position)), "automatic": .bool(r.automatic), "mediaGeneration": r.mediaGeneration.map { .integer($0) } ?? .null,
+                "title": .string(r.title), "driveId": r.driveId.map { .string($0) } ?? .null,
+                "plan": r.plan.map { .array($0.steps.map { .string($0.rawValue) }) } ?? .null,
+            ]
+            for (key, value) in want.members! { try Fixtures.same(value, got[key]!, "record \(key) of \(name)") }
         }
         for (name, want) in expect["logFile"]?.members ?? [] {
             let text = String(decoding: try h.fs.read("/data/jobs/\(await h.id(name).value)/log.jsonl"), as: UTF8.self)
@@ -342,12 +508,23 @@ struct PipelineRunnerTests {
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
     }
 
+    @Test func theSharedJobServiceCasesPass() async throws {
+        let doc = try Fixtures.json("engine/job-service.cases.json")
+        var failures: [String] = []
+        for c in doc["cases"]!.array! {
+            let id = c["id"]!.string!
+            do { try await PipelineRunnerTests.check(id, c["given"]!, c["expect"]!, service: true) } catch { failures.append("\(id): \(error)") }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
+    }
+
     @Test func theSharedPlannerCasesPass() throws {
         let failures = try Fixtures.runCases("engine/job-planner.cases.json") { _, given, expect in
             let r = given["request"]!
             let request = JobRequest(kind: JobKind(rawValue: r["kind"]!.string!)!, title: r["title"]!.string!, automatic: r["automatic"]?.bool == true,
                                      driveId: r["driveId"]?.string, sessionId: r["sessionId"]?.string.map { Id($0) })
             try Fixtures.same(FakeStep.strings(expect["steps"]), JobPlanner.initial(request).map(\.rawValue), "steps")
+            if let queue = expect["queue"] { try Fixtures.same(queue.string, JobPlanner.queue(request.kind).rawValue, "queue") }
             return true
         }
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")

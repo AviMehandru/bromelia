@@ -290,6 +290,13 @@ bro_scheduler_finish (BroScheduler *self, const BroId *job_id)
   pump (self);
 }
 
+int
+bro_scheduler_position (BroScheduler *self, const BroId *job_id)
+{
+  gpointer q = g_hash_table_lookup (self->queue_of, job_id->value);
+  return q ? index_in (self->queues[GPOINTER_TO_INT (q) - 1], job_id) : -1;
+}
+
 BroQueueOrders *
 bro_scheduler_queues (BroScheduler *self)
 {

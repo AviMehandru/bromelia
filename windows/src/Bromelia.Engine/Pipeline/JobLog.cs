@@ -26,6 +26,24 @@ public static class JobLog
         return Encoding.UTF8.GetBytes(text.ToString());
     }
 
+    /// <summary>The lines of a log file, each with its line number as its seq (from 1). A line that isn't a log line keeps
+    /// its number and is left out; so is an unfinished last line (no line break), as the runner counts.</summary>
+    public static IReadOnlyList<LogLineDto> Decode(byte[] bytes)
+    {
+        var lines = new List<LogLineDto>();
+        var raw = Encoding.UTF8.GetString(bytes).Split('\n');
+        for (int i = 0; i < raw.Length - 1; i++)
+        {
+            long seq = i + 1;
+            var j = JsonValue.Parse(raw[i]);
+            if (j?["t"]?.AsString is not { } t || Instant.Parse(t) is not { } at || EnumWire.Parse<Severity>(j["severity"]?.AsString) is not { } severity
+                || MessageCode.Parse(j["code"]?.AsString ?? "") is not { } code)
+                continue;
+            lines.Add(new LogLineDto(seq, at, severity, code, j["params"] as JsonValue.Object ?? new JsonValue.Object(new List<KeyValuePair<string, JsonValue>>())));
+        }
+        return lines;
+    }
+
     /// <summary>Adds the lines to the end of the job folder's log (the folder made when it isn't there), written
     /// atomically, 0600.</summary>
     public static void Append(IFileSystem fs, string jobDirectory, IReadOnlyList<LogLineDto> lines)

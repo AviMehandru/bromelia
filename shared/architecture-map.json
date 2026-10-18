@@ -12963,6 +12963,18 @@
           "swift": "LeaseSnapshot.parse(_:)",
           "cs": "LeaseSnapshot.Parse",
           "c": "bro_lease_snapshot_parse"
+        },
+        {
+          "name": "Scheduler.position",
+          "params": [
+            "jobId"
+          ],
+          "returns": "Int?",
+          "doc": "The job's place in its queue (0 is first); null when it is in none.",
+          "phase": 3,
+          "swift": "Scheduler.position(_:)",
+          "cs": "Scheduler.Position",
+          "c": "bro_scheduler_position"
         }
       ]
     },
@@ -13727,6 +13739,57 @@
               "BRO_DRIVE_STATUS_UNMOUNTING"
             ]
           }
+        },
+        {
+          "name": "JobQueryDto",
+          "kind": "struct",
+          "fields": [
+            "states",
+            "outcomes",
+            "kind",
+            "queue",
+            "driveId",
+            "unitId",
+            "cursor",
+            "limit"
+          ],
+          "doc": "Which jobs a client asks for (dtos.json JobQuery): any of the states and outcomes (empty: any), a kind, queue, drive, unit; a page of limit (1-500, default 50) from cursor.",
+          "phase": 3,
+          "swift": {
+            "name": "JobQueryDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/JobQueryDto.swift"
+          },
+          "cs": {
+            "name": "JobQueryDto",
+            "file": "windows/src/Bromelia.Engine/API/JobQueryDto.cs"
+          },
+          "c": {
+            "name": "BroJobQueryDto",
+            "file": "linux/src/engine/api/bro-job-query-dto.h"
+          }
+        },
+        {
+          "name": "JobPageDto",
+          "kind": "struct",
+          "fields": [
+            "items",
+            "next",
+            "total"
+          ],
+          "doc": "A page of jobs (dtos.json JobPage): newest first, next (null on the last page), total.",
+          "phase": 3,
+          "swift": {
+            "name": "JobPageDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/JobPageDto.swift"
+          },
+          "cs": {
+            "name": "JobPageDto",
+            "file": "windows/src/Bromelia.Engine/API/JobPageDto.cs"
+          },
+          "c": {
+            "name": "BroJobPageDto",
+            "file": "linux/src/engine/api/bro-job-page-dto.h"
+          }
         }
       ],
       "functions": [
@@ -13856,6 +13919,17 @@
           "swift": "MediumDto.typeOf(_:)",
           "cs": "MediumDto.TypeOf",
           "c": "bro_medium_dto_type_of"
+        },
+        {
+          "name": "JobPageDto.json",
+          "params": [
+            "page"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "JobPageDto.json(_:)",
+          "cs": "JobPageDto.Json",
+          "c": "bro_job_page_dto_json"
         }
       ]
     },
@@ -14541,6 +14615,54 @@
           "swift": "MakemkvSetup.invocation(_:profile:selectionOverride:jobDirectory:)",
           "cs": "MakemkvSetup.Invocation",
           "c": "bro_makemkv_setup_invocation"
+        },
+        {
+          "name": "PipelineRunner.job",
+          "params": [
+            "jobId"
+          ],
+          "returns": "JobDto?",
+          "doc": "The job as it runs (progress, blockedBy, decision); null when it isn't running here or its record isn't loaded yet.",
+          "phase": 3,
+          "swift": "PipelineRunner.job(_:)",
+          "cs": "PipelineRunner.Job",
+          "c": "bro_pipeline_runner_job"
+        },
+        {
+          "name": "PipelineRunner.log",
+          "params": [
+            "jobId"
+          ],
+          "returns": "[LogLineDto]?",
+          "doc": "The running job's log: the file as it started, then this run's lines, written or not; null when it isn't running here.",
+          "phase": 3,
+          "swift": "PipelineRunner.log(_:)",
+          "cs": "PipelineRunner.Log",
+          "c": "bro_pipeline_runner_log"
+        },
+        {
+          "name": "JobPlanner.queue",
+          "params": [
+            "kind"
+          ],
+          "returns": "Queue",
+          "doc": "The queue a job of the kind starts in (plan §21): disc jobs acquisition; commands and transcodes processing; the archive's checks and copies maintenance.",
+          "phase": 3,
+          "swift": "JobPlanner.queue(_:)",
+          "cs": "JobPlanner.Queue",
+          "c": "bro_job_planner_queue"
+        },
+        {
+          "name": "JobLog.decode",
+          "params": [
+            "bytes"
+          ],
+          "returns": "[LogLineDto]",
+          "doc": "A log file's lines, each with its line number as its seq; other lines (and an unfinished last line) keep their number and are left out.",
+          "phase": 3,
+          "swift": "JobLog.decode(_:)",
+          "cs": "JobLog.Decode",
+          "c": "bro_job_log_decode"
         }
       ]
     },
@@ -14836,7 +14958,7 @@
       "layer": "engine",
       "folder": "Services",
       "cFolder": "services",
-      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService, LibraryService, RecoveryService, MakemkvService and DriveService (their phase 3 parts). shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json, recovery-service.cases.json, makemkv-service.cases.json, drive-service.cases.json.",
+      "doc": "The services (plan §11.1), each on the executor with its ports injected at construction; steps never call them. So far ProblemService (a minimal one), ConfigService, LibraryService, RecoveryService, MakemkvService, DriveService and JobService (their phase 3 parts). shared/fixtures/engine/problem-service.cases.json, config-service.cases.json, library-service.cases.json, recovery-service.cases.json, makemkv-service.cases.json, drive-service.cases.json, job-service.cases.json.",
       "phase": 3,
       "types": [
         {
@@ -14979,6 +15101,24 @@
           "c": {
             "name": "BroDriveService",
             "file": "linux/src/engine/services/bro-drive-service.h"
+          }
+        },
+        {
+          "name": "JobService",
+          "kind": "class",
+          "doc": "The jobs (plan §11.1, §13.1): creates them (in their queue at once, stored before jobChanged announces them), runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones; cancel, retry (failed, cancelled or skipped jobs, as new jobs started by hand), decide, move, startNow, query, log; start() runs what recovery left queued; each job's place in its queue is stored when it changes. Retry from a step, continuing an interrupted job, the continue offer and keep-apart come in sessions D and F (owner, 2026-10-17). shared/fixtures/engine/job-service.cases.json.",
+          "phase": 3,
+          "swift": {
+            "name": "JobService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/JobService.swift"
+          },
+          "cs": {
+            "name": "JobService",
+            "file": "windows/src/Bromelia.Engine/Services/JobService.cs"
+          },
+          "c": {
+            "name": "BroJobService",
+            "file": "linux/src/engine/services/bro-job-service.h"
           }
         }
       ],
@@ -15333,6 +15473,168 @@
           "cNames": [
             "done"
           ]
+        },
+        {
+          "name": "JobService.start",
+          "params": [],
+          "doc": "Runs the jobs the store has unfinished (what RecoveryService left queued), in their queues' order. Once, after recover().",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.start()",
+          "cs": "JobService.Start",
+          "c": "bro_job_service_start"
+        },
+        {
+          "name": "JobService.create",
+          "params": [
+            "request"
+          ],
+          "returns": "JobDto",
+          "doc": "A new job: queued, stored, announced (jobChanged with its position), then run.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "request",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.create(_:)",
+          "cs": "JobService.Create",
+          "c": "bro_job_service_create"
+        },
+        {
+          "name": "JobService.cancel",
+          "params": [
+            "jobId"
+          ],
+          "doc": "A job it runs ends cancelled (job.cancelledByUser); one nothing runs is finished as cancelled at once; a finished one stays. job.notFound.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.cancel(_:)",
+          "cs": "JobService.Cancel",
+          "c": "bro_job_service_cancel"
+        },
+        {
+          "name": "JobService.retry",
+          "params": [
+            "jobId"
+          ],
+          "returns": "JobDto",
+          "doc": "A finished job that failed, was cancelled or was skipped, again as a new job with the same request, started by hand. job.notFound, job.notRetryable.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.retry(_:)",
+          "cs": "JobService.Retry",
+          "c": "bro_job_service_retry"
+        },
+        {
+          "name": "JobService.decide",
+          "params": [
+            "jobId",
+            "decisionId",
+            "answer"
+          ],
+          "doc": "Answers the job's question decisionId. job.notFound, job.notAwaitingDecision, server.badRequest.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "decision_id",
+            "answer",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.decide(_:decisionId:answer:)",
+          "cs": "JobService.Decide",
+          "c": "bro_job_service_decide"
+        },
+        {
+          "name": "JobService.move",
+          "params": [
+            "jobId",
+            "by"
+          ],
+          "doc": "Moves a job that waits to start a step in its queue (negative: earlier), stopping at the ends. job.notFound, job.notQueued.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "by",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.move(_:by:)",
+          "cs": "JobService.Move",
+          "c": "bro_job_service_move"
+        },
+        {
+          "name": "JobService.startNow",
+          "params": [
+            "jobId"
+          ],
+          "doc": "Puts a job that waits to start a step first in its queue, past the acquisitions cap. job.notFound, job.notQueued.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.startNow(_:)",
+          "cs": "JobService.StartNow",
+          "c": "bro_job_service_start_now"
+        },
+        {
+          "name": "JobService.query",
+          "params": [
+            "query"
+          ],
+          "returns": "JobPageDto",
+          "doc": "A page of jobs, newest first; running ones as they run, waiting ones with their position. server.badRequest for a bad limit or cursor.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "query",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.query(_:)",
+          "cs": "JobService.Query",
+          "c": "bro_job_service_query"
+        },
+        {
+          "name": "JobService.log",
+          "params": [
+            "jobId",
+            "after"
+          ],
+          "returns": "[LogLineDto]",
+          "doc": "The job's log lines after seq, a running step's unwritten lines included. job.notFound.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "after",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.log(_:after:)",
+          "cs": "JobService.Log",
+          "c": "bro_job_service_log"
         }
       ]
     },

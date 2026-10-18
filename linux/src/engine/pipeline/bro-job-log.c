@@ -65,3 +65,33 @@ bro_job_log_append (BroFileSystem *fs, const char *job_directory, GPtrArray *lin
   }
   return ok;
 }
+
+GPtrArray *
+bro_job_log_decode (GBytes *bytes)
+{
+  GPtrArray *lines = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);
+  gsize n = 0;
+  const char *data = bytes ? g_bytes_get_data (bytes, &n) : NULL;
+  gsize start = 0;
+  gint64 seq = 0;
+  for (gsize i = 0; i < n; i++)
+    {
+      g_autoptr (BroJsonValue) j = NULL;
+      BroInstant t;
+      BroSeverity severity;
+      BroMessageCode code;
+      BroJsonValue *params;
+      if (data[i] != '\n')
+        continue;
+      seq++;
+      j = bro_json_value_parse (data + start, (gssize) (i - start));
+      start = i + 1;
+      if (!j || !bro_instant_parse (bro_json_value_get_string (bro_json_value_member (j, "t"), ""), &t)
+          || !bro_severity_from_wire (bro_json_value_get_string (bro_json_value_member (j, "severity"), ""), &severity)
+          || !bro_message_code_parse (bro_json_value_get_string (bro_json_value_member (j, "code"), ""), &code))
+        continue;
+      params = bro_json_value_member (j, "params");
+      g_ptr_array_add (lines, bro_log_line_dto_new (seq, t, severity, code, params && params->kind == BRO_JSON_VALUE_OBJECT ? params : NULL));
+    }
+  return lines;
+}

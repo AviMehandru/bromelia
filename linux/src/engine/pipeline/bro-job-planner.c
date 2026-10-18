@@ -25,6 +25,24 @@ bro_job_planner_initial (const BroJobRequest *request)
   return steps;
 }
 
+BroQueue
+bro_job_planner_queue (BroJobKind kind)
+{
+  switch (kind)
+    {
+    case BRO_JOB_KIND_VIDEO_DISC:
+    case BRO_JOB_KIND_AUDIO_CD:
+    case BRO_JOB_KIND_DATA_DISC:
+    case BRO_JOB_KIND_READ_ERROR_RETRY:
+      return BRO_QUEUE_ACQUISITION;
+    case BRO_JOB_KIND_RUN_COMMAND:
+    case BRO_JOB_KIND_TRANSCODE:
+      return BRO_QUEUE_PROCESSING;
+    default:
+      return BRO_QUEUE_MAINTENANCE;
+    }
+}
+
 static gint
 by_seq (gconstpointer a, gconstpointer b)
 {

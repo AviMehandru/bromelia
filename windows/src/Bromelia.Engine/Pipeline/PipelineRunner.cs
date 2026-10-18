@@ -28,7 +28,8 @@ public sealed class PipelineRunner
     /// <summary>A job while it runs. Touched on the executor only.</summary>
     sealed class Live
     {
-        public required JobRecord Record;
+        /// <summary>Loaded when the run starts; null until then (the job is already live: it can be cancelled).</summary>
+        public JobRecord Record = null!;
         public readonly CancellationSource Cancel = new();
         public List<StepKind> Steps = new();
         public int Seq = -1;
@@ -41,6 +42,7 @@ public sealed class PipelineRunner
         public byte[] LogBefore = Array.Empty<byte>();
         public readonly List<LogLineDto> Log = new();
         public bool DirectoryMade;
+        public bool LogRead;
         public Config? Config;
     }
 
@@ -59,13 +61,23 @@ public sealed class PipelineRunner
 
     // ---- commands ----
 
-    /// <summary>Runs the job to its end, or until it is cancelled; returns how it ended.</summary>
+    /// <summary>Runs the job to its end, or until it is cancelled; returns how it ended. The job is live (cancel reaches
+    /// it) as soon as this is called, before its record is loaded. job.notFound when there is no such job.</summary>
     public async Task<Decided> Run(Id jobId)
     {
-        var record = await _executor.Worker(() => _store.Jobs().Load(jobId))
-            ?? throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobNotFound), ("jobId", JsonValue.Of(jobId.Value))));
-        var live = new Live { Record = record };
+        var live = new Live();
         _live[jobId] = live;
+        try
+        {
+            live.Record = await _executor.Worker(() => _store.Jobs().Load(jobId))
+                ?? throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobNotFound), ("jobId", JsonValue.Of(jobId.Value))));
+        }
+        catch (BroFailure)
+        {
+            _live.Remove(jobId);
+            live.Cancel.Close();
+            throw;
+        }
         Decided decided;
         try
         {
@@ -96,6 +108,15 @@ public sealed class PipelineRunner
             d.Answer.TrySetException(new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled))));
         }
     }
+
+    /// <summary>The job as it runs (progress, blockedBy, decision); null when it isn't running here or its record isn't
+    /// loaded yet.</summary>
+    public JobDto? Job(Id jobId) => _live.TryGetValue(jobId, out var live) && live.Record != null ? Dto(live) : null;
+
+    /// <summary>The running job's log: what the file held when it started, then this run's lines, written or not; null when
+    /// it isn't running here or hasn't read its log yet.</summary>
+    public IReadOnlyList<LogLineDto>? Log(Id jobId) =>
+        _live.TryGetValue(jobId, out var live) && live.LogRead ? JobLog.Decode(live.LogBefore).Concat(live.Log).ToList() : null;
 
     /// <summary>Answers the job's question. job.notAwaitingDecision when it has none; server.badRequest for an answer
     /// the question doesn't offer.</summary>
@@ -128,6 +149,7 @@ public sealed class PipelineRunner
         var logFile = JobDirectory(jobId) + "/" + JobLog.FileName;
         live.LogBefore = await _executor.Worker(() => _env.Fs.Exists(logFile) ? _env.Fs.Read(logFile) : Array.Empty<byte>());
         live.LogSeq = live.LogBefore.Count(b => b == (byte)'\n');
+        live.LogRead = true;
         live.DirectoryMade = live.LogBefore.Length > 0;
         var done = JobPlanner.Done(await _executor.Worker(() => _store.Steps().Load(jobId)));
         var outputs = done.Select(s => s.Output ?? new StepOutput(s.Kind, Empty)).ToList();
@@ -136,6 +158,11 @@ public sealed class PipelineRunner
         bool cancelled = false;
         for (int seq = done.Count; seq < live.Steps.Count; seq++)
         {
+            if (live.Cancel.Token.IsCancelled) // cancelled between steps, or before the first
+            {
+                cancelled = true;
+                break;
+            }
             var kind = live.Steps[seq];
             var step = _registry.Step(kind) ?? throw new BroFailure(Unexpected("no step " + EnumWire.Name(kind)));
             live.Seq = seq;
@@ -235,9 +262,11 @@ public sealed class PipelineRunner
 
     // ---- state and events ----
 
+    /// <summary>Stores the record, with the job's place in its queue as it is now (JobService stores it when it changes;
+    /// a stale one here would undo that).</summary>
     async Task SaveRecord(Live live, JobRecord record)
     {
-        live.Record = record;
+        live.Record = record = record with { Position = _scheduler.Position(record.Id) ?? record.Position };
         await _executor.Worker(() => _store.Jobs().Update(record));
     }
 

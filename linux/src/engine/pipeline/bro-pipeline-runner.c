@@ -118,6 +118,7 @@ typedef struct {
   GBytes *log_before; /* the log file as an earlier run (or recovery) left it; this run's lines follow */
   GPtrArray *log;     /* BroLogLineDto */
   gboolean directory_made;
+  gboolean log_read;
   BroConfig *config;  /* read when the job starts */
   GPtrArray *outputs; /* BroStepOutput */
   GPtrArray *results; /* BroStepResult */
@@ -267,10 +268,21 @@ save_done (gpointer data, const BroBroError *error)
     w->next (w->live);
 }
 
+/* The job's place in its queue as it is now, into its record before a save (JobService stores it when it changes; a
+ * stale one here would undo that). */
+static void
+place (Live *l)
+{
+  int position = bro_scheduler_position (l->runner->scheduler, &l->id);
+  if (position >= 0)
+    l->record->position = position;
+}
+
 static void
 save_record (Live *l, Next next)
 {
   Work *w = work_new (l);
+  place (l);
   w->record = bro_job_record_copy (l->record);
   w->next = next;
   bro_engine_executor_worker (l->runner->executor, save_work, save_done, w, work_free);
@@ -679,6 +691,7 @@ acquired (BroLease *lease, const BroBroError *error, gpointer data)
       l->record->started_at = l->started;
     }
   w = work_new (l);
+  place (l);
   w->record = bro_job_record_copy (l->record);
   w->step = bro_step_record_new ();
   w->step->job_id = l->id;
@@ -703,6 +716,12 @@ next_step (Live *l)
   g_autoptr (BroBroError) error = NULL;
   if (l->seq >= (int) l->steps->len)
     {
+      conclude (l, NULL);
+      return;
+    }
+  if (bro_cancellation_token_is_cancelled (bro_cancellation_source_token (l->cancel))) /* between steps, or before the first */
+    {
+      l->cancelled = TRUE;
       conclude (l, NULL);
       return;
     }
@@ -761,6 +780,7 @@ completed_done (gpointer data, const BroBroError *error)
           l->log_seq++;
       l->directory_made = n > 0;
     }
+  l->log_read = TRUE;
   for (guint i = 0; i < w->found->len; i++)
     {
       BroStepRecord *s = g_ptr_array_index (w->found, i);
@@ -954,6 +974,29 @@ bro_pipeline_runner_decide (BroPipelineRunner *self, const BroId *job_id, const 
   waiter_settle (l->waiter, answer, NULL);
   g_clear_pointer (&l->waiter, waiter_unref);
   return TRUE;
+}
+
+BroJobDto *
+bro_pipeline_runner_job (BroPipelineRunner *self, const BroId *job_id)
+{
+  Live *l = g_hash_table_lookup (self->live, job_id->value);
+  return l && l->record ? dto (l) : NULL;
+}
+
+GPtrArray *
+bro_pipeline_runner_log (BroPipelineRunner *self, const BroId *job_id)
+{
+  Live *l = g_hash_table_lookup (self->live, job_id->value);
+  GPtrArray *lines;
+  if (!l || !l->log_read)
+    return NULL;
+  lines = bro_job_log_decode (l->log_before);
+  for (guint i = 0; i < l->log->len; i++)
+    {
+      BroLogLineDto *line = g_ptr_array_index (l->log, i);
+      g_ptr_array_add (lines, bro_log_line_dto_new (line->seq, line->t, line->severity, line->code, line->params));
+    }
+  return lines;
 }
 
 /* ---- progress ---- */

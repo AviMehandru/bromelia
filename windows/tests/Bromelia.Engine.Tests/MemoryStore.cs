@@ -25,9 +25,46 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
     public Task<T> Transaction<T>(Func<IStore, Task<T>> block) => block(this);
     public Task Migrate() => Task.CompletedTask;
 
+    bool _holdInserts;
+    readonly List<(JobRecord Job, TaskCompletionSource Done)> _held = new();
+
+    /// <summary>From now on job inserts wait until <see cref="ReleaseInserts"/> (a test's way to act while one is written).</summary>
+    public void HoldInserts()
+    {
+        lock (_lock) _holdInserts = true;
+    }
+
+    public void ReleaseInserts()
+    {
+        List<(JobRecord Job, TaskCompletionSource Done)> held;
+        lock (_lock)
+        {
+            _holdInserts = false;
+            held = _held.ToList();
+            _held.Clear();
+            foreach (var (job, _) in held) _jobs[job.Id] = job;
+        }
+        foreach (var (_, done) in held) done.TrySetResult();
+    }
+
+    /// <summary>Inserts waiting for <see cref="ReleaseInserts"/>.</summary>
+    public int HeldInserts
+    {
+        get { lock (_lock) return _held.Count; }
+    }
+
     Task IJobRepository.Insert(JobRecord job)
     {
-        lock (_lock) _jobs[job.Id] = job;
+        lock (_lock)
+        {
+            if (_holdInserts)
+            {
+                var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _held.Add((job, done));
+                return done.Task;
+            }
+            _jobs[job.Id] = job;
+        }
         return Task.CompletedTask;
     }
 

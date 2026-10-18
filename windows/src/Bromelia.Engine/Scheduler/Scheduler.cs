@@ -137,6 +137,9 @@ public sealed class Scheduler
         Pump();
     }
 
+    /// <summary>The job's place in its queue (0 is first); null when it is in none.</summary>
+    public int? Position(Id jobId) => _queueOf.TryGetValue(jobId, out var q) ? _queues[q].IndexOf(jobId) : null;
+
     public QueueOrders Queues() =>
         new(_queues[Queue.Acquisition].ToList(), _queues[Queue.Processing].ToList(), _queues[Queue.Maintenance].ToList());
 

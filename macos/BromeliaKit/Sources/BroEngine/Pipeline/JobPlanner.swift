@@ -16,6 +16,16 @@ public enum JobPlanner {
         return steps
     }
 
+    /// The queue a job of the kind starts in (plan §21): a job that reads a disc, acquisition; checks and copies of the
+    /// archive, maintenance; commands and transcodes, processing.
+    public static func queue(_ kind: JobKind) -> Queue {
+        switch kind {
+        case .videoDisc, .audioCd, .dataDisc, .readErrorRetry: return .acquisition
+        case .runCommand, .transcode: return .processing
+        default: return .maintenance
+        }
+    }
+
     /// The steps a run doesn't do again (plan §12.3): the leading ones, by seq, that succeeded or were skipped, or
     /// failed after the commit (JobOutcome.afterCommit: the runner went on after them).
     public static func done(_ steps: [StepRecord]) -> [StepRecord] {

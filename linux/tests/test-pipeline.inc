@@ -1,7 +1,8 @@
-/* test-pipeline.inc: shared/fixtures/engine/pipeline-runner.cases.json and job-planner.cases.json (included by
- * test-engine.c, after test-scheduler.inc). */
+/* test-pipeline.inc: shared/fixtures/engine/pipeline-runner.cases.json, job-service.cases.json (the same harness with a
+ * JobService over the runner) and job-planner.cases.json (included by test-engine.c, after test-scheduler.inc). */
 #include "bro-job-log.h"
 #include "bro-job-planner.h"
+#include "bro-job-service.h"
 #include "bro-pipeline-runner.h"
 
 /* ---- jobs and steps in memory ---------------------------------------------------------------------------------- */
@@ -17,6 +18,9 @@ struct _TestMemoryStore {
   GHashTable *steps; /* "id/seq" → BroStepRecord */
   BroUnitRepository *units;         /* nullable: a test that needs units sets it */
   BroLibraryRepository *libraries;  /* nullable */
+  GCond released;
+  gboolean holding; /* job inserts wait until released (a test's way to act while one is written) */
+  int held;         /* inserts waiting */
 };
 
 static void store_iface_init (BroStoreInterface *iface);
@@ -65,6 +69,43 @@ job_put (BroJobRepository *repo, const BroJobRecord *job, BroBroError **error)
   g_hash_table_replace (self->jobs, g_strdup (job->id.value), bro_job_record_copy (job));
   g_mutex_unlock (&self->lock);
   return TRUE;
+}
+
+/* Waits while inserts are held (on the inserting worker), then stores the job. */
+static gboolean
+job_insert (BroJobRepository *repo, const BroJobRecord *job, BroBroError **error)
+{
+  TestMemoryStore *self = TEST_MEMORY_STORE (repo);
+  g_mutex_lock (&self->lock);
+  if (self->holding)
+    {
+      self->held++; /* the release counts it off, so a settle check never sees it held once released */
+      while (self->holding)
+        g_cond_wait (&self->released, &self->lock);
+    }
+  g_mutex_unlock (&self->lock);
+  return job_put (repo, job, error);
+}
+
+static void
+store_hold_inserts (TestMemoryStore *self, gboolean hold)
+{
+  g_mutex_lock (&self->lock);
+  self->holding = hold;
+  if (!hold)
+    self->held = 0;
+  g_cond_broadcast (&self->released);
+  g_mutex_unlock (&self->lock);
+}
+
+static int
+store_held_inserts (TestMemoryStore *self)
+{
+  int n;
+  g_mutex_lock (&self->lock);
+  n = self->held;
+  g_mutex_unlock (&self->lock);
+  return n;
 }
 
 static int
@@ -174,7 +215,7 @@ job_load (BroJobRepository *repo, BroId job_id, BroBroError **error)
 static void
 store_jobs_iface_init (BroJobRepositoryInterface *iface)
 {
-  iface->insert = job_put;
+  iface->insert = job_insert;
   iface->update = job_put;
   iface->load = job_load;
   iface->active = job_active;
@@ -248,6 +289,7 @@ test_memory_store_finalize (GObject *object)
   g_clear_object (&self->units);
   g_clear_object (&self->libraries);
   g_mutex_clear (&self->lock);
+  g_cond_clear (&self->released);
   G_OBJECT_CLASS (test_memory_store_parent_class)->finalize (object);
 }
 
@@ -261,6 +303,7 @@ static void
 test_memory_store_init (TestMemoryStore *self)
 {
   g_mutex_init (&self->lock);
+  g_cond_init (&self->released);
   self->jobs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_job_record_free);
   self->order = g_ptr_array_new_with_free_func (g_free);
   self->steps = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_step_record_free);
@@ -380,8 +423,9 @@ typedef struct {
   GMutex lock;
   GCond cond;
   GHashTable *opened;    /* gate names */
-  GPtrArray *waiters;    /* "gate\njob id" */
+  GPtrArray *waiters;    /* "gate\njob id", "!" first at a gate that ignores the cancel */
   GHashTable *cancelled; /* job ids */
+  gboolean closing;      /* the case is over: every wait ends */
 } Gates;
 
 static void
@@ -413,21 +457,35 @@ gates_wake (gpointer data, gpointer unused)
   g_mutex_unlock (&g->lock);
 }
 
-/* TRUE when the gate opened, FALSE when the job was cancelled first. */
+/* TRUE when the gate opened, FALSE when the job was cancelled first (never when @ignores_cancel). */
 static gboolean
-gates_wait (Gates *g, const char *gate, const BroId *job, BroCancellationToken *cancel)
+gates_wait (Gates *g, const char *gate, const BroId *job, BroCancellationToken *cancel, gboolean ignores_cancel)
 {
-  char *entry = g_strconcat (gate, "\n", job->value, NULL);
+  char *entry = g_strconcat (ignores_cancel ? "!" : "", gate, "\n", job->value, NULL);
   guint id = bro_cancellation_token_on_cancel (cancel, gates_wake, g, NULL);
   gboolean opened;
   g_mutex_lock (&g->lock);
   g_ptr_array_add (g->waiters, entry);
-  while (!(opened = g_hash_table_contains (g->opened, gate)) && !bro_cancellation_token_is_cancelled (cancel))
+  while (!(opened = g_hash_table_contains (g->opened, gate)) && !g->closing
+         && (ignores_cancel || !bro_cancellation_token_is_cancelled (cancel)))
     g_cond_wait (&g->cond, &g->lock);
   g_ptr_array_remove (g->waiters, entry);
+  g_cond_broadcast (&g->cond); /* gates_close may be waiting for the waiters to go */
   g_mutex_unlock (&g->lock);
   bro_cancellation_token_disconnect (cancel, id);
   return opened;
+}
+
+/* Ends every wait and returns once no step waits any more (before the gates are cleared at a case's end). */
+static void
+gates_close (Gates *g)
+{
+  g_mutex_lock (&g->lock);
+  g->closing = TRUE;
+  g_cond_broadcast (&g->cond);
+  while (g->waiters->len > 0)
+    g_cond_wait (&g->cond, &g->lock);
+  g_mutex_unlock (&g->lock);
 }
 
 static void
@@ -439,7 +497,8 @@ gates_open (Gates *g, const char *gate)
   g_mutex_unlock (&g->lock);
 }
 
-/* The steps parked at closed gates (not cancelled), and whether @job is one of them. */
+/* The steps parked at closed gates (not cancelled, or at a gate that ignores the cancel), and whether @job is one of
+ * them. */
 static int
 gates_parked (Gates *g, const char *job, gboolean *job_there)
 {
@@ -450,9 +509,11 @@ gates_parked (Gates *g, const char *job, gboolean *job_there)
   for (guint i = 0; i < g->waiters->len; i++)
     {
       const char *entry = g_ptr_array_index (g->waiters, i);
-      const char *id = strchr (entry, '\n') + 1;
-      g_autofree char *gate = g_strndup (entry, id - 1 - entry);
-      if (g_hash_table_contains (g->opened, gate) || g_hash_table_contains (g->cancelled, id))
+      gboolean stubborn = entry[0] == '!';
+      const char *start = stubborn ? entry + 1 : entry;
+      const char *id = strchr (start, '\n') + 1;
+      g_autofree char *gate = g_strndup (start, id - 1 - start);
+      if (g_hash_table_contains (g->opened, gate) || (!stubborn && g_hash_table_contains (g->cancelled, id)))
         continue;
       n++;
       if (job_there && job && strcmp (id, job) == 0)
@@ -514,9 +575,20 @@ G_DECLARE_FINAL_TYPE (TestFakeStep, test_fake_step, TEST, FAKE_STEP, GObject)
 struct _TestFakeStep {
   GObject parent_instance;
   BroStepKind kind;
-  BroJsonValue *b; /* behaviour */
+  BroJsonValue *b; /* behaviour: the steps op changes it, under the gates' lock */
   Gates *gates;
 };
+
+/* The step's behaviour now (a reference). */
+static BroJsonValue *
+fake_behaviour (TestFakeStep *self)
+{
+  BroJsonValue *b;
+  g_mutex_lock (&self->gates->lock);
+  b = bro_json_value_ref (self->b);
+  g_mutex_unlock (&self->gates->lock);
+  return b;
+}
 
 static void fake_step_iface_init (BroStepInterface *iface);
 G_DEFINE_FINAL_TYPE_WITH_CODE (TestFakeStep, test_fake_step, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_STEP, fake_step_iface_init))
@@ -537,12 +609,13 @@ static BroResourceSet *
 fake_resources (BroStep *s, const BroJobSnapshot *job)
 {
   TestFakeStep *self = TEST_FAKE_STEP (s);
-  BroJsonValue *r = bro_json_value_member (self->b, "resources");
+  g_autoptr (BroJsonValue) b = fake_behaviour (self);
+  BroJsonValue *r = bro_json_value_member (b, "resources");
   BroResourceSet *set = bro_resource_set_new ();
   g_auto (GStrv) drives = strv_of (r ? bro_json_value_member (r, "drives") : NULL);
   GStrvBuilder *all = g_strv_builder_new ();
   g_strv_builder_addv (all, (const char **) drives);
-  if (bro_json_value_get_bool (bro_json_value_member (self->b, "drive"), FALSE) && job->request->drive_id)
+  if (bro_json_value_get_bool (bro_json_value_member (b, "drive"), FALSE) && job->request->drive_id)
     g_strv_builder_add (all, job->request->drive_id);
   set->drives = g_strv_builder_end (all);
   g_strv_builder_unref (all);
@@ -566,7 +639,8 @@ static BroStepReport *
 fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
 {
   TestFakeStep *self = TEST_FAKE_STEP (s);
-  BroJsonValue *b = self->b, *v;
+  g_autoptr (BroJsonValue) b = fake_behaviour (self);
+  BroJsonValue *v;
   BroJsonValue *progress = bro_json_value_member (b, "progress"), *log = bro_json_value_member (b, "log");
   g_autoptr (BroJsonValue) data = NULL;
   BroStepReport *report;
@@ -628,7 +702,9 @@ fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
       data = bro_json_value_new_object ();
       bro_json_value_set (data, "answer", bro_json_value_new_string (answer));
     }
-  if ((v = bro_json_value_member (b, "gate")) && !gates_wait (self->gates, v->string, &ctx->job->id, ctx->cancel))
+  if ((v = bro_json_value_member (b, "gate"))
+      && !gates_wait (self->gates, v->string, &ctx->job->id, ctx->cancel,
+                      bro_json_value_get_bool (bro_json_value_member (b, "ignoresCancel"), FALSE)))
     {
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
       return NULL;
@@ -692,6 +768,49 @@ test_fake_step_init (TestFakeStep *self)
 {
 }
 
+/* ---- ids that count: 00000000-0000-4000-8000-000000000001, ... after the given jobs' ---------------------------- */
+
+#define TEST_TYPE_IDS (test_ids_get_type ())
+G_DECLARE_FINAL_TYPE (TestIds, test_ids, TEST, IDS, GObject)
+
+struct _TestIds {
+  GObject parent_instance;
+  gint n; /* the last one given */
+};
+
+static void test_ids_iface_init (BroIdGeneratorInterface *iface);
+G_DEFINE_FINAL_TYPE_WITH_CODE (TestIds, test_ids, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_ID_GENERATOR, test_ids_iface_init))
+
+static BroId
+counted_id (int n)
+{
+  BroId id;
+  g_snprintf (id.value, sizeof id.value, "00000000-0000-4000-8000-%012x", n);
+  return id;
+}
+
+static BroId
+test_ids_next (BroIdGenerator *ids)
+{
+  return counted_id (g_atomic_int_add (&TEST_IDS (ids)->n, 1) + 1);
+}
+
+static void
+test_ids_iface_init (BroIdGeneratorInterface *iface)
+{
+  iface->next = test_ids_next;
+}
+
+static void
+test_ids_class_init (TestIdsClass *klass)
+{
+}
+
+static void
+test_ids_init (TestIds *self)
+{
+}
+
 /* ---- the harness -------------------------------------------------------------------------------------------- */
 
 typedef struct {
@@ -711,6 +830,14 @@ typedef struct {
   GPtrArray *events;    /* BroEngineEvent */
   GPtrArray *failures;
   const char *id;
+  gboolean service;     /* job-service cases: cancel and decide go through the JobService */
+  BroJobService *jobs_service;
+  TestIds *ids;
+  GPtrArray *calls;     /* SvcCall: the JobService ops, checked when the case's ops are done */
+  GPtrArray *queries;   /* BroJsonValue */
+  GPtrArray *logs;      /* BroJsonValue */
+  GPtrArray *unstored;  /* ids announced (jobChanged) before their record was stored */
+  GPtrArray *steps;     /* TestFakeStep (borrowed) */
 } PipeHarness;
 
 static const char *
@@ -799,11 +926,260 @@ pipe_op_action (gpointer data)
     }
 }
 
+/* Every event; a jobFinished gives the job's outcome, a jobChanged must come after its record is stored. */
+static void
+pipe_event (BroEngineEvent *e, gpointer data)
+{
+  PipeHarness *h = data;
+  BroJsonValue *job = bro_json_value_member (e->data, "job");
+  const char *id;
+  g_ptr_array_add (h->events, bro_engine_event_ref (e));
+  if (e->type != BRO_ENGINE_EVENT_TYPE_JOB_CHANGED && e->type != BRO_ENGINE_EVENT_TYPE_JOB_FINISHED)
+    return;
+  id = bro_json_value_get_string (bro_json_value_member (job, "id"), "");
+  if (e->type == BRO_ENGINE_EVENT_TYPE_JOB_CHANGED)
+    {
+      BroId jid;
+      g_autoptr (BroJobRecord) stored = NULL;
+      g_strlcpy (jid.value, id, sizeof jid.value);
+      stored = bro_job_repository_load (BRO_JOB_REPOSITORY (h->store), jid, NULL);
+      if (!stored)
+        g_ptr_array_add (h->unstored, g_strdup (id));
+    }
+  else if (strcmp (pipe_name (h, id), "?") != 0)
+    {
+      BroJsonValue *err = bro_json_value_member (job, "error"), *params;
+      BroDecided *d = g_new0 (BroDecided, 1);
+      g_assert_true (bro_outcome_from_wire (bro_json_value_get_string (bro_json_value_member (job, "outcome"), ""), &d->outcome));
+      if (err)
+        {
+          params = bro_json_value_member (err, "params");
+          d->error = bro_bro_error_new (bro_json_value_get_string (bro_json_value_member (err, "code"), ""), params ? bro_json_value_ref (params) : NULL,
+                                        NULL);
+        }
+      g_hash_table_replace (h->outcomes, g_strdup (pipe_name (h, id)), d);
+    }
+}
+
+/* On the executor: cancels every job that was started and hasn't finished. */
+static void
+pipe_cancel_all (gpointer data)
+{
+  PipeHarness *h = data;
+  for (guint i = 0; i < h->names->len; i++)
+    {
+      const char *name = g_ptr_array_index (h->names, i);
+      BroId *id = g_hash_table_lookup (h->jobs, name);
+      if (!g_hash_table_contains (h->started, name) || g_hash_table_contains (h->outcomes, name))
+        continue;
+      g_mutex_lock (&h->gates.lock);
+      g_hash_table_add (h->gates.cancelled, g_strdup (id->value)); /* no longer parked, for the settle */
+      g_mutex_unlock (&h->gates.lock);
+      bro_pipeline_runner_cancel (h->runner, id);
+    }
+}
+
 static void
 pipe_subscribe (gpointer data)
 {
   PipeHarness *h = data;
-  h->subscription = bro_event_bus_subscribe (h->bus, NULL, 0, event_seen, h->events, NULL);
+  h->subscription = bro_event_bus_subscribe (h->bus, NULL, 0, pipe_event, h, NULL);
+}
+
+/* ---- JobService ops ---- */
+
+typedef struct {
+  PipeHarness *h;
+  BroJsonValue *op;
+  char *error; /* the code it failed with */
+  gboolean done;
+} SvcCall;
+
+static void
+svc_call_free (gpointer data)
+{
+  SvcCall *c = data;
+  bro_json_value_unref (c->op);
+  g_free (c->error);
+  g_free (c);
+}
+
+static void
+svc_ended (SvcCall *c, const BroBroError *error)
+{
+  c->done = TRUE;
+  if (error)
+    c->error = g_strdup (error->code);
+}
+
+static void
+svc_done (const BroBroError *error, gpointer data)
+{
+  svc_ended (data, error);
+}
+
+static void
+svc_job_done (const BroJobDto *job, const BroBroError *error, gpointer data)
+{
+  svc_ended (data, error);
+}
+
+static void
+svc_page_done (const BroJobPageDto *page, const BroBroError *error, gpointer data)
+{
+  SvcCall *c = data;
+  BroJsonValue *got = bro_json_value_new_object ();
+  if (page)
+    {
+      BroJsonValue *items = bro_json_value_new_array ();
+      for (guint i = 0; i < page->items->len; i++)
+        {
+          BroJobDto *j = g_ptr_array_index (page->items, i);
+          GString *text = g_string_new (NULL);
+          g_string_printf (text, "%s %s", pipe_name (c->h, j->id.value), bro_job_state_to_wire (j->state));
+          if (j->has_outcome)
+            g_string_append_printf (text, " %s", bro_outcome_to_wire (j->outcome));
+          if (j->has_position)
+            g_string_append_printf (text, " position %d", j->position);
+          if (j->progress)
+            g_string_append_printf (text, " step %s", bro_step_kind_to_wire (j->progress->step));
+          bro_json_value_append (items, bro_json_value_new_string (text->str));
+          g_string_free (text, TRUE);
+        }
+      bro_json_value_set (got, "items", items);
+      bro_json_value_set (got, "next", page->next ? bro_json_value_new_string (page->next) : bro_json_value_new_null ());
+      bro_json_value_set (got, "total", bro_json_value_new_integer (page->total));
+    }
+  else
+    bro_json_value_set (got, "error", bro_json_value_new_string (error->code));
+  g_ptr_array_add (c->h->queries, got);
+  svc_ended (c, error);
+}
+
+static void
+svc_lines_done (GPtrArray *lines, const BroBroError *error, gpointer data)
+{
+  SvcCall *c = data;
+  BroJsonValue *got;
+  if (lines)
+    {
+      got = bro_json_value_new_array ();
+      for (guint i = 0; i < lines->len; i++)
+        {
+          BroLogLineDto *l = g_ptr_array_index (lines, i);
+          g_autofree char *text = g_strdup_printf ("%" G_GINT64_FORMAT " %s", l->seq, bro_message_code_wire (l->code));
+          bro_json_value_append (got, bro_json_value_new_string (text));
+        }
+    }
+  else
+    {
+      got = bro_json_value_new_object ();
+      bro_json_value_set (got, "error", bro_json_value_new_string (error->code));
+    }
+  g_ptr_array_add (c->h->logs, got);
+  svc_ended (c, error);
+}
+
+/* The op's job: a name the case gave, else (nosuch) an id no job has. */
+static BroId
+svc_job (PipeHarness *h, BroJsonValue *arg)
+{
+  const char *name = arg->kind == BRO_JSON_VALUE_STRING ? arg->string : bro_json_value_get_string (bro_json_value_member (arg, "job"), "");
+  BroId *id = g_hash_table_lookup (h->jobs, name);
+  BroId none;
+  if (id)
+    return *id;
+  g_strlcpy (none.value, "00000000-0000-4000-8000-0000000000ff", sizeof none.value);
+  return none;
+}
+
+static GArray *
+enum_list (BroJsonValue *list, gboolean outcomes)
+{
+  GArray *values = g_array_new (FALSE, FALSE, sizeof (int));
+  for (guint i = 0; list && i < bro_json_value_length (list); i++)
+    {
+      int v;
+      const char *text = bro_json_value_get_string (bro_json_value_at (list, i), "");
+      g_assert_true (outcomes ? bro_outcome_from_wire (text, (BroOutcome *) &v) : bro_job_state_from_wire (text, (BroJobState *) &v));
+      g_array_append_val (values, v);
+    }
+  return values;
+}
+
+/* On the executor: calls the JobService. */
+static void
+svc_action (gpointer data)
+{
+  SvcCall *c = data;
+  PipeHarness *h = c->h;
+  BroJsonValue *arg;
+  const char *name = op_name (c->op, &arg);
+  BroJobService *js = h->jobs_service;
+  BroId job = svc_job (h, arg);
+  if (strcmp (name, "start") == 0)
+    bro_job_service_start (js, svc_done, c, NULL);
+  else if (strcmp (name, "create") == 0)
+    {
+      BroJobKind kind = BRO_JOB_KIND_VIDEO_DISC;
+      BroJsonValue *v;
+      g_autoptr (BroJobRequest) request = NULL;
+      if ((v = bro_json_value_member (arg, "kind")))
+        g_assert_true (bro_job_kind_from_wire (v->string, &kind));
+      request = bro_job_request_new (kind, bro_json_value_get_string (bro_json_value_member (arg, "title"),
+                                                                     bro_json_value_get_string (bro_json_value_member (arg, "as"), "")));
+      request->automatic = bro_json_value_get_bool (bro_json_value_member (arg, "automatic"), FALSE);
+      request->drive_id = g_strdup (bro_json_value_get_string (bro_json_value_member (arg, "driveId"), NULL));
+      if ((v = bro_json_value_member (arg, "mediaGeneration")))
+        {
+          request->has_media_generation = TRUE;
+          request->media_generation = v->integer;
+        }
+      bro_job_service_create (js, request, svc_job_done, c, NULL);
+    }
+  else if (strcmp (name, "retry") == 0)
+    bro_job_service_retry (js, &job, svc_job_done, c, NULL);
+  else if (strcmp (name, "cancel") == 0)
+    bro_job_service_cancel (js, &job, svc_done, c, NULL);
+  else if (strcmp (name, "decide") == 0)
+    bro_job_service_decide (js, &job, bro_json_value_get_string (bro_json_value_member (arg, "decisionId"), ""),
+                            bro_json_value_get_string (bro_json_value_member (arg, "answer"), ""), svc_done, c, NULL);
+  else if (strcmp (name, "move") == 0)
+    bro_job_service_move (js, &job, (int) bro_json_value_get_integer (bro_json_value_member (arg, "by"), 0), svc_done, c, NULL);
+  else if (strcmp (name, "startNow") == 0)
+    bro_job_service_start_now (js, &job, svc_done, c, NULL);
+  else if (strcmp (name, "query") == 0)
+    {
+      g_autoptr (BroJobQueryDto) q = bro_job_query_dto_new ();
+      g_autoptr (GArray) states = enum_list (bro_json_value_member (arg, "states"), FALSE);
+      g_autoptr (GArray) outcomes = enum_list (bro_json_value_member (arg, "outcomes"), TRUE);
+      BroJsonValue *v;
+      g_array_append_vals (q->states, states->data, states->len);
+      g_array_append_vals (q->outcomes, outcomes->data, outcomes->len);
+      if ((v = bro_json_value_member (arg, "kind")))
+        q->has_kind = bro_job_kind_from_wire (v->string, &q->kind);
+      if ((v = bro_json_value_member (arg, "queue")))
+        q->has_queue = bro_queue_from_wire (v->string, &q->queue);
+      q->drive_id = g_strdup (bro_json_value_get_string (bro_json_value_member (arg, "driveId"), NULL));
+      q->cursor = g_strdup (bro_json_value_get_string (bro_json_value_member (arg, "cursor"), NULL));
+      q->limit = (int) bro_json_value_get_integer (bro_json_value_member (arg, "limit"), BRO_JOB_QUERY_DTO_DEFAULT_LIMIT);
+      bro_job_service_query (js, q, svc_page_done, c, NULL);
+    }
+  else if (strcmp (name, "log") == 0)
+    bro_job_service_log (js, &job, bro_json_value_get_integer (bro_json_value_member (arg, "after"), 0), svc_lines_done, c, NULL);
+  else
+    g_error ("unknown op %s", name);
+}
+
+/* A job the op creates gets its name now (the ids count). */
+static void
+svc_name (PipeHarness *h, const char *name)
+{
+  BroId *id = g_new0 (BroId, 1);
+  *id = counted_id (g_atomic_int_get (&h->ids->n) + 1);
+  g_ptr_array_add (h->names, g_strdup (name));
+  g_hash_table_replace (h->jobs, g_strdup (name), id);
+  g_hash_table_add (h->started, g_strdup (name));
 }
 
 typedef struct {
@@ -839,6 +1215,8 @@ pipe_check (gpointer data)
               && g_strcmp0 (bro_json_value_get_string (bro_json_value_member (job, "id"), ""), id->value) == 0)
             state = bro_json_value_get_string (bro_json_value_member (job, "state"), "");
         }
+      if (!state && h->service)
+        continue; /* a created job not stored yet (its insert held): the activity tells */
       gates_parked (&h->gates, id->value, &at_gate);
       g_mutex_lock (&h->gates.lock);
       if (g_strcmp0 (state, "awaitingDecision") == 0 && !g_hash_table_contains (h->gates.cancelled, id->value))
@@ -847,7 +1225,7 @@ pipe_check (gpointer data)
         ok = FALSE;
       g_mutex_unlock (&h->gates.lock);
     }
-  c->settled = ok && bro_engine_executor_activity (h->w.executor) == parked;
+  c->settled = ok && bro_engine_executor_activity (h->w.executor) == parked + store_held_inserts (h->store);
   g_mutex_lock (&c->lock);
   c->done = TRUE;
   g_cond_signal (&c->cond);
@@ -873,7 +1251,11 @@ pipe_settle (PipeHarness *h)
       g_cond_clear (&c.cond);
       if (c.settled)
         return;
-      g_assert_true (g_get_monotonic_time () < until);
+      if (g_get_monotonic_time () >= until)
+        {
+          bro_test_fail (h->failures, h->id, "the jobs didn't settle");
+          return;
+        }
       g_usleep (1000);
     }
 }
@@ -887,6 +1269,51 @@ pipe_run_op (PipeHarness *h, BroJsonValue *op)
     gates_open (&h->gates, arg->string);
   else if (strcmp (name, "advance") == 0)
     manual_advance (h->w.clock, bro_json_value_get_integer (arg, 0), settle, &h->w);
+  else if (strcmp (name, "holdInserts") == 0 || strcmp (name, "releaseInserts") == 0)
+    store_hold_inserts (h->store, strcmp (name, "holdInserts") == 0);
+  else if (strcmp (name, "steps") == 0)
+    {
+      g_mutex_lock (&h->gates.lock);
+      for (guint i = 0; i < arg->keys->len; i++)
+        {
+          BroStepKind k;
+          g_assert_true (bro_step_kind_from_wire (g_ptr_array_index (arg->keys, i), &k));
+          for (guint n = 0; n < h->steps->len; n++)
+            {
+              TestFakeStep *step = g_ptr_array_index (h->steps, n);
+              if (step->kind == k)
+                {
+                  bro_json_value_unref (step->b);
+                  step->b = bro_json_value_ref (g_ptr_array_index (arg->items, i));
+                }
+            }
+        }
+      g_mutex_unlock (&h->gates.lock);
+    }
+  else if (h->service && strcmp (name, "config") != 0 && strcmp (name, "library") != 0 && strcmp (name, "run") != 0)
+    {
+      SvcCall *c = g_new0 (SvcCall, 1);
+      c->h = h;
+      c->op = bro_json_value_ref (op);
+      if (strcmp (name, "start") == 0)
+        for (guint i = 0; i < h->names->len; i++)
+          {
+            g_autoptr (BroJobRecord) r = bro_job_repository_load (BRO_JOB_REPOSITORY (h->store), *(BroId *) g_hash_table_lookup (h->jobs, g_ptr_array_index (h->names, i)), NULL);
+            if (r && r->state != BRO_JOB_STATE_FINISHED)
+              g_hash_table_add (h->started, g_strdup (g_ptr_array_index (h->names, i)));
+          }
+      if (strcmp (name, "create") == 0 || (strcmp (name, "retry") == 0 && bro_json_value_member (arg, "as")))
+        svc_name (h, bro_json_value_get_string (bro_json_value_member (arg, "as"), ""));
+      if (strcmp (name, "cancel") == 0)
+        {
+          BroId job = svc_job (h, arg);
+          g_mutex_lock (&h->gates.lock);
+          g_hash_table_add (h->gates.cancelled, g_strdup (job.value));
+          g_mutex_unlock (&h->gates.lock);
+        }
+      g_ptr_array_add (h->calls, c);
+      bro_engine_executor_post (h->w.executor, svc_action, c, NULL);
+    }
   else
     {
       PipeOp o = { h, op };
@@ -925,6 +1352,8 @@ pipe_lines (PipeHarness *h, const char *who)
           text = g_string_new (NULL);
           g_string_printf (text, "changed %s %s", bro_json_value_get_string (bro_json_value_member (job, "state"), ""),
                            progress ? bro_json_value_get_string (bro_json_value_member (progress, "step"), "-") : "-");
+          if ((v = bro_json_value_member (job, "position")))
+            g_string_append_printf (text, " position %" G_GINT64_FORMAT, v->integer);
           if (progress && (v = bro_json_value_member (progress, "currentFraction")))
             g_string_append_printf (text, " progress %d", (int) (bro_json_value_get_number (v, 0) * 100 + 0.5));
           if ((v = bro_json_value_member (job, "blockedBy")))
@@ -965,7 +1394,7 @@ pipe_lines (PipeHarness *h, const char *who)
 }
 
 static gboolean
-pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures, gboolean service)
 {
   PipeHarness h = { 0 };
   BroJsonValue *steps_given = bro_json_value_member (given, "steps"), *jobs = bro_json_value_member (given, "jobs"), *ops, *v;
@@ -977,6 +1406,10 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   gates_init (&h.gates);
   h.failures = failures;
   h.id = id;
+  h.service = service;
+  h.steps = steps;
+  if ((v = bro_json_value_member (given, "limits")))
+    limits.acquisitions = (int) bro_json_value_get_integer (bro_json_value_member (v, "acquisitions"), 0);
   h.bus = bro_event_bus_new (BRO_CLOCK (h.w.clock), 1, 1024, 1024);
   h.scheduler = bro_scheduler_new (h.w.executor, h.bus, &limits);
   h.store = g_object_new (TEST_TYPE_MEMORY_STORE, NULL);
@@ -1000,6 +1433,14 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   environment = bro_step_environment_new (NULL, BRO_FILE_SYSTEM (h.fs), BRO_CLOCK (h.w.clock), NULL, NULL, NULL,
                                           BRO_CONFIG_SOURCE (h.config), NULL, NULL, "/data");
   h.runner = bro_pipeline_runner_new (h.w.executor, h.bus, h.scheduler, BRO_STORE (h.store), registry, environment, h.w.engine_clock);
+  h.ids = g_object_new (TEST_TYPE_IDS, NULL);
+  h.ids->n = (gint) bro_json_value_length (jobs);
+  h.jobs_service = bro_job_service_new (h.w.executor, h.bus, BRO_STORE (h.store), h.scheduler, h.runner, h.w.engine_clock, BRO_ID_GENERATOR (h.ids),
+                                        BRO_FILE_SYSTEM (h.fs), "/data");
+  h.calls = g_ptr_array_new_with_free_func (svc_call_free);
+  h.queries = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_json_value_unref);
+  h.logs = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_json_value_unref);
+  h.unstored = g_ptr_array_new_with_free_func (g_free);
   h.names = g_ptr_array_new_with_free_func (g_free);
   h.jobs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   h.outcomes = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_decided_free);
@@ -1026,6 +1467,16 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
       r->id = *jid;
       r->kind = kind;
       r->state = BRO_JOB_STATE_QUEUED;
+      if ((v = bro_json_value_member (j, "state")))
+        g_assert_true (bro_job_state_from_wire (v->string, &r->state));
+      if ((v = bro_json_value_member (j, "outcome")))
+        r->has_outcome = bro_outcome_from_wire (v->string, &r->outcome);
+      if (r->state == BRO_JOB_STATE_FINISHED)
+        {
+          r->has_finished_at = TRUE;
+          r->finished_at.unix_milliseconds = START_MS;
+        }
+      r->position = (int) bro_json_value_get_integer (bro_json_value_member (j, "position"), 0);
       r->queue = queue;
       r->title = g_strdup (bro_json_value_get_string (bro_json_value_member (j, "title"), name));
       r->drive_id = g_strdup (bro_json_value_get_string (bro_json_value_member (j, "driveId"), NULL));
@@ -1033,7 +1484,14 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
       r->request = bro_job_request_new (kind, r->title);
       r->request->automatic = r->automatic;
       r->request->drive_id = g_strdup (r->drive_id);
+      if ((v = bro_json_value_member (j, "mediaGeneration")))
+        {
+          r->has_media_generation = r->request->has_media_generation = TRUE;
+          r->media_generation = r->request->media_generation = v->integer;
+        }
       r->created_at.unix_milliseconds = START_MS;
+      if ((v = bro_json_value_member (j, "created")))
+        g_assert_true (bro_instant_parse (v->string, &r->created_at));
       if (plan)
         {
           r->plan = bro_job_plan_new ();
@@ -1084,6 +1542,40 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   ops = bro_json_value_member (given, "ops");
   for (guint i = 0; i < bro_json_value_length (ops); i++)
     pipe_run_op (&h, bro_json_value_at (ops, i));
+  for (guint i = 0; i < h.calls->len; i++)
+    {
+      SvcCall *c = g_ptr_array_index (h.calls, i);
+      BroJsonValue *arg, *want;
+      g_autofree char *what = NULL;
+      op_name (c->op, &arg);
+      want = arg->kind == BRO_JSON_VALUE_OBJECT ? bro_json_value_member (arg, "expectError") : NULL;
+      what = bro_json_value_to_text (c->op);
+      if (!c->done)
+        bro_test_fail (failures, id, "the op hasn't finished: %s", what);
+      bro_test_same_string (failures, id, what, want ? want->string : NULL, c->error);
+    }
+  if (service)
+    {
+      g_autofree char *unstored = NULL;
+      g_ptr_array_add (h.unstored, NULL);
+      unstored = g_strjoinv (" ", (char **) h.unstored->pdata);
+      g_ptr_array_remove_index (h.unstored, h.unstored->len - 1);
+      bro_test_same_string (failures, id, "jobs announced before they were stored", "", unstored);
+      if ((v = bro_json_value_member (expect, "queries")))
+        {
+          g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+          for (guint i = 0; i < h.queries->len; i++)
+            bro_json_value_append (got, bro_json_value_ref (g_ptr_array_index (h.queries, i)));
+          bro_test_same_json (failures, id, "queries", v, got);
+        }
+      if ((v = bro_json_value_member (expect, "logs")))
+        {
+          g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+          for (guint i = 0; i < h.logs->len; i++)
+            bro_json_value_append (got, bro_json_value_ref (g_ptr_array_index (h.logs, i)));
+          bro_test_same_json (failures, id, "logs", v, got);
+        }
+    }
 
   if ((v = bro_json_value_member (expect, "outcomes")))
     for (guint i = 0; i < v->keys->len; i++)
@@ -1150,14 +1642,38 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
         BroId *jid = g_hash_table_lookup (h.jobs, g_ptr_array_index (v->keys, i));
         BroJsonValue *want = g_ptr_array_index (v->items, i);
         g_autoptr (BroJobRecord) r = bro_job_repository_load (BRO_JOB_REPOSITORY (h.store), *jid, NULL);
-        g_autoptr (GPtrArray) plan = g_ptr_array_new ();
+        g_autoptr (BroJsonValue) got = NULL;
+        BroJsonValue *plan;
+        if (!r)
+          {
+            bro_test_fail (failures, id, "no record of %s", (char *) g_ptr_array_index (v->keys, i));
+            continue;
+          }
+        got = bro_json_value_new_object ();
+        plan = bro_json_value_new_array ();
         for (guint k = 0; r->plan && k < r->plan->steps->len; k++)
-          g_ptr_array_add (plan, (gpointer) bro_step_kind_to_wire (g_array_index (r->plan->steps, BroStepKind, k)));
-        bro_test_same_string (failures, id, "record state", bro_json_value_get_string (bro_json_value_member (want, "state"), ""),
-                              bro_job_state_to_wire (r->state));
-        bro_test_same_string (failures, id, "record outcome", bro_json_value_get_string (bro_json_value_member (want, "outcome"), ""),
-                              r->has_outcome ? bro_outcome_to_wire (r->outcome) : NULL);
-        same_lines (failures, id, "record plan", bro_json_value_member (want, "plan"), plan);
+          bro_json_value_append (plan, bro_json_value_new_string (bro_step_kind_to_wire (g_array_index (r->plan->steps, BroStepKind, k))));
+        bro_json_value_set (got, "state", bro_json_value_new_string (bro_job_state_to_wire (r->state)));
+        bro_json_value_set (got, "outcome", r->has_outcome ? bro_json_value_new_string (bro_outcome_to_wire (r->outcome)) : bro_json_value_new_null ());
+        bro_json_value_set (got, "queue", bro_json_value_new_string (bro_queue_to_wire (r->queue)));
+        bro_json_value_set (got, "position", bro_json_value_new_integer (r->position));
+        bro_json_value_set (got, "automatic", bro_json_value_new_bool (r->automatic));
+        bro_json_value_set (got, "mediaGeneration", r->has_media_generation ? bro_json_value_new_integer (r->media_generation) : bro_json_value_new_null ());
+        bro_json_value_set (got, "title", bro_json_value_new_string (r->title));
+        bro_json_value_set (got, "driveId", r->drive_id ? bro_json_value_new_string (r->drive_id) : bro_json_value_new_null ());
+        if (r->plan)
+          bro_json_value_set (got, "plan", plan);
+        else
+          {
+            bro_json_value_unref (plan);
+            bro_json_value_set (got, "plan", bro_json_value_new_null ());
+          }
+        for (guint k = 0; k < want->keys->len; k++)
+          {
+            const char *key = g_ptr_array_index (want->keys, k);
+            g_autofree char *what = g_strdup_printf ("record %s of %s", key, (char *) g_ptr_array_index (v->keys, i));
+            bro_test_same_json (failures, id, what, g_ptr_array_index (want->items, k), bro_json_value_member (got, key));
+          }
       }
   if ((v = bro_json_value_member (expect, "logFile")))
     for (guint i = 0; i < v->keys->len; i++)
@@ -1207,8 +1723,20 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
       bro_test_same_json (failures, id, "events", v, got);
     }
 
+  /* Stops as the engine does (plan §15.1): what is still going is cancelled and the jobs settle, so no job is left live
+   * in the runner (a live job holds the runner: LeakSanitizer reports the pair). */
+  bro_engine_executor_post (h.w.executor, pipe_cancel_all, &h, NULL);
+  bro_engine_executor_barrier (h.w.executor);
+  gates_close (&h.gates);
+  pipe_settle (&h);
   bro_engine_executor_stop (h.w.executor);
   g_clear_object (&h.subscription);
+  g_object_unref (h.jobs_service);
+  g_object_unref (h.ids);
+  g_ptr_array_unref (h.calls);
+  g_ptr_array_unref (h.queries);
+  g_ptr_array_unref (h.logs);
+  g_ptr_array_unref (h.unstored);
   g_object_unref (h.runner);
   g_object_unref (h.scheduler);
   g_object_unref (h.bus);
@@ -1225,10 +1753,28 @@ pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   return TRUE;
 }
 
+static gboolean
+pipeline_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  return pipe_case (id, given, expect, failures, FALSE);
+}
+
+static gboolean
+job_service_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  return pipe_case (id, given, expect, failures, TRUE);
+}
+
 static void
 test_pipeline_runner (void)
 {
   bro_test_run_cases ("engine/pipeline-runner.cases.json", pipeline_case);
+}
+
+static void
+test_job_service (void)
+{
+  bro_test_run_cases ("engine/job-service.cases.json", job_service_case);
 }
 
 static gboolean
@@ -1252,6 +1798,8 @@ planner_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
   for (guint i = 0; i < steps->len; i++)
     g_ptr_array_add (got, (gpointer) bro_step_kind_to_wire (g_array_index (steps, BroStepKind, i)));
   same_lines (failures, id, "steps", bro_json_value_member (expect, "steps"), got);
+  if ((v = bro_json_value_member (expect, "queue")))
+    bro_test_same_string (failures, id, "queue", v->string, bro_queue_to_wire (bro_job_planner_queue (kind)));
   return TRUE;
 }
 

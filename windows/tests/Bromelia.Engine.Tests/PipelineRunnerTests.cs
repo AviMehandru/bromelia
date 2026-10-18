@@ -7,7 +7,8 @@ using static Bromelia.Tests.Fixtures;
 
 namespace Bromelia.Engine.Tests;
 
-/// <summary>shared/fixtures/engine/pipeline-runner.cases.json and job-planner.cases.json.</summary>
+/// <summary>shared/fixtures/engine/pipeline-runner.cases.json, job-service.cases.json (the same harness with a JobService
+/// over the runner) and job-planner.cases.json.</summary>
 public sealed class PipelineRunnerTests
 {
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
@@ -34,14 +35,14 @@ public sealed class PipelineRunnerTests
     sealed class FakeStep : IStep
     {
         readonly Harness _h;
-        readonly JsonValue _b;
 
-        public FakeStep(Harness h, StepKind kind, JsonValue behaviour)
+        public FakeStep(Harness h, StepKind kind)
         {
             _h = h;
             Kind = kind;
-            _b = behaviour;
         }
+
+        JsonValue _b => _h.Behaviour(Kind);
 
         public StepKind Kind { get; }
         public Resumability Resumability => Resumability.Idempotent;
@@ -72,7 +73,7 @@ public sealed class PipelineRunnerTests
                 var answer = await context.Decisions.Ask(question);
                 data = JsonValue.Of(("answer", JsonValue.Of(answer)));
             }
-            if (_b["gate"]?.AsString is { } gate) await _h.Gate(gate, context.Job.Id, context.Cancel);
+            if (_b["gate"]?.AsString is { } gate) await _h.Gate(gate, context.Job.Id, context.Cancel, _b["ignoresCancel"]?.AsBool == true);
             return new StepReport(
                 data,
                 AppendSteps: Strings(_b["append"]).Select(k => EnumWire.Parse<StepKind>(k)!.Value).ToList(),
@@ -84,6 +85,18 @@ public sealed class PipelineRunnerTests
                 Error: _b["fail"] is { } fail ? Error(fail) : null,
                 AffectsOutcome: _b["affectsOutcome"]?.AsBool ?? true);
         }
+    }
+
+    /// <summary>Ids that count: 00000000-0000-4000-8000-000000000001, … after the given jobs'.</summary>
+    internal sealed class CountingIds : IIdGenerator
+    {
+        long _n;
+
+        public CountingIds(long given) { _n = given; }
+
+        public Id Next() => new($"00000000-0000-4000-8000-{Interlocked.Increment(ref _n):x12}");
+
+        public Id Peek() => new($"00000000-0000-4000-8000-{Interlocked.Read(ref _n) + 1:x12}");
     }
 
     /// <summary>Gives the document the case sets (given.config, then the config ops); read on the executor.</summary>
@@ -110,17 +123,27 @@ public sealed class PipelineRunnerTests
         readonly Dictionary<string, TaskCompletionSource> _gates = new();
         readonly Dictionary<Id, int> _atGate = new();
 
-        public Harness(JsonValue given)
+        readonly bool _service;
+
+        /// <param name="service">job-service cases: cancel and decide go through the JobService.</param>
+        public Harness(JsonValue given, bool service = false)
         {
+            _service = service;
             Bus = new EventBus(W.Clock);
-            Scheduler = new Scheduler(W.Executor, Bus, new SchedulerLimits());
+            var limits = given["limits"];
+            Scheduler = new Scheduler(W.Executor, Bus, new SchedulerLimits(Acquisitions: (int)(limits?["acquisitions"]?.AsInteger ?? 0)));
             if (given["config"] is { } config) Config.Document = config;
             var steps = new List<IStep>();
             foreach (var kind in Enum.GetValues<StepKind>())
-                steps.Add(new FakeStep(this, kind, given["steps"]?[EnumWire.Name(kind)] ?? EmptyObject));
+            {
+                _behaviour[kind] = given["steps"]?[EnumWire.Name(kind)] ?? EmptyObject;
+                steps.Add(new FakeStep(this, kind));
+            }
             var env = new StepEnvironment(new ToolSet(null!, null!), Fs, W.Clock, null!, null!, null!, Config, null!, null!, "/data");
             Runner = new PipelineRunner(W.Executor, Bus, Scheduler, Store, new StepRegistry(steps), env, W.EngineClock);
-            W.OnExecutor(() => Bus.Subscribe(null, Events.Add));
+            Ids = new CountingIds(given["jobs"]!.AsArray!.Count);
+            Service = new JobService(W.Executor, Bus, Store, Scheduler, Runner, W.EngineClock, Ids, Fs, "/data");
+            W.OnExecutor(() => Bus.Subscribe(null, OnEvent));
             int n = 0;
             foreach (var j in given["jobs"]!.AsArray!)
             {
@@ -129,11 +152,14 @@ public sealed class PipelineRunnerTests
                 Jobs[name] = id;
                 var kind = EnumWire.Parse<JobKind>(j["kind"]?.AsString ?? "videoDisc")!.Value;
                 var title = j["title"]?.AsString ?? name;
-                var request = new JobRequest(kind, title, j["automatic"]?.AsBool == true, j["driveId"]?.AsString);
+                var request = new JobRequest(kind, title, j["automatic"]?.AsBool == true, j["driveId"]?.AsString, j["mediaGeneration"]?.AsInteger);
                 var plan = j["plan"] is { } p ? new JobPlan(Strings(p).Select(k => EnumWire.Parse<StepKind>(k)!.Value).ToList()) : null;
                 var queue = EnumWire.Parse<Queue>(j["queue"]?.AsString ?? "acquisition")!.Value;
-                var record = new JobRecord(id, kind, null, JobState.Queued, null, null, null, null, queue, 0, request.DriveId, null,
-                    request.Automatic, null, title, null, request, plan, null, W.Clock.Now());
+                var jobState = EnumWire.Parse<JobState>(j["state"]?.AsString ?? "queued")!.Value;
+                var created = j["created"]?.AsString is { } c ? Instant.Parse(c)!.Value : W.Clock.Now();
+                var record = new JobRecord(id, kind, null, jobState, EnumWire.Parse<Outcome>(j["outcome"]?.AsString), null, null, null, queue,
+                    (int)(j["position"]?.AsInteger ?? 0), request.DriveId, request.MediaGeneration, request.Automatic, null, title, null, request, plan,
+                    null, created, FinishedAt: jobState == JobState.Finished ? W.Clock.Now() : null);
                 ((IJobRepository)Store).Insert(record).Wait();
                 int seq = 0;
                 foreach (var d in j["done"]?.AsArray ?? new List<JsonValue>())
@@ -154,16 +180,42 @@ public sealed class PipelineRunnerTests
             }
         }
 
+        public readonly JobService Service;
+        public readonly CountingIds Ids;
+        public readonly List<JsonValue> Queries = new();
+        public readonly List<JsonValue> Logs = new();
+        public readonly List<string> AnnouncedUnstored = new();
+        readonly Dictionary<StepKind, JsonValue> _behaviour = new();
+
+        public JsonValue Behaviour(StepKind kind)
+        {
+            lock (_behaviour) return _behaviour[kind];
+        }
+
+        /// <summary>Every event; a jobFinished gives the job's outcome, a jobChanged must come after its record is stored.</summary>
+        void OnEvent(EngineEvent e)
+        {
+            Events.Add(e);
+            if (e.Type is not (EngineEventType.JobChanged or EngineEventType.JobFinished)) return;
+            var job = e.Data["job"]!;
+            var id = new Id(job["id"]!.AsString!);
+            if (e.Type == EngineEventType.JobChanged && Store.Job(id) == null) AnnouncedUnstored.Add(id.Value);
+            if (e.Type == EngineEventType.JobFinished && Jobs.FirstOrDefault(j => j.Value == id).Key is { } name)
+                Outcomes[name] = new Decided(EnumWire.Parse<Outcome>(job["outcome"]!.AsString)!.Value, job["error"] is { } err ? Error(err) : null);
+        }
+
         readonly Dictionary<string, List<Id>> _waiting = new(); // gate → jobs waiting there
         readonly HashSet<string> _opened = new();
         readonly HashSet<Id> _cancelled = new();
+        readonly HashSet<Id> _stubborn = new(); // at a gate that ignores the cancel
         readonly HashSet<string> _started = new();
 
-        public async Task Gate(string name, Id job, Foundation.CancellationToken cancel)
+        public async Task Gate(string name, Id job, Foundation.CancellationToken cancel, bool ignoresCancel = false)
         {
             TaskCompletionSource gate;
             lock (_gateLock)
             {
+                if (ignoresCancel) _stubborn.Add(job);
                 if (!_gates.TryGetValue(name, out gate!)) _gates[name] = gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 if (!_waiting.TryGetValue(name, out var list)) _waiting[name] = list = new List<Id>();
                 list.Add(job);
@@ -171,7 +223,10 @@ public sealed class PipelineRunnerTests
             try
             {
                 var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                using var registration = cancel.OnCancel(() => cancelled.TrySetResult());
+                using var registration = cancel.OnCancel(() =>
+                {
+                    if (!ignoresCancel) cancelled.TrySetResult();
+                });
                 await Task.WhenAny(gate.Task, cancelled.Task);
                 if (!gate.Task.IsCompleted) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
             }
@@ -207,7 +262,7 @@ public sealed class PipelineRunnerTests
                 lock (_gateLock)
                     foreach (var (gate, jobs) in _waiting)
                         if (!_opened.Contains(gate))
-                            foreach (var j in jobs.Where(j => !_cancelled.Contains(j)))
+                            foreach (var j in jobs.Where(j => !_cancelled.Contains(j) || _stubborn.Contains(j)))
                             {
                                 parked++;
                                 atGate.Add(j);
@@ -218,10 +273,11 @@ public sealed class PipelineRunnerTests
                     var last = Events.LastOrDefault(e => e.Type is EngineEventType.JobChanged or EngineEventType.JobFinished
                                                          && e.Data["job"]!["id"]!.AsString == id.Value);
                     var state = last?.Data["job"]!["state"]!.AsString;
+                    if (state == null && _service) continue; // a created job not stored yet (its insert held): the activity tells
                     if (state == "awaitingDecision" && !_cancelled.Contains(id)) parked++;
                     else if (!(state is "waitingForResources" or "blocked" || atGate.Contains(id))) ok = false;
                 }
-                if (W.Executor.Activity != parked) ok = false;
+                if (W.Executor.Activity != parked + Store.HeldInserts) ok = false;
                 checkedIt.Set();
             });
             if (!checkedIt.Wait(Patience)) throw new TimeoutException("the executor didn't run the check");
@@ -259,11 +315,11 @@ public sealed class PipelineRunnerTests
                 case "open":
                     Open(arg.AsString!);
                     break;
-                case "cancel":
+                case "cancel" when !_service:
                     lock (_gateLock) _cancelled.Add(Jobs[arg.AsString!]);
                     W.OnExecutor(() => Runner.Cancel(Jobs[arg.AsString!]));
                     break;
-                case "decide":
+                case "decide" when !_service:
                 {
                     BroError? error = null;
                     W.OnExecutor(() =>
@@ -287,10 +343,150 @@ public sealed class PipelineRunnerTests
                         : new BroError(MessageCode.Wire(MessageCode.LibraryOffline), ("library", JsonValue.Of(id)))));
                     break;
                 }
+                case "holdInserts":
+                    Store.HoldInserts();
+                    break;
+                case "releaseInserts":
+                    Store.ReleaseInserts();
+                    break;
+                default:
+                {
+                    if (!_service) throw new InvalidOperationException("unknown op " + name);
+                    var call = ServiceCall(op);
+                    Task? task = null;
+                    W.OnExecutor(() => task = call());
+                    _calls.Add((op, task!));
+                    break;
+                }
+            }
+            Settle();
+        }
+
+        Id IdOf(JsonValue job) => Jobs.TryGetValue(job.AsString!, out var id) ? id : new Id("00000000-0000-4000-8000-0000000000ff");
+
+        static JsonValue Arg(JsonValue op) => op.AsObject!.Single().Value;
+
+        /// <summary>A JobService op: what it calls on the executor. A job it creates gets its name now (the ids count).</summary>
+        Func<Task> ServiceCall(JsonValue op)
+        {
+            var (name, arg) = op.AsObject!.Single();
+            var job = arg.AsString != null ? arg : arg["job"];
+            switch (name)
+            {
+                case "start":
+                    foreach (var (n, id) in Jobs)
+                        if (Store.Job(id) is { State: not JobState.Finished }) _started.Add(n);
+                    return () => Service.Start();
+                case "create":
+                {
+                    var r = arg;
+                    var title = r["title"]?.AsString ?? r["as"]!.AsString!;
+                    var request = new JobRequest(EnumWire.Parse<JobKind>(r["kind"]?.AsString ?? "videoDisc")!.Value, title, r["automatic"]?.AsBool == true,
+                        r["driveId"]?.AsString, r["mediaGeneration"]?.AsInteger);
+                    Name(r["as"]!.AsString!);
+                    return () => Service.Create(request);
+                }
+                case "retry":
+                {
+                    var id = IdOf(job!);
+                    if (arg["as"]?.AsString is { } a) Name(a);
+                    return () => Service.Retry(id);
+                }
+                case "cancel":
+                {
+                    var id = IdOf(job!);
+                    lock (_gateLock) _cancelled.Add(id);
+                    return () => Service.Cancel(id);
+                }
+                case "decide":
+                {
+                    var id = IdOf(job!);
+                    return () => Service.Decide(id, arg["decisionId"]!.AsString!, arg["answer"]!.AsString!);
+                }
+                case "move":
+                {
+                    var id = IdOf(job!);
+                    return () => Service.Move(id, (int)arg["by"]!.AsInteger!.Value);
+                }
+                case "startNow":
+                {
+                    var id = IdOf(job!);
+                    return () => Service.StartNow(id);
+                }
+                case "steps":
+                    lock (_behaviour)
+                        foreach (var (kind, behaviour) in arg.AsObject!) _behaviour[EnumWire.Parse<StepKind>(kind)!.Value] = behaviour;
+                    return () => Task.CompletedTask;
+                case "query":
+                {
+                    var q = new JobQueryDto(
+                        Strings(arg["states"]).Select(x => EnumWire.Parse<JobState>(x)!.Value).ToList(),
+                        Strings(arg["outcomes"]).Select(x => EnumWire.Parse<Outcome>(x)!.Value).ToList(),
+                        EnumWire.Parse<JobKind>(arg["kind"]?.AsString), EnumWire.Parse<Queue>(arg["queue"]?.AsString), arg["driveId"]?.AsString, null,
+                        arg["cursor"]?.AsString, (int)(arg["limit"]?.AsInteger ?? JobQueryDto.DefaultLimit));
+                    return async () =>
+                    {
+                        try
+                        {
+                            var page = await Service.Query(q);
+                            Queries.Add(JsonValue.Of(("items", JsonValue.Of(page.Items.Select(i => JsonValue.Of(ItemText(i))))),
+                                ("next", JsonValue.Of(page.Next)), ("total", JsonValue.Of(page.Total))));
+                        }
+                        catch (BroFailure f)
+                        {
+                            Queries.Add(JsonValue.Of(("error", JsonValue.Of(f.Error.Code))));
+                            throw;
+                        }
+                    };
+                }
+                case "log":
+                {
+                    var id = IdOf(job!);
+                    return async () =>
+                    {
+                        try
+                        {
+                            var lines = await Service.Log(id, arg["after"]!.AsInteger!.Value);
+                            Logs.Add(JsonValue.Of(lines.Select(l => JsonValue.Of($"{l.Seq} {MessageCode.Wire(l.Code)}"))));
+                        }
+                        catch (BroFailure f)
+                        {
+                            Logs.Add(JsonValue.Of(("error", JsonValue.Of(f.Error.Code))));
+                            throw;
+                        }
+                    };
+                }
                 default:
                     throw new InvalidOperationException("unknown op " + name);
             }
-            Settle();
+        }
+
+        void Name(string name)
+        {
+            Jobs[name] = Ids.Peek();
+            _started.Add(name);
+        }
+
+        string ItemText(JobDto j)
+        {
+            var text = $"{NameOf(j.Id.Value)} {EnumWire.Name(j.State)}";
+            if (j.Outcome is { } o) text += " " + EnumWire.Name(o);
+            if (j.Position is { } p) text += " position " + p;
+            if (j.Progress is { } progress) text += " step " + EnumWire.Name(progress.Step);
+            return text;
+        }
+
+        readonly List<(JsonValue Op, Task Task)> _calls = new();
+
+        /// <summary>Every JobService op has ended as it expects (its expectError, else no error).</summary>
+        public void CheckCalls()
+        {
+            foreach (var (op, task) in _calls)
+            {
+                Assert.True(task.IsCompleted, "the op hasn't finished: " + op);
+                var error = task.Exception?.InnerException is BroFailure f ? f.Error.Code : task.Exception?.InnerException?.ToString();
+                Same(Arg(op).AsObject != null ? Arg(op)["expectError"]?.AsString : null, error, "error of " + op);
+            }
         }
 
         /// <summary>What was published about each job, as the case writes it.</summary>
@@ -305,6 +501,7 @@ public sealed class PipelineRunnerTests
                     {
                         var job = e.Data["job"]!;
                         var text = $"changed {job["state"]!.AsString} {job["progress"]?["step"]?.AsString ?? "-"}";
+                        if (job["position"]?.AsInteger is { } position) text += " position " + position;
                         if (job["progress"]?["currentFraction"]?.AsNumber is { } f) text += $" progress {(int)Math.Round(f * 100)}";
                         if (job["blockedBy"]?["code"]?.AsString is { } b) text += " blockedBy " + b;
                         if (job["decision"]?["id"]?.AsString is { } d) text += " decision " + d;
@@ -346,6 +543,31 @@ public sealed class PipelineRunnerTests
         {
             using var h = new Harness(given);
             foreach (var op in given["ops"]!.AsArray!) h.Run(op);
+            Expect(h, expect);
+            return true;
+        });
+    }
+
+    [Fact]
+    public void TheSharedJobServiceCasesPass()
+    {
+        RunCases("engine/job-service.cases.json", (id, given, expect) =>
+        {
+            using var h = new Harness(given, service: true);
+            foreach (var op in given["ops"]!.AsArray!) h.Run(op);
+            h.CheckCalls();
+            Expect(h, expect);
+            Same("", string.Join(" ", h.AnnouncedUnstored), "jobs announced before they were stored");
+            if (expect["queries"] is { } queries) Same(queries, JsonValue.Of(h.Queries), "queries");
+            if (expect["logs"] is { } logs) Same(logs, JsonValue.Of(h.Logs), "logs");
+            return true;
+        });
+    }
+
+    /// <summary>The expectations both case files share.</summary>
+    static void Expect(Harness h, JsonValue expect)
+    {
+        {
             foreach (var (name, want) in expect["outcomes"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
             {
                 Same(want["outcome"]!.AsString, h.Outcomes.TryGetValue(name, out var d) ? EnumWire.Name(d.Outcome) : null, "outcome of " + name);
@@ -364,9 +586,19 @@ public sealed class PipelineRunnerTests
             foreach (var (name, want) in expect["records"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
             {
                 var r = h.Store.Job(h.Jobs[name])!;
-                Same(want["state"]!.AsString, EnumWire.Name(r.State), "record state of " + name);
-                Same(want["outcome"]!.AsString, r.Outcome is { } o ? EnumWire.Name(o) : null, "record outcome of " + name);
-                SameLines(want["plan"]!, r.Plan!.Steps.Select(k => EnumWire.Name(k)), "record plan of " + name);
+                var got = new Dictionary<string, JsonValue>
+                {
+                    ["state"] = JsonValue.Of(EnumWire.Name(r.State)),
+                    ["outcome"] = JsonValue.Of(r.Outcome is { } o ? EnumWire.Name(o) : null),
+                    ["queue"] = JsonValue.Of(EnumWire.Name(r.Queue)),
+                    ["position"] = JsonValue.Of(r.Position),
+                    ["automatic"] = JsonValue.Of(r.Automatic),
+                    ["mediaGeneration"] = r.MediaGeneration is { } g ? JsonValue.Of(g) : JsonValue.Null.Instance,
+                    ["title"] = JsonValue.Of(r.Title),
+                    ["driveId"] = JsonValue.Of(r.DriveId),
+                    ["plan"] = r.Plan is { } plan ? JsonValue.Of(plan.Steps.Select(k => JsonValue.Of(EnumWire.Name(k)))) : JsonValue.Null.Instance,
+                };
+                foreach (var (key, value) in want.AsObject!) Same(value, got[key], $"record {key} of {name}");
             }
             foreach (var (name, want) in expect["logFile"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
             {
@@ -387,8 +619,7 @@ public sealed class PipelineRunnerTests
                 h.W.OnExecutor(() => got = JsonValue.Of(h.Events.Select(EngineEvent.Json)));
                 Same(events, got!, "events");
             }
-            return true;
-        });
+        }
     }
 
     [Fact]
@@ -400,6 +631,7 @@ public sealed class PipelineRunnerTests
             var request = new JobRequest(EnumWire.Parse<JobKind>(r["kind"]!.AsString)!.Value, r["title"]!.AsString!, r["automatic"]?.AsBool == true,
                 r["driveId"]?.AsString, SessionId: r["sessionId"]?.AsString is { } s ? new Id(s) : null);
             SameLines(expect["steps"]!, JobPlanner.Initial(request).Select(k => EnumWire.Name(k)), "steps");
+            if (expect["queue"] is { } queue) Same(queue.AsString, EnumWire.Name(JobPlanner.Queue(request.Kind)), "queue");
             return true;
         });
     }

@@ -10,6 +10,7 @@
 #include "bro-engine-clock.h"
 #include "bro-engine-executor.h"
 #include "bro-event-bus.h"
+#include "bro-job-dto.h"
 #include "bro-scheduler.h"
 #include "bro-step-environment.h"
 #include "bro-step-registry.h"
@@ -28,11 +29,20 @@ typedef void (*BroRunDone) (const BroDecided *decided, const BroBroError *error,
 BroPipelineRunner *bro_pipeline_runner_new (BroEngineExecutor *executor, BroEventBus *bus, BroScheduler *scheduler, BroStore *store,
                                             BroStepRegistry *registry, const BroStepEnvironment *environment, BroEngineClock *clock);
 
-/* Runs the job to its end, or until it is cancelled, then calls @done; @destroy frees @data afterwards. */
+/* Runs the job to its end, or until it is cancelled, then calls @done; @destroy frees @data afterwards. The job is live
+ * (cancel reaches it) as soon as this is called, before its record is loaded. */
 void bro_pipeline_runner_run (BroPipelineRunner *self, const BroId *job_id, BroRunDone done, gpointer data, GDestroyNotify destroy);
 
 /* Cancels a running job: a waiting request or a decision ends at once, a running step sees its token. */
 void bro_pipeline_runner_cancel (BroPipelineRunner *self, const BroId *job_id);
+
+/* The job as it runs (progress, blockedBy, decision; free with bro_job_dto_free); NULL when it isn't running here or its
+ * record isn't loaded yet. */
+BroJobDto *bro_pipeline_runner_job (BroPipelineRunner *self, const BroId *job_id);
+
+/* The running job's log (BroLogLineDto; yours): what the file held when it started, then this run's lines, written or
+ * not; NULL when it isn't running here or hasn't read its log yet. */
+GPtrArray *bro_pipeline_runner_log (BroPipelineRunner *self, const BroId *job_id);
 
 /* Answers the job's question. FALSE and @error: job.notAwaitingDecision when it has none; server.badRequest for an
  * answer the question doesn't offer. */

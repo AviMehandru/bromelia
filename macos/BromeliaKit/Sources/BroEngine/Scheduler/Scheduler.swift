@@ -135,6 +135,12 @@ public final class Scheduler {
         pump()
     }
 
+    /// The job's place in its queue (0 is first); nil when it is in none.
+    public func position(_ jobId: Id) -> Int? {
+        guard let q = queueOf[jobId] else { return nil }
+        return queueLists[q]!.firstIndex(of: jobId)
+    }
+
     public func queues() -> QueueOrders {
         QueueOrders(acquisition: queueLists[.acquisition]!, processing: queueLists[.processing]!, maintenance: queueLists[.maintenance]!)
     }

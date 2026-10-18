@@ -23,6 +23,15 @@ public static class JobPlanner
         return steps;
     }
 
+    /// <summary>The queue a job of the kind starts in (plan §21): a job that reads a disc, acquisition; checks and copies of
+    /// the archive, maintenance; commands and transcodes, processing.</summary>
+    public static Queue Queue(JobKind kind) => kind switch
+    {
+        JobKind.VideoDisc or JobKind.AudioCd or JobKind.DataDisc or JobKind.ReadErrorRetry => Domain.Queue.Acquisition,
+        JobKind.RunCommand or JobKind.Transcode => Domain.Queue.Processing,
+        _ => Domain.Queue.Maintenance,
+    };
+
     /// <summary>The steps a run doesn't do again (plan §12.3): the leading ones, by seq, that succeeded or were skipped,
     /// or failed after the commit (JobOutcome.afterCommit: the runner went on after them).</summary>
     public static IReadOnlyList<StepRecord> Done(IReadOnlyList<StepRecord> steps)
