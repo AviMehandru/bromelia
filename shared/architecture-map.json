@@ -13958,69 +13958,6 @@
           }
         },
         {
-          "name": "StepReport",
-          "kind": "struct",
-          "fields": [
-            "data",
-            "summary",
-            "appendSteps",
-            "skipped",
-            "readErrors",
-            "quarantined",
-            "notice",
-            "skipJob",
-            "error",
-            "affectsOutcome"
-          ],
-          "doc": "What a step's run says: its output data, the steps it appends (Plan), whether it skipped, what the outcome needs (read errors, quarantine, MakeMKV notice, a reason to skip the job), and its error when it failed.",
-          "swift": {
-            "name": "StepReport",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepReport.swift"
-          },
-          "cs": {
-            "name": "StepReport",
-            "file": "windows/src/Bromelia.Engine/Pipeline/StepReport.cs"
-          },
-          "c": {
-            "name": "BroStepReport",
-            "file": "linux/src/engine/pipeline/bro-step-report.h"
-          }
-        },
-        {
-          "name": "StepContext",
-          "kind": "struct",
-          "fields": [
-            "job",
-            "cancel",
-            "progress",
-            "log",
-            "decisions",
-            "tools",
-            "fs",
-            "clock",
-            "drives",
-            "library",
-            "catalog",
-            "config",
-            "driveLookup",
-            "makemkvSetup",
-            "jobDirectory"
-          ],
-          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with.",
-          "swift": {
-            "name": "StepContext",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
-          },
-          "cs": {
-            "name": "StepContext",
-            "file": "windows/src/Bromelia.Engine/Pipeline/StepContext.cs"
-          },
-          "c": {
-            "name": "BroStepContext",
-            "file": "linux/src/engine/pipeline/bro-step-context.h"
-          }
-        },
-        {
           "name": "StepEnvironment",
           "kind": "struct",
           "fields": [
@@ -14343,6 +14280,90 @@
             "name": "BroJobLog",
             "file": "linux/src/engine/pipeline/bro-job-log.h"
           }
+        },
+        {
+          "name": "SpaceReservations",
+          "kind": "protocol",
+          "doc": "How a step keeps room on a volume for its job (plan §21), implemented by the runner over Scheduler.reserve (owner, 2026-10-18).",
+          "phase": 3,
+          "swift": {
+            "name": "SpaceReservations",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/SpaceReservations.swift"
+          },
+          "cs": {
+            "name": "ISpaceReservations",
+            "file": "windows/src/Bromelia.Engine/Pipeline/ISpaceReservations.cs"
+          },
+          "c": {
+            "name": "BroSpaceReservations",
+            "file": "linux/src/engine/pipeline/bro-space-reservations.h"
+          }
+        },
+        {
+          "name": "StepContext",
+          "kind": "struct",
+          "fields": [
+            "job",
+            "cancel",
+            "progress",
+            "log",
+            "decisions",
+            "tools",
+            "fs",
+            "clock",
+            "drives",
+            "library",
+            "catalog",
+            "config",
+            "driveLookup",
+            "makemkvSetup",
+            "space",
+            "jobDirectory",
+            "finishing"
+          ],
+          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with; finishing is the job's outcome when the runner runs Release at the end of a job that stopped before it.",
+          "swift": {
+            "name": "StepContext",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
+          },
+          "cs": {
+            "name": "StepContext",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepContext.cs"
+          },
+          "c": {
+            "name": "BroStepContext",
+            "file": "linux/src/engine/pipeline/bro-step-context.h"
+          }
+        },
+        {
+          "name": "StepReport",
+          "kind": "struct",
+          "fields": [
+            "data",
+            "summary",
+            "appendSteps",
+            "skipped",
+            "readErrors",
+            "quarantined",
+            "notice",
+            "skipJob",
+            "error",
+            "affectsOutcome",
+            "plan"
+          ],
+          "doc": "What a step's run says: its output data, the steps it appends (Plan), whether it skipped, what the outcome needs (read errors, quarantine, MakeMKV notice, a reason to skip the job), its error when it failed, and Plan's plan (stored as the job's, its mode as the job's).",
+          "swift": {
+            "name": "StepReport",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepReport.swift"
+          },
+          "cs": {
+            "name": "StepReport",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepReport.cs"
+          },
+          "c": {
+            "name": "BroStepReport",
+            "file": "linux/src/engine/pipeline/bro-step-report.h"
+          }
         }
       ],
       "functions": [
@@ -14663,6 +14684,22 @@
           "swift": "JobLog.decode(_:)",
           "cs": "JobLog.Decode",
           "c": "bro_job_log_decode"
+        },
+        {
+          "name": "SpaceReservations.reserve",
+          "params": [
+            "volume",
+            "path",
+            "need",
+            "free"
+          ],
+          "doc": "Keeps need bytes on volume for the job, replacing what it kept there; space.insufficient when free minus what other jobs keep there is less.",
+          "throws": true,
+          "async": true,
+          "phase": 3,
+          "swift": "SpaceReservations.reserve(_:path:need:free:)",
+          "cs": "SpaceReservations.Reserve",
+          "c": "bro_space_reservations_reserve"
         }
       ]
     },
@@ -14670,7 +14707,7 @@
       "layer": "engine",
       "folder": "Steps",
       "cFolder": "steps",
-      "doc": "The steps of a video-disc job (plan §12.4, §20.1), each a Step: AwaitMedia, Probe, Reconcile, Identify (phase 3 form) and Release; the MakeMKV sink that turns robot events into progress and log; the typed data steps hand on; and what they share about the job's source. shared/fixtures/engine/video-steps.cases.json.",
+      "doc": "The steps of a video-disc job (plan §12.4, §20.1), each a Step: AwaitMedia, Probe, Reconcile, Identify (phase 3 form), Plan, Decide and Release (also run at the end of a job that stopped before it); the MakeMKV sink that turns robot events into progress and log; the typed data steps hand on; what they share about the job's source; the archive and space checks. shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json.",
       "phase": 3,
       "types": [
         {
@@ -14834,6 +14871,132 @@
             "name": "BroStepSources",
             "file": "linux/src/engine/steps/bro-step-sources.h"
           }
+        },
+        {
+          "name": "PlanStep",
+          "kind": "class",
+          "doc": "Step 6: the profile with real facts, the mode, the titles, one pass, the library (offline: Decide waits), archived before, the space; appends the rest of the job's steps.",
+          "phase": 3,
+          "swift": {
+            "name": "PlanStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/PlanStep.swift"
+          },
+          "cs": {
+            "name": "PlanStep",
+            "file": "windows/src/Bromelia.Engine/Steps/PlanStep.cs"
+          },
+          "c": {
+            "name": "BroPlanStep",
+            "file": "linux/src/engine/steps/bro-plan-step.h"
+          }
+        },
+        {
+          "name": "DecideStep",
+          "kind": "class",
+          "doc": "Step 7, only when needed: holds the plan's library (blocked while offline), the archive check Plan couldn't make, decision.archivedBefore, the space Plan didn't reserve.",
+          "phase": 3,
+          "swift": {
+            "name": "DecideStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/DecideStep.swift"
+          },
+          "cs": {
+            "name": "DecideStep",
+            "file": "windows/src/Bromelia.Engine/Steps/DecideStep.cs"
+          },
+          "c": {
+            "name": "BroDecideStep",
+            "file": "linux/src/engine/steps/bro-decide-step.h"
+          }
+        },
+        {
+          "name": "PlanOutput",
+          "kind": "struct",
+          "fields": [
+            "mode",
+            "profileId",
+            "profile",
+            "libraryId",
+            "libraryOffline",
+            "titles",
+            "onePassMinLength",
+            "spaceNeed",
+            "spaceReserved",
+            "askArchived",
+            "identity"
+          ],
+          "doc": "What PlanStep decided, for the steps after it.",
+          "phase": 3,
+          "swift": {
+            "name": "PlanOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/PlanOutput.swift"
+          },
+          "cs": {
+            "name": "PlanOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/PlanOutput.cs"
+          },
+          "c": {
+            "name": "BroPlanOutput",
+            "file": "linux/src/engine/steps/bro-plan-output.h"
+          }
+        },
+        {
+          "name": "ArchivedMatch",
+          "kind": "struct",
+          "fields": [
+            "unitId",
+            "folder",
+            "day"
+          ],
+          "doc": "A unit that holds this disc already: its id, folder and the day it was committed (UTC).",
+          "phase": 3,
+          "swift": {
+            "name": "ArchivedMatch",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ArchivedMatch.swift"
+          },
+          "cs": {
+            "name": "ArchivedMatch",
+            "file": "windows/src/Bromelia.Engine/Steps/ArchivedMatch.cs"
+          },
+          "c": {
+            "name": "BroArchivedMatch",
+            "file": "linux/src/engine/steps/bro-archived-match.h"
+          }
+        },
+        {
+          "name": "ArchiveCheck",
+          "kind": "namespace",
+          "doc": "Whether the disc was archived before, and what the job does about it (automation.alreadyArchived).",
+          "phase": 3,
+          "swift": {
+            "name": "ArchiveCheck",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ArchiveCheck.swift"
+          },
+          "cs": {
+            "name": "ArchiveCheck",
+            "file": "windows/src/Bromelia.Engine/Steps/ArchiveCheck.cs"
+          },
+          "c": {
+            "name": "BroArchiveCheck",
+            "file": "linux/src/engine/steps/bro-archive-check.h"
+          }
+        },
+        {
+          "name": "SpaceCheck",
+          "kind": "namespace",
+          "doc": "Room for a plan on its library's volume: space.report, then the reservation.",
+          "phase": 3,
+          "swift": {
+            "name": "SpaceCheck",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/SpaceCheck.swift"
+          },
+          "cs": {
+            "name": "SpaceCheck",
+            "file": "windows/src/Bromelia.Engine/Steps/SpaceCheck.cs"
+          },
+          "c": {
+            "name": "BroSpaceCheck",
+            "file": "linux/src/engine/steps/bro-space-check.h"
+          }
         }
       ],
       "functions": [
@@ -14951,6 +15114,148 @@
           "swift": "ReconcileOutput.decode(_:)",
           "cs": "ReconcileOutput.Decode",
           "c": "bro_reconcile_output_decode"
+        },
+        {
+          "name": "PlanOutput.encode",
+          "params": [
+            "plan"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "PlanOutput.encode(_:)",
+          "cs": "PlanOutput.Encode",
+          "c": "bro_plan_output_encode"
+        },
+        {
+          "name": "PlanOutput.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "PlanOutput",
+          "phase": 3,
+          "swift": "PlanOutput.decode(_:)",
+          "cs": "PlanOutput.Decode",
+          "c": "bro_plan_output_decode"
+        },
+        {
+          "name": "PlanOutput.of",
+          "params": [
+            "job"
+          ],
+          "returns": "PlanOutput?",
+          "doc": "The plan in the job's Plan output; null when Plan hasn't run.",
+          "phase": 3,
+          "swift": "PlanOutput.of(_:)",
+          "cs": "PlanOutput.Of",
+          "c": "bro_plan_output_of"
+        },
+        {
+          "name": "ArchivedMatch.encode",
+          "params": [
+            "match"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "ArchivedMatch.encode(_:)",
+          "cs": "ArchivedMatch.Encode",
+          "c": "bro_archived_match_encode"
+        },
+        {
+          "name": "ArchivedMatch.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "ArchivedMatch?",
+          "doc": "Null unless the JSON is an object.",
+          "phase": 3,
+          "swift": "ArchivedMatch.decode(_:)",
+          "cs": "ArchivedMatch.Decode",
+          "c": "bro_archived_match_decode"
+        },
+        {
+          "name": "ArchiveCheck.find",
+          "params": [
+            "context",
+            "_:fingerprint"
+          ],
+          "returns": "ArchivedMatch?",
+          "doc": "The newest committed unit of the disc that still counts: success, its library online, its folder there.",
+          "throws": true,
+          "async": true,
+          "phase": 3,
+          "swift": "ArchiveCheck.find(_:_:)",
+          "cs": "ArchiveCheck.Find",
+          "c": "bro_archive_check_find"
+        },
+        {
+          "name": "ArchiveCheck.apply",
+          "params": [
+            "context",
+            "_:match",
+            "configId"
+          ],
+          "returns": "BroMessage?",
+          "doc": "By hand or ripAgain: logs disc.archivedBefore and goes on; skip: disc.alreadyArchived to skip the job; ask: Decide asks.",
+          "phase": 3,
+          "swift": "ArchiveCheck.apply(_:_:configId:)",
+          "cs": "ArchiveCheck.Apply",
+          "c": "bro_archive_check_apply"
+        },
+        {
+          "name": "ArchiveCheck.message",
+          "params": [
+            "code",
+            "_:match",
+            "withUnit"
+          ],
+          "returns": "BroMessage",
+          "doc": "{folder, day}, and unitId for a reason to skip.",
+          "phase": 3,
+          "swift": "ArchiveCheck.message(_:_:withUnit:)",
+          "cs": "ArchiveCheck.Message",
+          "c": "bro_archive_check_message"
+        },
+        {
+          "name": "SpaceCheck.reserve",
+          "params": [
+            "context",
+            "_:libraryRoot",
+            "_:need"
+          ],
+          "doc": "Logs space.report, then keeps need plus the margin on the library's volume; space.insufficient.",
+          "throws": true,
+          "async": true,
+          "phase": 3,
+          "swift": "SpaceCheck.reserve(_:_:_:)",
+          "cs": "SpaceCheck.Reserve",
+          "c": "bro_space_check_reserve"
+        },
+        {
+          "name": "IdentifyStep.resolve",
+          "params": [
+            "context",
+            "encrypted"
+          ],
+          "returns": "Identity",
+          "doc": "The disc's identity from Probe's listing, the label, the drive's flags and the session's name and kind; Plan resolves it again under its mode.",
+          "throws": true,
+          "phase": 3,
+          "swift": "IdentifyStep.resolve(_:encrypted:)",
+          "cs": "IdentifyStep.Resolve",
+          "c": "bro_identify_step_resolve"
+        },
+        {
+          "name": "ArchiveCheck.asks",
+          "params": [
+            "context",
+            "configId"
+          ],
+          "returns": "Bool",
+          "doc": "Whether the job asks: an automatic rip under automation.alreadyArchived ask.",
+          "phase": 3,
+          "swift": "ArchiveCheck.asks(_:configId:)",
+          "cs": "ArchiveCheck.Asks",
+          "c": "bro_archive_check_asks"
         }
       ]
     },

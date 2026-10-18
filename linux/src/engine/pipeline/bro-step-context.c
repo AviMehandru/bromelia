@@ -18,7 +18,8 @@ config_copy (const BroConfig *config)
 
 BroStepContext *
 bro_step_context_new (BroJobSnapshot *job, BroCancellationToken *cancel, BroProgressReporter *progress, BroJobLogger *log,
-                      BroDecisionPort *decisions, const BroStepEnvironment *environment, const BroConfig *config, const char *job_directory)
+                      BroDecisionPort *decisions, BroSpaceReservations *space, const BroStepEnvironment *environment, const BroConfig *config,
+                      const char *job_directory)
 {
   BroStepContext *c = g_new0 (BroStepContext, 1);
   c->job = job;
@@ -35,6 +36,7 @@ bro_step_context_new (BroJobSnapshot *job, BroCancellationToken *cancel, BroProg
   c->config = config_copy (config);
   c->drive_lookup = ref_or_null (environment->drive_lookup);
   c->makemkv_setup = ref_or_null (environment->makemkv_setup);
+  c->space = space;
   c->job_directory = g_strdup (job_directory);
   return c;
 }
@@ -58,6 +60,8 @@ bro_step_context_free (BroStepContext *context)
   bro_config_free (context->config);
   g_clear_object (&context->drive_lookup);
   g_clear_object (&context->makemkv_setup);
+  g_clear_object (&context->space);
   g_free (context->job_directory);
+  bro_decided_free (context->finishing);
   g_free (context);
 }

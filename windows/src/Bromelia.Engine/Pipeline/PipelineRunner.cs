@@ -44,6 +44,8 @@ public sealed class PipelineRunner
         public bool DirectoryMade;
         public bool LogRead;
         public Config? Config;
+        /// <summary>The outputs of the steps done so far, for the Release step at the end.</summary>
+        public List<StepOutput> Outputs = new();
     }
 
     public PipelineRunner(EngineExecutor executor, EventBus bus, Scheduler scheduler, IStore store, StepRegistry registry,
@@ -91,6 +93,7 @@ public sealed class PipelineRunner
         {
             decided = new Decided(Outcome.Failed, Unexpected(e.Message));
         }
+        await ReleaseAtEnd(live, decided);
         await Finish(live, decided);
         _live.Remove(jobId);
         live.Cancel.Close();
@@ -152,7 +155,7 @@ public sealed class PipelineRunner
         live.LogRead = true;
         live.DirectoryMade = live.LogBefore.Length > 0;
         var done = JobPlanner.Done(await _executor.Worker(() => _store.Steps().Load(jobId)));
-        var outputs = done.Select(s => s.Output ?? new StepOutput(s.Kind, Empty)).ToList();
+        var outputs = live.Outputs = done.Select(s => s.Output ?? new StepOutput(s.Kind, Empty)).ToList();
         var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error)).ToList();
         _scheduler.Submit(jobId, live.Record.Queue);
         bool cancelled = false;
@@ -228,14 +231,36 @@ public sealed class PipelineRunner
                 break;
             }
             if (state == StepState.Failed && !JobOutcome.AfterCommit(kind)) break;
-            if (report?.AppendSteps is { Count: > 0 } more)
+            if (report?.Plan != null || report?.AppendSteps is { Count: > 0 })
             {
-                live.Steps.AddRange(more);
-                plan = plan with { Steps = live.Steps.ToList() };
-                await SaveRecord(live, live.Record with { Plan = plan });
+                if (report.AppendSteps != null) live.Steps.AddRange(report.AppendSteps);
+                plan = (report.Plan ?? plan) with { Steps = live.Steps.ToList() };
+                await SaveRecord(live, live.Record with { Plan = plan, Mode = plan.Mode ?? live.Record.Mode });
             }
+            if (report?.SkipJob != null) break; // the job is skipped: nothing after this step runs
         }
         return JobOutcome.Decide(results, cancelled || live.Cancel.Token.IsCancelled, OutcomePolicy.Default);
+    }
+
+    /// <summary>A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped,
+    /// cancelled) runs the Release step once more, with its outcome as the context's Finishing: the step decides whether
+    /// the disc comes out (owner, 2026-10-18). Nothing is stored for it but its log lines; what it throws is ignored.</summary>
+    async Task ReleaseAtEnd(Live live, Decided decided)
+    {
+        if (live.Record == null || !live.LogRead || _registry.Step(StepKind.Release) is not { } release) return;
+        var jobId = live.Record.Id;
+        if (!_scheduler.Leases().Drives.Any(h => h.Job == jobId)) return;
+        var snapshot = new JobSnapshot(jobId, live.Record.Request, live.Record.Plan, live.Outputs.ToList());
+        var context = Context(live, snapshot, live.Seq) with { Progress = Silent.Instance, Finishing = decided };
+        try
+        {
+            await _executor.Worker(() => release.Run(context));
+        }
+        catch (Exception)
+        {
+            // The job ends either way; the step logs a failed eject itself.
+        }
+        await WriteLog(live);
     }
 
     async Task Finish(Live live, Decided decided)
@@ -348,7 +373,7 @@ public sealed class PipelineRunner
 
     StepContext Context(Live live, JobSnapshot snapshot, int seq) => new(snapshot, live.Cancel.Token,
         new Reporter(this, live, seq), new Logger(this, live), new Decisions(this, live), _env.Tools, _env.Fs, _env.Clock, _env.Drives,
-        _env.Library, _env.Catalog, live.Config!, _env.DriveLookup, _env.MakemkvSetup, JobDirectory(live.Record.Id));
+        _env.Library, _env.Catalog, live.Config!, _env.DriveLookup, _env.MakemkvSetup, new Space(this, live), JobDirectory(live.Record.Id));
 
     static readonly JsonValue Empty = JsonValue.Of(Array.Empty<(string, JsonValue)>());
 
@@ -386,6 +411,46 @@ public sealed class PipelineRunner
         }
 
         public void Log(BroMessage message) => _runner._executor.Post(() => _runner.OnLog(_live, message));
+    }
+
+    sealed class Silent : IProgressReporter
+    {
+        public static readonly Silent Instance = new();
+
+        public void Report(double fraction, BroMessage operation, string? current = null)
+        {
+        }
+    }
+
+    sealed class Space : ISpaceReservations
+    {
+        readonly PipelineRunner _runner;
+        readonly Live _live;
+
+        public Space(PipelineRunner runner, Live live)
+        {
+            _runner = runner;
+            _live = live;
+        }
+
+        public Task Reserve(string volume, string path, long need, long free)
+        {
+            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_runner._executor.Post(() =>
+            {
+                try
+                {
+                    _runner._scheduler.Reserve(_live.Record.Id, volume, path, need, free);
+                    done.TrySetResult(true);
+                }
+                catch (BroFailure f)
+                {
+                    done.TrySetException(f);
+                }
+            }))
+                done.TrySetException(new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled))));
+            return done.Task;
+        }
     }
 
     sealed class Decisions : IDecisionPort

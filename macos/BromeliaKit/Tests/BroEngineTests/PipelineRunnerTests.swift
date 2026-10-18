@@ -64,11 +64,17 @@ final class Gates: @unchecked Sendable {
 final class Behaviours: @unchecked Sendable {
     private let lock = NSLock()
     private var map: [StepKind: JsonValue] = [:]
+    private var ends: [Id: String] = [:]
 
     subscript(kind: StepKind) -> JsonValue {
         get { lock.withLock { map[kind] ?? .object([]) } }
         set { lock.withLock { map[kind] = newValue } }
     }
+
+    /// What the Release at the end saw, by job: '<outcome> <error code>'.
+    func finishing(_ job: Id) -> String? { lock.withLock { ends[job] } }
+
+    func saw(_ job: Id, _ end: String) { lock.withLock { ends[job] = end } }
 }
 
 /// A step that does what the case says.
@@ -94,6 +100,11 @@ struct FakeStep: Step {
     }
 
     func run(_ context: StepContext) async throws(BroError) -> StepReport {
+        if let end = context.finishing {
+            for code in FakeStep.strings(behaviour["log"]) { context.log.log(BroMessage(MessageCode(rawValue: code)!)) }
+            behaviours.saw(context.job.id, end.outcome.rawValue + " " + (end.error?.code ?? ""))
+            return StepReport()
+        }
         for p in behaviour["progress"]?.array ?? [] {
             context.progress.report(p.array![0].double!, operation: BroMessage(MessageCode(rawValue: p.array![1].string!)!), current: nil)
         }
@@ -108,6 +119,9 @@ struct FakeStep: Step {
                                        })
             let answer = try await context.decisions.ask(question)
             data = .object([("answer", .string(answer))])
+        }
+        if let r = behaviour["reserve"] {
+            try await context.space.reserve(r["volume"]!.string!, path: r["path"]!.string!, need: r["need"]!.int!, free: r["free"]!.int!)
         }
         if let gate = behaviour["gate"]?.string,
            !(await gates.wait(gate, job: context.job.id, cancel: context.cancel, ignoresCancel: behaviour["ignoresCancel"]?.bool == true)) {
@@ -125,7 +139,8 @@ struct FakeStep: Step {
                           quarantined: behaviour["quarantined"]?.bool == true, notice: notice,
                           skipJob: behaviour["skipJob"].map { FakeStep.message($0, severity: .warning) },
                           error: behaviour["fail"].map { BroError($0["code"]!.string!, $0["params"]?.members ?? []) },
-                          affectsOutcome: behaviour["affectsOutcome"]?.bool ?? true)
+                          affectsOutcome: behaviour["affectsOutcome"]?.bool ?? true,
+                          plan: behaviour["plan"].map { JobPlan(steps: [], mode: $0["mode"]?.string, profileId: $0["profileId"]?.string, libraryId: $0["libraryId"]?.string) })
     }
 }
 
@@ -480,8 +495,12 @@ struct PipelineRunnerTests {
                 "position": .integer(Int64(r.position)), "automatic": .bool(r.automatic), "mediaGeneration": r.mediaGeneration.map { .integer($0) } ?? .null,
                 "title": .string(r.title), "driveId": r.driveId.map { .string($0) } ?? .null,
                 "plan": r.plan.map { .array($0.steps.map { .string($0.rawValue) }) } ?? .null,
+                "mode": r.mode.map { .string($0) } ?? .null, "libraryId": r.plan?.libraryId.map { .string($0) } ?? .null,
             ]
             for (key, value) in want.members! { try Fixtures.same(value, got[key]!, "record \(key) of \(name)") }
+        }
+        for (name, want) in expect["finishing"]?.members ?? [] {
+            try Fixtures.same(want, h.behaviours.finishing(await h.id(name)).map { .string($0) } ?? .null, "finishing of \(name)")
         }
         for (name, want) in expect["logFile"]?.members ?? [] {
             let text = String(decoding: try h.fs.read("/data/jobs/\(await h.id(name).value)/log.jsonl"), as: UTF8.self)

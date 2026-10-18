@@ -136,6 +136,10 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     private let lock = NSLock()
     private var files: [String: [UInt8]] = [:]
     private var folders: Set<String> = ["/"]
+    private var volumes: [String: VolumeInfo] = [:]
+
+    /// What `volume` gives for this path.
+    func setVolume(_ path: String, _ info: VolumeInfo) { lock.withLock { volumes[path] = info } }
 
     func exists(_ path: String) -> Bool { lock.withLock { files[path] != nil || folders.contains(path) } }
     func read(_ path: String) throws(BroError) -> [UInt8] {
@@ -170,11 +174,15 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     func syncFile(_ path: String) throws(BroError) { fatalError("not used") }
     func syncDirectory(_ path: String) throws(BroError) { fatalError("not used") }
     func openForReading(_ path: String, bypassCache: Bool) throws(BroError) -> any ByteStream { fatalError("not used") }
-    func volume(_ path: String) throws(BroError) -> VolumeInfo { fatalError("not used") }
+    func volume(_ path: String) throws(BroError) -> VolumeInfo {
+        guard let v = lock.withLock({ volumes[path] }) else { throw BroError("fs.notFound", [("path", .string(path))]) }
+        return v
+    }
 }
 
 /// Ports the pipeline's own tests never call.
-struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries, DriveLookup, MakemkvSetup {
+struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries, DriveLookup, MakemkvSetup, SpaceReservations {
+    func reserve(_ volume: String, path: String, need: Int64, free: Int64) async throws(BroError) { fatalError("not used") }
     func scanDrives(_ cancel: CancellationToken) async throws(BroError) -> [MakemkvDrive] { fatalError("not used") }
     func listing(_ source: MakemkvSource, invocation: MakemkvInvocation, sink: any RunSink, cancel: CancellationToken) async throws(BroError) -> ListingRun { fatalError("not used") }
     func rip(_ source: MakemkvSource, title: String, destination: String, invocation: MakemkvInvocation, sink: any RunSink,

@@ -12,6 +12,8 @@ internal sealed class MemoryFileSystem : IFileSystem
     readonly HashSet<string> _folders = new() { "/" };
     /// <summary>Reads of these paths fail so.</summary>
     public readonly Dictionary<string, BroError> ReadFails = new();
+    /// <summary>What <see cref="Volume"/> gives for these paths.</summary>
+    public readonly Dictionary<string, VolumeInfo> Volumes = new();
 
     public bool Exists(string path)
     {
@@ -60,5 +62,9 @@ internal sealed class MemoryFileSystem : IFileSystem
     public void SyncFile(string path) => throw new NotSupportedException();
     public void SyncDirectory(string path) => throw new NotSupportedException();
     public IByteStream OpenForReading(string path, bool bypassCache) => throw new NotSupportedException();
-    public VolumeInfo Volume(string path) => throw new NotSupportedException();
+    public VolumeInfo Volume(string path)
+    {
+        lock (_lock)
+            return Volumes.TryGetValue(path, out var v) ? v : throw new BroFailure(new BroError("fs.notFound", ("path", JsonValue.Of(path))));
+    }
 }

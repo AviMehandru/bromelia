@@ -58,6 +58,12 @@ public sealed class PipelineRunnerTests
 
         public async Task<StepReport> Run(StepContext context)
         {
+            if (context.Finishing is { } end)
+            {
+                foreach (var code in Strings(_b["log"])) context.Log.Log(new BroMessage(MessageCode.Parse(code)!.Value));
+                lock (_h.Finishing) _h.Finishing[context.Job.Id] = EnumWire.Name(end.Outcome) + " " + end.Error?.Code;
+                return new StepReport(EmptyObject);
+            }
             foreach (var p in _b["progress"]?.AsArray ?? new List<JsonValue>())
                 context.Progress.Report(p.AsArray![0].AsNumber!.Value, new BroMessage(MessageCode.Parse(p.AsArray[1].AsString!)!.Value));
             foreach (var code in Strings(_b["log"])) context.Log.Log(new BroMessage(MessageCode.Parse(code)!.Value));
@@ -73,6 +79,8 @@ public sealed class PipelineRunnerTests
                 var answer = await context.Decisions.Ask(question);
                 data = JsonValue.Of(("answer", JsonValue.Of(answer)));
             }
+            if (_b["reserve"] is { } r)
+                await context.Space.Reserve(r["volume"]!.AsString!, r["path"]!.AsString!, r["need"]!.AsInteger!.Value, r["free"]!.AsInteger!.Value);
             if (_b["gate"]?.AsString is { } gate) await _h.Gate(gate, context.Job.Id, context.Cancel, _b["ignoresCancel"]?.AsBool == true);
             return new StepReport(
                 data,
@@ -83,7 +91,10 @@ public sealed class PipelineRunnerTests
                 Notice: Notice(_b["notice"]?.AsString),
                 SkipJob: _b["skipJob"] is { } skip ? Message(skip, Severity.Warning) : null,
                 Error: _b["fail"] is { } fail ? Error(fail) : null,
-                AffectsOutcome: _b["affectsOutcome"]?.AsBool ?? true);
+                AffectsOutcome: _b["affectsOutcome"]?.AsBool ?? true,
+                Plan: _b["plan"] is { } plan
+                    ? new JobPlan(new List<StepKind>(), plan["mode"]?.AsString, plan["profileId"]?.AsString, plan["libraryId"]?.AsString)
+                    : null);
         }
     }
 
@@ -118,6 +129,8 @@ public sealed class PipelineRunnerTests
         public readonly PipelineRunner Runner;
         public readonly Dictionary<string, Id> Jobs = new();
         public readonly Dictionary<string, Decided> Outcomes = new();
+        /// <summary>What the Release at the end saw, by job: '&lt;outcome&gt; &lt;error code&gt;'.</summary>
+        public readonly Dictionary<Id, string> Finishing = new();
         public readonly List<EngineEvent> Events = new();
         readonly object _gateLock = new();
         readonly Dictionary<string, TaskCompletionSource> _gates = new();
@@ -603,9 +616,13 @@ public sealed class PipelineRunnerTests
                     ["title"] = JsonValue.Of(r.Title),
                     ["driveId"] = JsonValue.Of(r.DriveId),
                     ["plan"] = r.Plan is { } plan ? JsonValue.Of(plan.Steps.Select(k => JsonValue.Of(EnumWire.Name(k)))) : JsonValue.Null.Instance,
+                    ["mode"] = JsonValue.Of(r.Mode),
+                    ["libraryId"] = JsonValue.Of(r.Plan?.LibraryId),
                 };
                 foreach (var (key, value) in want.AsObject!) Same(value, got[key], $"record {key} of {name}");
             }
+            foreach (var (name, want) in expect["finishing"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+                lock (h.Finishing) Same(want, JsonValue.Of(h.Finishing.TryGetValue(h.Jobs[name], out var seen) ? seen : null), "finishing of " + name);
             foreach (var (name, want) in expect["logFile"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
             {
                 var text = Encoding.UTF8.GetString(h.Fs.Read($"/data/jobs/{h.Jobs[name].Value}/log.jsonl"));

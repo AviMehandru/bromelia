@@ -30,6 +30,8 @@ public final class PipelineRunner {
         var directoryMade = false
         var logRead = false
         var config: Config?
+        /// The outputs of the steps done so far, for the Release step at the end.
+        var outputs: [StepOutput] = []
     }
 
     private let executor: EngineExecutor
@@ -78,6 +80,7 @@ public final class PipelineRunner {
         } catch {
             decided = Decided(outcome: .failed, error: error)
         }
+        await releaseAtEnd(l, decided)
         await finish(l, decided)
         live.removeValue(forKey: jobId)
         l.cancel.close()
@@ -146,7 +149,7 @@ public final class PipelineRunner {
         l.logRead = true
         l.directoryMade = !l.logBefore.isEmpty
         let done = JobPlanner.done(try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) })
-        var outputs = done.map { $0.output ?? StepOutput(kind: $0.kind, data: .object([])) }
+        l.outputs = done.map { $0.output ?? StepOutput(kind: $0.kind, data: .object([])) }
         var results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error) }
         scheduler.submit(jobId, queue: l.record.queue)
         var cancelled = false
@@ -164,7 +167,7 @@ public final class PipelineRunner {
                                      currentFraction: nil, operation: BroMessage(.jobOpStarting))
             var snapshotPlan = plan
             snapshotPlan.steps = l.steps
-            let snapshot = JobSnapshot(id: jobId, request: l.record.request, plan: snapshotPlan, outputs: outputs)
+            let snapshot = JobSnapshot(id: jobId, request: l.record.request, plan: snapshotPlan, outputs: l.outputs)
             let lease: Lease
             do throws(BroError) {
                 lease = try await scheduler.acquire(jobId, resources: step.resources(snapshot), onWait: { [unowned self] wait in self.onWait(l, wait) },
@@ -206,7 +209,7 @@ public final class PipelineRunner {
             bus.publish(.stepFinished, data: .object([("job", .string(jobId.value)), ("seq", .integer(Int64(seq))), ("kind", .string(kind.rawValue)),
                                                       ("state", .string(state.rawValue))]))
             try await writeLog(l)
-            outputs.append(output)
+            l.outputs.append(output)
             results.append(StepResult(kind: kind, state: state, error: error, readErrors: report?.readErrors ?? 0, quarantined: report?.quarantined ?? false,
                                       notice: report?.notice, skip: report?.skipJob, affectsOutcome: report?.affectsOutcome ?? true))
             if kind == .release && state == .succeeded {
@@ -219,16 +222,34 @@ public final class PipelineRunner {
                 break
             }
             if state == .failed && !JobOutcome.afterCommit(kind) { break }
-            if let more = report?.appendSteps, !more.isEmpty {
-                l.steps += more
+            if let report, report.plan != nil || !report.appendSteps.isEmpty {
+                l.steps += report.appendSteps
+                plan = report.plan ?? plan
                 plan.steps = l.steps
                 var r = l.record
                 r.plan = plan
+                r.mode = plan.mode ?? r.mode
                 try await save(l, r)
             }
+            if report?.skipJob != nil { break } // the job is skipped: nothing after this step runs
             seq += 1
         }
         return JobOutcome.decide(results, cancelled: cancelled || l.cancel.token.isCancelled, policy: OutcomePolicy())
+    }
+
+    /// A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped, cancelled) runs
+    /// the Release step once more, with its outcome as the context's finishing: the step decides whether the disc comes out
+    /// (owner, 2026-10-18). Nothing is stored for it but its log lines; what it throws is ignored.
+    private func releaseAtEnd(_ l: Live, _ decided: Decided) async {
+        guard let record = l.loaded, l.logRead, let release = registry.step(.release),
+              scheduler.leases().drives.contains(where: { $0.job == record.id }) else { return }
+        let snapshot = JobSnapshot(id: record.id, request: record.request, plan: record.plan, outputs: l.outputs)
+        var ending = makeContext(l, snapshot, l.seq)
+        ending.progress = Silent()
+        ending.finishing = decided
+        let context = ending
+        _ = try? await executor.worker { () async throws(BroError) -> StepReport in try await release.run(context) }
+        try? await writeLog(l)
     }
 
     private func finish(_ l: Live, _ decided: Decided) async {
@@ -310,6 +331,15 @@ public final class PipelineRunner {
         bus.publish(.jobLog, data: .object([("jobId", .string(l.record.id.value)), ("lines", .array([LogLineDto.json(line)]))]))
     }
 
+    fileprivate func reserve(_ l: Live, _ volume: String, _ path: String, _ need: Int64, _ free: Int64) -> Result<Void, BroError> {
+        do throws(BroError) {
+            try scheduler.reserve(l.record.id, volume: volume, path: path, need: need, free: free)
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
     fileprivate func onAsk(_ l: Live, _ question: DecisionDto, _ answer: CheckedContinuation<Result<String, BroError>, Never>) {
         if l.cancel.token.isCancelled {
             answer.resume(returning: .failure(BroError(MessageCode.wire(.jobCancelled))))
@@ -341,7 +371,7 @@ public final class PipelineRunner {
                     log: Logger(runner: self, live: l, executor: executor), decisions: Decisions(runner: self, live: l, executor: executor),
                     tools: environment.tools, fs: environment.fs, clock: environment.clock, drives: environment.drives, library: environment.library,
                     catalog: environment.catalog, config: l.config!, driveLookup: environment.driveLookup, makemkvSetup: environment.makemkvSetup,
-                    jobDirectory: jobDirectory(l.record.id))
+                    space: Space(runner: self, live: l, executor: executor), jobDirectory: jobDirectory(l.record.id))
     }
 
     static func unexpected(_ detail: String) -> BroError {
@@ -369,6 +399,24 @@ private struct Logger: JobLogger {
 
     func log(_ message: BroMessage) {
         executor.post { [runner, live] in runner.onLog(live, message) }
+    }
+}
+
+private struct Silent: ProgressReporter {
+    func report(_ fraction: Double, operation: BroMessage, current: String?) {}
+}
+
+private struct Space: SpaceReservations {
+    let runner: PipelineRunner
+    let live: PipelineRunner.Live
+    let executor: EngineExecutor
+
+    func reserve(_ volume: String, path: String, need: Int64, free: Int64) async throws(BroError) {
+        let result = await withCheckedContinuation { (done: CheckedContinuation<Result<Void, BroError>, Never>) in
+            let posted = executor.post { [runner, live] in done.resume(returning: runner.reserve(live, volume, path, need, free)) }
+            if !posted { done.resume(returning: .failure(BroError(MessageCode.wire(.jobCancelled)))) }
+        }
+        try result.get()
     }
 }
 

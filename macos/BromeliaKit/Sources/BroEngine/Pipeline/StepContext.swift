@@ -3,7 +3,9 @@ import BroFoundation
 import BroPorts
 
 /// Everything a step may use from its worker (plan §12.2); all of it is Sendable. The job is a snapshot: its request,
-/// its plan and the outputs of the steps before this one. The configuration is the one the job started with.
+/// its plan and the outputs of the steps before this one. The configuration is the one the job started with. `finishing`
+/// is set only when the runner runs the Release step at the end of a job that stopped before it (the job's outcome): the
+/// step then decides whether the disc comes out.
 public struct StepContext: Sendable {
     public var job: JobSnapshot
     public var cancel: CancellationToken
@@ -19,11 +21,14 @@ public struct StepContext: Sendable {
     public var config: Config
     public var driveLookup: any DriveLookup
     public var makemkvSetup: any MakemkvSetup
+    public var space: any SpaceReservations
     public var jobDirectory: String
+    public var finishing: Decided?
 
     public init(job: JobSnapshot, cancel: CancellationToken, progress: any ProgressReporter, log: any JobLogger, decisions: any DecisionPort,
                 tools: ToolSet, fs: any FileSystem, clock: any Clock, drives: any DriveControl, library: any LibraryPort,
-                catalog: any CatalogQueries, config: Config, driveLookup: any DriveLookup, makemkvSetup: any MakemkvSetup, jobDirectory: String) {
+                catalog: any CatalogQueries, config: Config, driveLookup: any DriveLookup, makemkvSetup: any MakemkvSetup,
+                space: any SpaceReservations, jobDirectory: String, finishing: Decided? = nil) {
         self.job = job
         self.cancel = cancel
         self.progress = progress
@@ -38,6 +43,8 @@ public struct StepContext: Sendable {
         self.config = config
         self.driveLookup = driveLookup
         self.makemkvSetup = makemkvSetup
+        self.space = space
         self.jobDirectory = jobDirectory
+        self.finishing = finishing
     }
 }

@@ -22,5 +22,6 @@ bro_step_report_free (BroStepReport *report)
   bro_makemkv_notice_free (report->notice);
   bro_bro_message_free (report->skip_job);
   bro_bro_error_free (report->error);
+  bro_job_plan_free (report->plan);
   g_free (report);
 }

@@ -8,13 +8,14 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Engine.Tests;
 
-/// <summary>shared/fixtures/engine/video-steps.cases.json: each step alone, with fake ports.</summary>
+/// <summary>shared/fixtures/engine/video-steps.cases.json and plan-steps.cases.json: each step alone, with fake ports.</summary>
 public sealed class VideoStepsTests
 {
     static JsonValue EmptyObject => JsonValue.Of(Array.Empty<(string, JsonValue)>());
 
     static readonly Dictionary<StepKind, IStep> Steps = new IStep[]
-        { new AwaitMediaStep(), new ProbeStep(), new ReconcileStep(), new IdentifyStep(), new ReleaseStep() }.ToDictionary(s => s.Kind);
+        { new AwaitMediaStep(), new ProbeStep(), new ReconcileStep(), new IdentifyStep(), new PlanStep(), new DecideStep(), new ReleaseStep() }
+        .ToDictionary(s => s.Kind);
 
     static JobRequest RequestOf(JsonValue r) => new(
         EnumWire.Parse<JobKind>(r["kind"]?.AsString) ?? JobKind.VideoDisc, r["title"]?.AsString ?? "", r["automatic"]?.AsBool ?? false,
@@ -44,14 +45,62 @@ public sealed class VideoStepsTests
     };
 
     /// <summary>The ports a case gives, recording every call.</summary>
-    sealed class Fakes : IMakemkv, IDriveControl, IDriveLookup, IMakemkvSetup, IProgressReporter, IJobLogger
+    sealed class Fakes : IMakemkv, IDriveControl, IDriveLookup, IMakemkvSetup, IProgressReporter, IJobLogger, ILibraryPort, ICatalogQueries,
+        IDecisionPort, ISpaceReservations
     {
         readonly JsonValue _given;
         public readonly List<string> Calls = new();
         public readonly List<BroMessage> Log = new();
         public readonly List<JsonValue> Progress = new();
+        /// <summary>Probe's fingerprint ('archivedBefore probe').</summary>
+        public string? Fingerprint;
+        public DecisionDto? Question;
 
         public Fakes(JsonValue given) => _given = given;
+
+        public LibraryHandle Require(string libraryId)
+        {
+            if (_given["libraries"]?[libraryId] is not { } l) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.LibraryNotFound)));
+            if (l["offline"] is { } why) throw new BroFailure(new BroError(why["code"]!.AsString!, (JsonValue.Object)(why["params"] ?? EmptyObject)));
+            return new LibraryHandle(libraryId, l["path"]!.AsString!);
+        }
+
+        public string StagingDirectory(string libraryId, Id jobId) => throw new NotSupportedException();
+
+        public Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files) => throw new NotSupportedException();
+
+        public Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<UnitRecord>> ArchivedBefore(string fingerprint)
+        {
+            lock (Calls) Calls.Add("archivedBefore " + (fingerprint == Fingerprint ? "probe" : fingerprint));
+            if (fingerprint != Fingerprint) return Task.FromResult<IReadOnlyList<UnitRecord>>(new List<UnitRecord>());
+            var units = (_given["catalog"]?.AsArray ?? new List<JsonValue>()).Select(u => new UnitRecord(new Id(u["id"]!.AsString!),
+                u["libraryId"]!.AsString!, null, null, u["path"]!.AsString!, "", 3, UnitState.Committed,
+                EnumWire.Parse<UnitStatus>(u["status"]!.AsString) ?? UnitStatus.Success, "", MediaKind.Movie, "", "", false, fingerprint, "", null,
+                null, null, null, "", 0, 0, 1, Instant.Parse("2026-09-01T00:00:00.000Z")!.Value,
+                Instant.Parse(u["committedAt"]!.AsString!)!.Value)).ToList();
+            return Task.FromResult<IReadOnlyList<UnitRecord>>(units);
+        }
+
+        public Task<string> Ask(DecisionDto decision)
+        {
+            lock (Calls)
+            {
+                Question = decision;
+                Calls.Add($"ask {decision.Id} {MessageCode.Wire(decision.Question.Code)} {string.Join(",", decision.Answers.Select(a => a.Id))}");
+            }
+            return _given["answer"]?.AsString is { } answer ? Task.FromResult(answer)
+                : Task.FromException<string>(new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled))));
+        }
+
+        public Task Reserve(string volume, string path, long need, long free)
+        {
+            lock (Calls) Calls.Add(FormattableString.Invariant($"reserve {volume} {path} {need} {free}"));
+            if (_given["reserveFails"] is { } e) throw new BroFailure(new BroError(e["code"]!.AsString!, (JsonValue.Object)(e["params"] ?? EmptyObject)));
+            return Task.CompletedTask;
+        }
 
         public DriveLocation? Find(string driveId)
         {
@@ -168,20 +217,54 @@ public sealed class VideoStepsTests
     }
 
     [Fact]
-    public void TheSharedCasesPass() => RunCases("engine/video-steps.cases.json", (id, given, expect) =>
+    public void TheSharedCasesPass() => RunCases("engine/video-steps.cases.json", Case);
+
+    [Fact]
+    public void ThePlanCasesPass() => RunCases("engine/plan-steps.cases.json", Case);
+
+    static bool Case(string id, JsonValue given, JsonValue expect)
     {
         var step = Steps[EnumWire.Parse<StepKind>(given["step"]!.AsString)!.Value];
         var fakes = new Fakes(given);
         var config = ConfigCodec.Decode(JsonValue.EncodeCanonical(given["config"] ?? JsonValue.Of(("version", JsonValue.Of(3L)))));
-        var outputs = (given["outputs"]?.AsArray ?? new List<JsonValue>())
-            .Select(o => new StepOutput(EnumWire.Parse<StepKind>(o["kind"]!.AsString)!.Value, o["data"]!)).ToList();
-        var job = new JobSnapshot(new Id("00000000-0000-4000-8000-000000000001"), RequestOf(given["request"]!), null, outputs);
+        var outputs = new List<StepOutput>();
+        if (given["probe"] is { } probe)
+        {
+            var listing = probe["disc"] is { } disc ? Listing(GeneratedListing(disc)) : null;
+            fakes.Fingerprint = listing != null ? Bromelia.Domain.Fingerprint.Of(listing) : null;
+            outputs.Add(new StepOutput(StepKind.Probe, ProbeOutput.Encode(new ProbeOutput(listing, fakes.Fingerprint, null, false))));
+        }
+        outputs.AddRange((given["outputs"]?.AsArray ?? new List<JsonValue>())
+            .Select(o => new StepOutput(EnumWire.Parse<StepKind>(o["kind"]!.AsString)!.Value, o["data"]!)));
+        var fs = new MemoryFileSystem();
+        foreach (var f in given["files"]?.AsArray ?? new List<JsonValue>()) fs.CreateDirectory(f.AsString!, parentsMustExist: false);
+        foreach (var (path, v) in given["volumes"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+            fs.Volumes[path] = new VolumeInfo(v["id"]!.AsString!, v["free"]!.AsInteger!.Value, "apfs", false);
+        Decided? finishing = given["finishing"] is { } end
+            ? new Decided(EnumWire.Parse<Outcome>(end["outcome"]!.AsString)!.Value, end["error"] is { } why ? new BroError(why["code"]!.AsString!) : null)
+            : null;
+        var request = RequestOf(given["request"]!);
         var cancel = new CancellationSource();
-        var context = new StepContext(job, cancel.Token, fakes, fakes, null!, new ToolSet(fakes, null!), null!, null!, fakes, null!, null!, config,
-            fakes, fakes, "/data/jobs/" + job.Id.Value);
+        StepContext ContextOf(JobSnapshot job) => new(job, cancel.Token, fakes, fakes, fakes, new ToolSet(fakes, null!), fs, null!, fakes, fakes, fakes,
+            config, fakes, fakes, fakes, "/data/jobs/" + job.Id.Value, finishing);
+        var jobId = new Id("00000000-0000-4000-8000-000000000001");
+        if (given["identify"]?.AsBool == true)
+        {
+            var identified = Run(Steps[StepKind.Identify], ContextOf(new JobSnapshot(jobId, request, null, outputs.ToList())));
+            outputs.Add(new StepOutput(StepKind.Identify, identified.Report!.Data));
+            fakes.Log.Clear();
+            fakes.Calls.Clear();
+            fakes.Progress.Clear();
+        }
+        var job = new JobSnapshot(jobId, request, null, outputs);
+        var context = ContextOf(job);
 
         if (expect["resources"] is { } resources)
+        {
             Same(resources["drives"], JsonValue.Of(step.Resources(job).Drives.Select(d => JsonValue.Of(d))), "resources.drives");
+            if (resources["libraryWrites"] is { } writes)
+                Same(writes, JsonValue.Of(step.Resources(job).LibraryWrites.Select(d => JsonValue.Of(d))), "resources.libraryWrites");
+        }
         var (report, thrown) = Run(step, context);
         var error = thrown ?? report?.Error;
         if (expect["error"] is { } expectedError)
@@ -210,6 +293,29 @@ public sealed class VideoStepsTests
         }
         if (expect["calls"] is { } calls) Same(string.Join(" | ", calls.AsArray!.Select(c => c.AsString)), string.Join(" | ", fakes.Calls), "calls");
         if (expect["progress"] is { } progress) Subset(progress, JsonValue.Of(fakes.Progress), "progress");
+        if (expect["skipJob"] is { } skipJob)
+        {
+            Same(skipJob is JsonValue.Null ? JsonValue.Null.Instance : skipJob["code"]!, JsonValue.Of(report?.SkipJob is { } sj ? MessageCode.Wire(sj.Code) : null), "skipJob");
+            if (skipJob["params"] is { } sp) Same(sp, (JsonValue?)report?.SkipJob?.Params ?? EmptyObject, "skipJob params");
+        }
+        if (expect["appendSteps"] is { } append)
+            Same(append, JsonValue.Of((report?.AppendSteps ?? new List<StepKind>()).Select(k => JsonValue.Of(EnumWire.Name(k)))), "appendSteps");
+        if (expect["plan"] is { } plan)
+            Subset(plan, report?.Plan is { } p ? JsonValue.Of(("mode", JsonValue.Of(p.Mode)), ("profileId", JsonValue.Of(p.ProfileId)),
+                ("libraryId", JsonValue.Of(p.LibraryId))) : null, "plan");
+        if (expect["question"] is { } question)
+        {
+            Same(question["code"], JsonValue.Of(fakes.Question is { } q ? MessageCode.Wire(q.Question.Code) : null), "question");
+            Same(question["params"] ?? EmptyObject, (JsonValue?)fakes.Question?.Question.Params ?? EmptyObject, "question params");
+        }
         return true;
-    });
+    }
+
+    static Listing Listing(string robot)
+    {
+        var builder = new ListingBuilder();
+        foreach (var line in robot.Split('\n'))
+            if (Robot.ParseLine(line) is { } e) builder.Feed(e);
+        return builder.Build();
+    }
 }

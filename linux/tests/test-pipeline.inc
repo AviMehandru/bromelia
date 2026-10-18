@@ -463,6 +463,7 @@ typedef struct {
   GHashTable *opened;    /* gate names */
   GPtrArray *waiters;    /* "gate\njob id", "!" first at a gate that ignores the cancel */
   GHashTable *cancelled; /* job ids */
+  GHashTable *finishing; /* job id → what the Release at the end saw: "<outcome> <error code>" */
   gboolean closing;      /* the case is over: every wait ends */
 } Gates;
 
@@ -474,6 +475,7 @@ gates_init (Gates *g)
   g->opened = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g->waiters = g_ptr_array_new_with_free_func (g_free);
   g->cancelled = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  g->finishing = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
 }
 
 static void
@@ -482,6 +484,7 @@ gates_clear (Gates *g)
   g_hash_table_unref (g->opened);
   g_ptr_array_unref (g->waiters);
   g_hash_table_unref (g->cancelled);
+  g_hash_table_unref (g->finishing);
   g_mutex_clear (&g->lock);
   g_cond_clear (&g->cond);
 }
@@ -673,6 +676,8 @@ message_of (BroJsonValue *j, BroSeverity severity)
   return bro_bro_message_new (code, params ? bro_json_value_ref (params) : NULL, severity);
 }
 
+#define STEPS_RESERVE_S(v, k) bro_json_value_get_string (bro_json_value_member ((v), (k)), "")
+
 static BroStepReport *
 fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
 {
@@ -682,6 +687,23 @@ fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
   BroJsonValue *progress = bro_json_value_member (b, "progress"), *log = bro_json_value_member (b, "log");
   g_autoptr (BroJsonValue) data = NULL;
   BroStepReport *report;
+  if (ctx->finishing)
+    {
+      for (guint i = 0; log && i < bro_json_value_length (log); i++)
+        {
+          BroMessageCode code;
+          g_autoptr (BroBroMessage) m = NULL;
+          g_assert_true (bro_message_code_parse (bro_json_value_get_string (bro_json_value_at (log, i), ""), &code));
+          m = bro_bro_message_new (code, NULL, BRO_SEVERITY_INFO);
+          bro_job_logger_log (ctx->log, m);
+        }
+      g_mutex_lock (&self->gates->lock);
+      g_hash_table_replace (self->gates->finishing, g_strdup (ctx->job->id.value),
+                            g_strconcat (bro_outcome_to_wire (ctx->finishing->outcome), " ",
+                                         ctx->finishing->error ? ctx->finishing->error->code : "", NULL));
+      g_mutex_unlock (&self->gates->lock);
+      return bro_step_report_new (NULL);
+    }
   for (guint i = 0; progress && i < bro_json_value_length (progress); i++)
     {
       BroJsonValue *p = bro_json_value_at (progress, i);
@@ -740,6 +762,11 @@ fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
       data = bro_json_value_new_object ();
       bro_json_value_set (data, "answer", bro_json_value_new_string (answer));
     }
+  if ((v = bro_json_value_member (b, "reserve"))
+      && !bro_space_reservations_reserve (ctx->space, STEPS_RESERVE_S (v, "volume"), STEPS_RESERVE_S (v, "path"),
+                                          bro_json_value_get_integer (bro_json_value_member (v, "need"), 0),
+                                          bro_json_value_get_integer (bro_json_value_member (v, "free"), 0), error))
+    return NULL;
   if ((v = bro_json_value_member (b, "gate"))
       && !gates_wait (self->gates, v->string, &ctx->job->id, ctx->cancel,
                       bro_json_value_get_bool (bro_json_value_member (b, "ignoresCancel"), FALSE)))
@@ -776,6 +803,13 @@ fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
                                          params ? bro_json_value_ref (params) : NULL, NULL);
     }
   report->affects_outcome = bro_json_value_get_bool (bro_json_value_member (b, "affectsOutcome"), TRUE);
+  if ((v = bro_json_value_member (b, "plan")))
+    {
+      report->plan = bro_job_plan_new ();
+      report->plan->mode = g_strdup (bro_json_value_get_string (bro_json_value_member (v, "mode"), NULL));
+      report->plan->profile_id = g_strdup (bro_json_value_get_string (bro_json_value_member (v, "profileId"), NULL));
+      report->plan->library_id = g_strdup (bro_json_value_get_string (bro_json_value_member (v, "libraryId"), NULL));
+    }
   return report;
 }
 
@@ -1706,6 +1740,8 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
         bro_json_value_set (got, "mediaGeneration", r->has_media_generation ? bro_json_value_new_integer (r->media_generation) : bro_json_value_new_null ());
         bro_json_value_set (got, "title", bro_json_value_new_string (r->title));
         bro_json_value_set (got, "driveId", r->drive_id ? bro_json_value_new_string (r->drive_id) : bro_json_value_new_null ());
+        bro_json_value_set (got, "mode", r->mode ? bro_json_value_new_string (r->mode) : bro_json_value_new_null ());
+        bro_json_value_set (got, "libraryId", r->plan && r->plan->library_id ? bro_json_value_new_string (r->plan->library_id) : bro_json_value_new_null ());
         if (r->plan)
           bro_json_value_set (got, "plan", plan);
         else
@@ -1719,6 +1755,18 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
             g_autofree char *what = g_strdup_printf ("record %s of %s", key, (char *) g_ptr_array_index (v->keys, i));
             bro_test_same_json (failures, id, what, g_ptr_array_index (want->items, k), bro_json_value_member (got, key));
           }
+      }
+  if ((v = bro_json_value_member (expect, "finishing")))
+    for (guint i = 0; i < v->keys->len; i++)
+      {
+        BroId *jid = g_hash_table_lookup (h.jobs, g_ptr_array_index (v->keys, i));
+        BroJsonValue *want = g_ptr_array_index (v->items, i);
+        g_autofree char *what = g_strdup_printf ("finishing of %s", (char *) g_ptr_array_index (v->keys, i));
+        const char *seen;
+        g_mutex_lock (&h.gates.lock);
+        seen = g_hash_table_lookup (h.gates.finishing, jid->value);
+        bro_test_same_string (failures, id, what, want->kind == BRO_JSON_VALUE_NULL ? NULL : want->string, seen);
+        g_mutex_unlock (&h.gates.lock);
       }
   if ((v = bro_json_value_member (expect, "logFile")))
     for (guint i = 0; i < v->keys->len; i++)

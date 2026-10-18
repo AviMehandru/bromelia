@@ -6,6 +6,7 @@
 #include "bro-job-log.h"
 #include "bro-job-outcome.h"
 #include "bro-job-planner.h"
+#include "bro-lease-snapshot.h"
 #include "bro-log-line-dto.h"
 #include "bro-message-code.h"
 #include "bro-step-result.h"
@@ -126,6 +127,7 @@ typedef struct {
   BroInstant started;
   BroStepReport *report;
   BroBroError *thrown;
+  BroDecided *decided; /* how it ended, between conclude and the record's save */
   BroRunDone done;
   gpointer done_data;
   GDestroyNotify done_destroy;
@@ -162,6 +164,7 @@ live_unref (gpointer data)
   bro_lease_unref (l->lease);
   bro_step_report_free (l->report);
   bro_bro_error_free (l->thrown);
+  bro_decided_free (l->decided);
   g_object_unref (l->runner);
   g_free (l);
 }
@@ -248,6 +251,12 @@ work_free (gpointer data)
 static void conclude (Live *l, BroBroError *fatal);
 static void next_step (Live *l);
 
+static void
+concluded (Live *l)
+{
+  conclude (l, NULL);
+}
+
 /* Saves the record (and the step record, when set), then goes on with w->next. */
 static gboolean
 save_work (gpointer data, BroBroError **error)
@@ -298,6 +307,10 @@ typedef struct {
   char *current;
   Waiter *waiter;
   BroDecisionDto *decision;
+  char *volume;
+  char *path;
+  gint64 need;
+  gint64 free;
 } Posted;
 
 static void
@@ -309,6 +322,8 @@ posted_free (gpointer data)
   g_free (p->current);
   waiter_unref (p->waiter);
   bro_decision_dto_free (p->decision);
+  g_free (p->volume);
+  g_free (p->path);
   g_free (p);
 }
 
@@ -365,6 +380,17 @@ on_ask (gpointer data)
   set_state (l, BRO_JOB_STATE_AWAITING_DECISION);
 }
 
+static void
+on_reserve (gpointer data)
+{
+  Posted *p = data;
+  BroBroError *error = NULL;
+  if (bro_scheduler_reserve (p->live->runner->scheduler, &p->live->id, p->volume, p->path, p->need, p->free, &error))
+    waiter_settle (p->waiter, "ok", NULL);
+  else
+    waiter_settle (p->waiter, NULL, error);
+}
+
 #define TYPE_REPORTER (reporter_get_type ())
 G_DECLARE_FINAL_TYPE (Reporter, reporter, RUNNER, REPORTER, GObject)
 
@@ -377,12 +403,14 @@ struct _Reporter {
 static void reporter_progress_init (BroProgressReporterInterface *iface);
 static void reporter_logger_init (BroJobLoggerInterface *iface);
 static void reporter_decisions_init (BroDecisionPortInterface *iface);
+static void reporter_space_init (BroSpaceReservationsInterface *iface);
 
-/* One object is all three: the progress reporter, the logger and the decision port of a step. */
+/* One object is all four: the progress reporter, the logger, the decision port and the space reservations of a step. */
 G_DEFINE_FINAL_TYPE_WITH_CODE (Reporter, reporter, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_PROGRESS_REPORTER, reporter_progress_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_JOB_LOGGER, reporter_logger_init)
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_DECISION_PORT, reporter_decisions_init))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_DECISION_PORT, reporter_decisions_init)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_SPACE_RESERVATIONS, reporter_space_init))
 
 static Posted *
 posted_new (Reporter *r)
@@ -434,6 +462,38 @@ reporter_ask (BroDecisionPort *self, const BroDecisionDto *decision, BroBroError
     *error = bro_bro_error_copy (w->error);
   waiter_unref (w);
   return answer;
+}
+
+/* On the step's worker: waits until the executor has asked the Scheduler. */
+static gboolean
+reporter_reserve (BroSpaceReservations *self, const char *volume, const char *path, gint64 need, gint64 free, BroBroError **error)
+{
+  Reporter *r = (Reporter *) self;
+  Waiter *w = waiter_new ();
+  Posted *p = posted_new (r);
+  gboolean ok;
+  p->waiter = waiter_ref (w);
+  p->volume = g_strdup (volume);
+  p->path = g_strdup (path);
+  p->need = need;
+  p->free = free;
+  if (!bro_engine_executor_post (r->live->runner->executor, on_reserve, p, posted_free))
+    waiter_settle (w, NULL, cancelled_error ());
+  g_mutex_lock (&w->lock);
+  while (!w->settled)
+    g_cond_wait (&w->cond, &w->lock);
+  g_mutex_unlock (&w->lock);
+  ok = w->answer != NULL;
+  if (!ok)
+    *error = bro_bro_error_copy (w->error);
+  waiter_unref (w);
+  return ok;
+}
+
+static void
+reporter_space_init (BroSpaceReservationsInterface *iface)
+{
+  iface->reserve = reporter_reserve;
 }
 
 static void
@@ -585,12 +645,27 @@ end_done (gpointer data, const BroBroError *error)
       return;
     }
   l->seq++;
-  if (l->report && l->report->append_steps->len > 0)
+  if (l->report && (l->report->plan || l->report->append_steps->len > 0))
     {
       g_array_append_vals (l->steps, l->report->append_steps->data, l->report->append_steps->len);
+      if (l->report->plan)
+        {
+          bro_job_plan_free (l->record->plan);
+          l->record->plan = bro_job_plan_copy (l->report->plan);
+          if (l->report->plan->mode)
+            {
+              g_free (l->record->mode);
+              l->record->mode = g_strdup (l->report->plan->mode);
+            }
+        }
       g_array_set_size (l->record->plan->steps, 0);
       g_array_append_vals (l->record->plan->steps, l->steps->data, l->steps->len);
-      save_record (l, next_step);
+      save_record (l, l->report->skip_job ? concluded : next_step);
+      return;
+    }
+  if (l->report && l->report->skip_job) /* the job is skipped: nothing after this step runs */
+    {
+      conclude (l, NULL);
       return;
     }
   next_step (l);
@@ -660,7 +735,8 @@ started (Live *l)
   r->seq = l->seq;
   w->run_step = g_object_ref (step);
   w->context = bro_step_context_new (snapshot (l), bro_cancellation_source_token (l->cancel), g_object_ref (BRO_PROGRESS_REPORTER (r)),
-                                     g_object_ref (BRO_JOB_LOGGER (r)), BRO_DECISION_PORT (r), self->environment, l->config, directory);
+                                     g_object_ref (BRO_JOB_LOGGER (r)), g_object_ref (BRO_DECISION_PORT (r)), BRO_SPACE_RESERVATIONS (r),
+                                     self->environment, l->config, directory);
   bro_engine_executor_worker (self->executor, step_work, step_done, w, work_free);
 }
 
@@ -897,13 +973,104 @@ finish_work (gpointer data, BroBroError **error)
   return TRUE;
 }
 
-/* Decides the outcome (or fails with @fatal, taken), records it, gives everything back, says so. */
+static void record_end (Live *l);
+
+static gboolean
+release_work (gpointer data, BroBroError **error)
+{
+  Work *w = data;
+  g_autoptr (BroBroError) ignored = NULL;
+  g_autoptr (BroStepReport) report = bro_step_run (w->run_step, w->context, &ignored);
+  return TRUE; /* the job ends either way; the step logs a failed eject itself */
+}
+
+static gboolean
+release_log_work (gpointer data, BroBroError **error)
+{
+  Work *w = data;
+  g_autoptr (BroBroError) ignored = NULL;
+  g_autofree char *path = g_strconcat (w->log_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+  if (w->make_directory && !bro_file_system_create_directory (w->fs, w->log_directory, FALSE, &ignored))
+    return TRUE;
+  bro_file_system_write_atomically (w->fs, path, w->log, 0600, &ignored);
+  return TRUE;
+}
+
+static void
+release_log_done (gpointer data, const BroBroError *error)
+{
+  record_end (((Work *) data)->live);
+}
+
+/* The Release step has run (its log lines are posted before this): writes the log, then records the end. */
+static void
+release_done (gpointer data, const BroBroError *error)
+{
+  Live *l = ((Work *) data)->live;
+  BroPipelineRunner *self = l->runner;
+  Work *w;
+  if (l->log->len == 0)
+    {
+      record_end (l);
+      return;
+    }
+  w = work_new (l);
+  {
+    g_autoptr (GBytes) added = bro_job_log_encode (l->log);
+    GByteArray *all = g_byte_array_new ();
+    if (l->log_before)
+      g_byte_array_append (all, g_bytes_get_data (l->log_before, NULL), g_bytes_get_size (l->log_before));
+    g_byte_array_append (all, g_bytes_get_data (added, NULL), g_bytes_get_size (added));
+    w->log = g_byte_array_free_to_bytes (all);
+  }
+  w->log_directory = job_directory (self, &l->id);
+  w->fs = g_object_ref (self->environment->fs);
+  w->make_directory = !l->directory_made;
+  l->directory_made = TRUE;
+  bro_engine_executor_worker (self->executor, release_log_work, release_log_done, w, work_free);
+}
+
+/* A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped, cancelled)
+ * runs the Release step once more, unstored, with its outcome as the context's finishing (owner, 2026-10-18). */
+static gboolean
+release_at_end (Live *l)
+{
+  BroPipelineRunner *self = l->runner;
+  BroStep *step = bro_step_registry_step (self->registry, BRO_STEP_KIND_RELEASE);
+  g_autoptr (BroLeaseSnapshot) leases = NULL;
+  gboolean holds = FALSE;
+  Reporter *r;
+  Work *w;
+  g_autofree char *directory = NULL;
+  if (!l->record || !l->log_read || !l->steps || !step)
+    return FALSE;
+  leases = bro_scheduler_leases (self->scheduler);
+  for (guint i = 0; i < leases->drives->len; i++)
+    holds |= strcmp (((BroDriveHolder *) g_ptr_array_index (leases->drives, i))->job.value, l->id.value) == 0;
+  if (!holds)
+    return FALSE;
+  r = g_object_new (TYPE_REPORTER, NULL);
+  r->live = live_ref (l);
+  r->seq = G_MININT; /* its progress is never shown */
+  directory = job_directory (self, &l->id);
+  w = work_new (l);
+  w->run_step = g_object_ref (step);
+  w->context = bro_step_context_new (snapshot (l), bro_cancellation_source_token (l->cancel), g_object_ref (BRO_PROGRESS_REPORTER (r)),
+                                     g_object_ref (BRO_JOB_LOGGER (r)), g_object_ref (BRO_DECISION_PORT (r)), BRO_SPACE_RESERVATIONS (r),
+                                     self->environment, l->config, directory);
+  w->context->finishing = g_new0 (BroDecided, 1);
+  w->context->finishing->outcome = l->decided->outcome;
+  w->context->finishing->error = bro_bro_error_copy (l->decided->error);
+  bro_engine_executor_worker (self->executor, release_work, release_done, w, work_free);
+  return TRUE;
+}
+
+/* Decides the outcome (or fails with @fatal, taken), runs the Release step at the end when the job still holds its
+ * drive, records the outcome, gives everything back, says so. */
 static void
 conclude (Live *l, BroBroError *fatal)
 {
-  BroPipelineRunner *self = l->runner;
-  g_autoptr (BroDecided) decided = NULL;
-  Work *w;
+  BroDecided *decided;
   if (fatal)
     {
       decided = g_new0 (BroDecided, 1);
@@ -913,6 +1080,18 @@ conclude (Live *l, BroBroError *fatal)
   else
     decided = bro_job_outcome_decide (l->results, l->cancelled || bro_cancellation_token_is_cancelled (bro_cancellation_source_token (l->cancel)),
                                       NULL);
+  bro_decided_free (l->decided);
+  l->decided = decided;
+  if (!release_at_end (l))
+    record_end (l);
+}
+
+static void
+record_end (Live *l)
+{
+  BroPipelineRunner *self = l->runner;
+  const BroDecided *decided = l->decided;
+  Work *w;
   g_clear_pointer (&l->progress, bro_progress_dto_free);
   g_clear_pointer (&l->pending, bro_progress_dto_free);
   g_clear_pointer (&l->blocked_by, bro_bro_message_free);

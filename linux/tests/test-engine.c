@@ -1175,6 +1175,7 @@ main (int argc, char **argv)
   g_test_add_func ("/engine/job-planner", test_job_planner);
   g_test_add_func ("/engine/job-service", test_job_service);
   g_test_add_func ("/engine/video-steps", test_video_steps);
+  g_test_add_func ("/engine/plan-steps", test_plan_steps);
   g_test_add_func ("/engine/problem-service", test_problem_service);
   g_test_add_func ("/engine/config-service", test_config_service);
   g_test_add_func ("/engine/makemkv-service", test_makemkv_service);

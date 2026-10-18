@@ -6,7 +6,8 @@ namespace Bromelia.Engine;
 
 /// <summary>What a step's run says: its output data (for the steps after it), the steps it appends (Plan), whether it
 /// skipped, what the job's outcome needs (read errors, quarantine, the MakeMKV notice that explains a failure, a reason
-/// to skip the whole job, whether its failure counts), and its error when it failed.</summary>
+/// to skip the whole job, whether its failure counts), its error when it failed, and what Plan decided (the runner
+/// stores it as the job's plan, with the steps appended, and its mode as the job's).</summary>
 public sealed record StepReport(
     JsonValue Data,
     BroMessage? Summary = null,
@@ -17,7 +18,8 @@ public sealed record StepReport(
     MakemkvNotice? Notice = null,
     BroMessage? SkipJob = null,
     BroError? Error = null,
-    bool AffectsOutcome = true)
+    bool AffectsOutcome = true,
+    JobPlan? Plan = null)
 {
     public static StepReport Done(JsonValue data) => new(data);
 

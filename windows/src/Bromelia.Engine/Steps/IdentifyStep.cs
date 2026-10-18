@@ -19,18 +19,28 @@ public sealed class IdentifyStep : IStep
     public Task<StepReport> Run(StepContext context)
     {
         var request = StepSources.Request(context.Job);
-        var probe = ProbeOutput.Decode(JobSnapshot.Output(context.Job, StepKind.Probe) ?? JsonValue.Null.Instance);
         var drive = request.Source is DiscSource.Drive d ? context.DriveLookup.Find(d.DriveId) : null;
-        var label = probe.Listing is { Name.Length: > 0 } l ? l.Name : StepSources.Label(request.Source, drive);
         var mode = StepSources.BaseMode(context.Job, StepSources.Profile(context, drive?.ConfigId));
-        var choices = request.Session?.Choices;
-        var identity = Identity.Resolve(new IdentityInputs(probe.Listing, label, mode == RipMode.Backup, drive?.Flags,
-            NameOverride: choices?.Name ?? "", KindOverride: choices?.Kind));
+        var identity = Resolve(context, mode == RipMode.Backup);
         var set = LabelParser.SetDescription(identity.Label);
         context.Log.Log(new BroMessage(MessageCode.IdentityResolved, Severity.Info, ("kind", JsonValue.Of(EnumWire.Name(identity.Kind))),
             ("name", JsonValue.Of(identity.Name)), ("hasSet", JsonValue.Of(set.Length > 0)), ("set", JsonValue.Of(set)),
             ("format", JsonValue.Of(EnumWire.Name(identity.Format))), ("formatCode", JsonValue.Of(identity.FormatCode.Text)),
             ("reason", identity.Reason.ToJson())));
         return Task.FromResult(StepReport.Done(Identity.Encode(identity)));
+    }
+
+    /// <summary>The identity of the job's disc from Probe's listing (or none), the disc's label (the listing's name, else
+    /// StepSources.label), the drive's flags and the session's name and kind; <paramref name="encrypted"/>: a backup that
+    /// stays encrypted. Plan resolves it again under the mode it chose.</summary>
+    public static Identity Resolve(StepContext context, bool encrypted)
+    {
+        var request = StepSources.Request(context.Job);
+        var probe = ProbeOutput.Decode(JobSnapshot.Output(context.Job, StepKind.Probe) ?? JsonValue.Null.Instance);
+        var drive = request.Source is DiscSource.Drive d ? context.DriveLookup.Find(d.DriveId) : null;
+        var label = probe.Listing is { Name.Length: > 0 } l ? l.Name : StepSources.Label(request.Source, drive);
+        var choices = request.Session?.Choices;
+        return Identity.Resolve(new IdentityInputs(probe.Listing, label, encrypted, drive?.Flags,
+            NameOverride: choices?.Name ?? "", KindOverride: choices?.Kind));
     }
 }

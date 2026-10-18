@@ -1,9 +1,15 @@
-/* test-steps.inc: shared/fixtures/engine/video-steps.cases.json: each step alone, with fake ports. Included by
- * test-engine.c (after test-pipeline.inc). */
+/* test-steps.inc: shared/fixtures/engine/video-steps.cases.json and plan-steps.cases.json: each step alone, with fake
+ * ports. Included by test-engine.c (after test-pipeline.inc). */
 
 #include "bro-await-media-step.h"
 #include "bro-config-codec.h"
+#include "bro-decide-step.h"
+#include "bro-fingerprint.h"
 #include "bro-identify-step.h"
+#include "bro-plan-step.h"
+#include "bro-probe-output.h"
+#include "bro-unit-record.h"
+#include "bro-volume-info.h"
 #include "bro-listing-builder.h"
 #include "bro-probe-step.h"
 #include "bro-reconcile-step.h"
@@ -24,6 +30,8 @@ struct _TestStepFakes {
   GPtrArray *calls;    /* char * */
   GPtrArray *log;      /* BroBroMessage * */
   BroJsonValue *progress; /* array */
+  char *fingerprint;   /* Probe's ('archivedBefore probe') */
+  BroDecisionDto *question;
 };
 
 static void
@@ -181,6 +189,127 @@ fakes_log (BroJobLogger *logger, const BroBroMessage *message)
   g_mutex_unlock (&f->lock);
 }
 
+static gboolean
+steps_fakes_exists (BroFileSystem *fs, const char *path)
+{
+  BroJsonValue *files = bro_json_value_member (TEST_STEP_FAKES (fs)->given, "files");
+  for (guint i = 0; i < bro_json_value_length (files); i++)
+    if (strcmp (bro_json_value_get_string (bro_json_value_at (files, i), ""), path) == 0)
+      return TRUE;
+  return FALSE;
+}
+
+static BroVolumeInfo *
+fakes_volume (BroFileSystem *fs, const char *path, BroBroError **error)
+{
+  BroJsonValue *v = bro_json_value_member (bro_json_value_member (TEST_STEP_FAKES (fs)->given, "volumes"), path);
+  BroVolumeInfo *info;
+  if (!v)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "path", bro_json_value_new_string (path));
+      bro_bro_error_set (error, "fs.notFound", params);
+      return NULL;
+    }
+  info = bro_volume_info_new ();
+  g_free (info->id);
+  info->id = g_strdup (STEPS_JS (v, "id"));
+  info->free_bytes = bro_json_value_get_integer (bro_json_value_member (v, "free"), 0);
+  return info;
+}
+
+static BroLibraryHandle *
+fakes_require (BroLibraryPort *port, const char *library_id, BroBroError **error)
+{
+  BroJsonValue *l = bro_json_value_member (bro_json_value_member (TEST_STEP_FAKES (port)->given, "libraries"), library_id);
+  BroJsonValue *why = bro_json_value_member (l, "offline");
+  if (!l)
+    {
+      bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_LIBRARY_NOT_FOUND), NULL);
+      return NULL;
+    }
+  if (why)
+    {
+      BroJsonValue *params = bro_json_value_member (why, "params");
+      bro_bro_error_set (error, STEPS_JS (why, "code"), params ? bro_json_value_ref (params) : NULL);
+      return NULL;
+    }
+  return bro_library_handle_new (library_id, STEPS_JS (l, "path"));
+}
+
+static GPtrArray *
+fakes_archived_before (BroCatalogQueries *catalog, const char *fingerprint, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (catalog);
+  GPtrArray *units = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_unit_record_free);
+  gboolean probe = g_strcmp0 (fingerprint, f->fingerprint) == 0;
+  BroJsonValue *given = bro_json_value_member (f->given, "catalog");
+  fakes_call (f, g_strconcat ("archivedBefore ", probe ? "probe" : fingerprint, NULL));
+  for (guint i = 0; probe && i < bro_json_value_length (given); i++)
+    {
+      BroJsonValue *u = bro_json_value_at (given, i);
+      BroUnitRecord *r = bro_unit_record_new ();
+      g_strlcpy (r->id.value, STEPS_JS (u, "id"), sizeof r->id.value);
+      g_free (r->library_id);
+      r->library_id = g_strdup (STEPS_JS (u, "libraryId"));
+      g_free (r->path);
+      r->path = g_strdup (STEPS_JS (u, "path"));
+      r->state = BRO_UNIT_STATE_COMMITTED;
+      g_assert_true (bro_unit_status_from_wire (STEPS_JS (u, "status"), &r->status));
+      g_assert_true (bro_instant_parse ("2026-09-01T00:00:00.000Z", &r->created_at));
+      r->has_committed_at = bro_instant_parse (STEPS_JS (u, "committedAt"), &r->committed_at);
+      g_ptr_array_add (units, r);
+    }
+  return units;
+}
+
+static char *
+fakes_ask (BroDecisionPort *port, const BroDecisionDto *decision, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (port);
+  GString *text = g_string_new (NULL);
+  const char *answer = STEPS_JS (f->given, "answer");
+  g_string_append_printf (text, "ask %s %s ", decision->id, bro_message_code_wire (decision->question->code));
+  for (guint i = 0; i < decision->answers->len; i++)
+    g_string_append_printf (text, "%s%s", i ? "," : "", ((BroDecisionAnswer *) g_ptr_array_index (decision->answers, i))->id);
+  g_mutex_lock (&f->lock);
+  bro_decision_dto_free (f->question);
+  f->question = bro_decision_dto_copy (decision);
+  g_mutex_unlock (&f->lock);
+  fakes_call (f, g_string_free (text, FALSE));
+  if (!answer)
+    {
+      bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
+      return NULL;
+    }
+  return g_strdup (answer);
+}
+
+static gboolean
+fakes_reserve (BroSpaceReservations *space, const char *volume, const char *path, gint64 need, gint64 free, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (space);
+  BroJsonValue *fails = bro_json_value_member (f->given, "reserveFails");
+  fakes_call (f, g_strdup_printf ("reserve %s %s %" G_GINT64_FORMAT " %" G_GINT64_FORMAT, volume, path, need, free));
+  if (fails)
+    {
+      BroJsonValue *params = bro_json_value_member (fails, "params");
+      bro_bro_error_set (error, STEPS_JS (fails, "code"), params ? bro_json_value_ref (params) : NULL);
+      return FALSE;
+    }
+  return TRUE;
+}
+
+static void
+steps_fakes_fs_iface (BroFileSystemInterface *i)
+{
+  i->exists = steps_fakes_exists;
+  i->volume = fakes_volume;
+}
+static void fakes_library_iface (BroLibraryPortInterface *i) { i->require = fakes_require; }
+static void fakes_catalog_iface (BroCatalogQueriesInterface *i) { i->archived_before = fakes_archived_before; }
+static void fakes_decisions_iface (BroDecisionPortInterface *i) { i->ask = fakes_ask; }
+static void fakes_space_iface (BroSpaceReservationsInterface *i) { i->reserve = fakes_reserve; }
 static void fakes_lookup_iface (BroDriveLookupInterface *i) { i->find = fakes_find; }
 static void fakes_setup_iface (BroMakemkvSetupInterface *i) { i->invocation = fakes_invocation; }
 static void fakes_makemkv_iface (BroMakemkvInterface *i) { i->listing = fakes_listing; }
@@ -199,7 +328,12 @@ G_DEFINE_FINAL_TYPE_WITH_CODE (TestStepFakes, test_step_fakes, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_MAKEMKV, fakes_makemkv_iface)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_DRIVE_CONTROL, fakes_drives_iface)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_PROGRESS_REPORTER, fakes_progress_iface)
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_JOB_LOGGER, fakes_log_iface))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_JOB_LOGGER, fakes_log_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_FILE_SYSTEM, steps_fakes_fs_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_LIBRARY_PORT, fakes_library_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CATALOG_QUERIES, fakes_catalog_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_DECISION_PORT, fakes_decisions_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_SPACE_RESERVATIONS, fakes_space_iface))
 
 static void
 test_step_fakes_finalize (GObject *object)
@@ -209,6 +343,8 @@ test_step_fakes_finalize (GObject *object)
   g_ptr_array_unref (f->calls);
   g_ptr_array_unref (f->log);
   bro_json_value_unref (f->progress);
+  g_free (f->fingerprint);
+  bro_decision_dto_free (f->question);
   g_mutex_clear (&f->lock);
   G_OBJECT_CLASS (test_step_fakes_parent_class)->finalize (object);
 }
@@ -313,6 +449,10 @@ steps_step (const char *kind)
     return BRO_STEP (bro_reconcile_step_new ());
   if (strcmp (kind, "identify") == 0)
     return BRO_STEP (bro_identify_step_new ());
+  if (strcmp (kind, "plan") == 0)
+    return BRO_STEP (bro_plan_step_new ());
+  if (strcmp (kind, "decide") == 0)
+    return BRO_STEP (bro_decide_step_new ());
   if (strcmp (kind, "release") == 0)
     return BRO_STEP (bro_release_step_new ());
   return NULL;
@@ -350,6 +490,29 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   BroId job_id = { "00000000-0000-4000-8000-000000000001" };
   BroJobSnapshot *job = bro_job_snapshot_new (&job_id, steps_request_of (bro_json_value_member (given, "request")), NULL);
   BroJsonValue *outputs = bro_json_value_member (given, "outputs");
+  BroJsonValue *probe = bro_json_value_member (given, "probe");
+  if (probe)
+    {
+      BroJsonValue *disc = bro_json_value_member (probe, "disc");
+      g_autoptr (BroListing) listing = NULL;
+      g_autoptr (BroProbeOutput) output = NULL;
+      if (disc)
+        {
+          g_autofree char *robot = bro_test_generated_listing (disc);
+          g_auto (GStrv) lines = g_strsplit (robot, "\n", -1);
+          g_autoptr (BroListingBuilder) builder = bro_listing_builder_new ();
+          for (guint i = 0; lines[i]; i++)
+            {
+              g_autoptr (BroRobotEvent) e = bro_robot_parse_line (lines[i]);
+              if (e)
+                bro_listing_builder_feed (builder, e);
+            }
+          listing = bro_listing_builder_build (builder);
+          fakes->fingerprint = bro_fingerprint_of (listing);
+        }
+      output = bro_probe_output_new (listing, fakes->fingerprint, NULL, FALSE);
+      g_ptr_array_add (job->outputs, bro_step_output_new (BRO_STEP_KIND_PROBE, bro_probe_output_encode (output), NULL));
+    }
   for (guint i = 0; i < bro_json_value_length (outputs); i++)
     {
       BroJsonValue *o = bro_json_value_at (outputs, i);
@@ -358,13 +521,40 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
       g_ptr_array_add (job->outputs, bro_step_output_new (kind, bro_json_value_ref (bro_json_value_member (o, "data")), NULL));
     }
   g_autoptr (BroToolSet) tools = bro_tool_set_new (BRO_MAKEMKV (fakes), NULL);
-  g_autoptr (BroStepEnvironment) environment = bro_step_environment_new (tools, NULL, NULL, BRO_DRIVE_CONTROL (fakes), NULL, NULL, NULL,
+  g_autoptr (BroStepEnvironment) environment = bro_step_environment_new (tools, BRO_FILE_SYSTEM (fakes), NULL, BRO_DRIVE_CONTROL (fakes),
+                                                                         BRO_LIBRARY_PORT (fakes), BRO_CATALOG_QUERIES (fakes), NULL,
                                                                          BRO_DRIVE_LOOKUP (fakes), BRO_MAKEMKV_SETUP (fakes), "/data");
   g_autoptr (BroCancellationSource) cancel = bro_cancellation_source_new ();
   g_autofree char *directory = g_strconcat ("/data/jobs/", job_id.value, NULL);
+  if (bro_json_value_get_bool (bro_json_value_member (given, "identify"), FALSE))
+    {
+      BroJobSnapshot *before = bro_job_snapshot_new (&job_id, bro_job_request_copy (job->request), NULL);
+      g_autoptr (BroStep) identify = BRO_STEP (bro_identify_step_new ());
+      g_autoptr (BroBroError) failure = NULL;
+      for (guint i = 0; i < job->outputs->len; i++)
+        g_ptr_array_add (before->outputs, bro_step_output_copy (g_ptr_array_index (job->outputs, i)));
+      g_autoptr (BroStepContext) first = bro_step_context_new (before, bro_cancellation_source_token (cancel), g_object_ref (BRO_PROGRESS_REPORTER (fakes)),
+                                                               g_object_ref (BRO_JOB_LOGGER (fakes)), g_object_ref (BRO_DECISION_PORT (fakes)),
+                                                               g_object_ref (BRO_SPACE_RESERVATIONS (fakes)), environment, config, directory);
+      g_autoptr (BroStepReport) identified = bro_step_run (identify, first, &failure);
+      g_assert_nonnull (identified);
+      g_ptr_array_add (job->outputs, bro_step_output_new (BRO_STEP_KIND_IDENTIFY, bro_json_value_ref (identified->data), NULL));
+      g_ptr_array_set_size (fakes->calls, 0);
+      g_ptr_array_set_size (fakes->log, 0);
+      bro_json_value_unref (fakes->progress);
+      fakes->progress = bro_json_value_new_array ();
+    }
   g_autoptr (BroResourceSet) resources = bro_step_resources (step, job);
   g_autoptr (BroStepContext) context = bro_step_context_new (job, bro_cancellation_source_token (cancel), g_object_ref (BRO_PROGRESS_REPORTER (fakes)),
-                                                             g_object_ref (BRO_JOB_LOGGER (fakes)), NULL, environment, config, directory);
+                                                             g_object_ref (BRO_JOB_LOGGER (fakes)), g_object_ref (BRO_DECISION_PORT (fakes)),
+                                                             g_object_ref (BRO_SPACE_RESERVATIONS (fakes)), environment, config, directory);
+  if ((v = bro_json_value_member (given, "finishing")))
+    {
+      BroJsonValue *why = bro_json_value_member (v, "error");
+      context->finishing = g_new0 (BroDecided, 1);
+      g_assert_true (bro_outcome_from_wire (STEPS_JS (v, "outcome"), &context->finishing->outcome));
+      context->finishing->error = why ? bro_bro_error_new (STEPS_JS (why, "code"), NULL, NULL) : NULL;
+    }
 
   if ((v = bro_json_value_member (expect, "resources")))
     {
@@ -372,6 +562,13 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
       for (guint i = 0; resources->drives && resources->drives[i]; i++)
         bro_json_value_append (drives, bro_json_value_new_string (resources->drives[i]));
       bro_test_same_json (failures, id, "resources.drives", bro_json_value_member (v, "drives"), drives);
+      if (bro_json_value_member (v, "libraryWrites"))
+        {
+          g_autoptr (BroJsonValue) writes = bro_json_value_new_array ();
+          for (guint i = 0; resources->library_writes && resources->library_writes[i]; i++)
+            bro_json_value_append (writes, bro_json_value_new_string (resources->library_writes[i]));
+          bro_test_same_json (failures, id, "resources.libraryWrites", bro_json_value_member (v, "libraryWrites"), writes);
+        }
     }
   g_autoptr (BroBroError) thrown = NULL;
   g_autoptr (BroStepReport) report = bro_step_run (step, context, &thrown);
@@ -431,6 +628,43 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
     }
   if ((v = bro_json_value_member (expect, "progress")))
     steps_subset (failures, id, "progress", v, fakes->progress);
+  if ((v = bro_json_value_member (expect, "skipJob")))
+    {
+      const BroBroMessage *skip = report ? report->skip_job : NULL;
+      bro_test_same_string (failures, id, "skipJob", v->kind == BRO_JSON_VALUE_NULL ? NULL : STEPS_JS (v, "code"),
+                            skip ? bro_message_code_wire (skip->code) : NULL);
+      if (bro_json_value_member (v, "params"))
+        {
+          g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
+          bro_test_same_json (failures, id, "skipJob params", bro_json_value_member (v, "params"), skip ? skip->params : none);
+        }
+    }
+  if ((v = bro_json_value_member (expect, "appendSteps")))
+    {
+      g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+      for (guint i = 0; report && i < report->append_steps->len; i++)
+        bro_json_value_append (got, bro_json_value_new_string (bro_step_kind_to_wire (g_array_index (report->append_steps, BroStepKind, i))));
+      bro_test_same_json (failures, id, "appendSteps", v, got);
+    }
+  if ((v = bro_json_value_member (expect, "plan")))
+    {
+      g_autoptr (BroJsonValue) got = NULL;
+      if (report && report->plan)
+        {
+          got = bro_json_value_new_object ();
+          bro_json_value_set (got, "mode", report->plan->mode ? bro_json_value_new_string (report->plan->mode) : bro_json_value_new_null ());
+          bro_json_value_set (got, "profileId", report->plan->profile_id ? bro_json_value_new_string (report->plan->profile_id) : bro_json_value_new_null ());
+          bro_json_value_set (got, "libraryId", report->plan->library_id ? bro_json_value_new_string (report->plan->library_id) : bro_json_value_new_null ());
+        }
+      steps_subset (failures, id, "plan", v, got);
+    }
+  if ((v = bro_json_value_member (expect, "question")))
+    {
+      g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
+      BroJsonValue *params = bro_json_value_member (v, "params");
+      bro_test_same_string (failures, id, "question", STEPS_JS (v, "code"), fakes->question ? bro_message_code_wire (fakes->question->question->code) : NULL);
+      bro_test_same_json (failures, id, "question params", params ? params : none, fakes->question ? fakes->question->question->params : none);
+    }
   g_clear_pointer (&context, bro_step_context_free);
   g_object_unref (fakes);
   return TRUE;
@@ -440,4 +674,10 @@ static void
 test_video_steps (void)
 {
   bro_test_run_cases ("engine/video-steps.cases.json", video_steps_case);
+}
+
+static void
+test_plan_steps (void)
+{
+  bro_test_run_cases ("engine/plan-steps.cases.json", video_steps_case);
 }

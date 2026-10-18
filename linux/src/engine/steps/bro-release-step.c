@@ -3,6 +3,8 @@
 #include "bro-steps-private.h"
 #include "bro-step-sources.h"
 #include "bro-config.h"
+
+#include <string.h>
 struct _BroReleaseStep {
   GObject parent;
 };
@@ -38,6 +40,31 @@ ejected (gboolean value)
   return bro_step_report_new (_bro_param ("ejected", bro_json_value_new_bool (value)));
 }
 
+/* At the end of a job that stopped before it (the context's finishing, owner 2026-10-18): after a failure when
+ * automation.ejectOnFailure says so, after "already archived, skipped" (disc.alreadyArchived) when ejectWhenDone says so,
+ * and when the user answered eject to Decide's question; never after a cancel. Otherwise ejectWhenDone. */
+static gboolean
+ejects (const BroStepContext *context, const BroJsonValue *automation)
+{
+  const BroDecided *end = context->finishing;
+  BroJsonValue *decide;
+  if (!end)
+    return bro_json_value_get_bool (bro_json_value_member (automation, "ejectWhenDone"), FALSE);
+  switch (end->outcome)
+    {
+    case BRO_OUTCOME_FAILED:
+      return bro_json_value_get_bool (bro_json_value_member (automation, "ejectOnFailure"), FALSE);
+    case BRO_OUTCOME_SKIPPED:
+      decide = bro_job_snapshot_output (context->job, BRO_STEP_KIND_DECIDE);
+      if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (decide, "answer"), NULL), "eject") == 0)
+        return TRUE;
+      return end->error && strcmp (end->error->code, bro_message_code_wire (BRO_MSG_DISC_ALREADY_ARCHIVED)) == 0
+             && bro_json_value_get_bool (bro_json_value_member (automation, "ejectWhenDone"), FALSE);
+    default:
+      return FALSE;
+    }
+}
+
 static BroStepReport *
 step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
 {
@@ -50,7 +77,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   if (!at || !*at->device)
     return ejected (FALSE);
   g_autoptr (BroJsonValue) automation = bro_config_automation (context->config, at->config_id);
-  if (!bro_json_value_get_bool (bro_json_value_member (automation, "ejectWhenDone"), FALSE))
+  if (!ejects (context, automation))
     return ejected (FALSE);
   _bro_step_progress (context, 0, BRO_MSG_DRIVE_EJECTING);
   g_autoptr (BroBroError) failure = NULL;

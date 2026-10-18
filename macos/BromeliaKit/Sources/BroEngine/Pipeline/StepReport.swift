@@ -3,7 +3,8 @@ import BroFoundation
 
 /// What a step's run says: its output data (for the steps after it), the steps it appends (Plan), whether it skipped,
 /// what the job's outcome needs (read errors, quarantine, the MakeMKV notice that explains a failure, a reason to skip
-/// the whole job, whether its failure counts), and its error when it failed.
+/// the whole job, whether its failure counts), its error when it failed, and what Plan decided (the runner stores it as
+/// the job's plan, with the steps appended, and its mode as the job's).
 public struct StepReport: Sendable, Equatable {
     public var data: JsonValue
     public var summary: BroMessage?
@@ -15,10 +16,11 @@ public struct StepReport: Sendable, Equatable {
     public var skipJob: BroMessage?
     public var error: BroError?
     public var affectsOutcome: Bool
+    public var plan: JobPlan?
 
     public init(data: JsonValue = .object([]), summary: BroMessage? = nil, appendSteps: [StepKind] = [], skipped: Bool = false, readErrors: Int = 0,
                 quarantined: Bool = false, notice: MakemkvNotice? = nil, skipJob: BroMessage? = nil, error: BroError? = nil,
-                affectsOutcome: Bool = true) {
+                affectsOutcome: Bool = true, plan: JobPlan? = nil) {
         self.data = data
         self.summary = summary
         self.appendSteps = appendSteps
@@ -29,5 +31,6 @@ public struct StepReport: Sendable, Equatable {
         self.skipJob = skipJob
         self.error = error
         self.affectsOutcome = affectsOutcome
+        self.plan = plan
     }
 }

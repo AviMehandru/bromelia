@@ -33,8 +33,8 @@ step_resources (BroStep *step, const BroJobSnapshot *job)
   return set;
 }
 
-static BroStepReport *
-step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
+BroIdentity *
+bro_identify_step_resolve (const BroStepContext *context, gboolean encrypted, BroBroError **error)
 {
   g_autoptr (BroDiscRequest) request = bro_step_sources_request (context->job, error);
   if (!request)
@@ -45,10 +45,8 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
                                            : NULL;
   g_autofree char *label = probe->listing && *probe->listing->name ? g_strdup (probe->listing->name)
                                                                     : bro_step_sources_label (request->source, drive);
-  g_autoptr (BroEffectiveProfile) profile = bro_step_sources_profile (context, drive ? drive->config_id : NULL);
-  BroRipMode mode = bro_step_sources_base_mode (context->job, profile);
   const BroSessionChoices *choices = request->session ? request->session->choices : NULL;
-  g_autoptr (BroIdentityInputs) inputs = bro_identity_inputs_new (probe->listing, label, mode == BRO_RIP_MODE_BACKUP);
+  g_autoptr (BroIdentityInputs) inputs = bro_identity_inputs_new (probe->listing, label, encrypted);
   if (drive && drive->has_flags) {
     inputs->has_flags = TRUE;
     inputs->flags = drive->flags;
@@ -59,7 +57,23 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
     inputs->has_kind_override = choices->has_kind;
     inputs->kind_override = choices->kind;
   }
-  g_autoptr (BroIdentity) identity = bro_identity_resolve (inputs);
+  return bro_identity_resolve (inputs);
+}
+
+static BroStepReport *
+step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
+{
+  g_autoptr (BroDiscRequest) request = bro_step_sources_request (context->job, error);
+  if (!request)
+    return NULL;
+  g_autoptr (BroDriveLocation) drive = request->source->kind == BRO_DISC_SOURCE_DRIVE && context->drive_lookup
+                                           ? bro_drive_lookup_find (context->drive_lookup, request->source->value)
+                                           : NULL;
+  g_autoptr (BroEffectiveProfile) profile = bro_step_sources_profile (context, drive ? drive->config_id : NULL);
+  BroRipMode mode = bro_step_sources_base_mode (context->job, profile);
+  g_autoptr (BroIdentity) identity = bro_identify_step_resolve (context, mode == BRO_RIP_MODE_BACKUP, error);
+  if (!identity)
+    return NULL;
   g_autofree char *set = bro_label_parser_set_description (identity->label);
   BroJsonValue *params = _bro_param ("kind", bro_json_value_new_string (bro_media_kind_to_wire (identity->kind)));
   bro_json_value_set (params, "name", bro_json_value_new_string (identity->name));

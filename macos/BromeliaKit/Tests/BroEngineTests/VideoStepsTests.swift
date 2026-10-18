@@ -7,18 +7,69 @@ import Foundation
 import Testing
 
 /// The ports a case gives, recording every call.
-private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup, ProgressReporter, JobLogger, @unchecked Sendable {
+private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup, ProgressReporter, JobLogger, LibraryPort, CatalogQueries,
+    DecisionPort, SpaceReservations, @unchecked Sendable {
     let given: JsonValue
     private let lock = NSLock()
     private var _calls: [String] = []
     private var _log: [BroMessage] = []
     private var _progress: [JsonValue] = []
+    private var _question: DecisionDto?
+    /// Probe's fingerprint ('archivedBefore probe').
+    var fingerprint: String?
 
     init(_ given: JsonValue) { self.given = given }
 
     var calls: [String] { lock.withLock { _calls } }
     var logged: [BroMessage] { lock.withLock { _log } }
     var progressed: [JsonValue] { lock.withLock { _progress } }
+    var question: DecisionDto? { lock.withLock { _question } }
+
+    func clear() {
+        lock.withLock {
+            _calls = []
+            _log = []
+            _progress = []
+        }
+    }
+
+    func require(_ libraryId: String) throws(BroError) -> LibraryHandle {
+        guard let l = given["libraries"]?[libraryId] else { throw BroError(MessageCode.wire(.libraryNotFound)) }
+        if let why = l["offline"] { throw BroError(why["code"]?.string ?? "", why["params"]?.members ?? []) }
+        return LibraryHandle(id: libraryId, path: l["path"]?.string ?? "")
+    }
+
+    func stagingDirectory(_ libraryId: String, jobId: Id) throws(BroError) -> String { fatalError("not used") }
+    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile]) async throws(BroError) -> CommitResult { fatalError("not used") }
+    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String) async throws(BroError) -> CommitResult {
+        fatalError("not used")
+    }
+
+    func archivedBefore(_ fingerprint: String) async throws(BroError) -> [UnitRecord] {
+        call("archivedBefore " + (fingerprint == self.fingerprint ? "probe" : fingerprint))
+        guard fingerprint == self.fingerprint else { return [] }
+        return (given["catalog"]?.array ?? []).map { u in
+            UnitRecord(id: Id(u["id"]?.string ?? ""), libraryId: u["libraryId"]?.string ?? "", path: u["path"]?.string ?? "", recordFile: "",
+                       recordVersion: 3, state: .committed, status: u["status"]?.string.flatMap(UnitStatus.init(rawValue:)) ?? .success, name: "",
+                       kind: .movie, format: "", formatCode: "", encrypted: false, fingerprint: fingerprint, label: "", makemkvVersion: "", bytes: 0,
+                       fileCount: 0, attempts: 1, createdAt: Instant.parse("2026-09-01T00:00:00.000Z")!,
+                       committedAt: Instant.parse(u["committedAt"]?.string ?? ""))
+        }
+    }
+
+    func ask(_ decision: DecisionDto) async throws(BroError) -> String {
+        lock.withLock {
+            _question = decision
+            _calls.append("ask \(decision.id) \(decision.question.code.rawValue) \(decision.answers.map(\.id).joined(separator: ","))")
+        }
+        guard let answer = given["answer"]?.string else { throw BroError(MessageCode.wire(.jobCancelled)) }
+        return answer
+    }
+
+    func reserve(_ volume: String, path: String, need: Int64, free: Int64) async throws(BroError) {
+        call("reserve \(volume) \(path) \(need) \(free)")
+        if let e = given["reserveFails"] { throw BroError(e["code"]?.string ?? "", e["params"]?.members ?? []) }
+    }
 
     private func call(_ text: String) { lock.withLock { _calls.append(text) } }
 
@@ -100,11 +151,6 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
     func log(_ message: BroMessage) { lock.withLock { _log.append(message) } }
 }
 
-/// The steps of this file never ask.
-private struct NoDecisions: DecisionPort {
-    func ask(_ decision: DecisionDto) async throws(BroError) -> String { fatalError("not used") }
-}
-
 /// Every key of `expected` is in `actual` with the same value; arrays have the same length and match element by element.
 private func subset(_ expected: JsonValue, _ actual: JsonValue?, _ path: String) throws {
     switch expected {
@@ -130,14 +176,18 @@ private func noticeName(_ n: MakemkvNotice?) -> String? {
     }
 }
 
-/// shared/fixtures/engine/video-steps.cases.json: each step alone, with fake ports.
+/// shared/fixtures/engine/video-steps.cases.json and plan-steps.cases.json: each step alone, with fake ports.
 struct VideoStepsTests {
-    static let steps: [StepKind: any Step] = Dictionary(uniqueKeysWithValues: ([AwaitMediaStep(), ProbeStep(), ReconcileStep(), IdentifyStep(), ReleaseStep()]
-        as [any Step]).map { ($0.kind, $0) })
+    static let steps: [StepKind: any Step] = Dictionary(uniqueKeysWithValues: ([AwaitMediaStep(), ProbeStep(), ReconcileStep(), IdentifyStep(), PlanStep(),
+                                                                                DecideStep(), ReleaseStep()] as [any Step]).map { ($0.kind, $0) })
 
-    @Test func theSharedCasesPass() async throws {
+    @Test func theSharedCasesPass() async throws { try await cases("engine/video-steps.cases.json") }
+
+    @Test func thePlanCasesPass() async throws { try await cases("engine/plan-steps.cases.json") }
+
+    private func cases(_ file: String) async throws {
         var failures: [String] = []
-        let doc = try Fixtures.json("engine/video-steps.cases.json")
+        let doc = try Fixtures.json(file)
         for c in doc["cases"]?.array ?? [] {
             let id = c["id"]?.string ?? "?"
             do {
@@ -153,20 +203,53 @@ struct VideoStepsTests {
         let step = Self.steps[StepKind(rawValue: given["step"]?.string ?? "")!]!
         let fakes = StepFakes(given)
         let config = try ConfigCodec.decode(JsonValue.encodeCanonical(given["config"] ?? .object([("version", .integer(3))])))
-        let outputs = (given["outputs"]?.array ?? []).map { StepOutput(kind: StepKind(rawValue: $0["kind"]?.string ?? "")!, data: $0["data"]!) }
+        var outputs: [StepOutput] = []
+        if let probe = given["probe"] {
+            var listing: Listing?
+            if let disc = probe["disc"] {
+                var builder = ListingBuilder()
+                for line in Fixtures.generatedListing(disc).split(separator: "\n") { if let e = Robot.parseLine(String(line)) { builder.feed(e) } }
+                listing = builder.build()
+            }
+            fakes.fingerprint = listing.flatMap(Fingerprint.of)
+            outputs.append(StepOutput(kind: .probe, data: ProbeOutput.encode(ProbeOutput(listing: listing, fingerprint: fakes.fingerprint, libreDrive: nil,
+                                                                                         fromSession: false))))
+        }
+        outputs += (given["outputs"]?.array ?? []).map { StepOutput(kind: StepKind(rawValue: $0["kind"]?.string ?? "")!, data: $0["data"]!) }
+        let fs = MemoryFileSystem()
+        for f in given["files"]?.array ?? [] { try fs.createDirectory(f.string ?? "", parentsMustExist: false) }
+        for v in given["volumes"]?.members ?? [] {
+            fs.setVolume(v.key, VolumeInfo(id: v.value["id"]?.string ?? "", freeBytes: v.value["free"]?.int ?? 0, fsType: "apfs", caseSensitive: false))
+        }
+        var finishing: Decided?
+        if let end = given["finishing"] {
+            finishing = Decided(outcome: Outcome(rawValue: end["outcome"]?.string ?? "")!, error: end["error"].map { BroError($0["code"]?.string ?? "") })
+        }
         let r = given["request"]!
         let request = JobRequest(kind: r["kind"]?.string.flatMap(JobKind.init(rawValue:)) ?? .videoDisc, title: r["title"]?.string ?? "",
                                  automatic: r["automatic"]?.bool ?? false, driveId: r["driveId"]?.string, mediaGeneration: r["mediaGeneration"]?.int,
                                  sessionId: r["sessionId"]?.string.map(Id.init), options: r["options"], details: r["details"])
-        let job = JobSnapshot(id: Id("00000000-0000-4000-8000-000000000001"), request: request, plan: nil, outputs: outputs)
+        let jobId = Id("00000000-0000-4000-8000-000000000001")
         let unused = UnusedTools()
         let cancel = CancellationSource()
-        let context = StepContext(job: job, cancel: cancel.token, progress: fakes, log: fakes, decisions: NoDecisions(), tools: ToolSet(makemkv: fakes, matroska: unused),
-                                  fs: MemoryFileSystem(), clock: ManualClock(), drives: fakes, library: unused, catalog: unused, config: config,
-                                  driveLookup: fakes, makemkvSetup: fakes, jobDirectory: "/data/jobs/" + job.id.value)
+        func contextOf(_ job: JobSnapshot) -> StepContext {
+            StepContext(job: job, cancel: cancel.token, progress: fakes, log: fakes, decisions: fakes, tools: ToolSet(makemkv: fakes, matroska: unused),
+                        fs: fs, clock: ManualClock(), drives: fakes, library: fakes, catalog: fakes, config: config, driveLookup: fakes,
+                        makemkvSetup: fakes, space: fakes, jobDirectory: "/data/jobs/" + job.id.value, finishing: finishing)
+        }
+        if given["identify"]?.bool == true {
+            let identified = try await IdentifyStep().run(contextOf(JobSnapshot(id: jobId, request: request, plan: nil, outputs: outputs)))
+            outputs.append(StepOutput(kind: .identify, data: identified.data))
+            fakes.clear()
+        }
+        let job = JobSnapshot(id: jobId, request: request, plan: nil, outputs: outputs)
+        let context = contextOf(job)
 
         if let resources = expect["resources"] {
             try Fixtures.same(resources["drives"], .array(step.resources(job).drives.map { .string($0) }), "resources.drives")
+            if let writes = resources["libraryWrites"] {
+                try Fixtures.same(writes, .array(step.resources(job).libraryWrites.map { .string($0) }), "resources.libraryWrites")
+            }
         }
         var report: StepReport?
         var error: BroError?
@@ -200,5 +283,20 @@ struct VideoStepsTests {
             try Fixtures.same(calls.map { $0.string ?? "" }.joined(separator: " | "), fakes.calls.joined(separator: " | "), "calls")
         }
         if let progress = expect["progress"] { try subset(progress, .array(fakes.progressed), "progress") }
+        if let skipJob = expect["skipJob"] {
+            try Fixtures.same(skipJob.isNull ? JsonValue.null : skipJob["code"]!, report?.skipJob.map { .string($0.code.rawValue) } ?? .null, "skipJob")
+            if let sp = skipJob["params"] { try Fixtures.same(sp, JsonValue.object(report?.skipJob?.params ?? []), "skipJob params") }
+        }
+        if let append = expect["appendSteps"] {
+            try Fixtures.same(append, .array((report?.appendSteps ?? []).map { .string($0.rawValue) }), "appendSteps")
+        }
+        if let plan = expect["plan"] {
+            try subset(plan, report?.plan.map { p in .object([("mode", p.mode.map { .string($0) } ?? .null), ("profileId", p.profileId.map { .string($0) } ?? .null),
+                                                              ("libraryId", p.libraryId.map { .string($0) } ?? .null)]) }, "plan")
+        }
+        if let question = expect["question"] {
+            try Fixtures.same(question["code"], fakes.question.map { .string($0.question.code.rawValue) } ?? .null, "question")
+            try Fixtures.same(question["params"] ?? .object([]), JsonValue.object(fakes.question?.question.params ?? []), "question params")
+        }
     }
 }

@@ -7,7 +7,10 @@ namespace Bromelia.Engine;
 /// <summary>Step 9 (plan §20.1): ejects the disc when the drive's automation.ejectWhenDone says so (drive.ejecting,
 /// drive.ejected). A failed eject is logged as drive.ejectFailed (a warning) and doesn't fail the job. The runner then
 /// gives back the drive and moves the job to the processing queue: the drive takes the next disc. Skipped when the
-/// job isn't on a drive. Data: {ejected}.</summary>
+/// job isn't on a drive. Data: {ejected}.
+/// At the end of a job that stopped before it (the context's Finishing, owner 2026-10-18), the disc comes out after a
+/// failure when automation.ejectOnFailure says so, after "already archived, skipped" (disc.alreadyArchived) when
+/// ejectWhenDone says so, and when the user answered eject to Decide's question; never after a cancel.</summary>
 public sealed class ReleaseStep : IStep
 {
     public StepKind Kind => StepKind.Release;
@@ -21,8 +24,7 @@ public sealed class ReleaseStep : IStep
     {
         if (StepSources.Request(context.Job).Source is not DiscSource.Drive drive) return StepReport.Skip;
         var at = context.DriveLookup.Find(drive.DriveId);
-        if (at is not { Device.Length: > 0 } || Config.Automation(context.Config, at.ConfigId)["ejectWhenDone"]?.AsBool != true)
-            return Ejected(false);
+        if (at is not { Device.Length: > 0 } || !Ejects(context, Config.Automation(context.Config, at.ConfigId))) return Ejected(false);
         context.Progress.Report(0, new BroMessage(MessageCode.DriveEjecting));
         try
         {
@@ -36,6 +38,18 @@ public sealed class ReleaseStep : IStep
         }
         context.Log.Log(new BroMessage(MessageCode.DriveEjected));
         return Ejected(true);
+    }
+
+    static bool Ejects(StepContext context, JsonValue automation)
+    {
+        if (context.Finishing is not { } end) return automation["ejectWhenDone"]?.AsBool == true;
+        return end.Outcome switch
+        {
+            Outcome.Failed => automation["ejectOnFailure"]?.AsBool == true,
+            Outcome.Skipped => JobSnapshot.Output(context.Job, StepKind.Decide)?["answer"]?.AsString == "eject"
+                || (end.Error?.Code == MessageCode.Wire(MessageCode.DiscAlreadyArchived) && automation["ejectWhenDone"]?.AsBool == true),
+            _ => false,
+        };
     }
 
     static StepReport Ejected(bool ejected) => StepReport.Done(JsonValue.Of(("ejected", JsonValue.Of(ejected))));
