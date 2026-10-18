@@ -45,6 +45,7 @@ struct _BroScheduler {
   GArray *queues[3];          /* of BroId, by BroQueue */
   GHashTable *queue_of;       /* job id → GINT_TO_POINTER (queue + 1) */
   GHashTable *start_now;      /* job ids */
+  GHashTable *requested;      /* job ids that have asked for something since they were submitted */
   GPtrArray *pending;         /* of Request, owned */
   GHashTable *drive_holder;   /* drive → job id */
   GHashTable *held;           /* key → GINT_TO_POINTER (count) */
@@ -281,6 +282,7 @@ bro_scheduler_finish (BroScheduler *self, const BroId *job_id)
   drop_drives (self, job_id);
   bro_scheduler_unreserve (self, job_id);
   g_hash_table_remove (self->start_now, job_id->value);
+  g_hash_table_remove (self->requested, job_id->value);
   if (in_queue (self, job_id, &queue))
     {
       g_array_remove_index (self->queues[queue], index_in (self->queues[queue], job_id));
@@ -376,6 +378,7 @@ bro_scheduler_acquire (BroScheduler *self, const BroId *job_id, const BroResourc
   r->data = data;
   r->destroy = destroy;
   r->order = self->next_order++;
+  g_hash_table_add (self->requested, g_strdup (job_id->value));
   g_ptr_array_add (self->pending, r);
   if (cancel)
     {
@@ -661,6 +664,14 @@ pump (BroScheduler *self)
   g_autoptr (BroJsonValue) json = NULL;
   GHashTableIter it;
   gpointer key, value;
+  int hold_from[3]; /* each queue's first job that hasn't asked yet: the jobs behind it wait for it, without a word */
+  for (int q = 0; q < 3; q++)
+    {
+      hold_from[q] = -1;
+      for (guint j = 0; hold_from[q] < 0 && j < self->queues[q]->len; j++)
+        if (!g_hash_table_contains (self->requested, g_array_index (self->queues[q], BroId, j).value))
+          hold_from[q] = j;
+    }
   g_hash_table_iter_init (&it, self->held);
   while (g_hash_table_iter_next (&it, &key, &value))
     g_hash_table_insert (claimed, g_strdup (key), value);
@@ -677,6 +688,8 @@ pump (BroScheduler *self)
       const BroBroError *blocked = NULL;
       gboolean gated;
       in_queue (self, &r->job, &queue);
+      if (hold_from[queue] >= 0 && index_in (self->queues[queue], &r->job) > hold_from[queue])
+        continue;
       for (guint d = 0; r->resources->drives && r->resources->drives[d]; d++)
         {
           const char *drive = r->resources->drives[d];
@@ -749,6 +762,7 @@ bro_scheduler_finalize (GObject *object)
     g_array_unref (self->queues[q]);
   g_hash_table_unref (self->queue_of);
   g_hash_table_unref (self->start_now);
+  g_hash_table_unref (self->requested);
   g_hash_table_unref (self->drive_holder);
   g_hash_table_unref (self->held);
   g_hash_table_unref (self->leases);
@@ -773,6 +787,7 @@ bro_scheduler_init (BroScheduler *self)
     self->queues[q] = g_array_new (FALSE, FALSE, sizeof (BroId));
   self->queue_of = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->start_now = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->requested = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->pending = g_ptr_array_new_with_free_func (request_free);
   self->drive_holder = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   self->held = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);

@@ -8,7 +8,9 @@
  * volume: limits.io_per_volume. Every request of a job in the processing queue also takes a processing slot
  * (limits.processing) while its step runs. A maintenance job waits while any acquisition slot is held. Requests are
  * considered by queue, then the job's place in it, then request order; a request that has to wait keeps later ones
- * from overtaking it only on the resources it waits for. */
+ * from overtaking it only on the resources it waits for. A job in a queue that hasn't asked for anything yet (its run
+ * is still loading) holds its place: nothing is granted to a job behind it in that queue until it asks or finishes;
+ * those held back hear nothing. */
 #pragma once
 
 #include "bro-engine-executor.h"

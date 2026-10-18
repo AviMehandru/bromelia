@@ -174,8 +174,14 @@ run_scheduler_op (SchedulerHarness *h, BroJsonValue *op)
     }
   else if (strcmp (name, "release") == 0)
     {
-      bro_scheduler_release (h->scheduler, g_hash_table_lookup (h->leases, bro_json_value_get_string (arg, "")));
-      set_state (h, bro_json_value_get_string (arg, ""), "released");
+      BroLease *lease = g_hash_table_lookup (h->leases, bro_json_value_get_string (arg, ""));
+      if (!lease)
+        bro_test_fail (h->failures, h->id, "release %s: it wasn't granted", bro_json_value_get_string (arg, ""));
+      else
+        {
+          bro_scheduler_release (h->scheduler, lease);
+          set_state (h, bro_json_value_get_string (arg, ""), "released");
+        }
     }
   else if (strcmp (name, "releaseDrives") == 0)
     bro_scheduler_release_drives (h->scheduler, job_of (h, bro_json_value_get_string (arg, "")));

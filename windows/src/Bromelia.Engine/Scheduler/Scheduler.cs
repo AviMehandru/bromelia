@@ -21,6 +21,8 @@ namespace Bromelia.Engine;
 /// (limits.processing) while its step runs. A maintenance job waits while any acquisition slot is held.</item>
 /// <item>Requests are considered by queue, then the job's place in it, then request order. A request that has to
 /// wait keeps later ones from overtaking it only on the resources it waits for.</item>
+/// <item>A job in a queue that hasn't asked for anything yet (its run is still loading) holds its place: nothing is
+/// granted to a job behind it in that queue until it asks or finishes. Those held back hear nothing.</item>
 /// </list>
 /// </summary>
 public sealed class Scheduler
@@ -49,6 +51,8 @@ public sealed class Scheduler
     };
     readonly Dictionary<Id, Queue> _queueOf = new();
     readonly HashSet<Id> _startNow = new();
+    /// <summary>Jobs that have asked for something since they were submitted.</summary>
+    readonly HashSet<Id> _requested = new();
     readonly List<Request> _pending = new();
     readonly Dictionary<string, Id> _driveHolder = new();
     readonly Dictionary<string, int> _held = new();
@@ -129,6 +133,7 @@ public sealed class Scheduler
         foreach (var d in _driveHolder.Where(h => h.Value == jobId).Select(h => h.Key).ToList()) _driveHolder.Remove(d);
         Unreserve(jobId);
         _startNow.Remove(jobId);
+        _requested.Remove(jobId);
         if (_queueOf.Remove(jobId, out var q))
         {
             _queues[q].Remove(jobId);
@@ -151,6 +156,7 @@ public sealed class Scheduler
     public Task<Lease> Acquire(Id jobId, ResourceSet resources, Action<Wait> onWait, CancellationToken cancel)
     {
         QueueOfOrFail(jobId);
+        _requested.Add(jobId);
         var request = new Request
         {
             Job = jobId, Resources = resources, OnWait = onWait, Order = _nextOrder++,
@@ -276,6 +282,8 @@ public sealed class Scheduler
     {
         var claimed = new Dictionary<string, int>(_held);
         var waitedDrives = new HashSet<string>();
+        // Each queue's first job that hasn't asked yet: the jobs behind it wait for it, without a word.
+        var holdFrom = _queues.ToDictionary(q => q.Key, q => q.Value.FindIndex(j => !_requested.Contains(j)));
         var order = _pending
             .OrderBy(r => Rank(_queueOf[r.Job]))
             .ThenBy(r => _queues[_queueOf[r.Job]].IndexOf(r.Job))
@@ -284,6 +292,7 @@ public sealed class Scheduler
         foreach (var r in order)
         {
             var queue = _queueOf[r.Job];
+            if (holdFrom[queue] >= 0 && _queues[queue].IndexOf(r.Job) > holdFrom[queue]) continue;
             var needs = Counted(r);
             var waitDrives = r.Resources.Drives.Distinct()
                 .Where(d => (_driveHolder.TryGetValue(d, out var holder) && holder != r.Job)

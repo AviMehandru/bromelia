@@ -1,5 +1,5 @@
 {
-  "description": "JobService (plan §11.1, §13.1; owner 2026-10-17): creates jobs, runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones. create(request): a new id from the IdGenerator; the job goes into its queue (JobPlanner.queue(kind)) at once, in the order jobs are created, at the end of it; its record is stored (state queued, its place in the queue as position, the request, the planner's steps as its plan when there are any, createdAt now) before jobChanged announces it (with its position), then it runs. start() runs the jobs the store has unfinished (what RecoveryService left queued), in the store's order (queue, position, createdAt). Every active job's place in its queue is stored when it changes (a transaction that changes only the position). cancel(job): a job it runs is cancelled through the runner (one cancelled before its run starts runs no step); one nothing runs is finished at once as cancelled (job.cancelledByUser, jobFinished); a finished one stays as it is; job.notFound. retry(job): a finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by hand (not automatic, no media generation); job.notRetryable for any other (an interrupted one is continued in session D); job.notFound. decide(job, decisionId, answer): job.notAwaitingDecision unless the job waits for that question, server.badRequest for an answer it doesn't offer, job.notFound. move(job, by) and startNow(job): a job that waits to start a step (queued, waitingForResources, blocked) moves in its queue (stopping at the ends) or goes first and past the acquisitions cap; job.notQueued for one that runs a step, waits for an answer or has finished; job.notFound. query(q): newest first (createdAt, then id), a page of limit (1-500, default 50) from cursor (an offset as text), next (null on the last page) and total; running jobs as the runner sees them, waiting ones with their position; the states are the stored ones; server.badRequest for a bad limit or cursor. log(job, after): the lines after seq, including a running step's lines not yet written; job.notFound. The harness is pipeline-runner's (real executor, Scheduler, EventBus and PipelineRunner, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, the same fake steps) with a JobService over it and an IdGenerator that counts on from the given jobs (00000000-0000-4000-8000-000000000001, ...); a name it doesn't know (nosuch) is the id 00000000-0000-4000-8000-0000000000ff. Given: limits (SchedulerLimits: acquisitions), and per job also state (queued), outcome, position (0), automatic, mediaGeneration, created (an instant; default the clock's). Ops: start; create {as, kind (videoDisc), title (its name), driveId, automatic, mediaGeneration}; cancel <job> or {job, expectError}; retry {job, as, expectError}; decide {job, decisionId, answer, expectError}; move {job, by, expectError}; startNow <job> or {job, expectError}; open <gate>; steps {kind: behaviour} (from then on); query {states, outcomes, kind, queue, driveId, cursor, limit, expectError} and log {job, after, expectError} (their results, in order, are expect.queries and expect.logs); holdInserts / releaseInserts (the store's job inserts wait from then on until released; a held insert counts as parked). After each op the harness settles as pipeline-runner's does; an op's error is checked once the case's ops are done. Always: no jobChanged comes before the job's record is stored. Expect: outcomes, lines (pipeline-runner's, and 'changed queued - position <n>' for create's), queueLines, steps, outputs as pipeline-runner's; records {job: {state, outcome, queue, position, automatic, mediaGeneration, title, driveId, plan}} (only the members given; null: absent); queries [{items ['<job> <state>[ <outcome>][ position <n>][ step <progress.step>]'], next, total} or {error}]; logs [['<seq> <code>'] or {error}].",
+  "description": "JobService (plan §11.1, §13.1; owner 2026-10-17): creates jobs, runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones. create(request): a new id from the IdGenerator; the job goes into its queue (JobPlanner.queue(kind)) at once, in the order jobs are created, at the end of it; its record is stored (state queued, its place in the queue as position, the request, the planner's steps as its plan when there are any, createdAt now) before jobChanged announces it (with its position), then it runs. start() runs the jobs the store has unfinished (what RecoveryService left queued), in the store's order (queue, position, createdAt). Every active job's place in its queue is stored when it changes (a transaction that changes only the position). cancel(job): a job it runs is cancelled through the runner (one cancelled before its run starts runs no step); one nothing runs is finished at once as cancelled (job.cancelledByUser, jobFinished); a finished one stays as it is; job.notFound. retry(job): a finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by hand (not automatic, no media generation); job.notRetryable for any other (an interrupted one is continued in session D); job.notFound. decide(job, decisionId, answer): job.notAwaitingDecision unless the job waits for that question, server.badRequest for an answer it doesn't offer, job.notFound. move(job, by) and startNow(job): a job that waits to start a step (queued, waitingForResources, blocked) moves in its queue (stopping at the ends) or goes first and past the acquisitions cap; job.notQueued for one that runs a step, waits for an answer or has finished; job.notFound. query(q): newest first (createdAt, then id), a page of limit (1-500, default 50) from cursor (an offset as text), next (null on the last page) and total; running jobs as the runner sees them, waiting ones with their position; the states are the stored ones; server.badRequest for a bad limit or cursor. log(job, after): the lines after seq, including a running step's lines not yet written; job.notFound. The harness is pipeline-runner's (real executor, Scheduler, EventBus and PipelineRunner, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, the same fake steps) with a JobService over it and an IdGenerator that counts on from the given jobs (00000000-0000-4000-8000-000000000001, ...); a name it doesn't know (nosuch) is the id 00000000-0000-4000-8000-0000000000ff. Given: limits (SchedulerLimits: acquisitions), and per job also state (queued), outcome, position (0), automatic, mediaGeneration, created (an instant; default the clock's). Ops: start; create {as, kind (videoDisc), title (its name), driveId, automatic, mediaGeneration}; cancel <job> or {job, expectError}; retry {job, as, expectError}; decide {job, decisionId, answer, expectError}; move {job, by, expectError}; startNow <job> or {job, expectError}; open <gate>; steps {kind: behaviour} (from then on); query {states, outcomes, kind, queue, driveId, cursor, limit, expectError} and log {job, after, expectError} (their results, in order, are expect.queries and expect.logs); holdInserts / releaseInserts (the store's job inserts wait from then on until released; a held insert counts as parked); holdLoads <job> / releaseLoads (the store's loads of that job's record wait from then on until released, counted as parked: a run that is slow to load). After each op the harness settles as pipeline-runner's does; an op's error is checked once the case's ops are done. Always: no jobChanged comes before the job's record is stored. Expect: outcomes, lines (pipeline-runner's, and 'changed queued - position <n>' for create's), queueLines, steps, outputs as pipeline-runner's; records {job: {state, outcome, queue, position, automatic, mediaGeneration, title, driveId, plan}} (only the members given; null: absent); queries [{items ['<job> <state>[ <outcome>][ position <n>][ step <progress.step>]'], next, total} or {error}]; logs [['<seq> <code>'] or {error}].",
   "functions": [
     "JobService.start",
     "JobService.create",
@@ -621,6 +621,94 @@
             "state": "running",
             "position": 0
           }
+        }
+      }
+    },
+    {
+      "id": "start-runs-recovered-jobs-on-a-shared-drive-in-queue-order",
+      "given": {
+        "jobs": [
+          {
+            "name": "x",
+            "driveId": "d",
+            "position": 1,
+            "plan": [
+              "probe",
+              "identify"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              }
+            ]
+          },
+          {
+            "name": "y",
+            "driveId": "d",
+            "position": 0,
+            "plan": [
+              "probe",
+              "identify"
+            ]
+          }
+        ],
+        "steps": {
+          "probe": {
+            "drive": true,
+            "gate": "g"
+          },
+          "identify": {
+            "drive": true
+          }
+        },
+        "ops": [
+          {
+            "holdLoads": "y"
+          },
+          {
+            "start": true
+          },
+          {
+            "releaseLoads": true
+          },
+          {
+            "open": "g"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "x": {
+            "outcome": "succeeded"
+          },
+          "y": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "y": [
+            "changed running probe",
+            "step probe succeeded",
+            "changed running identify",
+            "step identify succeeded",
+            "finished succeeded"
+          ],
+          "x": [
+            "changed waitingForResources identify",
+            "changed running identify",
+            "step identify succeeded",
+            "finished succeeded"
+          ]
+        },
+        "steps": {
+          "x": [
+            "probe succeeded",
+            "identify succeeded"
+          ],
+          "y": [
+            "probe succeeded",
+            "identify succeeded"
+          ]
         }
       }
     },

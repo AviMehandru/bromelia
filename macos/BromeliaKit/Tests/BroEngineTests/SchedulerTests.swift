@@ -99,7 +99,8 @@ final class SchedulerHarness {
             }
             while !started.contains(label) { await Task.yield() }
         case "release":
-            scheduler.release(leases[arg.string!]!)
+            guard let lease = leases[arg.string!] else { throw FixtureError("release \(arg.string!): it wasn't granted") }
+            scheduler.release(lease)
             states[arg.string!] = "released"
         case "releaseDrives":
             scheduler.releaseDrives(job(arg.string!))

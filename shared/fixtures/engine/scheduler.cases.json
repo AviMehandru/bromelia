@@ -1,5 +1,5 @@
 {
-  "description": "Scheduler (plan §21, §11.1), used on the engine executor. Jobs are submitted to a queue (acquisition, processing, maintenance) and keep their order there (move, startNow). acquire(job, resources, onWait, cancel) asks for a ResourceSet and is granted, never inside the call, when every resource has room: a drive has room for one job, and a job keeps a drive it was given until releaseDrives or finish (a step's other resources go back on release); the acquisition slot has limits.acquisitions (0 = no cap; a job put first by startNow isn't held back by it); a library write has unlimited room but is blocked while the library is offline; cpu has limits.cpu (a request for more asks for all of it); io per volume has limits.ioPerVolume; every request of a job in the processing queue also takes one processing slot (limits.processing), only while that step runs; a maintenance job's request waits while any acquisition slot is held. Requests are considered by queue (acquisition, processing, maintenance), then the job's place in its queue, then the order they were made; a request that has to wait keeps others from overtaking it only on the resources it is waiting for. onWait tells the caller each change of a waiting request: 'waiting', or 'blocked:<code>' (library.offline). cancel fails a waiting request with job.cancelled; finish cancels a job's waiting requests, gives back everything it holds and its space, and takes it out of its queue. reserve(job, volume, path, need, free) keeps space on a volume: it fails with space.insufficient when free minus what other jobs keep there is less than need. Every change of a queue's order publishes queueChanged {queue, order}; every change of what is held publishes leaseChanged (internal) with a snapshot: {drives: [{drive, job}] by drive, acquisitions, jobs: {acquisition, processing, maintenance}} (jobs holding anything, per queue). The harness runs each op on a real executor and lets it settle; the bus's clock stays at 2026-10-02T20:00:00.000Z. Jobs get ids in the order they first appear: 00000000-0000-4000-8000-000000000001, …0002, … Ops: submit {job, queue}; request {as, job, drives, acquisition, libraryWrites, cpu, io}; release <as>; releaseDrives <job>; toProcessing <job>; finish <job>; move {job, by, expectError}; startNow {job, expectError}; cancel <as>; library {id, online} (setLibraryOffline: offline gives the reason library.offline {library: id}); cancelAll <queue>; limits {acquisitions, processing, cpu, ioPerVolume} (the given limits default to 0, 1, 2, 2); reserve {job, volume, path, need, free, expectError}; unreserve <job>. Expect: granted (requests in the order they were granted: Lease.seq numbers grants), states ({as: granted | waiting | blocked:<code> | cancelled | released}), waits ({as: [what onWait said, in order]}), queues ({queue: [jobs]}), leases (the last snapshot), events (every published event, EngineEvent.json, in order).",
+  "description": "Scheduler (plan §21, §11.1), used on the engine executor. Jobs are submitted to a queue (acquisition, processing, maintenance) and keep their order there (move, startNow). acquire(job, resources, onWait, cancel) asks for a ResourceSet and is granted, never inside the call, when every resource has room: a drive has room for one job, and a job keeps a drive it was given until releaseDrives or finish (a step's other resources go back on release); the acquisition slot has limits.acquisitions (0 = no cap; a job put first by startNow isn't held back by it); a library write has unlimited room but is blocked while the library is offline; cpu has limits.cpu (a request for more asks for all of it); io per volume has limits.ioPerVolume; every request of a job in the processing queue also takes one processing slot (limits.processing), only while that step runs; a maintenance job's request waits while any acquisition slot is held. Requests are considered by queue (acquisition, processing, maintenance), then the job's place in its queue, then the order they were made; a request that has to wait keeps others from overtaking it only on the resources it is waiting for. A job in a queue that hasn't asked for anything yet (its run is still loading) holds its place: nothing is granted to a job behind it in that queue until it asks or finishes, and a request held back that way hears nothing (onWait isn't called). onWait tells the caller each change of a waiting request: 'waiting', or 'blocked:<code>' (library.offline). cancel fails a waiting request with job.cancelled; finish cancels a job's waiting requests, gives back everything it holds and its space, and takes it out of its queue. reserve(job, volume, path, need, free) keeps space on a volume: it fails with space.insufficient when free minus what other jobs keep there is less than need. Every change of a queue's order publishes queueChanged {queue, order}; every change of what is held publishes leaseChanged (internal) with a snapshot: {drives: [{drive, job}] by drive, acquisitions, jobs: {acquisition, processing, maintenance}} (jobs holding anything, per queue). The harness runs each op on a real executor and lets it settle; the bus's clock stays at 2026-10-02T20:00:00.000Z. Jobs get ids in the order they first appear: 00000000-0000-4000-8000-000000000001, …0002, … Ops: submit {job, queue}; request {as, job, drives, acquisition, libraryWrites, cpu, io}; release <as>; releaseDrives <job>; toProcessing <job>; finish <job>; move {job, by, expectError}; startNow {job, expectError}; cancel <as>; library {id, online} (setLibraryOffline: offline gives the reason library.offline {library: id}); cancelAll <queue>; limits {acquisitions, processing, cpu, ioPerVolume} (the given limits default to 0, 1, 2, 2); reserve {job, volume, path, need, free, expectError}; unreserve <job>. Expect: granted (requests in the order they were granted: Lease.seq numbers grants), states ({as: granted | waiting | blocked:<code> | cancelled | released}), waits ({as: [what onWait said, in order]}), queues ({queue: [jobs]}), leases (the last snapshot), events (every published event, EngineEvent.json, in order).",
   "functions": [
     "Scheduler.submit",
     "Scheduler.acquire",
@@ -1676,6 +1676,219 @@
           "p1": "granted",
           "q1": "waiting"
         }
+      }
+    },
+    {
+      "id": "a-job-that-has-not-asked-yet-keeps-its-place",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "finish": "a"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1"
+        ],
+        "states": {
+          "a1": "released",
+          "b1": "granted"
+        },
+        "waits": {
+          "b1": [
+            "waiting"
+          ]
+        }
+      }
+    },
+    {
+      "id": "it-holds-back-every-job-behind-it-in-its-queue",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "c",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "right"
+              ]
+            }
+          },
+          {
+            "request": {
+              "as": "c1",
+              "job": "c",
+              "acquisition": true
+            }
+          },
+          {
+            "request": {
+              "as": "a1",
+              "job": "a",
+              "drives": [
+                "left"
+              ]
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "a1",
+          "b1",
+          "c1"
+        ],
+        "waits": {
+          "b1": [],
+          "c1": []
+        }
+      }
+    },
+    {
+      "id": "it-holds-its-place-until-it-finishes",
+      "given": {
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "b",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "request": {
+              "as": "b1",
+              "job": "b",
+              "drives": [
+                "left"
+              ]
+            }
+          },
+          {
+            "finish": "a"
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "b1"
+        ],
+        "states": {
+          "b1": "granted"
+        },
+        "waits": {
+          "b1": []
+        },
+        "queues": {
+          "acquisition": [
+            "b"
+          ],
+          "processing": [],
+          "maintenance": []
+        }
+      }
+    },
+    {
+      "id": "it-holds-its-place-only-in-its-own-queue",
+      "given": {
+        "limits": {
+          "processing": 2
+        },
+        "ops": [
+          {
+            "submit": {
+              "job": "a",
+              "queue": "acquisition"
+            }
+          },
+          {
+            "submit": {
+              "job": "p",
+              "queue": "processing"
+            }
+          },
+          {
+            "submit": {
+              "job": "q",
+              "queue": "processing"
+            }
+          },
+          {
+            "request": {
+              "as": "p1",
+              "job": "p",
+              "cpu": 1
+            }
+          },
+          {
+            "request": {
+              "as": "q1",
+              "job": "q",
+              "cpu": 1
+            }
+          }
+        ]
+      },
+      "expect": {
+        "granted": [
+          "p1",
+          "q1"
+        ]
       }
     }
   ]

@@ -53,6 +53,33 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
         get { lock (_lock) return _held.Count; }
     }
 
+    readonly HashSet<Id> _holdLoads = new();
+    readonly List<TaskCompletionSource> _heldLoads = new();
+
+    /// <summary>From now on loads of the job's record wait until <see cref="ReleaseLoads"/> (a run that is slow to load).</summary>
+    public void HoldLoads(Id jobId)
+    {
+        lock (_lock) _holdLoads.Add(jobId);
+    }
+
+    public void ReleaseLoads()
+    {
+        List<TaskCompletionSource> held;
+        lock (_lock)
+        {
+            _holdLoads.Clear();
+            held = _heldLoads.ToList();
+            _heldLoads.Clear();
+        }
+        foreach (var done in held) done.TrySetResult();
+    }
+
+    /// <summary>Loads waiting for <see cref="ReleaseLoads"/>.</summary>
+    public int HeldLoads
+    {
+        get { lock (_lock) return _heldLoads.Count; }
+    }
+
     Task IJobRepository.Insert(JobRecord job)
     {
         lock (_lock)
@@ -74,9 +101,18 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
         return Task.CompletedTask;
     }
 
-    Task<JobRecord?> IJobRepository.Load(Id jobId)
+    async Task<JobRecord?> IJobRepository.Load(Id jobId)
     {
-        lock (_lock) return Task.FromResult(_jobs.GetValueOrDefault(jobId));
+        Task? held = null;
+        lock (_lock)
+            if (_holdLoads.Contains(jobId))
+            {
+                var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _heldLoads.Add(done);
+                held = done.Task;
+            }
+        if (held != null) await held;
+        lock (_lock) return _jobs.GetValueOrDefault(jobId);
     }
 
     Task<IReadOnlyList<JobRecord>> IJobRepository.Active()

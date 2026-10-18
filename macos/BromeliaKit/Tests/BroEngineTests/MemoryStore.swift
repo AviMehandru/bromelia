@@ -44,6 +44,24 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
     /// Inserts waiting for `releaseInserts()`.
     var heldInserts: Int { lock.withLock { held.count } }
 
+    private var holdLoadsOf: Set<Id> = []
+    private var heldLoadList: [CheckedContinuation<Void, Never>] = []
+
+    /// From now on loads of the job's record wait until `releaseLoads()` (a run that is slow to load).
+    func holdLoads(_ jobId: Id) { _ = lock.withLock { holdLoadsOf.insert(jobId) } }
+
+    func releaseLoads() {
+        let ready = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            holdLoadsOf.removeAll()
+            defer { heldLoadList.removeAll() }
+            return heldLoadList
+        }
+        ready.forEach { $0.resume() }
+    }
+
+    /// Loads waiting for `releaseLoads()`.
+    var heldLoads: Int { lock.withLock { heldLoadList.count } }
+
     /// The lock held.
     private func put(_ job: JobRecord) {
         if jobsById[job.id] == nil { order.append(job.id) }
@@ -64,7 +82,17 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
         }
     }
     func update(_ job: JobRecord) async throws(BroError) { lock.withLock { jobsById[job.id] = job } }
-    func load(_ jobId: Id) async throws(BroError) -> JobRecord? { lock.withLock { jobsById[jobId] } }
+    func load(_ jobId: Id) async throws(BroError) -> JobRecord? {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            let now = lock.withLock { () -> Bool in
+                guard holdLoadsOf.contains(jobId) else { return true }
+                heldLoadList.append(done)
+                return false
+            }
+            if now { done.resume() }
+        }
+        return lock.withLock { jobsById[jobId] }
+    }
     func active() async throws(BroError) -> [JobRecord] {
         lock.withLock {
             let rank: [Queue: Int] = [.acquisition: 0, .processing: 1, .maintenance: 2]

@@ -21,6 +21,8 @@ struct _TestMemoryStore {
   GCond released;
   gboolean holding; /* job inserts wait until released (a test's way to act while one is written) */
   int held;         /* inserts waiting */
+  GHashTable *hold_loads; /* job ids whose record loads wait until released (a run that is slow to load) */
+  int held_loads;         /* loads waiting */
 };
 
 static void store_iface_init (BroStoreInterface *iface);
@@ -98,14 +100,42 @@ store_hold_inserts (TestMemoryStore *self, gboolean hold)
   g_mutex_unlock (&self->lock);
 }
 
+/* The stored job, as the harness sees it (never held). */
+static BroJobRecord *
+store_job (TestMemoryStore *self, const BroId *job_id)
+{
+  BroJobRecord *r;
+  g_mutex_lock (&self->lock);
+  r = bro_job_record_copy (g_hash_table_lookup (self->jobs, job_id->value));
+  g_mutex_unlock (&self->lock);
+  return r;
+}
+
+/* Inserts and loads waiting. */
 static int
-store_held_inserts (TestMemoryStore *self)
+store_held (TestMemoryStore *self)
 {
   int n;
   g_mutex_lock (&self->lock);
-  n = self->held;
+  n = self->held + self->held_loads;
   g_mutex_unlock (&self->lock);
   return n;
+}
+
+/* Holds the job's record loads (job_id) from now on, or releases every held load (NULL). */
+static void
+store_hold_loads (TestMemoryStore *self, const BroId *job_id)
+{
+  g_mutex_lock (&self->lock);
+  if (job_id)
+    g_hash_table_add (self->hold_loads, g_strdup (job_id->value));
+  else
+    {
+      g_hash_table_remove_all (self->hold_loads);
+      self->held_loads = 0;
+      g_cond_broadcast (&self->released);
+    }
+  g_mutex_unlock (&self->lock);
 }
 
 static int
@@ -207,6 +237,12 @@ job_load (BroJobRepository *repo, BroId job_id, BroBroError **error)
   TestMemoryStore *self = TEST_MEMORY_STORE (repo);
   BroJobRecord *r;
   g_mutex_lock (&self->lock);
+  if (g_hash_table_contains (self->hold_loads, job_id.value))
+    {
+      self->held_loads++; /* the release counts it off, like the inserts */
+      while (g_hash_table_contains (self->hold_loads, job_id.value))
+        g_cond_wait (&self->released, &self->lock);
+    }
   r = bro_job_record_copy (g_hash_table_lookup (self->jobs, job_id.value));
   g_mutex_unlock (&self->lock);
   return r;
@@ -286,6 +322,7 @@ test_memory_store_finalize (GObject *object)
   g_hash_table_unref (self->jobs);
   g_ptr_array_unref (self->order);
   g_hash_table_unref (self->steps);
+  g_hash_table_unref (self->hold_loads);
   g_clear_object (&self->units);
   g_clear_object (&self->libraries);
   g_mutex_clear (&self->lock);
@@ -307,6 +344,7 @@ test_memory_store_init (TestMemoryStore *self)
   self->jobs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_job_record_free);
   self->order = g_ptr_array_new_with_free_func (g_free);
   self->steps = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_step_record_free);
+  self->hold_loads = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 }
 
 /* ---- files and folders in memory ------------------------------------------------------------------------------- */
@@ -942,7 +980,7 @@ pipe_event (BroEngineEvent *e, gpointer data)
       BroId jid;
       g_autoptr (BroJobRecord) stored = NULL;
       g_strlcpy (jid.value, id, sizeof jid.value);
-      stored = bro_job_repository_load (BRO_JOB_REPOSITORY (h->store), jid, NULL);
+      stored = store_job (h->store, &jid);
       if (!stored)
         g_ptr_array_add (h->unstored, g_strdup (id));
     }
@@ -1225,7 +1263,7 @@ pipe_check (gpointer data)
         ok = FALSE;
       g_mutex_unlock (&h->gates.lock);
     }
-  c->settled = ok && bro_engine_executor_activity (h->w.executor) == parked + store_held_inserts (h->store);
+  c->settled = ok && bro_engine_executor_activity (h->w.executor) == parked + store_held (h->store);
   g_mutex_lock (&c->lock);
   c->done = TRUE;
   g_cond_signal (&c->cond);
@@ -1271,6 +1309,13 @@ pipe_run_op (PipeHarness *h, BroJsonValue *op)
     manual_advance (h->w.clock, bro_json_value_get_integer (arg, 0), settle, &h->w);
   else if (strcmp (name, "holdInserts") == 0 || strcmp (name, "releaseInserts") == 0)
     store_hold_inserts (h->store, strcmp (name, "holdInserts") == 0);
+  else if (strcmp (name, "holdLoads") == 0)
+    {
+      BroId id = svc_job (h, arg);
+      store_hold_loads (h->store, &id);
+    }
+  else if (strcmp (name, "releaseLoads") == 0)
+    store_hold_loads (h->store, NULL);
   else if (strcmp (name, "steps") == 0)
     {
       g_mutex_lock (&h->gates.lock);
@@ -1298,7 +1343,7 @@ pipe_run_op (PipeHarness *h, BroJsonValue *op)
       if (strcmp (name, "start") == 0)
         for (guint i = 0; i < h->names->len; i++)
           {
-            g_autoptr (BroJobRecord) r = bro_job_repository_load (BRO_JOB_REPOSITORY (h->store), *(BroId *) g_hash_table_lookup (h->jobs, g_ptr_array_index (h->names, i)), NULL);
+            g_autoptr (BroJobRecord) r = store_job (h->store, g_hash_table_lookup (h->jobs, g_ptr_array_index (h->names, i)));
             if (r && r->state != BRO_JOB_STATE_FINISHED)
               g_hash_table_add (h->started, g_strdup (g_ptr_array_index (h->names, i)));
           }
@@ -1641,7 +1686,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
       {
         BroId *jid = g_hash_table_lookup (h.jobs, g_ptr_array_index (v->keys, i));
         BroJsonValue *want = g_ptr_array_index (v->items, i);
-        g_autoptr (BroJobRecord) r = bro_job_repository_load (BRO_JOB_REPOSITORY (h.store), *jid, NULL);
+        g_autoptr (BroJobRecord) r = store_job (h.store, jid);
         g_autoptr (BroJsonValue) got = NULL;
         BroJsonValue *plan;
         if (!r)

@@ -277,7 +277,7 @@ public sealed class PipelineRunnerTests
                     if (state == "awaitingDecision" && !_cancelled.Contains(id)) parked++;
                     else if (!(state is "waitingForResources" or "blocked" || atGate.Contains(id))) ok = false;
                 }
-                if (W.Executor.Activity != parked + Store.HeldInserts) ok = false;
+                if (W.Executor.Activity != parked + Store.HeldInserts + Store.HeldLoads) ok = false;
                 checkedIt.Set();
             });
             if (!checkedIt.Wait(Patience)) throw new TimeoutException("the executor didn't run the check");
@@ -348,6 +348,12 @@ public sealed class PipelineRunnerTests
                     break;
                 case "releaseInserts":
                     Store.ReleaseInserts();
+                    break;
+                case "holdLoads":
+                    Store.HoldLoads(Jobs[arg.AsString!]);
+                    break;
+                case "releaseLoads":
+                    Store.ReleaseLoads();
                     break;
                 default:
                 {

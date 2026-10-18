@@ -241,7 +241,7 @@ final class PipelineHarness {
                 ok = false
             }
         }
-        return ok && world.executor.activity == parked + store.heldInserts
+        return ok && world.executor.activity == parked + store.heldInserts + store.heldLoads
     }
 
     nonisolated func settled() async -> Bool {
@@ -292,6 +292,10 @@ final class PipelineHarness {
             store.holdInserts()
         case "releaseInserts":
             store.releaseInserts()
+        case "holdLoads":
+            store.holdLoads(id(arg.string!))
+        case "releaseLoads":
+            store.releaseLoads()
         case "steps":
             for (kind, behaviour) in arg.members! { behaviours[StepKind(rawValue: kind)!] = behaviour }
         default:

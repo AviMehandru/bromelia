@@ -13,6 +13,8 @@ import BroFoundation
 ///   (limits.processing) while its step runs. A maintenance job waits while any acquisition slot is held.
 /// - Requests are considered by queue, then the job's place in it, then request order. A request that has to wait
 ///   keeps later ones from overtaking it only on the resources it waits for.
+/// - A job in a queue that hasn't asked for anything yet (its run is still loading) holds its place: nothing is
+///   granted to a job behind it in that queue until it asks or finishes. Those held back hear nothing.
 @EngineActor
 public final class Scheduler {
     private static let acquisitionKey = "acquisition"
@@ -50,6 +52,8 @@ public final class Scheduler {
     private var queueLists: [Queue: [Id]] = [.acquisition: [], .processing: [], .maintenance: []]
     private var queueOf: [Id: Queue] = [:]
     private var startNowJobs: Set<Id> = []
+    /// Jobs that have asked for something since they were submitted.
+    private var requestedJobs: Set<Id> = []
     private var pending: [Request] = []
     private var driveHolder: [String: Id] = [:]
     private var held: [String: Int] = [:]
@@ -128,6 +132,7 @@ public final class Scheduler {
         driveHolder = driveHolder.filter { $0.value != jobId }
         unreserve(jobId)
         startNowJobs.remove(jobId)
+        requestedJobs.remove(jobId)
         if let queue = queueOf.removeValue(forKey: jobId) {
             queueLists[queue]!.removeAll { $0 == jobId }
             publishQueue(queue)
@@ -156,6 +161,7 @@ public final class Scheduler {
         let result = await executor.suspend { (done: Resumption<Result<Lease, BroError>>) in
             let request = Request(job: jobId, resources: resources, onWait: onWait, done: done, order: nextOrder)
             nextOrder += 1
+            requestedJobs.insert(jobId)
             pending.append(request)
             let executor = executor
             request.unregister = cancel.onCancel { [weak self, weak request] in
@@ -272,6 +278,8 @@ public final class Scheduler {
     private func pump() {
         var claimed = held
         var waitedDrives: Set<String> = []
+        // Each queue's first job that hasn't asked yet: the jobs behind it wait for it, without a word.
+        let holdFrom = queueLists.mapValues { $0.firstIndex { !requestedJobs.contains($0) } }
         let order = pending.sorted { a, b in
             let qa = queueOf[a.job]!, qb = queueOf[b.job]!
             if Scheduler.rank(qa) != Scheduler.rank(qb) { return Scheduler.rank(qa) < Scheduler.rank(qb) }
@@ -279,6 +287,8 @@ public final class Scheduler {
             return ia != ib ? ia < ib : a.order < b.order
         }
         for r in order {
+            let queue = queueOf[r.job]!
+            if let first = holdFrom[queue]!, queueLists[queue]!.firstIndex(of: r.job)! > first { continue }
             let needs = counted(r)
             var seenDrives: Set<String> = []
             let waitDrives = r.resources.drives.filter { d in
