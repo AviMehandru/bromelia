@@ -42,3 +42,10 @@ bro_job_repository_query (BroJobRepository *self, const BroJobQuery *query, BroB
   g_return_val_if_fail (BRO_IS_JOB_REPOSITORY (self), NULL);
   return BRO_JOB_REPOSITORY_GET_IFACE (self)->query (self, query, error);
 }
+
+gboolean
+bro_job_repository_count (BroJobRepository *self, const BroJobQuery *query, int *count, BroBroError **error)
+{
+  g_return_val_if_fail (BRO_IS_JOB_REPOSITORY (self), FALSE);
+  return BRO_JOB_REPOSITORY_GET_IFACE (self)->count (self, query, count, error);
+}

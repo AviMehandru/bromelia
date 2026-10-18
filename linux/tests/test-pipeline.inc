@@ -67,7 +67,22 @@ job_put (BroJobRepository *repo, const BroJobRecord *job, BroBroError **error)
   return TRUE;
 }
 
-/* Unfinished jobs, in the order they were inserted. */
+static int
+queue_rank (BroQueue q)
+{
+  return q == BRO_QUEUE_ACQUISITION ? 0 : q == BRO_QUEUE_PROCESSING ? 1 : 2;
+}
+
+/* Unfinished jobs by queue and position, then in the order they were inserted (SqliteStore: created_at). */
+static gint
+active_order (gconstpointer a, gconstpointer b)
+{
+  const BroJobRecord *x = *(BroJobRecord *const *) a, *y = *(BroJobRecord *const *) b;
+  if (queue_rank (x->queue) != queue_rank (y->queue))
+    return queue_rank (x->queue) - queue_rank (y->queue);
+  return x->position - y->position; /* g_ptr_array_sort is stable */
+}
+
 static GPtrArray *
 job_active (BroJobRepository *repo, BroBroError **error)
 {
@@ -81,7 +96,68 @@ job_active (BroJobRepository *repo, BroBroError **error)
         g_ptr_array_add (found, bro_job_record_copy (r));
     }
   g_mutex_unlock (&self->lock);
+  g_ptr_array_sort (found, active_order);
   return found;
+}
+
+static gboolean
+job_matches (const BroJobRecord *j, const BroJobQuery *q)
+{
+  gboolean state = q->states->len == 0, outcome = q->outcomes->len == 0;
+  for (guint i = 0; i < q->states->len; i++)
+    state = state || g_array_index (q->states, BroJobState, i) == j->state;
+  for (guint i = 0; i < q->outcomes->len; i++)
+    outcome = outcome || (j->has_outcome && g_array_index (q->outcomes, BroOutcome, i) == j->outcome);
+  return state && outcome && (!q->has_kind || j->kind == q->kind) && (!q->has_queue || j->queue == q->queue)
+         && (!q->drive_id || g_strcmp0 (j->drive_id, q->drive_id) == 0)
+         && (!q->has_unit_id || (j->has_unit_id && g_str_equal (j->unit_id.value, q->unit_id.value)))
+         && (!q->has_finished_after || (j->has_finished_at && j->finished_at.unix_milliseconds > q->finished_after.unix_milliseconds));
+}
+
+/* Newest first: created_at, then id, both descending. */
+static gint
+newest_first (gconstpointer a, gconstpointer b)
+{
+  const BroJobRecord *x = *(BroJobRecord *const *) a, *y = *(BroJobRecord *const *) b;
+  if (x->created_at.unix_milliseconds != y->created_at.unix_milliseconds)
+    return x->created_at.unix_milliseconds > y->created_at.unix_milliseconds ? -1 : 1;
+  return -strcmp (x->id.value, y->id.value);
+}
+
+/* What SqliteStore's query matches, newest first, the whole list. */
+static GPtrArray *
+job_matching (TestMemoryStore *self, const BroJobQuery *q)
+{
+  GPtrArray *found = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_job_record_free);
+  g_mutex_lock (&self->lock);
+  for (guint i = 0; i < self->order->len; i++)
+    {
+      BroJobRecord *r = g_hash_table_lookup (self->jobs, self->order->pdata[i]);
+      if (job_matches (r, q))
+        g_ptr_array_add (found, bro_job_record_copy (r));
+    }
+  g_mutex_unlock (&self->lock);
+  g_ptr_array_sort (found, newest_first);
+  return found;
+}
+
+static GPtrArray *
+job_query (BroJobRepository *repo, const BroJobQuery *q, BroBroError **error)
+{
+  GPtrArray *found = job_matching (TEST_MEMORY_STORE (repo), q);
+  guint from = MIN ((guint) MAX (q->offset, 0), found->len);
+  g_ptr_array_remove_range (found, 0, from);
+  if (found->len > (guint) MAX (q->limit, 0))
+    g_ptr_array_remove_range (found, (guint) MAX (q->limit, 0), found->len - (guint) MAX (q->limit, 0));
+  return found;
+}
+
+static gboolean
+job_count (BroJobRepository *repo, const BroJobQuery *q, int *count, BroBroError **error)
+{
+  g_autoptr (GPtrArray) found = job_matching (TEST_MEMORY_STORE (repo), q);
+  *count = (int) found->len;
+  return TRUE;
 }
 
 static BroJobRecord *
@@ -102,6 +178,8 @@ store_jobs_iface_init (BroJobRepositoryInterface *iface)
   iface->update = job_put;
   iface->load = job_load;
   iface->active = job_active;
+  iface->query = job_query;
+  iface->count = job_count;
 }
 
 static gboolean

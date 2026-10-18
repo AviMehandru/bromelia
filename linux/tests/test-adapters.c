@@ -36,6 +36,7 @@
 #include "bro-system-tool-locator.h"
 #include <sqlite3.h>
 #include "bro-system-clock.h"
+#include "bro-random-id-generator.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -2038,6 +2039,22 @@ test_real_iso (void)
 #include "test-drives.inc"
 #include "test-drive-control.inc"
 
+/* ---- ids ----------------------------------------------------------------------------------------- */
+
+static void
+test_ids_random (void)
+{
+  g_autoptr (BroRandomIdGenerator) ids = bro_random_id_generator_new ();
+  g_autoptr (GRegex) shape = g_regex_new ("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", 0, 0, NULL);
+  g_autoptr (GHashTable) seen = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  for (int i = 0; i < 10000; i++)
+    {
+      BroId id = bro_id_generator_next (BRO_ID_GENERATOR (ids));
+      g_assert_true (g_regex_match (shape, id.value, 0, NULL));
+      g_assert_true (g_hash_table_add (seen, g_strdup (id.value)));
+    }
+}
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -2192,6 +2209,7 @@ main (int argc, char **argv)
   g_test_add_func ("/keystore/files", test_keystore_files);
   g_test_add_func ("/keystore/loose-folder", test_keystore_loose_folder);
   g_test_add_func ("/keystore/secret-service", test_keystore_secret_service);
+  g_test_add_func ("/ids/random", test_ids_random);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);

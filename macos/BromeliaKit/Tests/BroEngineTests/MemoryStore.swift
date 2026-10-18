@@ -33,8 +33,31 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
     }
     func update(_ job: JobRecord) async throws(BroError) { lock.withLock { jobsById[job.id] = job } }
     func load(_ jobId: Id) async throws(BroError) -> JobRecord? { lock.withLock { jobsById[jobId] } }
-    func active() async throws(BroError) -> [JobRecord] { lock.withLock { order.compactMap { jobsById[$0] }.filter { $0.state != .finished } } }
-    func query(_ query: JobQuery) async throws(BroError) -> [JobRecord] { lock.withLock { Array(jobsById.values) } }
+    func active() async throws(BroError) -> [JobRecord] {
+        lock.withLock {
+            let rank: [Queue: Int] = [.acquisition: 0, .processing: 1, .maintenance: 2]
+            // Stable: insertion order breaks the remaining ties, like created_at in SqliteStore.
+            return order.compactMap { jobsById[$0] }.filter { $0.state != .finished }.enumerated()
+                .sorted { ($0.element.queue != $1.element.queue) ? rank[$0.element.queue]! < rank[$1.element.queue]!
+                    : $0.element.position != $1.element.position ? $0.element.position < $1.element.position : $0.offset < $1.offset }
+                .map(\.element)
+        }
+    }
+    func query(_ query: JobQuery) async throws(BroError) -> [JobRecord] {
+        lock.withLock { Array(matching(query).dropFirst(query.offset).prefix(query.limit)) }
+    }
+    func count(_ query: JobQuery) async throws(BroError) -> Int { lock.withLock { matching(query).count } }
+
+    /// What SqliteStore's query matches, newest first (the lock held).
+    private func matching(_ q: JobQuery) -> [JobRecord] {
+        order.compactMap { jobsById[$0] }.filter { j in
+            (q.states.isEmpty || q.states.contains(j.state)) && (q.outcomes.isEmpty || j.outcome.map(q.outcomes.contains) == true)
+                && (q.kind == nil || j.kind == q.kind) && (q.queue == nil || j.queue == q.queue) && (q.driveId == nil || j.driveId == q.driveId)
+                && (q.unitId == nil || j.unitId == q.unitId)
+                && (q.finishedAfter == nil || (j.finishedAt.map { $0.unixMilliseconds > q.finishedAfter!.unixMilliseconds } ?? false))
+        }.sorted { $0.createdAt.unixMilliseconds != $1.createdAt.unixMilliseconds ? $0.createdAt.unixMilliseconds > $1.createdAt.unixMilliseconds
+            : $0.id.value > $1.id.value }
+    }
 
     func save(_ step: StepRecord) async throws(BroError) { lock.withLock { stepsByKey["\(step.jobId.value)/\(step.seq)"] = step } }
     func completed(_ jobId: Id) async throws(BroError) -> [StepRecord] {

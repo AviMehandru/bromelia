@@ -91,9 +91,14 @@ public sealed class SqliteStoreTests : IDisposable
             {
                 case "jobs.active": Same("ids", Ids(store.Jobs().Active().Result, j => j.Id.Value)); break;
                 case "jobs.query":
-                    Same("ids", Ids(store.Jobs().Query(new JobQuery(EnumWire.Parse<JobState>(a["state"]?.AsString), EnumWire.Parse<JobKind>(a["kind"]?.AsString),
-                        a["finishedAfter"]?.AsString is { } f ? Instant.Parse(f) : null, (int)a["limit"]!.AsInteger!.Value, (int)a["offset"]!.AsInteger!.Value)).Result,
-                        j => j.Id.Value));
+                    var query = new JobQuery(
+                        (a["states"]?.AsArray ?? new List<JsonValue>()).Select(x => EnumWire.Parse<JobState>(x.AsString)!.Value).ToList(),
+                        (a["outcomes"]?.AsArray ?? new List<JsonValue>()).Select(x => EnumWire.Parse<Outcome>(x.AsString)!.Value).ToList(),
+                        EnumWire.Parse<JobKind>(a["kind"]?.AsString), EnumWire.Parse<Queue>(a["queue"]?.AsString), a["driveId"]?.AsString,
+                        a["unitId"]?.AsString is { } u ? new Id(u) : null, a["finishedAfter"]?.AsString is { } f ? Instant.Parse(f) : null,
+                        (int)a["limit"]!.AsInteger!.Value, (int)a["offset"]!.AsInteger!.Value);
+                    Same("ids", Ids(store.Jobs().Query(query).Result, j => j.Id.Value));
+                    if (expect["total"] != null) Same("total", JsonValue.Of(store.Jobs().Count(query).Result));
                     break;
                 case "steps.completed": Same("seqs", JsonValue.Of(store.Steps().Completed(new Id(a["jobId"]!.AsString!)).Result.Select(s => JsonValue.Of(s.Seq)))); break;
                 case "steps.load": Same("seqs", JsonValue.Of(store.Steps().Load(new Id(a["jobId"]!.AsString!)).Result.Select(s => JsonValue.Of(s.Seq)))); break;

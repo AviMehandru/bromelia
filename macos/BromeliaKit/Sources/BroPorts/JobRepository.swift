@@ -13,4 +13,7 @@ public protocol JobRepository: Sendable {
     func active() async throws(BroError) -> [JobRecord]
 
     func query(_ query: JobQuery) async throws(BroError) -> [JobRecord]
+
+    /// How many jobs the query matches, whatever its page.
+    func count(_ query: JobQuery) async throws(BroError) -> Int
 }

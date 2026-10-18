@@ -394,11 +394,38 @@ private struct JobRepo: JobRepository {
     }
 
     func query(_ q: JobQuery) async throws(BroError) -> [JobRecord] {
-        let state = Value.of(q.state?.rawValue), kind = Value.of(q.kind?.rawValue), after = Value.of(q.finishedAfter)
+        let (condition, args) = Self.condition(q)
         return try await db.run { s throws(BroError) in
-            try s.rows("SELECT \(jobColumns) FROM jobs WHERE (?1 IS NULL OR state = ?1) AND (?2 IS NULL OR kind = ?2) AND (?3 IS NULL OR finished_at > ?3) "
-                       + "ORDER BY created_at DESC, id DESC LIMIT ?4 OFFSET ?5", [state, kind, after, .of(q.limit), .of(q.offset)], mapJob)
+            try s.rows("SELECT \(jobColumns) FROM jobs WHERE \(condition) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                       args + [.of(q.limit), .of(q.offset)], mapJob)
         }
+    }
+
+    func count(_ q: JobQuery) async throws(BroError) -> Int {
+        let (condition, args) = Self.condition(q)
+        return try await db.run { s throws(BroError) in
+            try s.rows("SELECT count(*) FROM jobs WHERE \(condition)", args) { r throws(BroError) in r.int(0) }.first ?? 0
+        }
+    }
+
+    /// The query's conditions: a list matches any of its values, an empty one everything.
+    private static func condition(_ q: JobQuery) -> (String, [Value]) {
+        var args: [Value] = []
+        func anyOf(_ column: String, _ values: [String]) -> String {
+            if values.isEmpty { return "1" }
+            args += values.map { .text($0) }
+            return "\(column) IN (\(values.map { _ in "?" }.joined(separator: ", ")))"
+        }
+        var condition = anyOf("state", q.states.map(\.rawValue)) + " AND " + anyOf("outcome", q.outcomes.map(\.rawValue))
+        let optional: [(String, Value)] = [("kind", .of(q.kind?.rawValue)), ("queue", .of(q.queue?.rawValue)), ("drive_id", .of(q.driveId)),
+                                           ("unit_id", .of(q.unitId))]
+        for (column, value) in optional {
+            condition += " AND (? IS NULL OR \(column) = ?)"
+            args += [value, value]
+        }
+        condition += " AND (? IS NULL OR finished_at > ?)"
+        args += [.of(q.finishedAfter), .of(q.finishedAfter)]
+        return (condition, args)
     }
 }
 

@@ -20,6 +20,7 @@ struct _BroJobRepositoryInterface {
   BroJobRecord *(*load) (BroJobRepository *self, BroId job_id, BroBroError **error);
   GPtrArray *(*active) (BroJobRepository *self, BroBroError **error);
   GPtrArray *(*query) (BroJobRepository *self, const BroJobQuery *query, BroBroError **error);
+  gboolean (*count) (BroJobRepository *self, const BroJobQuery *query, int *count, BroBroError **error);
 };
 
 /* FALSE and @error set on failure. */
@@ -35,5 +36,8 @@ BroJobRecord *bro_job_repository_load (BroJobRepository *self, BroId job_id, Bro
 GPtrArray *bro_job_repository_active (BroJobRepository *self, BroBroError **error);
 
 GPtrArray *bro_job_repository_query (BroJobRepository *self, const BroJobQuery *query, BroBroError **error);
+
+/* How many jobs the query matches, whatever its page, in @count. FALSE and @error set on failure. */
+gboolean bro_job_repository_count (BroJobRepository *self, const BroJobQuery *query, int *count, BroBroError **error);
 
 G_END_DECLS

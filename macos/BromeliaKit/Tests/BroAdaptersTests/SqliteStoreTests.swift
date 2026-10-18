@@ -130,9 +130,13 @@ final class RawDb {
         switch given["call"]!.string! {
         case "jobs.active": try same("ids", ids(try await s.jobs().active().map(\.id.value)))
         case "jobs.query":
-            let q = JobQuery(state: a["state"]?.string.flatMap(JobState.init(rawValue:)), kind: a["kind"]?.string.flatMap(JobKind.init(rawValue:)),
+            let q = JobQuery(states: (a["states"]?.array ?? []).map { JobState(rawValue: $0.string!)! },
+                             outcomes: (a["outcomes"]?.array ?? []).map { Outcome(rawValue: $0.string!)! },
+                             kind: a["kind"]?.string.flatMap(JobKind.init(rawValue:)), queue: a["queue"]?.string.flatMap(Queue.init(rawValue:)),
+                             driveId: a["driveId"]?.string, unitId: a["unitId"]?.string.map(Id.init),
                              finishedAfter: a["finishedAfter"]?.string.flatMap(Instant.parse), limit: Int(a["limit"]!.int!), offset: Int(a["offset"]!.int!))
             try same("ids", ids(try await s.jobs().query(q).map(\.id.value)))
+            if expect["total"] != nil { try same("total", .integer(Int64(try await s.jobs().count(q)))) }
         case "steps.completed": try same("seqs", .array(try await s.steps().completed(Id(a["jobId"]!.string!)).map { .integer(Int64($0.seq)) }))
         case "steps.load": try same("seqs", .array(try await s.steps().load(Id(a["jobId"]!.string!)).map { .integer(Int64($0.seq)) }))
         case "units.query":

@@ -44,13 +44,29 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
 
     Task<IReadOnlyList<JobRecord>> IJobRepository.Active()
     {
-        lock (_lock) return Task.FromResult<IReadOnlyList<JobRecord>>(_jobs.Values.Where(j => j.State != JobState.Finished).ToList());
+        lock (_lock)
+            return Task.FromResult<IReadOnlyList<JobRecord>>(_jobs.Values.Where(j => j.State != JobState.Finished)
+                .OrderBy(j => j.Queue switch { Queue.Acquisition => 0, Queue.Processing => 1, _ => 2 }).ThenBy(j => j.Position)
+                .ThenBy(j => j.CreatedAt.UnixMilliseconds).ThenBy(j => j.Id.Value, StringComparer.Ordinal).ToList());
     }
 
     Task<IReadOnlyList<JobRecord>> IJobRepository.Query(JobQuery query)
     {
-        lock (_lock) return Task.FromResult<IReadOnlyList<JobRecord>>(_jobs.Values.ToList());
+        lock (_lock) return Task.FromResult<IReadOnlyList<JobRecord>>(Matching(query).Skip(query.Offset).Take(query.Limit).ToList());
     }
+
+    Task<int> IJobRepository.Count(JobQuery query)
+    {
+        lock (_lock) return Task.FromResult(Matching(query).Count());
+    }
+
+    /// <summary>What SqliteStore's query matches, newest first.</summary>
+    IEnumerable<JobRecord> Matching(JobQuery q) => _jobs.Values
+        .Where(j => (q.States.Count == 0 || q.States.Contains(j.State)) && (q.Outcomes.Count == 0 || (j.Outcome is { } o && q.Outcomes.Contains(o)))
+                    && (q.Kind == null || j.Kind == q.Kind) && (q.Queue == null || j.Queue == q.Queue) && (q.DriveId == null || j.DriveId == q.DriveId)
+                    && (q.UnitId == null || j.UnitId == q.UnitId)
+                    && (q.FinishedAfter == null || (j.FinishedAt is { } f && f.UnixMilliseconds > q.FinishedAfter.Value.UnixMilliseconds)))
+        .OrderByDescending(j => j.CreatedAt.UnixMilliseconds).ThenByDescending(j => j.Id.Value, StringComparer.Ordinal).ToList();
 
     Task IStepRepository.Save(StepRecord step)
     {

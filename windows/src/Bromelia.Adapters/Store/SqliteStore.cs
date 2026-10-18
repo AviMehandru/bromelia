@@ -397,11 +397,44 @@ public sealed class SqliteStore : IStore, IDisposable
             $"SELECT {Columns} FROM jobs WHERE state <> 'finished' ORDER BY "
             + "CASE queue WHEN 'acquisition' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END, position, created_at, id", Map));
 
-        public Task<IReadOnlyList<JobRecord>> Query(JobQuery q) => _db.Run(db => (IReadOnlyList<JobRecord>)Rows(db,
-            $"SELECT {Columns} FROM jobs WHERE ($state IS NULL OR state = $state) AND ($kind IS NULL OR kind = $kind) "
-            + "AND ($after IS NULL OR finished_at > $after) ORDER BY created_at DESC, id DESC LIMIT $limit OFFSET $offset", Map,
-            ("$state", q.State is { } s ? W(s) : null), ("$kind", q.Kind is { } k ? W(k) : null), ("$after", T(q.FinishedAfter)),
-            ("$limit", q.Limit), ("$offset", q.Offset)));
+        public Task<IReadOnlyList<JobRecord>> Query(JobQuery q)
+        {
+            var (where, args) = Where(q);
+            return _db.Run(db => (IReadOnlyList<JobRecord>)Rows(db,
+                $"SELECT {Columns} FROM jobs WHERE {where} ORDER BY created_at DESC, id DESC LIMIT $limit OFFSET $offset", Map,
+                args.Append(("$limit", q.Limit)).Append(("$offset", q.Offset)).ToArray()));
+        }
+
+        public Task<int> Count(JobQuery q)
+        {
+            var (where, args) = Where(q);
+            return _db.Run(db => Convert.ToInt32(Scalar(db, $"SELECT count(*) FROM jobs WHERE {where}", args), CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>The query's conditions: a list matches any of its values, an empty one everything.</summary>
+        static (string, (string, object?)[]) Where(JobQuery q)
+        {
+            var args = new List<(string, object?)>();
+            string In(string column, string prefix, IEnumerable<string> values)
+            {
+                var names = new List<string>();
+                foreach (var v in values)
+                {
+                    names.Add(prefix + names.Count);
+                    args.Add((names[^1], v));
+                }
+                return names.Count == 0 ? "1" : $"{column} IN ({string.Join(", ", names)})";
+            }
+            var where = In("state", "$state", q.States.Select(s => W(s))) + " AND " + In("outcome", "$outcome", q.Outcomes.Select(o => W(o)))
+                        + " AND ($kind IS NULL OR kind = $kind) AND ($queue IS NULL OR queue = $queue) AND ($drive IS NULL OR drive_id = $drive) "
+                        + "AND ($unit IS NULL OR unit_id = $unit) AND ($after IS NULL OR finished_at > $after)";
+            args.AddRange(new (string, object?)[]
+            {
+                ("$kind", q.Kind is { } k ? W(k) : null), ("$queue", q.Queue is { } qu ? W(qu) : null), ("$drive", q.DriveId),
+                ("$unit", q.UnitId?.Value), ("$after", T(q.FinishedAfter)),
+            });
+            return (where, args.ToArray());
+        }
     }
 
     // ---- steps -------------------------------------------------------------------------------------

@@ -140,7 +140,9 @@
         },
         "call": "jobs.query",
         "args": {
-          "state": "finished",
+          "states": [
+            "finished"
+          ],
           "kind": "videoDisc",
           "limit": 10,
           "offset": 0
@@ -151,7 +153,8 @@
           "00000000-0000-4000-8000-000000000003",
           "00000000-0000-4000-8000-000000000001"
         ],
-        "rule": "newest first (created_at), then a page"
+        "rule": "newest first (created_at), then a page",
+        "total": 2
       }
     },
     {
@@ -224,7 +227,734 @@
         "ids": [
           "00000000-0000-4000-8000-000000000003",
           "00000000-0000-4000-8000-000000000002"
-        ]
+        ],
+        "total": 3,
+        "rule": "the total ignores the page"
+      }
+    },
+    {
+      "id": "jobs-query-any-of-several-states",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "cancelled",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "b"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "blocked",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "kind": "verify",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 6",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-06T12:00:00.000Z",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "states": [
+            "running",
+            "blocked",
+            "queued"
+          ],
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000006",
+          "00000000-0000-4000-8000-000000000005",
+          "00000000-0000-4000-8000-000000000004"
+        ],
+        "total": 3,
+        "rule": "a list matches any of its values"
+      }
+    },
+    {
+      "id": "jobs-query-any-of-several-outcomes",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "cancelled",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "b"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "blocked",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "kind": "verify",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 6",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-06T12:00:00.000Z",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "outcomes": [
+            "failed",
+            "cancelled"
+          ],
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000003",
+          "00000000-0000-4000-8000-000000000002"
+        ],
+        "total": 2,
+        "rule": "outcomes, like states"
+      }
+    },
+    {
+      "id": "jobs-query-everything",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "cancelled",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "b"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "blocked",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "kind": "verify",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 6",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-06T12:00:00.000Z",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000006",
+          "00000000-0000-4000-8000-000000000005",
+          "00000000-0000-4000-8000-000000000004",
+          "00000000-0000-4000-8000-000000000003",
+          "00000000-0000-4000-8000-000000000002",
+          "00000000-0000-4000-8000-000000000001"
+        ],
+        "total": 6,
+        "rule": "no condition: every job, newest first"
+      }
+    },
+    {
+      "id": "jobs-query-by-queue",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "cancelled",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "b"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "blocked",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "kind": "verify",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 6",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-06T12:00:00.000Z",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "queue": "processing",
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000005"
+        ],
+        "total": 1,
+        "rule": "queue"
+      }
+    },
+    {
+      "id": "jobs-query-by-drive",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "cancelled",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "b"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "blocked",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "kind": "verify",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 6",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-06T12:00:00.000Z",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "driveId": "a",
+          "states": [
+            "finished"
+          ],
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000002",
+          "00000000-0000-4000-8000-000000000001"
+        ],
+        "total": 2,
+        "rule": "drive and state together"
+      }
+    },
+    {
+      "id": "jobs-query-by-unit",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "cancelled",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "b"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "blocked",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "kind": "verify",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 6",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-06T12:00:00.000Z",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "unitId": "10000000-0000-4000-8000-000000000001",
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [
+          "00000000-0000-4000-8000-000000000006",
+          "00000000-0000-4000-8000-000000000001"
+        ],
+        "total": 2,
+        "rule": "unit"
+      }
+    },
+    {
+      "id": "jobs-query-by-kind-and-queue",
+      "given": {
+        "rows": {
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 1",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-01T12:00:00.000Z",
+              "outcome": "succeeded",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000002",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 2",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-02T12:00:00.000Z",
+              "outcome": "failed",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000003",
+              "kind": "videoDisc",
+              "state": "finished",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 3",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-03T12:00:00.000Z",
+              "outcome": "cancelled",
+              "finished_at": "2026-10-11T12:00:00.000Z",
+              "drive_id": "b"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "kind": "videoDisc",
+              "state": "running",
+              "queue": "acquisition",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 4",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-04T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "kind": "videoDisc",
+              "state": "blocked",
+              "queue": "processing",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 5",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-05T12:00:00.000Z",
+              "drive_id": "a"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "kind": "verify",
+              "state": "queued",
+              "queue": "maintenance",
+              "position": 0,
+              "automatic": 0,
+              "title": "job 6",
+              "request": "{\"kind\":\"videoDisc\",\"title\":\"x\",\"automatic\":false}",
+              "created_at": "2026-10-06T12:00:00.000Z",
+              "unit_id": "10000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        "call": "jobs.query",
+        "args": {
+          "kind": "videoDisc",
+          "queue": "maintenance",
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "expect": {
+        "ids": [],
+        "total": 0,
+        "rule": "no match: an empty page, total 0"
       }
     },
     {

@@ -153,6 +153,10 @@
       {
         "symbol": "bro_cancellation_source_token",
         "why": "The source's token (a property in Swift and C#: CancellationSource.token)."
+      },
+      {
+        "symbol": "bro_platform_process_launcher_delay_readers_for_tests",
+        "why": "A test-only hook (916b021: a reader that starts late loses nothing); Swift and C# keep theirs internal, a C hook needs a header, so its name is public."
       }
     ]
   },
@@ -8869,14 +8873,18 @@
         {
           "name": "JobQuery",
           "kind": "struct",
-          "doc": "Which jobs: in a state, of a kind, finished after an instant; newest first, a page at a time.",
           "fields": [
-            "state",
+            "states",
+            "outcomes",
             "kind",
+            "queue",
+            "driveId",
+            "unitId",
             "finishedAfter",
             "limit",
             "offset"
           ],
+          "doc": "Which jobs (GET /v1/jobs, owner 2026-10-17): in any of the states, with any of the outcomes (an empty list is any), of a kind, in a queue, on a drive, for a unit, finished after an instant; newest first, a page at a time.",
           "swift": {
             "name": "JobQuery",
             "file": "macos/BromeliaKit/Sources/BroPorts/JobQuery.swift"
@@ -8934,6 +8942,24 @@
           "swift": "JobRepository.query(_:)",
           "cs": "JobRepository.Query",
           "c": "bro_job_repository_query"
+        },
+        {
+          "name": "JobRepository.count",
+          "params": [
+            "query"
+          ],
+          "returns": "Int",
+          "doc": "How many jobs the query matches, whatever its page (owner, 2026-10-17).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "query",
+            "count"
+          ],
+          "phase": 3,
+          "swift": "JobRepository.count(_:)",
+          "cs": "JobRepository.Count",
+          "c": "bro_job_repository_count"
         }
       ]
     },
@@ -15438,6 +15464,79 @@
           "swift": "MessageRenderer.render(_:)",
           "cs": "MessageRenderer.Render",
           "c": "bro_message_renderer_render"
+        }
+      ]
+    },
+    "ports/id-generator": {
+      "layer": "ports",
+      "folder": "",
+      "cFolder": "",
+      "doc": "The IdGenerator port (owner, 2026-10-17): randomness is I/O, so the ids the engine creates (jobs first) come through a port. The adapter is RandomIdGenerator; the test kit counts.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "IdGenerator",
+          "kind": "protocol",
+          "doc": "New ids: lower-case UUIDs no other call has given.",
+          "swift": {
+            "name": "IdGenerator",
+            "file": "macos/BromeliaKit/Sources/BroPorts/IdGenerator.swift"
+          },
+          "cs": {
+            "name": "IIdGenerator",
+            "file": "windows/src/Bromelia.Ports/IIdGenerator.cs"
+          },
+          "c": {
+            "name": "BroIdGenerator",
+            "file": "linux/src/ports/bro-id-generator.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "IdGenerator.next",
+          "params": [],
+          "returns": "Id",
+          "doc": "An id no other call has given. Any thread.",
+          "swift": "IdGenerator.next()",
+          "cs": "IdGenerator.Next",
+          "c": "bro_id_generator_next"
+        }
+      ]
+    },
+    "adapters/random-id-generator": {
+      "layer": "adapters",
+      "folder": "Ids",
+      "cFolder": "ids",
+      "doc": "The real IdGenerator (owner, 2026-10-17): random version 4 UUIDs.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "RandomIdGenerator",
+          "kind": "class",
+          "doc": "Random (version 4) UUIDs in lower-case text.",
+          "swift": {
+            "name": "RandomIdGenerator",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Ids/RandomIdGenerator.swift"
+          },
+          "cs": {
+            "name": "RandomIdGenerator",
+            "file": "windows/src/Bromelia.Adapters/Ids/RandomIdGenerator.cs"
+          },
+          "c": {
+            "name": "BroRandomIdGenerator",
+            "file": "linux/src/adapters/ids/bro-random-id-generator.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "RandomIdGenerator.next",
+          "params": [],
+          "returns": "Id",
+          "swift": "RandomIdGenerator.next()",
+          "cs": "RandomIdGenerator.Next",
+          "c": "bro_random_id_generator_next"
         }
       ]
     }

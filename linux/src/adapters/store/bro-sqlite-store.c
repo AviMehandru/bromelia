@@ -616,15 +616,85 @@ job_active (BroJobRepository *repo, BroBroError **error)
                       NULL, 0, map_job, (GDestroyNotify) bro_job_record_free, error);
 }
 
+/* The query's conditions, with their arguments in @args (room for 12 + both lists): a list matches any of its values,
+ * an empty one everything. */
+static char *
+job_condition (const BroJobQuery *q, Arg *args, int *n)
+{
+  GString *sql = g_string_new ("");
+  const struct { const char *column; gboolean has; const char *text; } optional[] = {
+    { "kind", q->has_kind, q->has_kind ? bro_job_kind_to_wire (q->kind) : NULL },
+    { "queue", q->has_queue, q->has_queue ? bro_queue_to_wire (q->queue) : NULL },
+    { "drive_id", q->drive_id != NULL, q->drive_id },
+    { "unit_id", q->has_unit_id, q->has_unit_id ? q->unit_id.value : NULL },
+  };
+  *n = 0;
+  if (q->states->len == 0)
+    g_string_append (sql, "1");
+  else
+    {
+      g_string_append (sql, "state IN (");
+      for (guint i = 0; i < q->states->len; i++)
+        {
+          g_string_append (sql, i ? ", ?" : "?");
+          args[(*n)++] = a_text (bro_job_state_to_wire (g_array_index (q->states, BroJobState, i)));
+        }
+      g_string_append (sql, ")");
+    }
+  if (q->outcomes->len == 0)
+    g_string_append (sql, " AND 1");
+  else
+    {
+      g_string_append (sql, " AND outcome IN (");
+      for (guint i = 0; i < q->outcomes->len; i++)
+        {
+          g_string_append (sql, i ? ", ?" : "?");
+          args[(*n)++] = a_text (bro_outcome_to_wire (g_array_index (q->outcomes, BroOutcome, i)));
+        }
+      g_string_append (sql, ")");
+    }
+  for (guint i = 0; i < G_N_ELEMENTS (optional); i++)
+    {
+      g_string_append_printf (sql, " AND (? IS NULL OR %s = ?)", optional[i].column);
+      args[(*n)++] = optional[i].has ? a_text (optional[i].text) : a_null ();
+      args[(*n)++] = optional[i].has ? a_text (optional[i].text) : a_null ();
+    }
+  g_string_append (sql, " AND (? IS NULL OR finished_at > ?)");
+  args[(*n)++] = a_opt_time (q->has_finished_after, q->finished_after);
+  args[(*n)++] = a_opt_time (q->has_finished_after, q->finished_after);
+  return g_string_free (sql, FALSE);
+}
+
 static GPtrArray *
 job_query (BroJobRepository *repo, const BroJobQuery *q, BroBroError **error)
 {
-  Arg a[] = { q->has_state ? a_text (bro_job_state_to_wire (q->state)) : a_null (), q->has_kind ? a_text (bro_job_kind_to_wire (q->kind)) : a_null (),
-              a_opt_time (q->has_finished_after, q->finished_after), a_int (q->limit), a_int (q->offset) };
-  return locked_rows (STORE (repo),
-                      "SELECT " JOB_COLUMNS " FROM jobs WHERE (?1 IS NULL OR state = ?1) AND (?2 IS NULL OR kind = ?2) "
-                      "AND (?3 IS NULL OR finished_at > ?3) ORDER BY created_at DESC, id DESC LIMIT ?4 OFFSET ?5",
-                      a, N (a), map_job, (GDestroyNotify) bro_job_record_free, error);
+  g_autofree Arg *a = g_new0 (Arg, 12 + q->states->len + q->outcomes->len);
+  int n;
+  g_autofree char *condition = job_condition (q, a, &n);
+  g_autofree char *sql = g_strdup_printf ("SELECT " JOB_COLUMNS " FROM jobs WHERE %s ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", condition);
+  a[n++] = a_int (q->limit);
+  a[n++] = a_int (q->offset);
+  return locked_rows (STORE (repo), sql, a, n, map_job, (GDestroyNotify) bro_job_record_free, error);
+}
+
+static gpointer
+map_count (BroSqliteStore *self, sqlite3_stmt *r)
+{
+  return GINT_TO_POINTER ((int) col_int (r, 0));
+}
+
+static gboolean
+job_count (BroJobRepository *repo, const BroJobQuery *q, int *count, BroBroError **error)
+{
+  g_autofree Arg *a = g_new0 (Arg, 12 + q->states->len + q->outcomes->len);
+  int n;
+  g_autofree char *condition = job_condition (q, a, &n);
+  g_autofree char *sql = g_strdup_printf ("SELECT count(*) FROM jobs WHERE %s", condition);
+  g_autoptr (GPtrArray) rows = locked_rows (STORE (repo), sql, a, n, map_count, NULL, error);
+  if (!rows)
+    return FALSE;
+  *count = rows->len > 0 ? GPOINTER_TO_INT (rows->pdata[0]) : 0;
+  return TRUE;
 }
 
 static void
@@ -635,6 +705,7 @@ jobs_iface_init (BroJobRepositoryInterface *iface)
   iface->load = job_load;
   iface->active = job_active;
   iface->query = job_query;
+  iface->count = job_count;
 }
 
 /* ---- steps ---- */

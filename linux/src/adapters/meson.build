@@ -7,13 +7,14 @@ soup_dep = dependency('libsoup-3.0', version: '>= 3.0', required: host_machine.s
 # The keystore is libsecret (plan §10.3) on the same terms; without it, secrets are 0600 files.
 secret_dep = dependency('libsecret-1', version: '>= 0.20', required: host_machine.system() == 'linux')
 
-bro_adapters_inc = include_directories('platform', 'clock', 'http', 'store', 'tools')
+bro_adapters_inc = include_directories('platform', 'clock', 'http', 'ids', 'store', 'tools')
 
 bro_adapters_sources = files(
   'clock/bro-system-clock.c',
   'http/bro-beta-key-source.c',
   'http/bro-metadata-client.c',
   'http/bro-notification-sender.c',
+  'ids/bro-random-id-generator.c',
   'platform/bro-drive-poller.c',
   'platform/bro-os-drive-state.c',
   'platform/bro-platform-device-monitor.c',

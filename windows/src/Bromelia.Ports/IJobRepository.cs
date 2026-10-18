@@ -19,4 +19,7 @@ public interface IJobRepository
     Task<IReadOnlyList<JobRecord>> Active();
 
     Task<IReadOnlyList<JobRecord>> Query(JobQuery query);
+
+    /// <summary>How many jobs the query matches, whatever its page.</summary>
+    Task<int> Count(JobQuery query);
 }

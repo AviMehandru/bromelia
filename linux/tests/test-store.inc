@@ -167,13 +167,36 @@ store_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray
     {
       g_autoptr (BroJobQuery) q = bro_job_query_new ();
       g_autoptr (GPtrArray) r = NULL;
-      q->has_state = ARG_S ("state") && bro_job_state_from_wire (ARG_S ("state"), &q->state);
+      BroJsonValue *states = bro_json_value_member (a, "states"), *outcomes = bro_json_value_member (a, "outcomes");
+      int count = -1;
+      for (guint i = 0; i < bro_json_value_length (states); i++)
+        {
+          BroJobState v;
+          if (bro_job_state_from_wire (bro_json_value_get_string (bro_json_value_at (states, (guint) i), ""), &v))
+            g_array_append_val (q->states, v);
+        }
+      for (guint i = 0; i < bro_json_value_length (outcomes); i++)
+        {
+          BroOutcome v;
+          if (bro_outcome_from_wire (bro_json_value_get_string (bro_json_value_at (outcomes, (guint) i), ""), &v))
+            g_array_append_val (q->outcomes, v);
+        }
       q->has_kind = ARG_S ("kind") && bro_job_kind_from_wire (ARG_S ("kind"), &q->kind);
+      q->has_queue = ARG_S ("queue") && bro_queue_from_wire (ARG_S ("queue"), &q->queue);
+      q->drive_id = g_strdup (ARG_S ("driveId"));
+      q->has_unit_id = ARG_S ("unitId") != NULL;
+      if (q->has_unit_id)
+        q->unit_id = id_from (ARG_S ("unitId"));
       q->has_finished_after = ARG_S ("finishedAfter") && bro_instant_parse (ARG_S ("finishedAfter"), &q->finished_after);
       q->limit = (int) ARG_I ("limit");
       q->offset = (int) ARG_I ("offset");
       r = bro_job_repository_query (bro_store_jobs (s), q, &error);
       got = ids_of (r, job_id_of);
+      if (bro_json_value_member (expect, "total") && !error && bro_job_repository_count (bro_store_jobs (s), q, &count, &error))
+        {
+          g_autoptr (BroJsonValue) total = bro_json_value_new_integer (count);
+          bro_test_same_json (failures, id, "total", bro_json_value_member (expect, "total"), total);
+        }
     }
   else if (g_str_equal (call, "steps.completed") || g_str_equal (call, "steps.load"))
     {
