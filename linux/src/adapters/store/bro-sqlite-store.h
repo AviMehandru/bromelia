@@ -4,7 +4,7 @@
  * ask for it). Times are ISO 8601 text (bro_instant_format), enums their wire names, JSON columns the canonical
  * encoding: BroError {code, params?, cause?}, BroMessage {code, params?, severity? (when not info)}, JobRequest
  * {kind, title, automatic, driveId?, mediaGeneration?, sessionId?, parentId?, unitId?, options?, details?}, JobPlan
- * {steps, mode?, profileId?, libraryId?, details?}, StepOutput {kind, data, summary?}.
+ * {steps, mode?, profileId?, libraryId?, details?}, StepOutput {kind, data, summary?, readErrors? (when not 0)}.
  *
  * The object implements the Store port and every repository port: bro_store_jobs () and the others return it. */
 #pragma once

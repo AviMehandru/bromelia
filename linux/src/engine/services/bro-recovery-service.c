@@ -258,6 +258,8 @@ recover_job (BroRecoveryService *self, Run *r, const BroJobRecord *job, BroBroEr
   BroStepKind kind;
   BroStep *step;
   BroResumability resumability;
+  const char *wanted;
+  gboolean resumes;
   gboolean started;
   const char *step_name;
   if (!rows)
@@ -268,6 +270,7 @@ recover_job (BroRecoveryService *self, Run *r, const BroJobRecord *job, BroBroEr
     {
       BroStepRecord *s = done->pdata[i];
       add_result (results, s->kind, s->state, s->error);
+      ((BroStepResult *) results->pdata[results->len - 1])->read_errors = s->output ? s->output->read_errors : 0;
     }
   if (job->plan)
     steps = job->plan->steps;
@@ -291,7 +294,10 @@ recover_job (BroRecoveryService *self, Run *r, const BroJobRecord *job, BroBroEr
   started = row && (row->state == BRO_STEP_STATE_RUNNING || row->state == BRO_STEP_STATE_INTERRUPTED);
   step = bro_step_registry_step (self->registry, kind);
   resumability = step ? bro_step_resumability (step) : BRO_RESUMABILITY_NOT_RESUMABLE;
-  if (started && (resumability == BRO_RESUMABILITY_NOT_RESUMABLE || (resumability == BRO_RESUMABILITY_RESUME_FROM && !row->checkpoint)))
+  wanted = step ? bro_step_resume_checkpoint (step) : NULL;
+  resumes = resumability == BRO_RESUMABILITY_RESUME_FROM && wanted && row && row->checkpoint
+            && g_strcmp0 (bro_json_value_get_string (bro_json_value_member (row->checkpoint, "kind"), NULL), wanted) == 0;
+  if (started && (resumability == BRO_RESUMABILITY_NOT_RESUMABLE || (resumability == BRO_RESUMABILITY_RESUME_FROM && !resumes)))
     {
       if (!save_step (self, row, BRO_STEP_STATE_INTERRUPTED, error))
         return FALSE;

@@ -194,7 +194,7 @@ public sealed class SqliteStoreTests : IDisposable
         Assert.Null(await store.Jobs().Load(U(2)));
 
         var step = new StepRecord(U(1), 0, StepKind.Probe, StepState.Succeeded, 2, T1, T2,
-            new StepOutput(StepKind.Probe, JsonValue.Of(("titles", JsonValue.Of(3L))), new BroMessage(MessageCode.JobCancelled, Severity.Warning)),
+            new StepOutput(StepKind.Probe, JsonValue.Of(("titles", JsonValue.Of(3L))), new BroMessage(MessageCode.JobCancelled, Severity.Warning), 2),
             new BroError("job.cancelled"), JsonValue.Of(("sector", JsonValue.Of(10L))));
         await store.Steps().Save(step);
         await store.Steps().Save(step with { Attempt = 3 });

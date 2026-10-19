@@ -131,51 +131,158 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
     func stepsOf(_ id: Id) -> [StepRecord] { lock.withLock { stepsByKey.values.filter { $0.jobId == id }.sorted { $0.seq < $1.seq } } }
 }
 
-/// Files and folders in memory: what the engine's tests need of the FileSystem port. Thread-safe.
+/// Files and folders in memory: what the engine's tests need of the FileSystem port. Thread-safe. While `recording` is on,
+/// the calls that change something are written to `ops` ('write', 'sync', 'remove', 'rename'); `put` and `putFolder` (a
+/// tool writing, a case's setup) aren't.
 final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     private let lock = NSLock()
     private var files: [String: [UInt8]] = [:]
     private var folders: Set<String> = ["/"]
     private var volumes: [String: VolumeInfo] = [:]
+    private var _ops: [String] = []
+    private var _recording = false
+
+    var ops: [String] { lock.withLock { _ops } }
+    var recording: Bool {
+        get { lock.withLock { _recording } }
+        set { lock.withLock { _recording = newValue } }
+    }
 
     /// What `volume` gives for this path.
     func setVolume(_ path: String, _ info: VolumeInfo) { lock.withLock { volumes[path] = info } }
 
-    func exists(_ path: String) -> Bool { lock.withLock { files[path] != nil || folders.contains(path) } }
-    func read(_ path: String) throws(BroError) -> [UInt8] {
-        guard let b = lock.withLock({ files[path] }) else { throw BroError("fs.notFound", [("path", .string(path))]) }
-        return b
+    private static func notFound(_ path: String) -> BroError { BroError("fs.notFound", [("path", .string(path))]) }
+
+    private static func parent(_ path: String) -> String {
+        guard let i = path.lastIndex(of: "/"), i != path.startIndex else { return "/" }
+        return String(path[..<i])
     }
-    func createDirectory(_ path: String, parentsMustExist: Bool) throws(BroError) {
-        lock.withLock {
-            var current = ""
-            for part in path.split(separator: "/") {
-                current += "/" + part
-                folders.insert(current)
-            }
+
+    /// The lock held.
+    private func record(_ op: String) { if _recording { _ops.append(op) } }
+
+    /// The lock held.
+    private func putFolderLocked(_ path: String) {
+        var current = ""
+        for part in path.split(separator: "/") {
+            current += "/" + part
+            folders.insert(current)
         }
     }
+
+    /// A file with these bytes, its folders made.
+    func put(_ path: String, _ bytes: [UInt8]) {
+        lock.withLock {
+            putFolderLocked(MemoryFileSystem.parent(path))
+            files[path] = bytes
+        }
+    }
+
+    func putFolder(_ path: String) { lock.withLock { putFolderLocked(path) } }
+
+    func exists(_ path: String) -> Bool { lock.withLock { files[path] != nil || folders.contains(path) } }
+    func read(_ path: String) throws(BroError) -> [UInt8] {
+        guard let b = lock.withLock({ files[path] }) else { throw MemoryFileSystem.notFound(path) }
+        return b
+    }
+    func createDirectory(_ path: String, parentsMustExist: Bool) throws(BroError) { putFolder(path) }
     func writeAtomically(_ path: String, bytes: [UInt8], mode: Int) throws(BroError) {
         let folder = String(path[..<path.lastIndex(of: "/")!])
         let ok = lock.withLock { () -> Bool in
             guard folders.contains(folder) else { return false }
             files[path] = bytes
+            record("write " + path)
             return true
         }
-        if !ok { throw BroError("fs.notFound", [("path", .string(folder))]) }
+        if !ok { throw MemoryFileSystem.notFound(folder) }
     }
-    func stat(_ path: String) throws(BroError) -> FileInfo { fatalError("not used") }
-    func list(_ directory: String) throws(BroError) -> [DirectoryEntry] { fatalError("not used") }
-    func readRange(_ path: String, offset: Int64, length: Int) throws(BroError) -> [UInt8] { fatalError("not used") }
-    func rename(_ from: String, to: String) throws(BroError) { fatalError("not used") }
+    func stat(_ path: String) throws(BroError) -> FileInfo {
+        let info = lock.withLock { () -> FileInfo? in
+            if let b = files[path] { return FileInfo(size: Int64(b.count), isDirectory: false, modifiedAt: Instant(unixMilliseconds: 0)) }
+            return folders.contains(path) ? FileInfo(size: 0, isDirectory: true, modifiedAt: Instant(unixMilliseconds: 0)) : nil
+        }
+        guard let info else { throw MemoryFileSystem.notFound(path) }
+        return info
+    }
+    func list(_ directory: String) throws(BroError) -> [DirectoryEntry] {
+        let entries = lock.withLock { () -> [DirectoryEntry]? in
+            guard folders.contains(directory) else { return nil }
+            let prefix = directory == "/" ? "/" : directory + "/"
+            func child(_ p: String) -> String? {
+                guard p.hasPrefix(prefix), p.count > prefix.count else { return nil }
+                let rest = String(p.dropFirst(prefix.count))
+                return rest.contains("/") ? nil : rest
+            }
+            return (files.keys.compactMap(child).map { DirectoryEntry(name: $0, isDirectory: false) }
+                + folders.compactMap(child).map { DirectoryEntry(name: $0, isDirectory: true) })
+                .sorted { $0.name.utf8.lexicographicallyPrecedes($1.name.utf8) }
+        }
+        guard let entries else { throw MemoryFileSystem.notFound(directory) }
+        return entries
+    }
+    func readRange(_ path: String, offset: Int64, length: Int) throws(BroError) -> [UInt8] {
+        let bytes = try read(path)
+        guard offset < Int64(bytes.count) else { return [] }
+        return Array(bytes[Int(offset)..<min(bytes.count, Int(offset) + length)])
+    }
+    func rename(_ from: String, to: String) throws(BroError) {
+        let error = lock.withLock { () -> BroError? in
+            if files[to] != nil || folders.contains(to) { return BroError("fs.alreadyExists", [("path", .string(to))]) }
+            if let b = files.removeValue(forKey: from) {
+                files[to] = b
+            } else if folders.contains(from) {
+                for f in files.keys where f.hasPrefix(from + "/") {
+                    files[to + f.dropFirst(from.count)] = files.removeValue(forKey: f)
+                }
+                for d in folders where d == from || d.hasPrefix(from + "/") {
+                    folders.remove(d)
+                    folders.insert(to + d.dropFirst(from.count))
+                }
+            } else {
+                return MemoryFileSystem.notFound(from)
+            }
+            record("rename \(from) \(to)")
+            return nil
+        }
+        if let error { throw error }
+    }
     func moveMerging(_ from: String, to: String, policy: MovePolicy, onMoved: (MovedItem) -> Void) throws(BroError) -> [MovedItem] { fatalError("not used") }
-    func remove(_ path: String) throws(BroError) { fatalError("not used") }
+    func remove(_ path: String) throws(BroError) {
+        let error = lock.withLock { () -> BroError? in
+            if files.removeValue(forKey: path) != nil {
+                record("remove " + path)
+                return nil
+            }
+            guard folders.contains(path) else { return MemoryFileSystem.notFound(path) }
+            if files.keys.contains(where: { $0.hasPrefix(path + "/") }) || folders.contains(where: { $0.hasPrefix(path + "/") }) {
+                return BroError("fs.failed", [("path", .string(path)), ("reason", .string("not empty"))])
+            }
+            folders.remove(path)
+            record("remove " + path)
+            return nil
+        }
+        if let error { throw error }
+    }
     func moveToTrash(_ path: String, trash: String) throws(BroError) { fatalError("not used") }
-    func syncFile(_ path: String) throws(BroError) { fatalError("not used") }
-    func syncDirectory(_ path: String) throws(BroError) { fatalError("not used") }
+    func syncFile(_ path: String) throws(BroError) {
+        let ok = lock.withLock { () -> Bool in
+            guard files[path] != nil else { return false }
+            record("sync " + path)
+            return true
+        }
+        if !ok { throw MemoryFileSystem.notFound(path) }
+    }
+    func syncDirectory(_ path: String) throws(BroError) {
+        let ok = lock.withLock { () -> Bool in
+            guard folders.contains(path) else { return false }
+            record("syncDirectory " + path)
+            return true
+        }
+        if !ok { throw MemoryFileSystem.notFound(path) }
+    }
     func openForReading(_ path: String, bypassCache: Bool) throws(BroError) -> any ByteStream { fatalError("not used") }
     func volume(_ path: String) throws(BroError) -> VolumeInfo {
-        guard let v = lock.withLock({ volumes[path] }) else { throw BroError("fs.notFound", [("path", .string(path))]) }
+        guard let v = lock.withLock({ volumes[path] }) else { throw MemoryFileSystem.notFound(path) }
         return v
     }
 }

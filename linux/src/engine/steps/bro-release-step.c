@@ -42,14 +42,20 @@ ejected (gboolean value)
 
 /* At the end of a job that stopped before it (the context's finishing, owner 2026-10-18): after a failure when
  * automation.ejectOnFailure says so, after "already archived, skipped" (disc.alreadyArchived) when ejectWhenDone says so,
- * and when the user answered eject to Decide's question; never after a cancel. Otherwise ejectWhenDone. */
+ * and when the user answered eject to Decide's question; never after a cancel. Otherwise ejectWhenDone, or ejectOnFailure
+ * after a rip with read errors (a step before it counted some), as today. */
 static gboolean
 ejects (const BroStepContext *context, const BroJsonValue *automation)
 {
   const BroDecided *end = context->finishing;
   BroJsonValue *decide;
   if (!end)
-    return bro_json_value_get_bool (bro_json_value_member (automation, "ejectWhenDone"), FALSE);
+    {
+      gboolean damaged = FALSE;
+      for (guint i = 0; i < context->job->outputs->len; i++)
+        damaged |= ((BroStepOutput *) context->job->outputs->pdata[i])->read_errors > 0;
+      return bro_json_value_get_bool (bro_json_value_member (automation, damaged ? "ejectOnFailure" : "ejectWhenDone"), FALSE);
+    }
   switch (end->outcome)
     {
     case BRO_OUTCOME_FAILED:

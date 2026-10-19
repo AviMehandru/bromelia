@@ -146,6 +146,9 @@ typedef enum {
   BRO_MSG_RIP_TITLES_FAILED, /* rip.titlesFailed */
   BRO_MSG_RIP_TITLE_REASON, /* rip.titleReason */
   BRO_MSG_RIP_KEPT_UNDER_MAKEMKV_NAME, /* rip.keptUnderMakemkvName */
+  BRO_MSG_RIP_CONTINUED, /* rip.continued */
+  BRO_MSG_RIP_LEFTOVER_REMOVED, /* rip.leftoverRemoved */
+  BRO_MSG_RIP_PARTIAL_REMOVED, /* rip.partialRemoved */
   BRO_MSG_RIP_CHECK_FAILED, /* rip.checkFailed */
   BRO_MSG_RIP_READ_ERRORS, /* rip.readErrors */
   BRO_MSG_RIP_ONE_PASS, /* rip.onePass */

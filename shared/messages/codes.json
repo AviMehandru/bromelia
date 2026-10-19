@@ -861,6 +861,30 @@
       },
       "today": "JobRunner.ripTitles"
     },
+    "rip.continued": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "count": "int"
+      },
+      "today": "new: AcquireStep continues an interrupted rip (owner 2026-10-18)"
+    },
+    "rip.leftoverRemoved": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string"
+      },
+      "today": "new: AcquireStep clears what an earlier attempt left in staging"
+    },
+    "rip.partialRemoved": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "file": "string"
+      },
+      "today": "new: AcquireStep removes what a stopped run wrote (P2-14)"
+    },
     "rip.checkFailed": {
       "kind": "log",
       "severity": "error",

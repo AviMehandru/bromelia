@@ -32,6 +32,8 @@ public final class PipelineRunner {
         var config: Config?
         /// The outputs of the steps done so far, for the Release step at the end.
         var outputs: [StepOutput] = []
+        /// Each step kind's latest checkpoint (Checkpointer): from the stored rows, then what this run saves.
+        var checkpoints: [StepKind: JsonValue] = [:]
     }
 
     private let executor: EngineExecutor
@@ -148,9 +150,11 @@ public final class PipelineRunner {
         l.logSeq = Int64(l.logBefore.filter { $0 == UInt8(ascii: "\n") }.count)
         l.logRead = true
         l.directoryMade = !l.logBefore.isEmpty
-        let done = JobPlanner.done(try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) })
+        let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
+        for row in rows.sorted(by: { $0.seq < $1.seq }) { if let checkpoint = row.checkpoint { l.checkpoints[row.kind] = checkpoint } }
+        let done = JobPlanner.done(rows)
         l.outputs = done.map { $0.output ?? StepOutput(kind: $0.kind, data: .object([])) }
-        var results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error) }
+        var results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error, readErrors: $0.output?.readErrors ?? 0) }
         scheduler.submit(jobId, queue: l.record.queue)
         var cancelled = false
         var seq = done.count
@@ -186,12 +190,13 @@ public final class PipelineRunner {
             running.startedAt = running.startedAt ?? started
             try await save(l, running)
             setState(l, .running)
-            let startRecord = StepRecord(jobId: jobId, seq: seq, kind: kind, state: .running, attempt: 1, startedAt: started)
+            let startRecord = StepRecord(jobId: jobId, seq: seq, kind: kind, state: .running, attempt: 1, startedAt: started,
+                                         checkpoint: l.checkpoints[kind])
             try await executor.worker { () async throws(BroError) in try await store.steps().save(startRecord) }
 
             var report: StepReport?
             var thrown: BroError?
-            let context = makeContext(l, snapshot, seq)
+            let context = makeContext(l, snapshot, seq, checkpoint: Checkpoints(store: store, live: l, running: startRecord, executor: executor))
             do throws(BroError) {
                 report = try await executor.worker { () async throws(BroError) -> StepReport in try await step.run(context) }
             } catch {
@@ -202,9 +207,9 @@ public final class PipelineRunner {
 
             let error = thrown ?? report?.error
             let state: StepState = error != nil ? (l.cancel.token.isCancelled ? .cancelled : .failed) : report!.skipped ? .skipped : .succeeded
-            let output = StepOutput(kind: kind, data: report?.data ?? .object([]), summary: report?.summary)
+            let output = StepOutput(kind: kind, data: report?.data ?? .object([]), summary: report?.summary, readErrors: report?.readErrors ?? 0)
             let endRecord = StepRecord(jobId: jobId, seq: seq, kind: kind, state: state, attempt: 1, startedAt: started, finishedAt: clock.now(),
-                                       output: output, error: error)
+                                       output: output, error: error, checkpoint: l.checkpoints[kind])
             try await executor.worker { () async throws(BroError) in try await store.steps().save(endRecord) }
             bus.publish(.stepFinished, data: .object([("job", .string(jobId.value)), ("seq", .integer(Int64(seq))), ("kind", .string(kind.rawValue)),
                                                       ("state", .string(state.rawValue))]))
@@ -244,7 +249,7 @@ public final class PipelineRunner {
         guard let record = l.loaded, l.logRead, let release = registry.step(.release),
               scheduler.leases().drives.contains(where: { $0.job == record.id }) else { return }
         let snapshot = JobSnapshot(id: record.id, request: record.request, plan: record.plan, outputs: l.outputs)
-        var ending = makeContext(l, snapshot, l.seq)
+        var ending = makeContext(l, snapshot, l.seq, checkpoint: Silent())
         ending.progress = Silent()
         ending.finishing = decided
         let context = ending
@@ -366,12 +371,12 @@ public final class PipelineRunner {
 
     private func jobDirectory(_ jobId: Id) -> String { environment.dataDirectory + "/jobs/" + jobId.value }
 
-    private func makeContext(_ l: Live, _ snapshot: JobSnapshot, _ seq: Int) -> StepContext {
+    private func makeContext(_ l: Live, _ snapshot: JobSnapshot, _ seq: Int, checkpoint: any Checkpointer) -> StepContext {
         StepContext(job: snapshot, cancel: l.cancel.token, progress: Reporter(runner: self, live: l, seq: seq, executor: executor),
                     log: Logger(runner: self, live: l, executor: executor), decisions: Decisions(runner: self, live: l, executor: executor),
                     tools: environment.tools, fs: environment.fs, clock: environment.clock, drives: environment.drives, library: environment.library,
                     catalog: environment.catalog, config: l.config!, driveLookup: environment.driveLookup, makemkvSetup: environment.makemkvSetup,
-                    space: Space(runner: self, live: l, executor: executor), jobDirectory: jobDirectory(l.record.id))
+                    space: Space(runner: self, live: l, executor: executor), checkpoint: checkpoint, jobDirectory: jobDirectory(l.record.id))
     }
 
     static func unexpected(_ detail: String) -> BroError {
@@ -402,8 +407,33 @@ private struct Logger: JobLogger {
     }
 }
 
-private struct Silent: ProgressReporter {
+/// The Release step at the end of a job: no progress, and no checkpoint (nothing is stored for it).
+private struct Silent: ProgressReporter, Checkpointer {
     func report(_ fraction: Double, operation: BroMessage, current: String?) {}
+
+    var saved: JsonValue? { nil }
+
+    func save(_ checkpoint: JsonValue) async throws(BroError) {}
+}
+
+/// A step's checkpoint: stored with the step's running row from the step's worker, and kept on the executor for the row
+/// it finishes with (a retry of the job hands it to the step again). The update is posted before the store write, so it
+/// is there before the step's result.
+private struct Checkpoints: Checkpointer {
+    let store: any Store
+    let live: PipelineRunner.Live
+    let running: StepRecord
+    let executor: EngineExecutor
+
+    var saved: JsonValue? { running.checkpoint }
+
+    func save(_ checkpoint: JsonValue) async throws(BroError) {
+        let kind = running.kind
+        guard executor.post({ [live] in live.checkpoints[kind] = checkpoint }) else { throw BroError(MessageCode.wire(.jobCancelled)) }
+        var row = running
+        row.checkpoint = checkpoint
+        try await store.steps().save(row)
+    }
 }
 
 private struct Space: SpaceReservations {

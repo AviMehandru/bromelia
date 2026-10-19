@@ -22,6 +22,11 @@ G_DEFINE_FINAL_TYPE_WITH_CODE (TestRecoveryStep, test_recovery_step, G_TYPE_OBJE
 
 static BroStepKind recovery_step_kind (BroStep *s) { return TEST_RECOVERY_STEP (s)->kind; }
 static BroResumability recovery_step_resumability (BroStep *s) { return TEST_RECOVERY_STEP (s)->resumability; }
+/* A resumeFrom step resumes from a "backup" checkpoint. */
+static const char *recovery_step_resume_checkpoint (BroStep *s)
+{
+  return TEST_RECOVERY_STEP (s)->resumability == BRO_RESUMABILITY_RESUME_FROM ? "backup" : NULL;
+}
 static void test_recovery_step_class_init (TestRecoveryStepClass *k) {}
 static void test_recovery_step_init (TestRecoveryStep *s) {}
 
@@ -30,6 +35,7 @@ recovery_step_iface_init (BroStepInterface *iface)
 {
   iface->kind = recovery_step_kind;
   iface->resumability = recovery_step_resumability;
+  iface->resume_checkpoint = recovery_step_resume_checkpoint;
 }
 
 /* ---- a SettingsIsolation that records recover and returns what the case gives ---- */
@@ -333,6 +339,7 @@ recovery_given_jobs (RecoveryHarness *h, BroJsonValue *jobs)
           s->has_started_at = TRUE;
           s->started_at = r->created_at;
           s->output = bro_step_output_new (s->kind, bro_json_value_new_object (), NULL);
+          s->output->read_errors = (int) bro_json_value_get_integer (bro_json_value_member (row, "readErrors"), 0);
           if ((v = bro_json_value_member (row, "error")))
             s->error = recovery_case_error (v);
           if ((v = bro_json_value_member (row, "checkpoint")))

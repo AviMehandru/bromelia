@@ -19,6 +19,7 @@ struct _BroStepInterface {
   GTypeInterface parent_iface;
   BroStepKind (*kind) (BroStep *self);
   BroResumability (*resumability) (BroStep *self);
+  const char *(*resume_checkpoint) (BroStep *self); /* optional */
   BroResourceSet *(*resources) (BroStep *self, const BroJobSnapshot *job);
   BroStepReport *(*run) (BroStep *self, const BroStepContext *context, BroBroError **error);
 };
@@ -26,6 +27,10 @@ struct _BroStepInterface {
 BroStepKind bro_step_kind (BroStep *self);
 
 BroResumability bro_step_resumability (BroStep *self);
+
+/* The kind of checkpoint (BroCheckpointer) a resumeFrom step resumes from by itself after a restart (plan §12.1's
+ * resumeFrom(checkpointKind)); NULL: none, the step is interrupted. A step without the function has none. */
+const char *bro_step_resume_checkpoint (BroStep *self);
 
 /* What the step holds while it runs: a drive, the acquisition slot, library writes, cpu, io. Free it. */
 BroResourceSet *bro_step_resources (BroStep *self, const BroJobSnapshot *job);

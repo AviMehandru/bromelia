@@ -120,6 +120,8 @@ struct FakeStep: Step {
             let answer = try await context.decisions.ask(question)
             data = .object([("answer", .string(answer))])
         }
+        if let checkpoint = behaviour["checkpoint"] { try await context.checkpoint.save(checkpoint) }
+        if behaviour["saved"]?.bool == true { data = .object([("saved", context.checkpoint.saved ?? .null)]) }
         if let r = behaviour["reserve"] {
             try await context.space.reserve(r["volume"]!.string!, path: r["path"]!.string!, need: r["need"]!.int!, free: r["free"]!.int!)
         }
@@ -213,7 +215,8 @@ final class PipelineHarness {
                 let k = StepKind(rawValue: d["kind"]!.string!)!
                 try await store.save(StepRecord(jobId: id, seq: seq, kind: k, state: StepState(rawValue: d["state"]?.string ?? "succeeded")!, attempt: 1,
                                                 startedAt: world.clock.now(), finishedAt: world.clock.now(),
-                                                output: StepOutput(kind: k, data: d["output"] ?? .object([]))))
+                                                output: StepOutput(kind: k, data: d["output"] ?? .object([]), readErrors: Int(d["readErrors"]?.int ?? 0)),
+                                                checkpoint: d["checkpoint"]))
                 seq += 1
             }
             if let log = j["log"] {
@@ -510,6 +513,18 @@ struct PipelineRunnerTests {
                 codes.append(JsonValue.parse(String(line))!["code"]!.string!)
             }
             try Fixtures.same(FakeStep.strings(want), codes, "log file of \(name)")
+        }
+        for (name, want) in expect["checkpoints"]?.members ?? [] {
+            let steps = h.store.stepsOf(await h.id(name))
+            for (kind, checkpoint) in want.members! {
+                try Fixtures.same(checkpoint, steps.last { $0.kind.rawValue == kind }!.checkpoint ?? .null, "checkpoint of \(name)'s \(kind)")
+            }
+        }
+        for (name, want) in expect["readErrors"]?.members ?? [] {
+            let steps = h.store.stepsOf(await h.id(name))
+            for (kind, count) in want.members! {
+                try Fixtures.same(count.int.map { Int($0) }, steps.last { $0.kind.rawValue == kind }!.output!.readErrors, "read errors of \(name)'s \(kind)")
+            }
         }
         for (name, want) in expect["outputs"]?.members ?? [] {
             let steps = h.store.stepsOf(await h.id(name))

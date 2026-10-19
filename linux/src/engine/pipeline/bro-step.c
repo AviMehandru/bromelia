@@ -20,6 +20,13 @@ bro_step_resumability (BroStep *self)
   return BRO_STEP_GET_IFACE (self)->resumability (self);
 }
 
+const char *
+bro_step_resume_checkpoint (BroStep *self)
+{
+  BroStepInterface *iface = BRO_STEP_GET_IFACE (self);
+  return iface->resume_checkpoint ? iface->resume_checkpoint (self) : NULL;
+}
+
 BroResourceSet *
 bro_step_resources (BroStep *self, const BroJobSnapshot *job)
 {

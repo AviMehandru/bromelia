@@ -1,5 +1,6 @@
 /* bro-run-outcome.h: what one makemkvcon run amounted to. makemkvcon exits 0 when a title fails, so the saved /
- * failed counts (5036, 5037, 5004) and the files the run produced decide, not the exit status alone. */
+ * failed counts (5036, 5037, 5004) and the files the run produced decide, not the exit status alone. abandoned: the
+ * process didn't end after KILL and may still be writing, so what it wrote must never be reused or removed. */
 #pragma once
 
 #include "bro-process-exit.h"
@@ -23,6 +24,7 @@ typedef struct {
   BroStatusWord status;
   BroBroMessage *error;           /* nullable */
   GPtrArray *produced;            /* char *: the new names that count (bro_run_outcome_products) */
+  gboolean abandoned;
 } BroRunOutcome;
 
 /* Cancelled when the run was cancelled. Failed when MakeMKV's space warning or a renumbered drive stopped it, when

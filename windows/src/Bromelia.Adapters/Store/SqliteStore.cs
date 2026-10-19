@@ -18,7 +18,7 @@ namespace Bromelia.Adapters;
 /// their wire names, JSON columns the canonical encoding: BroError {code, params?, cause?}, BroMessage {code, params?,
 /// severity? (when not info)}, JobRequest {kind, title, automatic, driveId?, mediaGeneration?, sessionId?, parentId?,
 /// unitId?, options?, details?}, JobPlan {steps, mode?, profileId?, libraryId?, details?}, StepOutput {kind, data,
-/// summary?}.</summary>
+/// summary?, readErrors? (when not 0)}.</summary>
 public sealed class SqliteStore : IStore, IDisposable
 {
     readonly SqliteConnection _db;
@@ -345,11 +345,12 @@ public sealed class SqliteStore : IStore, IDisposable
         v["mode"]?.AsString, v["profileId"]?.AsString, v["libraryId"]?.AsString, v["details"]);
 
     static JsonValue OutputJson(StepOutput o) =>
-        Obj(("kind", JsonValue.Of(W(o.Kind))), ("data", o.Data), ("summary", o.Summary is { } s ? MessageJson(s) : null));
+        Obj(("kind", JsonValue.Of(W(o.Kind))), ("data", o.Data), ("summary", o.Summary is { } s ? MessageJson(s) : null),
+            ("readErrors", o.ReadErrors > 0 ? JsonValue.Of(o.ReadErrors) : null));
 
     static StepOutput OutputOf(JsonValue v) =>
         new(EnumWire.Parse<StepKind>(v["kind"]?.AsString) ?? throw new FormatException("output.kind"), v["data"] ?? JsonValue.Null.Instance,
-            v["summary"] is { IsNull: false } s ? MessageOf(s) : null);
+            v["summary"] is { IsNull: false } s ? MessageOf(s) : null, (int)(v["readErrors"]?.AsInteger ?? 0));
 
     static JsonValue Strings(IEnumerable<string> list) => JsonValue.Of(list.Select(JsonValue.Of));
     static List<string> StringsOf(JsonValue? v) => (v?.AsArray ?? new List<JsonValue>()).Select(x => x.AsString ?? "").ToList();

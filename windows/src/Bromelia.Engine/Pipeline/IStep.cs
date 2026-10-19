@@ -12,6 +12,10 @@ public interface IStep
 
     Resumability Resumability { get; }
 
+    /// <summary>The kind of checkpoint (ICheckpointer) a resumeFrom step resumes from by itself after a restart (plan
+    /// §12.1's resumeFrom(checkpointKind)); null: none, the step is interrupted.</summary>
+    string? ResumeCheckpoint => null;
+
     /// <summary>What the step holds while it runs: a drive, the acquisition slot, library writes, cpu, io.</summary>
     ResourceSet Resources(JobSnapshot job);
 

@@ -67,6 +67,13 @@ struct OutcomeTests {
         let stalled = RunOutcome.classify(acc, exit: ProcessExit(status: -1, signal: 9, stalled: Duration(seconds: 600), abandoned: true), product: .titles, newNames: [])
         #expect(stalled.status == .failed)
         #expect(try English.render(stalled.error!.toJson()) == "makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry.")
-        #expect(RunOutcome.classify(acc, exit: ProcessExit(status: 143, signal: 15, cancelled: true), product: .titles, newNames: ["title_t00.mkv"]).status == .cancelled)
+        #expect(stalled.abandoned)
+        let cancelled = RunOutcome.classify(acc, exit: ProcessExit(status: 143, signal: 15, cancelled: true), product: .titles, newNames: ["title_t00.mkv"])
+        #expect(cancelled.status == .cancelled)
+        #expect(!cancelled.abandoned)
+        let abandoned = RunOutcome.classify(acc, exit: ProcessExit(status: -1, signal: 9, abandoned: true, cancelled: true), product: .titles,
+                                            newNames: ["title_t00.mkv"])
+        #expect(abandoned.status == .cancelled)
+        #expect(abandoned.abandoned)
     }
 }

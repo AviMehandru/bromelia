@@ -525,6 +525,7 @@ test_store_round_trips (void)
     step->attempt = 2;
     step->output = bro_step_output_new (BRO_STEP_KIND_PROBE, obj1 ("titles", bro_json_value_new_integer (3)),
                                         bro_bro_message_new (BRO_MSG_JOB_CANCELLED, NULL, BRO_SEVERITY_WARNING));
+    step->output->read_errors = 2;
     step->error = bro_bro_error_new ("job.cancelled", NULL, NULL);
     step->checkpoint = obj1 ("sector", bro_json_value_new_integer (10));
     g_assert_true (bro_step_repository_save (bro_store_steps (s), step, &error));
@@ -537,6 +538,7 @@ test_store_round_trips (void)
     g_assert_true (bro_json_value_equal (b->output->data, step->output->data));
     g_assert_cmpint (b->output->summary->severity, ==, BRO_SEVERITY_WARNING);
     g_assert_cmpint (b->output->summary->code, ==, BRO_MSG_JOB_CANCELLED);
+    g_assert_cmpint (b->output->read_errors, ==, 2);
     g_assert_cmpstr (b->error->code, ==, "job.cancelled");
     g_assert_true (bro_json_value_equal (b->checkpoint, step->checkpoint));
   }

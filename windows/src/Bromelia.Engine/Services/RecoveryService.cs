@@ -102,7 +102,7 @@ public sealed class RecoveryService
     {
         var rows = await _executor.Worker(() => _store.Steps().Load(job.Id));
         var done = JobPlanner.Done(rows);
-        var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error)).ToList();
+        var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error, s.Output?.ReadErrors ?? 0)).ToList();
         var steps = job.Plan?.Steps ?? JobPlanner.Initial(job.Request);
         var row = rows.FirstOrDefault(r => r.Seq == done.Count);
 
@@ -116,9 +116,12 @@ public sealed class RecoveryService
 
         var kind = steps[done.Count];
         var started = row is { State: StepState.Running or StepState.Interrupted };
-        var resumability = _registry.Step(kind)?.Resumability ?? Resumability.NotResumable;
+        var registered = _registry.Step(kind);
+        var resumability = registered?.Resumability ?? Resumability.NotResumable;
         var step = JsonValue.Of(EnumWire.Name(kind));
-        if (started && (resumability == Resumability.NotResumable || (resumability == Resumability.ResumeFrom && row!.Checkpoint == null)))
+        bool resumes = resumability == Resumability.ResumeFrom && registered!.ResumeCheckpoint is { } wanted
+            && row?.Checkpoint?["kind"]?.AsString == wanted;
+        if (started && (resumability == Resumability.NotResumable || (resumability == Resumability.ResumeFrom && !resumes)))
         {
             await SaveStep(row! with { State = StepState.Interrupted });
             results.Add(new StepResult(kind, StepState.Interrupted));

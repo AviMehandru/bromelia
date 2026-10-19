@@ -471,6 +471,8 @@ output_json (const BroStepOutput *o)
   bro_json_value_set (v, "data", o->data ? bro_json_value_ref (o->data) : bro_json_value_new_null ());
   if (o->summary)
     bro_json_value_set (v, "summary", message_json (o->summary));
+  if (o->read_errors > 0)
+    bro_json_value_set (v, "readErrors", bro_json_value_new_integer (o->read_errors));
   return v;
 }
 
@@ -480,9 +482,12 @@ output_of (const BroJsonValue *v)
   BroStepKind kind = BRO_STEP_KIND_AWAIT_MEDIA;
   BroJsonValue *data = bro_json_value_member (v, "data");
   BroJsonValue *summary = bro_json_value_member (v, "summary");
+  BroStepOutput *o;
   bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_member (v, "kind"), ""), &kind);
-  return bro_step_output_new (kind, data ? bro_json_value_ref (data) : bro_json_value_new_null (),
-                              summary && summary->kind != BRO_JSON_VALUE_NULL ? message_of (summary) : NULL);
+  o = bro_step_output_new (kind, data ? bro_json_value_ref (data) : bro_json_value_new_null (),
+                           summary && summary->kind != BRO_JSON_VALUE_NULL ? message_of (summary) : NULL);
+  o->read_errors = (int) bro_json_value_get_integer (bro_json_value_member (v, "readErrors"), 0);
+  return o;
 }
 
 static BroJsonValue *

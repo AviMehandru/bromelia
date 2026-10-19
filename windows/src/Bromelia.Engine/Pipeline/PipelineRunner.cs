@@ -46,6 +46,8 @@ public sealed class PipelineRunner
         public Config? Config;
         /// <summary>The outputs of the steps done so far, for the Release step at the end.</summary>
         public List<StepOutput> Outputs = new();
+        /// <summary>Each step kind's latest checkpoint (ICheckpointer): from the stored rows, then what this run saves.</summary>
+        public readonly Dictionary<StepKind, JsonValue> Checkpoints = new();
     }
 
     public PipelineRunner(EngineExecutor executor, EventBus bus, Scheduler scheduler, IStore store, StepRegistry registry,
@@ -154,9 +156,11 @@ public sealed class PipelineRunner
         live.LogSeq = live.LogBefore.Count(b => b == (byte)'\n');
         live.LogRead = true;
         live.DirectoryMade = live.LogBefore.Length > 0;
-        var done = JobPlanner.Done(await _executor.Worker(() => _store.Steps().Load(jobId)));
+        var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
+        foreach (var row in rows.Where(r => r.Checkpoint != null).OrderBy(r => r.Seq)) live.Checkpoints[row.Kind] = row.Checkpoint!;
+        var done = JobPlanner.Done(rows);
         var outputs = live.Outputs = done.Select(s => s.Output ?? new StepOutput(s.Kind, Empty)).ToList();
-        var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error)).ToList();
+        var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error, s.Output?.ReadErrors ?? 0)).ToList();
         _scheduler.Submit(jobId, live.Record.Queue);
         bool cancelled = false;
         for (int seq = done.Count; seq < live.Steps.Count; seq++)
@@ -187,13 +191,14 @@ public sealed class PipelineRunner
             var started = _clock.Now();
             await SaveRecord(live, live.Record with { State = JobState.Running, StartedAt = live.Record.StartedAt ?? started });
             SetState(live, JobState.Running);
-            await _executor.Worker(() => _store.Steps().Save(new StepRecord(jobId, seq, kind, StepState.Running, 1, started)));
+            var running = new StepRecord(jobId, seq, kind, StepState.Running, 1, started, Checkpoint: live.Checkpoints.GetValueOrDefault(kind));
+            await _executor.Worker(() => _store.Steps().Save(running));
 
             StepReport? report = null;
             BroError? thrown = null;
             try
             {
-                var context = Context(live, snapshot, seq);
+                var context = Context(live, snapshot, seq, new Checkpoints(this, live, running));
                 report = await _executor.Worker(() => step.Run(context));
             }
             catch (BroFailure f)
@@ -210,8 +215,9 @@ public sealed class PipelineRunner
             var error = thrown ?? report?.Error;
             var state = error != null ? (live.Cancel.Token.IsCancelled ? StepState.Cancelled : StepState.Failed)
                 : report!.Skipped ? StepState.Skipped : StepState.Succeeded;
-            var output = new StepOutput(kind, report?.Data ?? Empty, report?.Summary);
-            await _executor.Worker(() => _store.Steps().Save(new StepRecord(jobId, seq, kind, state, 1, started, _clock.Now(), output, error)));
+            var output = new StepOutput(kind, report?.Data ?? Empty, report?.Summary, report?.ReadErrors ?? 0);
+            await _executor.Worker(() => _store.Steps().Save(new StepRecord(jobId, seq, kind, state, 1, started, _clock.Now(), output, error,
+                live.Checkpoints.GetValueOrDefault(kind))));
             _bus.Publish(EngineEventType.StepFinished, JsonValue.Of(("job", JsonValue.Of(jobId.Value)), ("seq", JsonValue.Of(seq)),
                 ("kind", JsonValue.Of(EnumWire.Name(kind))), ("state", JsonValue.Of(EnumWire.Name(state)))));
             await WriteLog(live);
@@ -251,7 +257,7 @@ public sealed class PipelineRunner
         var jobId = live.Record.Id;
         if (!_scheduler.Leases().Drives.Any(h => h.Job == jobId)) return;
         var snapshot = new JobSnapshot(jobId, live.Record.Request, live.Record.Plan, live.Outputs.ToList());
-        var context = Context(live, snapshot, live.Seq) with { Progress = Silent.Instance, Finishing = decided };
+        var context = Context(live, snapshot, live.Seq, Silent.Instance) with { Progress = Silent.Instance, Finishing = decided };
         try
         {
             await _executor.Worker(() => release.Run(context));
@@ -371,9 +377,9 @@ public sealed class PipelineRunner
 
     string JobDirectory(Id jobId) => _env.DataDirectory + "/jobs/" + jobId.Value;
 
-    StepContext Context(Live live, JobSnapshot snapshot, int seq) => new(snapshot, live.Cancel.Token,
+    StepContext Context(Live live, JobSnapshot snapshot, int seq, ICheckpointer checkpoint) => new(snapshot, live.Cancel.Token,
         new Reporter(this, live, seq), new Logger(this, live), new Decisions(this, live), _env.Tools, _env.Fs, _env.Clock, _env.Drives,
-        _env.Library, _env.Catalog, live.Config!, _env.DriveLookup, _env.MakemkvSetup, new Space(this, live), JobDirectory(live.Record.Id));
+        _env.Library, _env.Catalog, live.Config!, _env.DriveLookup, _env.MakemkvSetup, new Space(this, live), checkpoint, JobDirectory(live.Record.Id));
 
     static readonly JsonValue Empty = JsonValue.Of(Array.Empty<(string, JsonValue)>());
 
@@ -413,12 +419,56 @@ public sealed class PipelineRunner
         public void Log(BroMessage message) => _runner._executor.Post(() => _runner.OnLog(_live, message));
     }
 
-    sealed class Silent : IProgressReporter
+    /// <summary>The Release step at the end of a job: no progress, and no checkpoint (nothing is stored for it).</summary>
+    sealed class Silent : IProgressReporter, ICheckpointer
     {
         public static readonly Silent Instance = new();
 
         public void Report(double fraction, BroMessage operation, string? current = null)
         {
+        }
+
+        public JsonValue? Saved => null;
+
+        public Task Save(JsonValue checkpoint) => Task.CompletedTask;
+    }
+
+    /// <summary>A step's checkpoint: kept on the executor and stored with the step's running row; the row it finishes with
+    /// keeps the last one (a retry of the job hands it to the step again).</summary>
+    sealed class Checkpoints : ICheckpointer
+    {
+        readonly PipelineRunner _runner;
+        readonly Live _live;
+        readonly StepRecord _running;
+
+        public Checkpoints(PipelineRunner runner, Live live, StepRecord running)
+        {
+            _runner = runner;
+            _live = live;
+            _running = running;
+            Saved = running.Checkpoint;
+        }
+
+        public JsonValue? Saved { get; }
+
+        public Task Save(JsonValue checkpoint)
+        {
+            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_runner._executor.Post(async () =>
+            {
+                _live.Checkpoints[_running.Kind] = checkpoint;
+                try
+                {
+                    await _runner._executor.Worker(() => _runner._store.Steps().Save(_running with { Checkpoint = checkpoint }));
+                    done.TrySetResult(true);
+                }
+                catch (Exception e) // a store that fails fails the step, which awaits it
+                {
+                    done.TrySetException(e);
+                }
+            }))
+                done.TrySetException(new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled))));
+            return done.Task;
         }
     }
 

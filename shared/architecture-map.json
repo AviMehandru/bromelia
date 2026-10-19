@@ -4585,33 +4585,6 @@
       "phase": 1,
       "types": [
         {
-          "name": "RunOutcome",
-          "kind": "struct",
-          "fields": [
-            "saved",
-            "failed",
-            "exitCode",
-            "firstError",
-            "spaceWarning",
-            "readErrors",
-            "driveMismatch",
-            "debugLog",
-            "produced"
-          ],
-          "swift": {
-            "name": "RunOutcome",
-            "file": "macos/BromeliaKit/Sources/BroDomain/Outcome/RunOutcome.swift"
-          },
-          "cs": {
-            "name": "RunOutcome",
-            "file": "windows/src/Bromelia.Domain/Outcome/RunOutcome.cs"
-          },
-          "c": {
-            "name": "BroRunOutcome",
-            "file": "linux/src/domain/outcome/bro-run-outcome.h"
-          }
-        },
-        {
           "name": "RunProduct",
           "kind": "enum",
           "doc": "What a makemkvcon run should leave in its destination: nothing (a listing), titles (MKV files of a rip), a backup (a disc structure or an ISO image in a folder), or an image: a backup that came out as one file at the destination itself, whatever it is called (MakeMKV writes DVD backups as ISO images even when a folder was asked for).",
@@ -4743,6 +4716,35 @@
           "c": {
             "name": "BroDecided",
             "file": "linux/src/domain/outcome/bro-decided.h"
+          }
+        },
+        {
+          "name": "RunOutcome",
+          "kind": "struct",
+          "fields": [
+            "saved",
+            "failed",
+            "exitCode",
+            "firstError",
+            "spaceWarning",
+            "readErrors",
+            "driveMismatch",
+            "debugLog",
+            "produced",
+            "abandoned"
+          ],
+          "doc": "What one makemkvcon run amounted to; abandoned: the process didn't end after KILL, so what it wrote is never reused or removed.",
+          "swift": {
+            "name": "RunOutcome",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Outcome/RunOutcome.swift"
+          },
+          "cs": {
+            "name": "RunOutcome",
+            "file": "windows/src/Bromelia.Domain/Outcome/RunOutcome.cs"
+          },
+          "c": {
+            "name": "BroRunOutcome",
+            "file": "linux/src/domain/outcome/bro-run-outcome.h"
           }
         }
       ],
@@ -6321,22 +6323,6 @@
           }
         },
         {
-          "name": "StepOutput",
-          "kind": "struct",
-          "swift": {
-            "name": "StepOutput",
-            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/StepOutput.swift"
-          },
-          "cs": {
-            "name": "StepOutput",
-            "file": "windows/src/Bromelia.Domain/Jobs/StepOutput.cs"
-          },
-          "c": {
-            "name": "BroStepOutput",
-            "file": "linux/src/domain/jobs/bro-step-output.h"
-          }
-        },
-        {
           "name": "ResourceSet",
           "kind": "struct",
           "swift": {
@@ -6965,6 +6951,29 @@
           "c": {
             "name": "BroDiscRequest",
             "file": "linux/src/domain/jobs/bro-disc-request.h"
+          }
+        },
+        {
+          "name": "StepOutput",
+          "kind": "struct",
+          "fields": [
+            "kind",
+            "data",
+            "summary",
+            "readErrors"
+          ],
+          "doc": "What a step produced (job_steps.output), for the steps after it, and the read errors it saw, so a job resumed after it still ends with them.",
+          "swift": {
+            "name": "StepOutput",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/StepOutput.swift"
+          },
+          "cs": {
+            "name": "StepOutput",
+            "file": "windows/src/Bromelia.Domain/Jobs/StepOutput.cs"
+          },
+          "c": {
+            "name": "BroStepOutput",
+            "file": "linux/src/domain/jobs/bro-step-output.h"
           }
         }
       ],
@@ -14300,42 +14309,6 @@
           }
         },
         {
-          "name": "StepContext",
-          "kind": "struct",
-          "fields": [
-            "job",
-            "cancel",
-            "progress",
-            "log",
-            "decisions",
-            "tools",
-            "fs",
-            "clock",
-            "drives",
-            "library",
-            "catalog",
-            "config",
-            "driveLookup",
-            "makemkvSetup",
-            "space",
-            "jobDirectory",
-            "finishing"
-          ],
-          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with; finishing is the job's outcome when the runner runs Release at the end of a job that stopped before it.",
-          "swift": {
-            "name": "StepContext",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
-          },
-          "cs": {
-            "name": "StepContext",
-            "file": "windows/src/Bromelia.Engine/Pipeline/StepContext.cs"
-          },
-          "c": {
-            "name": "BroStepContext",
-            "file": "linux/src/engine/pipeline/bro-step-context.h"
-          }
-        },
-        {
           "name": "StepReport",
           "kind": "struct",
           "fields": [
@@ -14363,6 +14336,61 @@
           "c": {
             "name": "BroStepReport",
             "file": "linux/src/engine/pipeline/bro-step-report.h"
+          }
+        },
+        {
+          "name": "Checkpointer",
+          "kind": "protocol",
+          "doc": "What a resumable step keeps between its attempts in a job (plan §12.2), stored with its row (job_steps.checkpoint), implemented by the runner; a checkpoint is JSON with a kind.",
+          "phase": 3,
+          "swift": {
+            "name": "Checkpointer",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/Checkpointer.swift"
+          },
+          "cs": {
+            "name": "ICheckpointer",
+            "file": "windows/src/Bromelia.Engine/Pipeline/ICheckpointer.cs"
+          },
+          "c": {
+            "name": "BroCheckpointer",
+            "file": "linux/src/engine/pipeline/bro-checkpointer.h"
+          }
+        },
+        {
+          "name": "StepContext",
+          "kind": "struct",
+          "fields": [
+            "job",
+            "cancel",
+            "progress",
+            "log",
+            "decisions",
+            "tools",
+            "fs",
+            "clock",
+            "drives",
+            "library",
+            "catalog",
+            "config",
+            "driveLookup",
+            "makemkvSetup",
+            "space",
+            "checkpoint",
+            "jobDirectory",
+            "finishing"
+          ],
+          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with; checkpoint keeps what a resumable step saved between attempts; finishing is the job's outcome when the runner runs Release at the end of a job that stopped before it.",
+          "swift": {
+            "name": "StepContext",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
+          },
+          "cs": {
+            "name": "StepContext",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepContext.cs"
+          },
+          "c": {
+            "name": "BroStepContext",
+            "file": "linux/src/engine/pipeline/bro-step-context.h"
           }
         }
       ],
@@ -14700,6 +14728,39 @@
           "swift": "SpaceReservations.reserve(_:path:need:free:)",
           "cs": "SpaceReservations.Reserve",
           "c": "bro_space_reservations_reserve"
+        },
+        {
+          "name": "Checkpointer.saved",
+          "params": [],
+          "returns": "JsonValue?",
+          "doc": "What an earlier attempt of the step saved in this job (before a restart, or a retry); null when none.",
+          "phase": 3,
+          "swift": "Checkpointer.saved()",
+          "cs": "Checkpointer.Saved",
+          "c": "bro_checkpointer_saved"
+        },
+        {
+          "name": "Checkpointer.save",
+          "params": [
+            "checkpoint"
+          ],
+          "doc": "Stores the checkpoint with the step's row; done once it is stored. Any thread.",
+          "throws": true,
+          "async": true,
+          "phase": 3,
+          "swift": "Checkpointer.save(_:)",
+          "cs": "Checkpointer.Save",
+          "c": "bro_checkpointer_save"
+        },
+        {
+          "name": "Step.resumeCheckpoint",
+          "params": [],
+          "returns": "String?",
+          "doc": "The kind of checkpoint a resumeFrom step resumes from by itself after a restart (plan §12.1's resumeFrom(checkpointKind)); null: none.",
+          "phase": 3,
+          "swift": "Step.resumeCheckpoint()",
+          "cs": "Step.ResumeCheckpoint",
+          "c": "bro_step_resume_checkpoint"
         }
       ]
     },
@@ -14997,6 +15058,108 @@
             "name": "BroSpaceCheck",
             "file": "linux/src/engine/steps/bro-space-check.h"
           }
+        },
+        {
+          "name": "AcquireStep",
+          "kind": "class",
+          "doc": "Step 8: makes what Plan decided in the job's staging folder (the listing, MKV files, a backup, or a backup then MKV files from it), holding the drive, an acquisition slot and the library; checkpoints what is finished; a cancel removes what the stopped run wrote.",
+          "phase": 3,
+          "swift": {
+            "name": "AcquireStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/AcquireStep.swift"
+          },
+          "cs": {
+            "name": "AcquireStep",
+            "file": "windows/src/Bromelia.Engine/Steps/AcquireStep.cs"
+          },
+          "c": {
+            "name": "BroAcquireStep",
+            "file": "linux/src/engine/steps/bro-acquire-step.h"
+          }
+        },
+        {
+          "name": "AcquireOutput",
+          "kind": "struct",
+          "fields": [
+            "titles",
+            "others",
+            "backup",
+            "discInfo",
+            "readErrors"
+          ],
+          "doc": "What AcquireStep left in staging, by name (L3-1: the lists, never a count): the titles, files no title owns, the kept backup, disc-info.json, run-level read errors.",
+          "phase": 3,
+          "swift": {
+            "name": "AcquireOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/AcquireOutput.swift"
+          },
+          "cs": {
+            "name": "AcquireOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/AcquireOutput.cs"
+          },
+          "c": {
+            "name": "BroAcquireOutput",
+            "file": "linux/src/engine/steps/bro-acquire-output.h"
+          }
+        },
+        {
+          "name": "AcquiredTitle",
+          "kind": "struct",
+          "fields": [
+            "index",
+            "files",
+            "readErrors"
+          ],
+          "doc": "A title AcquireStep ripped: its index as the plan numbers it, its files in staging (MakeMKV's names), its read errors.",
+          "phase": 3,
+          "swift": {
+            "name": "AcquiredTitle",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/AcquiredTitle.swift"
+          },
+          "cs": {
+            "name": "AcquiredTitle",
+            "file": "windows/src/Bromelia.Engine/Steps/AcquiredTitle.cs"
+          },
+          "c": {
+            "name": "BroAcquiredTitle",
+            "file": "linux/src/engine/steps/bro-acquired-title.h"
+          }
+        },
+        {
+          "name": "FileTree",
+          "kind": "namespace",
+          "doc": "What is under a folder a job made, through the FileSystem port: its files, removing it, syncing it.",
+          "phase": 3,
+          "swift": {
+            "name": "FileTree",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/FileTree.swift"
+          },
+          "cs": {
+            "name": "FileTree",
+            "file": "windows/src/Bromelia.Engine/Steps/FileTree.cs"
+          },
+          "c": {
+            "name": "BroFileTree",
+            "file": "linux/src/engine/steps/bro-file-tree.h"
+          }
+        },
+        {
+          "name": "BackupCheck",
+          "kind": "namespace",
+          "doc": "Whether a backup a job made looks like a disc (BackupStructure.problem), read from disk.",
+          "phase": 3,
+          "swift": {
+            "name": "BackupCheck",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/BackupCheck.swift"
+          },
+          "cs": {
+            "name": "BackupCheck",
+            "file": "windows/src/Bromelia.Engine/Steps/BackupCheck.cs"
+          },
+          "c": {
+            "name": "BroBackupCheck",
+            "file": "linux/src/engine/steps/bro-backup-check.h"
+          }
         }
       ],
       "functions": [
@@ -15256,6 +15419,139 @@
           "swift": "ArchiveCheck.asks(_:configId:)",
           "cs": "ArchiveCheck.Asks",
           "c": "bro_archive_check_asks"
+        },
+        {
+          "name": "AcquireOutput.encode",
+          "params": [
+            "output"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "AcquireOutput.encode(_:)",
+          "cs": "AcquireOutput.Encode",
+          "c": "bro_acquire_output_encode"
+        },
+        {
+          "name": "AcquireOutput.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "AcquireOutput",
+          "phase": 3,
+          "swift": "AcquireOutput.decode(_:)",
+          "cs": "AcquireOutput.Decode",
+          "c": "bro_acquire_output_decode"
+        },
+        {
+          "name": "AcquireOutput.of",
+          "params": [
+            "job"
+          ],
+          "returns": "AcquireOutput?",
+          "doc": "The job's Acquire output; null when Acquire hasn't run.",
+          "phase": 3,
+          "swift": "AcquireOutput.of(_:)",
+          "cs": "AcquireOutput.Of",
+          "c": "bro_acquire_output_of"
+        },
+        {
+          "name": "AcquireOutput.produced",
+          "params": [
+            "output"
+          ],
+          "returns": "[String]",
+          "doc": "Every name Acquire made in staging: the titles' files, the others, the backup, disc-info.json.",
+          "phase": 3,
+          "swift": "AcquireOutput.produced(_:)",
+          "cs": "AcquireOutput.Produced",
+          "c": "bro_acquire_output_produced"
+        },
+        {
+          "name": "AcquireOutput.readErrorCount",
+          "params": [
+            "output"
+          ],
+          "returns": "Int",
+          "doc": "How many read errors MakeMKV reported in all.",
+          "phase": 3,
+          "swift": "AcquireOutput.readErrorCount(_:)",
+          "cs": "AcquireOutput.ReadErrorCount",
+          "c": "bro_acquire_output_read_error_count"
+        },
+        {
+          "name": "AcquiredTitle.encode",
+          "params": [
+            "title"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "AcquiredTitle.encode(_:)",
+          "cs": "AcquiredTitle.Encode",
+          "c": "bro_acquired_title_encode"
+        },
+        {
+          "name": "AcquiredTitle.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "AcquiredTitle",
+          "phase": 3,
+          "swift": "AcquiredTitle.decode(_:)",
+          "cs": "AcquiredTitle.Decode",
+          "c": "bro_acquired_title_decode"
+        },
+        {
+          "name": "FileTree.files",
+          "params": [
+            "fs",
+            "root"
+          ],
+          "returns": "[String]",
+          "doc": "Every file under root, relative ('/'), ordinal order; an empty folder ends in /.",
+          "throws": true,
+          "phase": 3,
+          "swift": "FileTree.files(_:root:)",
+          "cs": "FileTree.Files",
+          "c": "bro_file_tree_files"
+        },
+        {
+          "name": "FileTree.remove",
+          "params": [
+            "fs",
+            "path"
+          ],
+          "doc": "Removes a file, or a folder with everything in it.",
+          "throws": true,
+          "phase": 3,
+          "swift": "FileTree.remove(_:path:)",
+          "cs": "FileTree.Remove",
+          "c": "bro_file_tree_remove"
+        },
+        {
+          "name": "FileTree.sync",
+          "params": [
+            "fs",
+            "path"
+          ],
+          "doc": "Syncs every file under path (or the file) to disk.",
+          "throws": true,
+          "phase": 3,
+          "swift": "FileTree.sync(_:path:)",
+          "cs": "FileTree.Sync",
+          "c": "bro_file_tree_sync"
+        },
+        {
+          "name": "BackupCheck.problem",
+          "params": [
+            "fs",
+            "path"
+          ],
+          "returns": "BroMessage?",
+          "doc": "What is wrong with the backup at path, or null (structure.notCreated, structure.unreadable).",
+          "phase": 3,
+          "swift": "BackupCheck.problem(_:path:)",
+          "cs": "BackupCheck.Problem",
+          "c": "bro_backup_check_problem"
         }
       ]
     },

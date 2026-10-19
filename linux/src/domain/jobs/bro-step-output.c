@@ -26,5 +26,8 @@ bro_step_output_copy (const BroStepOutput *output)
 {
   if (!output)
     return NULL;
-  return bro_step_output_new (output->kind, bro_json_value_ref (output->data), output->summary ? bro_bro_message_copy (output->summary) : NULL);
+  BroStepOutput *copy = bro_step_output_new (output->kind, bro_json_value_ref (output->data),
+                                             output->summary ? bro_bro_message_copy (output->summary) : NULL);
+  copy->read_errors = output->read_errors;
+  return copy;
 }

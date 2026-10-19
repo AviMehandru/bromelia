@@ -25,10 +25,11 @@ private final class RecoveryStore: Store, @unchecked Sendable {
     func migrate() async throws(BroError) {}
 }
 
-/// A step that only says what it can do after a stop.
+/// A step that only says what it can do after a stop; a resumeFrom one resumes from a "backup" checkpoint.
 private struct RecoveryStep: Step {
     let kind: StepKind
     let resumability: Resumability
+    var resumeCheckpoint: String? { resumability == .resumeFrom ? "backup" : nil }
     func resources(_ job: JobSnapshot) -> ResourceSet { .none }
     func run(_ context: StepContext) async throws(BroError) -> StepReport { fatalError("not used") }
 }
@@ -149,7 +150,8 @@ struct RecoveryServiceTests {
             for (seq, r) in j["rows"]!.array!.enumerated() {
                 let kind = StepKind(rawValue: r["kind"]!.string!)!
                 try await store.memory.save(StepRecord(jobId: jobId, seq: seq, kind: kind, state: StepState(rawValue: r["state"]!.string!)!, attempt: 1,
-                                                       startedAt: world.clock.now(), finishedAt: nil, output: StepOutput(kind: kind, data: .object([])),
+                                                       startedAt: world.clock.now(), finishedAt: nil, output: StepOutput(kind: kind, data: .object([]),
+                                                                                                                    readErrors: Int(r["readErrors"]?.int ?? 0)),
                                                        error: r["error"].map(caseError), checkpoint: r["checkpoint"]))
             }
         }

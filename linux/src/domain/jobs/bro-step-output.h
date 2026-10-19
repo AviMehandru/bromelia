@@ -1,4 +1,5 @@
-/* bro-step-output.h: what a step produced (stored as job_steps.output), for the steps after it. */
+/* bro-step-output.h: what a step produced (stored as job_steps.output), for the steps after it, and the read errors it
+ * saw, so a job resumed after it still ends with them (bro_job_outcome_decide). */
 #pragma once
 
 #include "bro-bro-message.h"
@@ -11,9 +12,10 @@ typedef struct {
   BroStepKind kind;
   BroJsonValue *data;
   BroBroMessage *summary; /* nullable */
+  int read_errors;
 } BroStepOutput;
 
-/* Takes ownership of @data and @summary. */
+/* Takes ownership of @data and @summary; read_errors starts 0. */
 BroStepOutput *bro_step_output_new (BroStepKind kind, BroJsonValue *data, BroBroMessage *summary);
 void bro_step_output_free (BroStepOutput *output);
 BroStepOutput *bro_step_output_copy (const BroStepOutput *output);

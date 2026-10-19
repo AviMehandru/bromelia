@@ -1,6 +1,10 @@
-/* test-steps.inc: shared/fixtures/engine/video-steps.cases.json and plan-steps.cases.json: each step alone, with fake
- * ports. Included by test-engine.c (after test-pipeline.inc). */
+/* test-steps.inc: shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json and acquire-steps.cases.json: each
+ * step alone, with fake ports. Included by test-engine.c (after test-pipeline.inc). */
 
+#include "bro-acquire-step.h"
+#include "bro-directory-entry.h"
+#include "bro-file-info.h"
+#include "bro-file-tree.h"
 #include "bro-await-media-step.h"
 #include "bro-config-codec.h"
 #include "bro-decide-step.h"
@@ -32,7 +36,533 @@ struct _TestStepFakes {
   BroJsonValue *progress; /* array */
   char *fingerprint;   /* Probe's ('archivedBefore probe') */
   BroDecisionDto *question;
+  GHashTable *files;   /* path → GBytes: what the step and the scripted tool made */
+  GHashTable *folders; /* paths */
+  GPtrArray *ops;      /* char *: the file system calls that change something, while recording */
+  gboolean recording;
+  guint next_run;      /* makemkv.runs taken */
+  BroCancellationSource *cancel; /* the case's; not owned */
 };
+
+static void fakes_call (TestStepFakes *f, char *text);
+static BroBroMessage *fakes_message (BroJsonValue *j, BroSeverity severity);
+
+/* ---- files and folders in memory (and given.files, which exist as folders) ---- */
+
+static void
+steps_tree_record (TestStepFakes *f, char *op)
+{
+  if (f->recording)
+    g_ptr_array_add (f->ops, op);
+  else
+    g_free (op);
+}
+
+/* The lock held. */
+static void
+steps_tree_put_folder (TestStepFakes *f, const char *path)
+{
+  g_auto (GStrv) parts = g_strsplit (path, "/", -1);
+  GString *current = g_string_new ("");
+  for (guint i = 0; parts[i]; i++)
+    if (*parts[i])
+      {
+        g_string_append_printf (current, "/%s", parts[i]);
+        g_hash_table_add (f->folders, g_strdup (current->str));
+      }
+  g_string_free (current, TRUE);
+}
+
+/* A file with these bytes (taken), its folders made; not recorded. */
+static void
+steps_tree_put (TestStepFakes *f, const char *path, GBytes *bytes)
+{
+  g_autofree char *folder = g_path_get_dirname (path);
+  g_mutex_lock (&f->lock);
+  steps_tree_put_folder (f, folder);
+  g_hash_table_replace (f->files, g_strdup (path), bytes);
+  g_mutex_unlock (&f->lock);
+}
+
+static void
+steps_tree_put_dir (TestStepFakes *f, const char *path)
+{
+  g_mutex_lock (&f->lock);
+  steps_tree_put_folder (f, path);
+  g_mutex_unlock (&f->lock);
+}
+
+static BroBroError *
+steps_tree_not_found (const char *path)
+{
+  BroJsonValue *params = bro_json_value_new_object ();
+  bro_json_value_set (params, "path", bro_json_value_new_string (path));
+  return bro_bro_error_new ("fs.notFound", params, NULL);
+}
+
+static gboolean
+steps_tree_under (const char *p, const char *folder)
+{
+  gsize n = strlen (folder);
+  return strncmp (p, folder, n) == 0 && p[n] == '/';
+}
+
+static BroFileInfo *
+steps_fakes_stat (BroFileSystem *fs, const char *path, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  BroFileInfo *info = NULL;
+  GBytes *b;
+  g_mutex_lock (&f->lock);
+  if ((b = g_hash_table_lookup (f->files, path)))
+    {
+      info = bro_file_info_new ();
+      info->size = g_bytes_get_size (b);
+    }
+  else if (g_hash_table_contains (f->folders, path))
+    {
+      info = bro_file_info_new ();
+      info->is_directory = TRUE;
+    }
+  g_mutex_unlock (&f->lock);
+  if (!info)
+    *error = steps_tree_not_found (path);
+  return info;
+}
+
+static int
+steps_tree_by_name (gconstpointer a, gconstpointer b)
+{
+  return strcmp ((*(BroDirectoryEntry *const *) a)->name, (*(BroDirectoryEntry *const *) b)->name);
+}
+
+static GPtrArray *
+steps_fakes_list (BroFileSystem *fs, const char *directory, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  GPtrArray *entries = NULL;
+  GHashTableIter it;
+  gpointer key;
+  g_mutex_lock (&f->lock);
+  if (g_hash_table_contains (f->folders, directory))
+    {
+      entries = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_directory_entry_free);
+      for (int pass = 0; pass < 2; pass++)
+        {
+          g_hash_table_iter_init (&it, pass ? f->folders : f->files);
+          while (g_hash_table_iter_next (&it, &key, NULL))
+            {
+              const char *p = key;
+              if (steps_tree_under (p, directory) && !strchr (p + strlen (directory) + 1, '/'))
+                {
+                  BroDirectoryEntry *e = bro_directory_entry_new ();
+                  e->name = g_strdup (p + strlen (directory) + 1);
+                  e->is_directory = pass == 1;
+                  g_ptr_array_add (entries, e);
+                }
+            }
+        }
+      g_ptr_array_sort (entries, steps_tree_by_name);
+    }
+  g_mutex_unlock (&f->lock);
+  if (!entries)
+    *error = steps_tree_not_found (directory);
+  return entries;
+}
+
+static GBytes *
+steps_fakes_read (BroFileSystem *fs, const char *path, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  GBytes *b;
+  g_mutex_lock (&f->lock);
+  b = g_hash_table_lookup (f->files, path);
+  b = b ? g_bytes_ref (b) : NULL;
+  g_mutex_unlock (&f->lock);
+  if (!b)
+    *error = steps_tree_not_found (path);
+  return b;
+}
+
+static GBytes *
+steps_fakes_read_range (BroFileSystem *fs, const char *path, gint64 offset, int length, BroBroError **error)
+{
+  g_autoptr (GBytes) all = steps_fakes_read (fs, path, error);
+  gsize n;
+  if (!all)
+    return NULL;
+  n = g_bytes_get_size (all);
+  if ((gsize) offset >= n)
+    return g_bytes_new (NULL, 0);
+  return g_bytes_new_from_bytes (all, offset, MIN ((gsize) length, n - offset));
+}
+
+static gboolean
+steps_fakes_create_directory (BroFileSystem *fs, const char *path, gboolean parents_must_exist, BroBroError **error)
+{
+  steps_tree_put_dir (TEST_STEP_FAKES (fs), path);
+  return TRUE;
+}
+
+static gboolean
+steps_fakes_write_atomically (BroFileSystem *fs, const char *path, GBytes *bytes, int mode, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  g_autofree char *folder = g_path_get_dirname (path);
+  gboolean ok;
+  g_mutex_lock (&f->lock);
+  if ((ok = g_hash_table_contains (f->folders, folder)))
+    {
+      g_hash_table_replace (f->files, g_strdup (path), g_bytes_ref (bytes));
+      steps_tree_record (f, g_strconcat ("write ", path, NULL));
+    }
+  g_mutex_unlock (&f->lock);
+  if (!ok)
+    *error = steps_tree_not_found (folder);
+  return ok;
+}
+
+static gboolean
+steps_fakes_rename (BroFileSystem *fs, const char *from, const char *to, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  gboolean ok = TRUE;
+  GBytes *b;
+  g_mutex_lock (&f->lock);
+  if (g_hash_table_contains (f->files, to) || g_hash_table_contains (f->folders, to))
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "path", bro_json_value_new_string (to));
+      *error = bro_bro_error_new ("fs.alreadyExists", params, NULL);
+      ok = FALSE;
+    }
+  else if ((b = g_hash_table_lookup (f->files, from)))
+    {
+      g_hash_table_replace (f->files, g_strdup (to), g_bytes_ref (b));
+      g_hash_table_remove (f->files, from);
+    }
+  else if (g_hash_table_contains (f->folders, from))
+    {
+      g_autoptr (GPtrArray) moved = g_ptr_array_new_with_free_func (g_free);
+      GHashTableIter it;
+      gpointer key, value;
+      g_hash_table_iter_init (&it, f->files);
+      while (g_hash_table_iter_next (&it, &key, &value))
+        if (steps_tree_under (key, from))
+          g_ptr_array_add (moved, g_strdup (key));
+      for (guint i = 0; i < moved->len; i++)
+        {
+          const char *old = moved->pdata[i];
+          g_hash_table_replace (f->files, g_strconcat (to, old + strlen (from), NULL), g_bytes_ref (g_hash_table_lookup (f->files, old)));
+          g_hash_table_remove (f->files, old);
+        }
+      g_ptr_array_set_size (moved, 0);
+      g_hash_table_iter_init (&it, f->folders);
+      while (g_hash_table_iter_next (&it, &key, NULL))
+        if (strcmp (key, from) == 0 || steps_tree_under (key, from))
+          g_ptr_array_add (moved, g_strdup (key));
+      for (guint i = 0; i < moved->len; i++)
+        {
+          const char *old = moved->pdata[i];
+          g_hash_table_add (f->folders, g_strconcat (to, old + strlen (from), NULL));
+          g_hash_table_remove (f->folders, old);
+        }
+    }
+  else
+    {
+      *error = steps_tree_not_found (from);
+      ok = FALSE;
+    }
+  if (ok)
+    steps_tree_record (f, g_strdup_printf ("rename %s %s", from, to));
+  g_mutex_unlock (&f->lock);
+  return ok;
+}
+
+static gboolean
+steps_fakes_remove (BroFileSystem *fs, const char *path, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  gboolean ok = TRUE;
+  g_mutex_lock (&f->lock);
+  if (!g_hash_table_remove (f->files, path))
+    {
+      GHashTableIter it;
+      gpointer key;
+      gboolean empty = TRUE;
+      if (!g_hash_table_contains (f->folders, path))
+        {
+          *error = steps_tree_not_found (path);
+          ok = FALSE;
+        }
+      else
+        {
+          for (int pass = 0; pass < 2; pass++)
+            {
+              g_hash_table_iter_init (&it, pass ? f->folders : f->files);
+              while (g_hash_table_iter_next (&it, &key, NULL))
+                empty &= !steps_tree_under (key, path);
+            }
+          if (!empty)
+            {
+              BroJsonValue *params = bro_json_value_new_object ();
+              bro_json_value_set (params, "path", bro_json_value_new_string (path));
+              bro_json_value_set (params, "reason", bro_json_value_new_string ("not empty"));
+              *error = bro_bro_error_new ("fs.failed", params, NULL);
+              ok = FALSE;
+            }
+          else
+            g_hash_table_remove (f->folders, path);
+        }
+    }
+  if (ok)
+    steps_tree_record (f, g_strconcat ("remove ", path, NULL));
+  g_mutex_unlock (&f->lock);
+  return ok;
+}
+
+static gboolean
+steps_fakes_sync_directory (BroFileSystem *fs, const char *path, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  gboolean ok;
+  g_mutex_lock (&f->lock);
+  if ((ok = g_hash_table_contains (f->folders, path)))
+    steps_tree_record (f, g_strconcat ("syncDirectory ", path, NULL));
+  g_mutex_unlock (&f->lock);
+  if (!ok)
+    *error = steps_tree_not_found (path);
+  return ok;
+}
+
+static gboolean
+steps_fakes_sync_file (BroFileSystem *fs, const char *path, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  gboolean ok;
+  g_mutex_lock (&f->lock);
+  if ((ok = g_hash_table_contains (f->files, path)))
+    steps_tree_record (f, g_strconcat ("sync ", path, NULL));
+  g_mutex_unlock (&f->lock);
+  if (!ok)
+    *error = steps_tree_not_found (path);
+  return ok;
+}
+
+/* ---- the scripted makemkvcon runs (makemkv.runs) ---- */
+
+static BroJsonValue *
+steps_fakes_next_run (TestStepFakes *f, BroBroError **error)
+{
+  BroJsonValue *runs = bro_json_value_member (bro_json_value_member (f->given, "makemkv"), "runs");
+  BroJsonValue *run = NULL;
+  g_mutex_lock (&f->lock);
+  if (f->next_run < bro_json_value_length (runs))
+    run = bro_json_value_at (runs, f->next_run++);
+  g_mutex_unlock (&f->lock);
+  if (!run)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "detail", bro_json_value_new_string ("no makemkv run left"));
+      *error = bro_bro_error_new (bro_message_code_wire (BRO_MSG_INTERNAL_UNEXPECTED), params, NULL);
+    }
+  return run;
+}
+
+static BroMakemkvNotice *
+steps_fakes_notice (const char *name)
+{
+  BroMakemkvNoticeKind kinds[] = { BRO_MAKEMKV_NOTICE_KEY_EXPIRED, BRO_MAKEMKV_NOTICE_EVALUATION_NOT_STARTED, BRO_MAKEMKV_NOTICE_VERSION_TOO_OLD,
+                                   BRO_MAKEMKV_NOTICE_LIBRE_DRIVE_REQUIRED };
+  const char *names[] = { "keyExpired", "evaluationNotStarted", "versionTooOld", "libreDriveRequired" };
+  for (guint i = 0; name && i < G_N_ELEMENTS (names); i++)
+    if (strcmp (name, names[i]) == 0)
+      return bro_makemkv_notice_new (kinds[i], "");
+  return NULL;
+}
+
+/* What a scripted run ends with (@produced: char *, taken). */
+static BroMakemkvRun *
+steps_fakes_ran (TestStepFakes *f, BroJsonValue *run, BroRunSink *sink, GPtrArray *produced)
+{
+  BroJsonValue *robot = bro_json_value_member (run, "robot");
+  BroJsonValue *errors = bro_json_value_member (run, "readErrors");
+  BroJsonValue *given_produced = bro_json_value_member (run, "produced");
+  BroRunOutcome *outcome = g_new0 (BroRunOutcome, 1);
+  BroMakemkvRun *made = bro_makemkv_run_new ();
+  for (guint i = 0; i < bro_json_value_length (robot); i++)
+    {
+      g_autoptr (BroRobotEvent) e = bro_robot_parse_line (bro_json_value_get_string (bro_json_value_at (robot, i), ""));
+      if (e)
+        bro_run_sink_event (sink, e);
+    }
+  if (bro_json_value_get_bool (bro_json_value_member (run, "cancel"), FALSE))
+    bro_cancellation_source_cancel (f->cancel);
+  outcome->exit_code = (int) bro_json_value_get_integer (bro_json_value_member (run, "exitCode"), 0);
+  outcome->read_errors = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_robot_message_free);
+  for (guint i = 0; i < bro_json_value_length (errors); i++)
+    g_ptr_array_add (outcome->read_errors, bro_robot_message_new (2003, 0, bro_json_value_get_string (bro_json_value_at (errors, i), "")));
+  if (given_produced)
+    {
+      g_ptr_array_unref (produced);
+      produced = g_ptr_array_new_with_free_func (g_free);
+      for (guint i = 0; i < bro_json_value_length (given_produced); i++)
+        g_ptr_array_add (produced, g_strdup (bro_json_value_get_string (bro_json_value_at (given_produced, i), "")));
+    }
+  outcome->produced = produced;
+  outcome->abandoned = bro_json_value_get_bool (bro_json_value_member (run, "abandoned"), FALSE);
+  if (!bro_status_word_from_wire (bro_json_value_get_string (bro_json_value_member (run, "status"), "success"), &outcome->status))
+    outcome->status = BRO_STATUS_WORD_SUCCESS;
+  outcome->error = fakes_message (bro_json_value_member (run, "error"), BRO_SEVERITY_ERROR);
+  made->outcome = outcome;
+  made->notice = steps_fakes_notice (bro_json_value_get_string (bro_json_value_member (run, "notice"), NULL));
+  made->transcript_problem = fakes_message (bro_json_value_member (run, "transcriptProblem"), BRO_SEVERITY_WARNING);
+  made->settings_problem = fakes_message (bro_json_value_member (run, "settingsProblem"), BRO_SEVERITY_WARNING);
+  made->isolation_warning = fakes_message (bro_json_value_member (run, "isolationWarning"), BRO_SEVERITY_WARNING);
+  return made;
+}
+
+static char *
+steps_fakes_describe (const BroMakemkvSource *source)
+{
+  return source->kind == BRO_MAKEMKV_SOURCE_DRIVE ? g_strdup_printf ("disc:%d", source->index)
+         : source->kind == BRO_MAKEMKV_SOURCE_ISO ? g_strconcat ("iso:", source->path, NULL)
+                                                  : g_strconcat ("file:", source->path, NULL);
+}
+
+static BroMakemkvRun *
+steps_fakes_rip (BroMakemkv *makemkv, const BroMakemkvSource *source, const char *title, const char *destination,
+           const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (makemkv);
+  g_autofree char *described = steps_fakes_describe (source);
+  BroJsonValue *run, *files;
+  GPtrArray *produced;
+  fakes_call (f, g_strdup_printf ("rip %s %s %s", described, title, destination));
+  if (!(run = steps_fakes_next_run (f, error)))
+    return NULL;
+  files = bro_json_value_member (run, "files");
+  produced = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < bro_json_value_length (files); i++)
+    {
+      const char *name = bro_json_value_get_string (bro_json_value_at (files, i), "");
+      g_autofree char *path = g_strconcat (destination, "/", name, NULL);
+      steps_tree_put (f, path, g_bytes_new (NULL, 0));
+      g_ptr_array_add (produced, g_strdup (name));
+    }
+  return steps_fakes_ran (f, run, sink, produced);
+}
+
+static int
+steps_tree_by_text (gconstpointer a, gconstpointer b)
+{
+  return strcmp (*(char *const *) a, *(char *const *) b);
+}
+
+static BroMakemkvRun *
+steps_fakes_backup (BroMakemkv *makemkv, const BroMakemkvSource *source, gboolean decrypt, const char *destination,
+              const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (makemkv);
+  g_autofree char *described = steps_fakes_describe (source);
+  BroJsonValue *run;
+  GPtrArray *produced = g_ptr_array_new_with_free_func (g_free);
+  fakes_call (f, g_strdup_printf ("backup %s %s %s", described, decrypt ? "true" : "false", destination));
+  if (!(run = steps_fakes_next_run (f, error)))
+    {
+      g_ptr_array_unref (produced);
+      return NULL;
+    }
+  if (bro_json_value_get_bool (bro_json_value_member (run, "image"), FALSE))
+    {
+      const char *header = bro_json_value_get_string (bro_json_value_member (run, "header"), "");
+      GByteArray *bytes = g_byte_array_new ();
+      g_byte_array_set_size (bytes, 32769);
+      memset (bytes->data, 0, 32769);
+      g_byte_array_append (bytes, (const guint8 *) header, strlen (header));
+      steps_tree_put (f, destination, g_byte_array_free_to_bytes (bytes));
+      g_ptr_array_add (produced, g_path_get_basename (destination));
+    }
+  else
+    {
+      BroJsonValue *files = bro_json_value_member (run, "files");
+      steps_tree_put_dir (f, destination);
+      for (guint i = 0; i < bro_json_value_length (files); i++)
+        {
+          const char *name = bro_json_value_get_string (bro_json_value_at (files, i), "");
+          g_autofree char *path = g_strconcat (destination, "/", name, NULL);
+          g_auto (GStrv) parts = g_strsplit (name, "/", 2);
+          gboolean seen = FALSE;
+          steps_tree_put (f, path, g_bytes_new (NULL, 0));
+          for (guint j = 0; j < produced->len; j++)
+            seen |= strcmp (produced->pdata[j], parts[0]) == 0;
+          if (!seen)
+            g_ptr_array_add (produced, g_strdup (parts[0]));
+        }
+      g_ptr_array_sort (produced, steps_tree_by_text);
+    }
+  return steps_fakes_ran (f, run, sink, produced);
+}
+
+/* ---- the checkpoint (given.checkpoint; a fingerprint "probe" stands for Probe's, both ways) ---- */
+
+static BroJsonValue *
+steps_fakes_probed (TestStepFakes *f, const BroJsonValue *checkpoint, gboolean to_probe)
+{
+  BroJsonValue *o;
+  if (checkpoint->kind != BRO_JSON_VALUE_OBJECT)
+    return bro_json_value_ref ((BroJsonValue *) checkpoint);
+  o = bro_json_value_new_object ();
+  for (guint i = 0; i < checkpoint->keys->len; i++)
+    {
+      const char *key = checkpoint->keys->pdata[i];
+      BroJsonValue *value = checkpoint->items->pdata[i];
+      const char *text = bro_json_value_get_string (value, NULL);
+      if (strcmp (key, "fingerprint") == 0 && text && (to_probe ? g_strcmp0 (text, f->fingerprint) == 0 : strcmp (text, "probe") == 0))
+        bro_json_value_set (o, key, to_probe ? bro_json_value_new_string ("probe")
+                                             : f->fingerprint ? bro_json_value_new_string (f->fingerprint) : bro_json_value_new_null ());
+      else
+        bro_json_value_set (o, key, bro_json_value_ref (value));
+    }
+  return o;
+}
+
+/* The canonical encoding on one line, as JobLog writes it. */
+static char *
+steps_one_line (const BroJsonValue *value)
+{
+  g_autofree char *canonical = bro_json_value_to_text (value);
+  GString *out = g_string_new (NULL);
+  for (const char *c = canonical; *c; c++)
+    {
+      if (*c != '\n')
+        {
+          g_string_append_c (out, *c);
+          continue;
+        }
+      while (c[1] == ' ')
+        c++;
+    }
+  return g_string_free (out, FALSE);
+}
+
+static BroJsonValue *
+steps_fakes_saved (BroCheckpointer *checkpointer)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (checkpointer);
+  BroJsonValue *given = bro_json_value_member (f->given, "checkpoint");
+  return given ? steps_fakes_probed (f, given, FALSE) : NULL;
+}
+
+static gboolean
+steps_fakes_save (BroCheckpointer *checkpointer, const BroJsonValue *checkpoint, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (checkpointer);
+  g_autoptr (BroJsonValue) probed = steps_fakes_probed (f, checkpoint, TRUE);
+  g_autofree char *text = steps_one_line (probed);
+  fakes_call (f, g_strconcat ("checkpoint ", text, NULL));
+  return TRUE;
+}
 
 static void
 fakes_call (TestStepFakes *f, char *text)
@@ -97,6 +627,33 @@ fakes_listing (BroMakemkv *makemkv, const BroMakemkvSource *source, const BroMak
                  : source->kind == BRO_MAKEMKV_SOURCE_ISO ? g_strconcat ("listing iso:", source->path, NULL)
                                                           : g_strconcat ("listing file:", source->path, NULL));
   BroJsonValue *m = bro_json_value_member (f->given, "makemkv"), *v;
+  if (bro_json_value_member (m, "runs"))
+    {
+      BroJsonValue *run = steps_fakes_next_run (f, error);
+      BroJsonValue *disc;
+      g_autoptr (BroListingBuilder) listed = bro_listing_builder_new ();
+      BroListingRun *read;
+      if (!run)
+        return NULL;
+      if ((disc = bro_json_value_member (run, "listing")))
+        {
+          g_autofree char *robot = bro_test_generated_listing (disc);
+          g_auto (GStrv) robot_lines = g_strsplit (robot, "\n", -1);
+          for (guint i = 0; robot_lines[i]; i++)
+            {
+              g_autoptr (BroRobotEvent) e = bro_robot_parse_line (robot_lines[i]);
+              if (e)
+                {
+                  bro_run_sink_event (sink, e);
+                  bro_listing_builder_feed (listed, e);
+                }
+            }
+        }
+      read = bro_listing_run_new ();
+      read->listing = bro_listing_builder_build (listed);
+      read->run = steps_fakes_ran (f, run, sink, g_ptr_array_new_with_free_func (g_free));
+      return read;
+    }
   g_autofree char *text = NULL;
   if ((v = bro_json_value_member (m, "listing")))
     text = bro_test_generated_listing (v);
@@ -192,11 +749,16 @@ fakes_log (BroJobLogger *logger, const BroBroMessage *message)
 static gboolean
 steps_fakes_exists (BroFileSystem *fs, const char *path)
 {
-  BroJsonValue *files = bro_json_value_member (TEST_STEP_FAKES (fs)->given, "files");
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  BroJsonValue *files = bro_json_value_member (f->given, "files");
+  gboolean found;
   for (guint i = 0; i < bro_json_value_length (files); i++)
     if (strcmp (bro_json_value_get_string (bro_json_value_at (files, i), ""), path) == 0)
       return TRUE;
-  return FALSE;
+  g_mutex_lock (&f->lock);
+  found = g_hash_table_contains (f->files, path) || g_hash_table_contains (f->folders, path);
+  g_mutex_unlock (&f->lock);
+  return found;
 }
 
 static BroVolumeInfo *
@@ -235,6 +797,18 @@ fakes_require (BroLibraryPort *port, const char *library_id, BroBroError **error
       return NULL;
     }
   return bro_library_handle_new (library_id, STEPS_JS (l, "path"));
+}
+
+static char *
+steps_fakes_staging_directory (BroLibraryPort *port, const char *library_id, const BroId *job_id, BroBroError **error)
+{
+  g_autoptr (BroLibraryHandle) library = fakes_require (port, library_id, error);
+  char *path;
+  if (!library)
+    return NULL;
+  path = g_strconcat (library->path, "/.bromelia/staging/", job_id->value, NULL);
+  steps_tree_put_dir (TEST_STEP_FAKES (port), path);
+  return path;
 }
 
 static GPtrArray *
@@ -305,14 +879,41 @@ steps_fakes_fs_iface (BroFileSystemInterface *i)
 {
   i->exists = steps_fakes_exists;
   i->volume = fakes_volume;
+  i->stat = steps_fakes_stat;
+  i->list = steps_fakes_list;
+  i->read = steps_fakes_read;
+  i->read_range = steps_fakes_read_range;
+  i->create_directory = steps_fakes_create_directory;
+  i->write_atomically = steps_fakes_write_atomically;
+  i->rename = steps_fakes_rename;
+  i->remove = steps_fakes_remove;
+  i->sync_file = steps_fakes_sync_file;
+  i->sync_directory = steps_fakes_sync_directory;
 }
-static void fakes_library_iface (BroLibraryPortInterface *i) { i->require = fakes_require; }
+static void
+fakes_library_iface (BroLibraryPortInterface *i)
+{
+  i->require = fakes_require;
+  i->staging_directory = steps_fakes_staging_directory;
+}
+static void
+steps_fakes_checkpointer_iface (BroCheckpointerInterface *i)
+{
+  i->saved = steps_fakes_saved;
+  i->save = steps_fakes_save;
+}
 static void fakes_catalog_iface (BroCatalogQueriesInterface *i) { i->archived_before = fakes_archived_before; }
 static void fakes_decisions_iface (BroDecisionPortInterface *i) { i->ask = fakes_ask; }
 static void fakes_space_iface (BroSpaceReservationsInterface *i) { i->reserve = fakes_reserve; }
 static void fakes_lookup_iface (BroDriveLookupInterface *i) { i->find = fakes_find; }
 static void fakes_setup_iface (BroMakemkvSetupInterface *i) { i->invocation = fakes_invocation; }
-static void fakes_makemkv_iface (BroMakemkvInterface *i) { i->listing = fakes_listing; }
+static void
+fakes_makemkv_iface (BroMakemkvInterface *i)
+{
+  i->listing = fakes_listing;
+  i->rip = steps_fakes_rip;
+  i->backup = steps_fakes_backup;
+}
 static void
 fakes_drives_iface (BroDriveControlInterface *i)
 {
@@ -333,7 +934,8 @@ G_DEFINE_FINAL_TYPE_WITH_CODE (TestStepFakes, test_step_fakes, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_LIBRARY_PORT, fakes_library_iface)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_CATALOG_QUERIES, fakes_catalog_iface)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_DECISION_PORT, fakes_decisions_iface)
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_SPACE_RESERVATIONS, fakes_space_iface))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_SPACE_RESERVATIONS, fakes_space_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CHECKPOINTER, steps_fakes_checkpointer_iface))
 
 static void
 test_step_fakes_finalize (GObject *object)
@@ -345,6 +947,9 @@ test_step_fakes_finalize (GObject *object)
   bro_json_value_unref (f->progress);
   g_free (f->fingerprint);
   bro_decision_dto_free (f->question);
+  g_hash_table_unref (f->files);
+  g_hash_table_unref (f->folders);
+  g_ptr_array_unref (f->ops);
   g_mutex_clear (&f->lock);
   G_OBJECT_CLASS (test_step_fakes_parent_class)->finalize (object);
 }
@@ -362,6 +967,10 @@ test_step_fakes_init (TestStepFakes *f)
   f->calls = g_ptr_array_new_with_free_func (g_free);
   f->log = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_bro_message_free);
   f->progress = bro_json_value_new_array ();
+  f->files = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_bytes_unref);
+  f->folders = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  g_hash_table_add (f->folders, g_strdup ("/"));
+  f->ops = g_ptr_array_new_with_free_func (g_free);
 }
 
 /* ---- the cases ---- */
@@ -453,6 +1062,8 @@ steps_step (const char *kind)
     return BRO_STEP (bro_plan_step_new ());
   if (strcmp (kind, "decide") == 0)
     return BRO_STEP (bro_decide_step_new ());
+  if (strcmp (kind, "acquire") == 0)
+    return BRO_STEP (bro_acquire_step_new ());
   if (strcmp (kind, "release") == 0)
     return BRO_STEP (bro_release_step_new ());
   return NULL;
@@ -491,6 +1102,8 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   BroJobSnapshot *job = bro_job_snapshot_new (&job_id, steps_request_of (bro_json_value_member (given, "request")), NULL);
   BroJsonValue *outputs = bro_json_value_member (given, "outputs");
   BroJsonValue *probe = bro_json_value_member (given, "probe");
+  g_autofree char *staging = NULL;
+  g_autoptr (BroListing) probed_listing = NULL;
   if (probe)
     {
       BroJsonValue *disc = bro_json_value_member (probe, "disc");
@@ -509,6 +1122,7 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
             }
           listing = bro_listing_builder_build (builder);
           fakes->fingerprint = bro_fingerprint_of (listing);
+          probed_listing = bro_listing_ref (listing);
         }
       output = bro_probe_output_new (listing, fakes->fingerprint, NULL, FALSE);
       g_ptr_array_add (job->outputs, bro_step_output_new (BRO_STEP_KIND_PROBE, bro_probe_output_encode (output), NULL));
@@ -519,13 +1133,34 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
       BroStepKind kind;
       g_assert_true (bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_member (o, "kind"), ""), &kind));
       g_ptr_array_add (job->outputs, bro_step_output_new (kind, bro_json_value_ref (bro_json_value_member (o, "data")), NULL));
+      ((BroStepOutput *) job->outputs->pdata[job->outputs->len - 1])->read_errors =
+        (int) bro_json_value_get_integer (bro_json_value_member (o, "readErrors"), 0);
     }
+  {
+    BroJsonValue *libraries = bro_json_value_member (given, "libraries");
+    BroJsonValue *tree = bro_json_value_member (given, "tree");
+    const char *root = bro_json_value_get_string (bro_json_value_member (bro_json_value_member (libraries, "lib"), "path"), "/lib");
+    staging = g_strconcat (root, "/.bromelia/staging/", job_id.value, NULL);
+    for (guint i = 0; i < bro_json_value_length (tree); i++)
+      {
+        const char *entry = bro_json_value_get_string (bro_json_value_at (tree, i), "");
+        g_autofree char *path = g_strconcat (staging, "/", entry, NULL);
+        if (g_str_has_suffix (path, "/"))
+          {
+            path[strlen (path) - 1] = 0;
+            steps_tree_put_dir (fakes, path);
+          }
+        else
+          steps_tree_put (fakes, path, g_bytes_new (NULL, 0));
+      }
+  }
   g_autoptr (BroToolSet) tools = bro_tool_set_new (BRO_MAKEMKV (fakes), NULL);
   g_autoptr (BroStepEnvironment) environment = bro_step_environment_new (tools, BRO_FILE_SYSTEM (fakes), NULL, BRO_DRIVE_CONTROL (fakes),
                                                                          BRO_LIBRARY_PORT (fakes), BRO_CATALOG_QUERIES (fakes), NULL,
                                                                          BRO_DRIVE_LOOKUP (fakes), BRO_MAKEMKV_SETUP (fakes), "/data");
   g_autoptr (BroCancellationSource) cancel = bro_cancellation_source_new ();
   g_autofree char *directory = g_strconcat ("/data/jobs/", job_id.value, NULL);
+  fakes->cancel = cancel;
   if (bro_json_value_get_bool (bro_json_value_member (given, "identify"), FALSE))
     {
       BroJobSnapshot *before = bro_job_snapshot_new (&job_id, bro_job_request_copy (job->request), NULL);
@@ -535,7 +1170,8 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
         g_ptr_array_add (before->outputs, bro_step_output_copy (g_ptr_array_index (job->outputs, i)));
       g_autoptr (BroStepContext) first = bro_step_context_new (before, bro_cancellation_source_token (cancel), g_object_ref (BRO_PROGRESS_REPORTER (fakes)),
                                                                g_object_ref (BRO_JOB_LOGGER (fakes)), g_object_ref (BRO_DECISION_PORT (fakes)),
-                                                               g_object_ref (BRO_SPACE_RESERVATIONS (fakes)), environment, config, directory);
+                                                               g_object_ref (BRO_SPACE_RESERVATIONS (fakes)), g_object_ref (BRO_CHECKPOINTER (fakes)),
+                                                               environment, config, directory);
       g_autoptr (BroStepReport) identified = bro_step_run (identify, first, &failure);
       g_assert_nonnull (identified);
       g_ptr_array_add (job->outputs, bro_step_output_new (BRO_STEP_KIND_IDENTIFY, bro_json_value_ref (identified->data), NULL));
@@ -547,7 +1183,8 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   g_autoptr (BroResourceSet) resources = bro_step_resources (step, job);
   g_autoptr (BroStepContext) context = bro_step_context_new (job, bro_cancellation_source_token (cancel), g_object_ref (BRO_PROGRESS_REPORTER (fakes)),
                                                              g_object_ref (BRO_JOB_LOGGER (fakes)), g_object_ref (BRO_DECISION_PORT (fakes)),
-                                                             g_object_ref (BRO_SPACE_RESERVATIONS (fakes)), environment, config, directory);
+                                                             g_object_ref (BRO_SPACE_RESERVATIONS (fakes)), g_object_ref (BRO_CHECKPOINTER (fakes)),
+                                                             environment, config, directory);
   if ((v = bro_json_value_member (given, "finishing")))
     {
       BroJsonValue *why = bro_json_value_member (v, "error");
@@ -569,9 +1206,19 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
             bro_json_value_append (writes, bro_json_value_new_string (resources->library_writes[i]));
           bro_test_same_json (failures, id, "resources.libraryWrites", bro_json_value_member (v, "libraryWrites"), writes);
         }
+      if (bro_json_value_member (v, "acquisition")
+          && bro_json_value_get_bool (bro_json_value_member (v, "acquisition"), FALSE) != resources->acquisition)
+        bro_test_fail (failures, id, "resources.acquisition: expected %s", resources->acquisition ? "false" : "true");
+    }
+  if ((v = bro_json_value_member (expect, "resumes")))
+    {
+      bro_test_same_string (failures, id, "resumability", STEPS_JS (v, "resumability"), bro_resumability_to_wire (bro_step_resumability (step)));
+      bro_test_same_string (failures, id, "resumeCheckpoint", STEPS_JS (v, "checkpoint"), bro_step_resume_checkpoint (step));
     }
   g_autoptr (BroBroError) thrown = NULL;
+  fakes->recording = TRUE;
   g_autoptr (BroStepReport) report = bro_step_run (step, context, &thrown);
+  fakes->recording = FALSE;
   const BroBroError *error = thrown ? thrown : report ? report->error : NULL;
   if ((v = bro_json_value_member (expect, "error")))
     {
@@ -658,6 +1305,43 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
         }
       steps_subset (failures, id, "plan", v, got);
     }
+  if ((v = bro_json_value_member (expect, "readErrors")) && v->integer != (report ? report->read_errors : 0))
+    bro_test_fail (failures, id, "readErrors: expected %" G_GINT64_FORMAT ", got %d", v->integer, report ? report->read_errors : 0);
+  if ((v = bro_json_value_member (expect, "tree")))
+    {
+      g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+      g_autoptr (BroBroError) unlisted = NULL;
+      g_autoptr (GPtrArray) files = bro_file_system_exists (BRO_FILE_SYSTEM (fakes), staging)
+                                        ? bro_file_tree_files (BRO_FILE_SYSTEM (fakes), staging, &unlisted)
+                                        : g_ptr_array_new ();
+      for (guint i = 0; files && i < files->len; i++)
+        bro_json_value_append (got, bro_json_value_new_string (files->pdata[i]));
+      bro_test_same_json (failures, id, "tree", v, got);
+    }
+  if ((v = bro_json_value_member (expect, "fs")))
+    {
+      GString *want = g_string_new (NULL), *got = g_string_new (NULL);
+      for (guint i = 0; i < bro_json_value_length (v); i++)
+        g_string_append_printf (want, "%s%s", i ? " | " : "", bro_json_value_get_string (bro_json_value_at (v, i), ""));
+      for (guint i = 0; i < fakes->ops->len; i++)
+        g_string_append_printf (got, "%s%s", i ? " | " : "", (char *) fakes->ops->pdata[i]);
+      bro_test_same_string (failures, id, "fs", want->str, got->str);
+      g_string_free (want, TRUE);
+      g_string_free (got, TRUE);
+    }
+  if ((v = bro_json_value_member (expect, "json")))
+    for (guint i = 0; i < v->keys->len; i++)
+      {
+        g_autofree char *path = g_strconcat (staging, "/", (char *) v->keys->pdata[i], NULL);
+        g_autoptr (BroBroError) unread = NULL;
+        g_autoptr (GBytes) bytes = steps_fakes_read (BRO_FILE_SYSTEM (fakes), path, &unread);
+        g_autoptr (BroJsonValue) got = bytes ? bro_json_value_parse (g_bytes_get_data (bytes, NULL), g_bytes_get_size (bytes)) : NULL;
+        g_autoptr (BroJsonValue) want = g_strcmp0 (bro_json_value_get_string (v->items->pdata[i], NULL), "probe") == 0 && probed_listing
+                                            ? bro_listing_encode (probed_listing)
+                                            : bro_json_value_ref (v->items->pdata[i]);
+        g_autofree char *what = g_strconcat ("json ", (char *) v->keys->pdata[i], NULL);
+        bro_test_same_json (failures, id, what, want, got);
+      }
   if ((v = bro_json_value_member (expect, "question")))
     {
       g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
@@ -680,4 +1364,10 @@ static void
 test_plan_steps (void)
 {
   bro_test_run_cases ("engine/plan-steps.cases.json", video_steps_case);
+}
+
+static void
+test_acquire_steps (void)
+{
+  bro_test_run_cases ("engine/acquire-steps.cases.json", video_steps_case);
 }

@@ -123,6 +123,7 @@ typedef struct {
   BroConfig *config;  /* read when the job starts */
   GPtrArray *outputs; /* BroStepOutput */
   GPtrArray *results; /* BroStepResult */
+  GHashTable *checkpoints; /* BroStepKind → BroJsonValue (a reference): each kind's latest, from the rows, then this run's */
   BroLease *lease;
   BroInstant started;
   BroStepReport *report;
@@ -161,6 +162,7 @@ live_unref (gpointer data)
   bro_config_free (l->config);
   g_ptr_array_unref (l->outputs);
   g_ptr_array_unref (l->results);
+  g_hash_table_unref (l->checkpoints);
   bro_lease_unref (l->lease);
   bro_step_report_free (l->report);
   bro_bro_error_free (l->thrown);
@@ -211,6 +213,7 @@ typedef struct {
   BroJobRecord *record;     /* to save, or loaded */
   BroStepRecord *step;      /* to save */
   GPtrArray *found;         /* steps done */
+  GPtrArray *rows;          /* every step's row */
   BroStep *run_step;
   BroStepContext *context;
   BroStepReport *report;
@@ -239,6 +242,7 @@ work_free (gpointer data)
   bro_job_record_free (w->record);
   bro_step_record_free (w->step);
   g_clear_pointer (&w->found, g_ptr_array_unref);
+  g_clear_pointer (&w->rows, g_ptr_array_unref);
   g_clear_object (&w->run_step);
   bro_step_context_free (w->context);
   bro_step_report_free (w->report);
@@ -311,6 +315,8 @@ typedef struct {
   char *path;
   gint64 need;
   gint64 free;
+  BroStepKind kind;
+  BroJsonValue *checkpoint;
 } Posted;
 
 static void
@@ -324,6 +330,8 @@ posted_free (gpointer data)
   bro_decision_dto_free (p->decision);
   g_free (p->volume);
   g_free (p->path);
+  if (p->checkpoint)
+    bro_json_value_unref (p->checkpoint);
   g_free (p);
 }
 
@@ -391,6 +399,13 @@ on_reserve (gpointer data)
     waiter_settle (p->waiter, NULL, error);
 }
 
+static void
+on_checkpoint (gpointer data)
+{
+  Posted *p = data;
+  g_hash_table_replace (p->live->checkpoints, GINT_TO_POINTER (p->kind), g_steal_pointer (&p->checkpoint));
+}
+
 #define TYPE_REPORTER (reporter_get_type ())
 G_DECLARE_FINAL_TYPE (Reporter, reporter, RUNNER, REPORTER, GObject)
 
@@ -398,19 +413,26 @@ struct _Reporter {
   GObject parent_instance;
   Live *live;
   int seq;
+  gboolean stores;      /* its checkpoints are stored (not the Release at the end) */
+  BroStepKind kind;
+  BroInstant started;
+  BroJsonValue *saved;  /* nullable: what the step's last attempt saved */
 };
 
 static void reporter_progress_init (BroProgressReporterInterface *iface);
 static void reporter_logger_init (BroJobLoggerInterface *iface);
 static void reporter_decisions_init (BroDecisionPortInterface *iface);
 static void reporter_space_init (BroSpaceReservationsInterface *iface);
+static void reporter_checkpointer_init (BroCheckpointerInterface *iface);
 
-/* One object is all four: the progress reporter, the logger, the decision port and the space reservations of a step. */
+/* One object is all five: the progress reporter, the logger, the decision port, the space reservations and the
+ * checkpointer of a step. */
 G_DEFINE_FINAL_TYPE_WITH_CODE (Reporter, reporter, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_PROGRESS_REPORTER, reporter_progress_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_JOB_LOGGER, reporter_logger_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_DECISION_PORT, reporter_decisions_init)
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_SPACE_RESERVATIONS, reporter_space_init))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_SPACE_RESERVATIONS, reporter_space_init)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CHECKPOINTER, reporter_checkpointer_init))
 
 static Posted *
 posted_new (Reporter *r)
@@ -490,6 +512,50 @@ reporter_reserve (BroSpaceReservations *self, const char *volume, const char *pa
   return ok;
 }
 
+static BroJsonValue *
+reporter_saved (BroCheckpointer *self)
+{
+  Reporter *r = (Reporter *) self;
+  return r->saved ? bro_json_value_ref (r->saved) : NULL;
+}
+
+/* On the step's worker: the executor hears of it first (posted before the store write, so it is there before the
+ * step's result), then the step's running row is stored with it from this thread. */
+static gboolean
+reporter_save (BroCheckpointer *self, const BroJsonValue *checkpoint, BroBroError **error)
+{
+  Reporter *r = (Reporter *) self;
+  Posted *p;
+  g_autoptr (BroStepRecord) row = NULL;
+  if (!r->stores)
+    return TRUE;
+  p = posted_new (r);
+  p->kind = r->kind;
+  p->checkpoint = bro_json_value_ref ((BroJsonValue *) checkpoint);
+  if (!bro_engine_executor_post (r->live->runner->executor, on_checkpoint, p, posted_free))
+    {
+      *error = cancelled_error ();
+      return FALSE;
+    }
+  row = bro_step_record_new ();
+  row->job_id = r->live->id;
+  row->seq = r->seq;
+  row->kind = r->kind;
+  row->state = BRO_STEP_STATE_RUNNING;
+  row->attempt = 1;
+  row->has_started_at = TRUE;
+  row->started_at = r->started;
+  row->checkpoint = bro_json_value_ref ((BroJsonValue *) checkpoint);
+  return bro_step_repository_save (bro_store_steps (r->live->runner->store), row, error);
+}
+
+static void
+reporter_checkpointer_init (BroCheckpointerInterface *iface)
+{
+  iface->saved = reporter_saved;
+  iface->save = reporter_save;
+}
+
 static void
 reporter_space_init (BroSpaceReservationsInterface *iface)
 {
@@ -517,7 +583,10 @@ reporter_decisions_init (BroDecisionPortInterface *iface)
 static void
 reporter_finalize (GObject *object)
 {
-  live_unref (((Reporter *) object)->live);
+  Reporter *r = (Reporter *) object;
+  if (r->saved)
+    bro_json_value_unref (r->saved);
+  live_unref (r->live);
   G_OBJECT_CLASS (reporter_parent_class)->finalize (object);
 }
 
@@ -705,7 +774,12 @@ step_done (gpointer data, const BroBroError *error)
   end->step->finished_at = bro_engine_clock_now (self->clock);
   end->step->output = bro_step_output_new (kind, l->report ? bro_json_value_ref (l->report->data) : bro_json_value_new_object (),
                                            l->report && l->report->summary ? bro_bro_message_copy (l->report->summary) : NULL);
+  end->step->output->read_errors = l->report ? l->report->read_errors : 0;
   end->step->error = bro_bro_error_copy (failed);
+  {
+    BroJsonValue *checkpoint = g_hash_table_lookup (l->checkpoints, GINT_TO_POINTER (kind));
+    end->step->checkpoint = checkpoint ? bro_json_value_ref (checkpoint) : NULL;
+  }
   if (l->log->len > 0)
     {
       g_autoptr (GBytes) added = bro_job_log_encode (l->log);
@@ -733,10 +807,17 @@ started (Live *l)
   set_state (l, BRO_JOB_STATE_RUNNING);
   r->live = live_ref (l);
   r->seq = l->seq;
+  r->stores = TRUE;
+  r->kind = g_array_index (l->steps, BroStepKind, l->seq);
+  r->started = l->started;
+  {
+    BroJsonValue *saved = g_hash_table_lookup (l->checkpoints, GINT_TO_POINTER (r->kind));
+    r->saved = saved ? bro_json_value_ref (saved) : NULL;
+  }
   w->run_step = g_object_ref (step);
   w->context = bro_step_context_new (snapshot (l), bro_cancellation_source_token (l->cancel), g_object_ref (BRO_PROGRESS_REPORTER (r)),
-                                     g_object_ref (BRO_JOB_LOGGER (r)), g_object_ref (BRO_DECISION_PORT (r)), BRO_SPACE_RESERVATIONS (r),
-                                     self->environment, l->config, directory);
+                                     g_object_ref (BRO_JOB_LOGGER (r)), g_object_ref (BRO_DECISION_PORT (r)),
+                                     g_object_ref (BRO_SPACE_RESERVATIONS (r)), BRO_CHECKPOINTER (r), self->environment, l->config, directory);
   bro_engine_executor_worker (self->executor, step_work, step_done, w, work_free);
 }
 
@@ -777,6 +858,10 @@ acquired (BroLease *lease, const BroBroError *error, gpointer data)
   w->step->attempt = 1;
   w->step->has_started_at = TRUE;
   w->step->started_at = l->started;
+  {
+    BroJsonValue *checkpoint = g_hash_table_lookup (l->checkpoints, GINT_TO_POINTER (w->step->kind));
+    w->step->checkpoint = checkpoint ? bro_json_value_ref (checkpoint) : NULL;
+  }
   w->next = started;
   bro_engine_executor_worker (self->executor, save_work, save_done, w, work_free);
 }
@@ -833,6 +918,7 @@ completed_work (gpointer data, BroBroError **error)
   if (!rows)
     return FALSE;
   w->found = bro_job_planner_done (rows);
+  w->rows = g_ptr_array_ref (rows);
   return TRUE;
 }
 
@@ -857,11 +943,18 @@ completed_done (gpointer data, const BroBroError *error)
       l->directory_made = n > 0;
     }
   l->log_read = TRUE;
+  for (guint i = 0; i < w->rows->len; i++) /* in seq order */
+    {
+      BroStepRecord *row = g_ptr_array_index (w->rows, i);
+      if (row->checkpoint)
+        g_hash_table_replace (l->checkpoints, GINT_TO_POINTER (row->kind), bro_json_value_ref (row->checkpoint));
+    }
   for (guint i = 0; i < w->found->len; i++)
     {
       BroStepRecord *s = g_ptr_array_index (w->found, i);
       BroStepResult *result = bro_step_result_new (s->kind, s->state);
       result->error = bro_bro_error_copy (s->error);
+      result->read_errors = s->output ? s->output->read_errors : 0;
       g_ptr_array_add (l->outputs, s->output ? bro_step_output_copy (s->output) : bro_step_output_new (s->kind, bro_json_value_new_object (), NULL));
       g_ptr_array_add (l->results, result);
     }
@@ -937,6 +1030,7 @@ bro_pipeline_runner_run (BroPipelineRunner *self, const BroId *job_id, BroRunDon
   l->log = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);
   l->outputs = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_output_free);
   l->results = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_result_free);
+  l->checkpoints = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) bro_json_value_unref);
   l->done = done;
   l->done_data = data;
   l->done_destroy = destroy;
@@ -1056,8 +1150,8 @@ release_at_end (Live *l)
   w = work_new (l);
   w->run_step = g_object_ref (step);
   w->context = bro_step_context_new (snapshot (l), bro_cancellation_source_token (l->cancel), g_object_ref (BRO_PROGRESS_REPORTER (r)),
-                                     g_object_ref (BRO_JOB_LOGGER (r)), g_object_ref (BRO_DECISION_PORT (r)), BRO_SPACE_RESERVATIONS (r),
-                                     self->environment, l->config, directory);
+                                     g_object_ref (BRO_JOB_LOGGER (r)), g_object_ref (BRO_DECISION_PORT (r)),
+                                     g_object_ref (BRO_SPACE_RESERVATIONS (r)), BRO_CHECKPOINTER (r), self->environment, l->config, directory);
   w->context->finishing = g_new0 (BroDecided, 1);
   w->context->finishing->outcome = l->decided->outcome;
   w->context->finishing->error = bro_bro_error_copy (l->decided->error);

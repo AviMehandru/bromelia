@@ -79,6 +79,8 @@ public sealed class PipelineRunnerTests
                 var answer = await context.Decisions.Ask(question);
                 data = JsonValue.Of(("answer", JsonValue.Of(answer)));
             }
+            if (_b["checkpoint"] is { } checkpoint) await context.Checkpoint.Save(checkpoint);
+            if (_b["saved"]?.AsBool == true) data = JsonValue.Of(("saved", context.Checkpoint.Saved ?? JsonValue.Null.Instance));
             if (_b["reserve"] is { } r)
                 await context.Space.Reserve(r["volume"]!.AsString!, r["path"]!.AsString!, r["need"]!.AsInteger!.Value, r["free"]!.AsInteger!.Value);
             if (_b["gate"]?.AsString is { } gate) await _h.Gate(gate, context.Job.Id, context.Cancel, _b["ignoresCancel"]?.AsBool == true);
@@ -180,7 +182,7 @@ public sealed class PipelineRunnerTests
                     var k = EnumWire.Parse<StepKind>(d["kind"]!.AsString)!.Value;
                     var state = EnumWire.Parse<StepState>(d["state"]?.AsString ?? "succeeded")!.Value;
                     ((IStepRepository)Store).Save(new StepRecord(id, seq++, k, state, 1, W.Clock.Now(), W.Clock.Now(),
-                        new StepOutput(k, d["output"] ?? EmptyObject))).Wait();
+                        new StepOutput(k, d["output"] ?? EmptyObject, null, (int)(d["readErrors"]?.AsInteger ?? 0)), null, d["checkpoint"])).Wait();
                 }
                 if (j["log"] is { } log)
                 {
@@ -633,6 +635,14 @@ public sealed class PipelineRunnerTests
                 });
                 SameLines(want, codes, "log file of " + name);
             }
+            foreach (var (name, want) in expect["checkpoints"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+                foreach (var (kind, checkpoint) in want.AsObject!)
+                    Same(checkpoint, h.Store.StepsOf(h.Jobs[name]).Last(s => EnumWire.Name(s.Kind) == kind).Checkpoint ?? JsonValue.Null.Instance,
+                        $"checkpoint of {name}'s {kind}");
+            foreach (var (name, want) in expect["readErrors"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+                foreach (var (kind, count) in want.AsObject!)
+                    Same(count.AsInteger, (long?)h.Store.StepsOf(h.Jobs[name]).Last(s => EnumWire.Name(s.Kind) == kind).Output!.ReadErrors,
+                        $"read errors of {name}'s {kind}");
             foreach (var (name, want) in expect["outputs"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
                 foreach (var (kind, data) in want.AsObject!)
                     Same(data, h.Store.StepsOf(h.Jobs[name]).Last(s => EnumWire.Name(s.Kind) == kind).Output!.Data, $"output of {name}'s {kind}");

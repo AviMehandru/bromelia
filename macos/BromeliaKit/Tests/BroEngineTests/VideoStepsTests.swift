@@ -8,7 +8,7 @@ import Testing
 
 /// The ports a case gives, recording every call.
 private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup, ProgressReporter, JobLogger, LibraryPort, CatalogQueries,
-    DecisionPort, SpaceReservations, @unchecked Sendable {
+    DecisionPort, SpaceReservations, Checkpointer, @unchecked Sendable {
     let given: JsonValue
     private let lock = NSLock()
     private var _calls: [String] = []
@@ -17,8 +17,70 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
     private var _question: DecisionDto?
     /// Probe's fingerprint ('archivedBefore probe').
     var fingerprint: String?
+    let fs = MemoryFileSystem()
+    let cancel = CancellationSource()
+    /// makemkv.runs not taken yet.
+    private var runs: [JsonValue]
 
-    init(_ given: JsonValue) { self.given = given }
+    init(_ given: JsonValue) {
+        self.given = given
+        runs = given["makemkv"]?["runs"]?.array ?? []
+    }
+
+    /// A fingerprint "probe" stands for Probe's, both ways.
+    private func probed(_ checkpoint: JsonValue, toProbe: Bool) -> JsonValue {
+        guard let members = checkpoint.members else { return checkpoint }
+        return .object(members.map { m in
+            guard m.key == "fingerprint", let f = m.value.string, toProbe ? f == fingerprint : f == "probe" else { return m }
+            return (m.key, toProbe ? .string("probe") : fingerprint.map { .string($0) } ?? .null)
+        })
+    }
+
+    var saved: JsonValue? { given["checkpoint"].map { probed($0, toProbe: false) } }
+
+    func save(_ checkpoint: JsonValue) async throws(BroError) { call("checkpoint " + oneLine(probed(checkpoint, toProbe: true))) }
+
+    private func describe(_ source: MakemkvSource) -> String {
+        switch source {
+        case .drive(let index, _): "disc:\(index)"
+        case .iso(let path): "iso:" + path
+        case .file(let path): "file:" + path
+        }
+    }
+
+    private func nextRun() throws(BroError) -> JsonValue {
+        guard let run = lock.withLock({ runs.isEmpty ? nil : runs.removeFirst() }) else {
+            throw BroError(MessageCode.wire(.internalUnexpected), [("detail", .string("no makemkv run left"))])
+        }
+        return run
+    }
+
+    private func message(_ j: JsonValue?, _ severity: Severity) -> BroMessage? {
+        guard let j, let code = j["code"]?.string.flatMap(MessageCode.init(rawValue:)) else { return nil }
+        return BroMessage(code, j["params"]?.members ?? [], severity: severity)
+    }
+
+    /// What a scripted run ends with: its outcome and what it reported.
+    private func ran(_ run: JsonValue, _ sink: any RunSink, _ produced: [String]) -> MakemkvRun {
+        for line in run["robot"]?.array ?? [] { if let e = Robot.parseLine(line.string ?? "") { sink.event(e) } }
+        if run["cancel"]?.bool == true { cancel.cancel() }
+        let readErrors = (run["readErrors"]?.array ?? []).map { RobotMessage(code: 2003, flags: 0, text: $0.string ?? "", format: $0.string ?? "") }
+        let outcome = RunOutcome(exitCode: Int(run["exitCode"]?.int ?? 0), readErrors: readErrors,
+                                 status: run["status"]?.string.flatMap(StatusWord.init(rawValue:)) ?? .success, error: message(run["error"], .error),
+                                 produced: run["produced"]?.array?.map { $0.string ?? "" } ?? produced, abandoned: run["abandoned"]?.bool ?? false)
+        return MakemkvRun(outcome: outcome, notice: notice(run["notice"]?.string), transcriptProblem: message(run["transcriptProblem"], .warning),
+                          settingsProblem: message(run["settingsProblem"], .warning), isolationWarning: message(run["isolationWarning"], .warning))
+    }
+
+    private func notice(_ name: String?) -> MakemkvNotice? {
+        switch name {
+        case "keyExpired": .keyExpired
+        case "evaluationNotStarted": .evaluationNotStarted
+        case "versionTooOld": .versionTooOld
+        case "libreDriveRequired": .libreDriveRequired
+        default: nil
+        }
+    }
 
     var calls: [String] { lock.withLock { _calls } }
     var logged: [BroMessage] { lock.withLock { _log } }
@@ -39,7 +101,11 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
         return LibraryHandle(id: libraryId, path: l["path"]?.string ?? "")
     }
 
-    func stagingDirectory(_ libraryId: String, jobId: Id) throws(BroError) -> String { fatalError("not used") }
+    func stagingDirectory(_ libraryId: String, jobId: Id) throws(BroError) -> String {
+        let path = try require(libraryId).path + "/.bromelia/staging/" + jobId.value
+        fs.putFolder(path)
+        return path
+    }
     func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile]) async throws(BroError) -> CommitResult { fatalError("not used") }
     func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String) async throws(BroError) -> CommitResult {
         fatalError("not used")
@@ -86,10 +152,19 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
     }
 
     func listing(_ source: MakemkvSource, invocation: MakemkvInvocation, sink: any RunSink, cancel: CancellationToken) async throws(BroError) -> ListingRun {
-        switch source {
-        case .drive(let index, _): call("listing disc:\(index)")
-        case .iso(let path): call("listing iso:" + path)
-        case .file(let path): call("listing file:" + path)
+        call("listing " + describe(source))
+        if given["makemkv"]?["runs"] != nil {
+            let run = try nextRun()
+            var listed = ListingBuilder()
+            if let disc = run["listing"] {
+                for line in Fixtures.generatedListing(disc).split(separator: "\n") {
+                    if let e = Robot.parseLine(String(line)) {
+                        sink.event(e)
+                        listed.feed(e)
+                    }
+                }
+            }
+            return ListingRun(listing: listed.build(), run: ran(run, sink, []))
         }
         let m = given["makemkv"] ?? .object([])
         let text = m["listing"].map(Fixtures.generatedListing) ?? (m["robot"]?.array ?? []).map { $0.string ?? "" }.joined(separator: "\n")
@@ -123,9 +198,31 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
 
     func scanDrives(_ cancel: CancellationToken) async throws(BroError) -> [MakemkvDrive] { fatalError("not used") }
     func rip(_ source: MakemkvSource, title: String, destination: String, invocation: MakemkvInvocation, sink: any RunSink,
-             cancel: CancellationToken) async throws(BroError) -> MakemkvRun { fatalError("not used") }
+             cancel: CancellationToken) async throws(BroError) -> MakemkvRun {
+        call("rip \(describe(source)) \(title) \(destination)")
+        let run = try nextRun()
+        let files = (run["files"]?.array ?? []).map { $0.string ?? "" }
+        for f in files { fs.put(destination + "/" + f, []) }
+        return ran(run, sink, files)
+    }
+
     func backup(_ source: MakemkvSource, decrypt: Bool, destination: String, invocation: MakemkvInvocation, sink: any RunSink,
-                cancel: CancellationToken) async throws(BroError) -> MakemkvRun { fatalError("not used") }
+                cancel: CancellationToken) async throws(BroError) -> MakemkvRun {
+        call("backup \(describe(source)) \(decrypt) \(destination)")
+        let run = try nextRun()
+        let name = destination.split(separator: "/").last.map(String.init) ?? destination
+        var produced: [String]
+        if run["image"]?.bool == true {
+            fs.put(destination, [UInt8](repeating: 0, count: 32769) + Array((run["header"]?.string ?? "").utf8))
+            produced = [name]
+        } else {
+            let files = (run["files"]?.array ?? []).map { $0.string ?? "" }
+            fs.putFolder(destination)
+            for f in files { fs.put(destination + "/" + f, []) }
+            produced = Array(Set(files.map { String($0.split(separator: "/")[0]) })).sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+        }
+        return ran(run, sink, produced)
+    }
 
     func eject(_ device: String) async throws(BroError) {
         call("eject " + device)
@@ -149,6 +246,22 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
     }
 
     func log(_ message: BroMessage) { lock.withLock { _log.append(message) } }
+}
+
+/// The canonical encoding on one line, as JobLog writes it.
+private func oneLine(_ value: JsonValue) -> String {
+    let canonical = Array(value.description.utf8)
+    var out: [UInt8] = []
+    var i = 0
+    while i < canonical.count {
+        if canonical[i] != UInt8(ascii: "\n") {
+            out.append(canonical[i])
+        } else {
+            while i + 1 < canonical.count && canonical[i + 1] == UInt8(ascii: " ") { i += 1 }
+        }
+        i += 1
+    }
+    return String(decoding: out, as: UTF8.self)
 }
 
 /// Every key of `expected` is in `actual` with the same value; arrays have the same length and match element by element.
@@ -176,14 +289,17 @@ private func noticeName(_ n: MakemkvNotice?) -> String? {
     }
 }
 
-/// shared/fixtures/engine/video-steps.cases.json and plan-steps.cases.json: each step alone, with fake ports.
+/// shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json and acquire-steps.cases.json: each step alone,
+/// with fake ports.
 struct VideoStepsTests {
     static let steps: [StepKind: any Step] = Dictionary(uniqueKeysWithValues: ([AwaitMediaStep(), ProbeStep(), ReconcileStep(), IdentifyStep(), PlanStep(),
-                                                                                DecideStep(), ReleaseStep()] as [any Step]).map { ($0.kind, $0) })
+                                                                                DecideStep(), AcquireStep(), ReleaseStep()] as [any Step]).map { ($0.kind, $0) })
 
     @Test func theSharedCasesPass() async throws { try await cases("engine/video-steps.cases.json") }
 
     @Test func thePlanCasesPass() async throws { try await cases("engine/plan-steps.cases.json") }
+
+    @Test func theAcquireCasesPass() async throws { try await cases("engine/acquire-steps.cases.json") }
 
     private func cases(_ file: String) async throws {
         var failures: [String] = []
@@ -215,8 +331,16 @@ struct VideoStepsTests {
             outputs.append(StepOutput(kind: .probe, data: ProbeOutput.encode(ProbeOutput(listing: listing, fingerprint: fakes.fingerprint, libreDrive: nil,
                                                                                          fromSession: false))))
         }
-        outputs += (given["outputs"]?.array ?? []).map { StepOutput(kind: StepKind(rawValue: $0["kind"]?.string ?? "")!, data: $0["data"]!) }
-        let fs = MemoryFileSystem()
+        outputs += (given["outputs"]?.array ?? []).map {
+            StepOutput(kind: StepKind(rawValue: $0["kind"]?.string ?? "")!, data: $0["data"]!, readErrors: Int($0["readErrors"]?.int ?? 0))
+        }
+        let fs = fakes.fs
+        let jobId = Id("00000000-0000-4000-8000-000000000001")
+        let staging = (given["libraries"]?["lib"]?["path"]?.string ?? "/lib") + "/.bromelia/staging/" + jobId.value
+        for t in given["tree"]?.array ?? [] {
+            let path = t.string ?? ""
+            if path.hasSuffix("/") { fs.putFolder(staging + "/" + path.dropLast()) } else { fs.put(staging + "/" + path, []) }
+        }
         for f in given["files"]?.array ?? [] { try fs.createDirectory(f.string ?? "", parentsMustExist: false) }
         for v in given["volumes"]?.members ?? [] {
             fs.setVolume(v.key, VolumeInfo(id: v.value["id"]?.string ?? "", freeBytes: v.value["free"]?.int ?? 0, fsType: "apfs", caseSensitive: false))
@@ -229,13 +353,12 @@ struct VideoStepsTests {
         let request = JobRequest(kind: r["kind"]?.string.flatMap(JobKind.init(rawValue:)) ?? .videoDisc, title: r["title"]?.string ?? "",
                                  automatic: r["automatic"]?.bool ?? false, driveId: r["driveId"]?.string, mediaGeneration: r["mediaGeneration"]?.int,
                                  sessionId: r["sessionId"]?.string.map(Id.init), options: r["options"], details: r["details"])
-        let jobId = Id("00000000-0000-4000-8000-000000000001")
         let unused = UnusedTools()
-        let cancel = CancellationSource()
+        let cancel = fakes.cancel
         func contextOf(_ job: JobSnapshot) -> StepContext {
             StepContext(job: job, cancel: cancel.token, progress: fakes, log: fakes, decisions: fakes, tools: ToolSet(makemkv: fakes, matroska: unused),
                         fs: fs, clock: ManualClock(), drives: fakes, library: fakes, catalog: fakes, config: config, driveLookup: fakes,
-                        makemkvSetup: fakes, space: fakes, jobDirectory: "/data/jobs/" + job.id.value, finishing: finishing)
+                        makemkvSetup: fakes, space: fakes, checkpoint: fakes, jobDirectory: "/data/jobs/" + job.id.value, finishing: finishing)
         }
         if given["identify"]?.bool == true {
             let identified = try await IdentifyStep().run(contextOf(JobSnapshot(id: jobId, request: request, plan: nil, outputs: outputs)))
@@ -250,15 +373,22 @@ struct VideoStepsTests {
             if let writes = resources["libraryWrites"] {
                 try Fixtures.same(writes, .array(step.resources(job).libraryWrites.map { .string($0) }), "resources.libraryWrites")
             }
+            if let acquisition = resources["acquisition"]?.bool { try Fixtures.same(acquisition, step.resources(job).acquisition, "resources.acquisition") }
         }
         var report: StepReport?
         var error: BroError?
+        if let resumes = expect["resumes"] {
+            try Fixtures.same(resumes["resumability"]?.string, step.resumability.rawValue, "resumability")
+            try Fixtures.same(resumes["checkpoint"]?.string, step.resumeCheckpoint, "resumeCheckpoint")
+        }
+        fs.recording = true
         do throws(BroError) {
             report = try await step.run(context)
             error = report?.error
         } catch let e {
             error = e
         }
+        fs.recording = false
         if let e = expect["error"] {
             try Fixtures.same(e["code"]?.string, error?.code, "error")
             try Fixtures.same(e["params"] ?? .object([]), JsonValue.object(error?.params ?? []), "error params")
@@ -293,6 +423,23 @@ struct VideoStepsTests {
         if let plan = expect["plan"] {
             try subset(plan, report?.plan.map { p in .object([("mode", p.mode.map { .string($0) } ?? .null), ("profileId", p.profileId.map { .string($0) } ?? .null),
                                                               ("libraryId", p.libraryId.map { .string($0) } ?? .null)]) }, "plan")
+        }
+        if let readErrors = expect["readErrors"]?.int { try Fixtures.same(Int(readErrors), report?.readErrors ?? 0, "readErrors") }
+        if let tree = expect["tree"] {
+            let files = fs.exists(staging) ? try FileTree.files(fs, root: staging) : []
+            try Fixtures.same(tree, .array(files.map { .string($0) }), "tree")
+        }
+        if let ops = expect["fs"]?.array {
+            try Fixtures.same(ops.map { $0.string ?? "" }.joined(separator: " | "), fs.ops.joined(separator: " | "), "fs")
+        }
+        for (name, wanted) in expect["json"]?.members ?? [] {
+            var want = wanted
+            if wanted.string == "probe", let disc = given["probe"]?["disc"] {
+                var builder = ListingBuilder()
+                for line in Fixtures.generatedListing(disc).split(separator: "\n") { if let e = Robot.parseLine(String(line)) { builder.feed(e) } }
+                want = Listing.encode(builder.build())
+            }
+            try Fixtures.same(want, JsonValue.parse(try fs.read(staging + "/" + name)), "json " + name)
         }
         if let question = expect["question"] {
             try Fixtures.same(question["code"], fakes.question.map { .string($0.question.code.rawValue) } ?? .null, "question")

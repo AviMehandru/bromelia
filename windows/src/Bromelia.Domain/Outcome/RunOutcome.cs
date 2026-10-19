@@ -6,7 +6,8 @@ using Bromelia.Foundation;
 namespace Bromelia.Domain;
 
 /// <summary>What one makemkvcon run amounted to. makemkvcon exits 0 when a title fails, so the saved / failed
-/// counts (5036, 5037, 5004) and the files the run produced decide, not the exit status alone.</summary>
+/// counts (5036, 5037, 5004) and the files the run produced decide, not the exit status alone. Abandoned: the process
+/// didn't end after KILL and may still be writing, so what it wrote must never be reused or removed.</summary>
 public sealed record RunOutcome(
     int? Saved,
     int? Failed,
@@ -18,7 +19,8 @@ public sealed record RunOutcome(
     string? DebugLog,
     StatusWord Status,
     BroMessage? Error,
-    IReadOnlyList<string> Produced)
+    IReadOnlyList<string> Produced,
+    bool Abandoned = false)
 {
     /// <summary>Cancelled when the run was cancelled. Failed when MakeMKV's space warning or a renumbered drive
     /// stopped it, when it stalled, exited non-zero, reported a failed title or produced nothing; the error is the
@@ -33,7 +35,8 @@ public sealed record RunOutcome(
         var a = accumulator;
         var produced = Products(product, newNames);
         RunOutcome With(StatusWord status, BroMessage? error) =>
-            new(a.Saved, a.Failed, exit.Status, a.FirstError, a.SpaceWarning, a.ReadErrors, a.DriveMismatch, a.DebugLog, status, error, produced);
+            new(a.Saved, a.Failed, exit.Status, a.FirstError, a.SpaceWarning, a.ReadErrors, a.DriveMismatch, a.DebugLog, status, error, produced,
+                exit.Abandoned);
 
         // These stop makemkvcon themselves, so they come before cancellation.
         if (a.DriveMismatch is { } mismatch) return With(StatusWord.Failed, mismatch);

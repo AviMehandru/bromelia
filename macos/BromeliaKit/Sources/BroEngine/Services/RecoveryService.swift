@@ -104,7 +104,7 @@ public final class RecoveryService {
         let jobId = job.id
         let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
         let done = JobPlanner.done(rows)
-        var results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error) }
+        var results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error, readErrors: $0.output?.readErrors ?? 0) }
         let steps = job.plan?.steps ?? JobPlanner.initial(job.request)
         let row = rows.first { $0.seq == done.count }
 
@@ -117,9 +117,12 @@ public final class RecoveryService {
 
         let kind = steps[done.count]
         let started = row?.state == .running || row?.state == .interrupted
-        let resumability = registry.step(kind)?.resumability ?? .notResumable
+        let registered = registry.step(kind)
+        let resumability = registered?.resumability ?? .notResumable
         let step: [(key: String, value: JsonValue)] = [("step", .string(kind.rawValue))]
-        if let row, started, resumability == .notResumable || (resumability == .resumeFrom && row.checkpoint == nil) {
+        let resumes = resumability == .resumeFrom && registered?.resumeCheckpoint != nil
+            && row?.checkpoint?["kind"]?.string == registered?.resumeCheckpoint
+        if let row, started, resumability == .notResumable || (resumability == .resumeFrom && !resumes) {
             var interrupted = row
             interrupted.state = .interrupted
             try await save(interrupted)

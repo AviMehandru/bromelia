@@ -915,11 +915,17 @@ test_stalled_and_cancelled_runs (void)
   g_autoptr (BroJsonValue) error = bro_bro_message_to_json (run->error);
   g_autofree char *text = bro_test_english (error);
   g_assert_cmpstr (text, ==, "makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry.");
+  g_assert_true (run->abandoned);
   BroProcessExit cancelled = { 143, 15, -1, FALSE, TRUE };
   g_autoptr (GPtrArray) one = g_ptr_array_new ();
   g_ptr_array_add (one, (char *) "title_t00.mkv");
   g_autoptr (BroRunOutcome) c = bro_run_outcome_classify (acc, &cancelled, BRO_RUN_PRODUCT_TITLES, one);
   g_assert_cmpint (c->status, ==, BRO_STATUS_WORD_CANCELLED);
+  g_assert_false (c->abandoned);
+  BroProcessExit gone = { -1, 9, -1, TRUE, TRUE };
+  g_autoptr (BroRunOutcome) a = bro_run_outcome_classify (acc, &gone, BRO_RUN_PRODUCT_TITLES, one);
+  g_assert_cmpint (a->status, ==, BRO_STATUS_WORD_CANCELLED);
+  g_assert_true (a->abandoned);
 }
 
 /* ---- identity ---------------------------------------------------------------------------------------- */

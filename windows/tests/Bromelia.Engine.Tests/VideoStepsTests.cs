@@ -8,13 +8,14 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Engine.Tests;
 
-/// <summary>shared/fixtures/engine/video-steps.cases.json and plan-steps.cases.json: each step alone, with fake ports.</summary>
+/// <summary>shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json and acquire-steps.cases.json: each step
+/// alone, with fake ports.</summary>
 public sealed class VideoStepsTests
 {
     static JsonValue EmptyObject => JsonValue.Of(Array.Empty<(string, JsonValue)>());
 
     static readonly Dictionary<StepKind, IStep> Steps = new IStep[]
-        { new AwaitMediaStep(), new ProbeStep(), new ReconcileStep(), new IdentifyStep(), new PlanStep(), new DecideStep(), new ReleaseStep() }
+        { new AwaitMediaStep(), new ProbeStep(), new ReconcileStep(), new IdentifyStep(), new PlanStep(), new DecideStep(), new AcquireStep(), new ReleaseStep() }
         .ToDictionary(s => s.Kind);
 
     static JobRequest RequestOf(JsonValue r) => new(
@@ -46,7 +47,7 @@ public sealed class VideoStepsTests
 
     /// <summary>The ports a case gives, recording every call.</summary>
     sealed class Fakes : IMakemkv, IDriveControl, IDriveLookup, IMakemkvSetup, IProgressReporter, IJobLogger, ILibraryPort, ICatalogQueries,
-        IDecisionPort, ISpaceReservations
+        IDecisionPort, ISpaceReservations, ICheckpointer
     {
         readonly JsonValue _given;
         public readonly List<string> Calls = new();
@@ -55,8 +56,61 @@ public sealed class VideoStepsTests
         /// <summary>Probe's fingerprint ('archivedBefore probe').</summary>
         public string? Fingerprint;
         public DecisionDto? Question;
+        public MemoryFileSystem Fs = null!;
+        public CancellationSource Cancel = null!;
+        /// <summary>makemkv.runs not taken yet.</summary>
+        readonly Queue<JsonValue> _runs;
 
-        public Fakes(JsonValue given) => _given = given;
+        public Fakes(JsonValue given)
+        {
+            _given = given;
+            _runs = new Queue<JsonValue>(given["makemkv"]?["runs"]?.AsArray ?? new List<JsonValue>());
+        }
+
+        /// <summary>A fingerprint "probe" stands for Probe's, both ways.</summary>
+        JsonValue Probed(JsonValue checkpoint, bool toProbe) => checkpoint is JsonValue.Object o
+            ? new JsonValue.Object(o.Members.Select(m => m.Key == "fingerprint" && m.Value.AsString is { } f
+                && (toProbe ? f == Fingerprint : f == "probe") ? new KeyValuePair<string, JsonValue>(m.Key, JsonValue.Of(toProbe ? "probe" : Fingerprint)) : m).ToList())
+            : checkpoint;
+
+        public JsonValue? Saved => _given["checkpoint"] is { } c ? Probed(c, false) : null;
+
+        public Task Save(JsonValue checkpoint)
+        {
+            lock (Calls) Calls.Add("checkpoint " + OneLine(Probed(checkpoint, true)));
+            return Task.CompletedTask;
+        }
+
+        static string Describe(MakemkvSource source) => source switch
+        {
+            MakemkvSource.Drive d => "disc:" + d.Index.ToString(CultureInfo.InvariantCulture),
+            MakemkvSource.Iso i => "iso:" + i.Path,
+            MakemkvSource.File f => "file:" + f.Path,
+            _ => "?",
+        };
+
+        JsonValue NextRun()
+        {
+            lock (_runs)
+                return _runs.Count > 0 ? _runs.Dequeue()
+                    : throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.InternalUnexpected), ("detail", JsonValue.Of("no makemkv run left"))));
+        }
+
+        /// <summary>What a scripted run ends with: its outcome and what it reported.</summary>
+        MakemkvRun Ran(JsonValue run, IRunSink sink, IReadOnlyList<string> produced)
+        {
+            foreach (var line in run["robot"]?.AsArray ?? new List<JsonValue>())
+                if (Robot.ParseLine(line.AsString!) is { } e) sink.Event(e);
+            if (run["cancel"]?.AsBool == true) Cancel.Cancel();
+            var readErrors = (run["readErrors"]?.AsArray ?? new List<JsonValue>())
+                .Select(t => new RobotMessage(2003, 0, 0, t.AsString!, t.AsString!, new List<string>())).ToList();
+            var outcome = new RunOutcome(null, null, (int)(run["exitCode"]?.AsInteger ?? 0), null, null, readErrors, null, null,
+                EnumWire.Parse<StatusWord>(run["status"]?.AsString) ?? StatusWord.Success, run["error"] is { } err ? MessageOf(err, Severity.Error) : null,
+                (run["produced"]?.AsArray?.Select(p => p.AsString!).ToList() ?? produced.ToList()), run["abandoned"]?.AsBool ?? false);
+            BroMessage? Problem(string key) => run[key] is { } p ? MessageOf(p, Severity.Warning) : null;
+            return new MakemkvRun(outcome, NoticeOf(run["notice"]?.AsString), null, null, Problem("transcriptProblem"), Problem("settingsProblem"),
+                Problem("isolationWarning"));
+        }
 
         public LibraryHandle Require(string libraryId)
         {
@@ -65,7 +119,12 @@ public sealed class VideoStepsTests
             return new LibraryHandle(libraryId, l["path"]!.AsString!);
         }
 
-        public string StagingDirectory(string libraryId, Id jobId) => throw new NotSupportedException();
+        public string StagingDirectory(string libraryId, Id jobId)
+        {
+            var path = Require(libraryId).Path + "/.bromelia/staging/" + jobId.Value;
+            Fs.PutFolder(path);
+            return path;
+        }
 
         public Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files) => throw new NotSupportedException();
 
@@ -118,14 +177,20 @@ public sealed class VideoStepsTests
 
         public Task<ListingRun> Listing(MakemkvSource source, MakemkvInvocation invocation, IRunSink sink, CancellationToken cancel)
         {
-            lock (Calls)
-                Calls.Add("listing " + source switch
-                {
-                    MakemkvSource.Drive d => "disc:" + d.Index.ToString(CultureInfo.InvariantCulture),
-                    MakemkvSource.Iso i => "iso:" + i.Path,
-                    MakemkvSource.File f => "file:" + f.Path,
-                    _ => "?",
-                });
+            lock (Calls) Calls.Add("listing " + Describe(source));
+            if (_given["makemkv"]?["runs"] != null)
+            {
+                var run = NextRun();
+                var listed = new ListingBuilder();
+                if (run["listing"] is { } disc)
+                    foreach (var line in GeneratedListing(disc).Split('\n'))
+                        if (Robot.ParseLine(line) is { } e)
+                        {
+                            sink.Event(e);
+                            listed.Feed(e);
+                        }
+                return Task.FromResult(new ListingRun(listed.Build(), Ran(run, sink, Array.Empty<string>())));
+            }
             var m = _given["makemkv"] ?? EmptyObject;
             var text = m["listing"] is { } l ? GeneratedListing(l) : string.Join("\n", (m["robot"]?.AsArray ?? new List<JsonValue>()).Select(x => x.AsString));
             var builder = new ListingBuilder();
@@ -148,10 +213,36 @@ public sealed class VideoStepsTests
         public Task<IReadOnlyList<MakemkvDrive>> ScanDrives(CancellationToken cancel) => throw new NotSupportedException();
 
         public Task<MakemkvRun> Rip(MakemkvSource source, string title, string destination, MakemkvInvocation invocation, IRunSink sink,
-            CancellationToken cancel) => throw new NotSupportedException();
+            CancellationToken cancel)
+        {
+            lock (Calls) Calls.Add($"rip {Describe(source)} {title} {destination}");
+            var run = NextRun();
+            var files = (run["files"]?.AsArray ?? new List<JsonValue>()).Select(f => f.AsString!).ToList();
+            foreach (var f in files) Fs.Put(destination + "/" + f, Array.Empty<byte>());
+            return Task.FromResult(Ran(run, sink, files));
+        }
 
         public Task<MakemkvRun> Backup(MakemkvSource source, bool decrypt, string destination, MakemkvInvocation invocation, IRunSink sink,
-            CancellationToken cancel) => throw new NotSupportedException();
+            CancellationToken cancel)
+        {
+            lock (Calls) Calls.Add($"backup {Describe(source)} {(decrypt ? "true" : "false")} {destination}");
+            var run = NextRun();
+            var name = destination[(destination.LastIndexOf('/') + 1)..];
+            List<string> produced;
+            if (run["image"]?.AsBool == true)
+            {
+                Fs.Put(destination, new byte[32769].Concat(System.Text.Encoding.ASCII.GetBytes(run["header"]?.AsString ?? "")).ToArray());
+                produced = new List<string> { name };
+            }
+            else
+            {
+                var files = (run["files"]?.AsArray ?? new List<JsonValue>()).Select(f => f.AsString!).ToList();
+                Fs.PutFolder(destination);
+                foreach (var f in files) Fs.Put(destination + "/" + f, Array.Empty<byte>());
+                produced = files.Select(f => f.Split('/')[0]).Distinct().OrderBy(f => f, StringComparer.Ordinal).ToList();
+            }
+            return Task.FromResult(Ran(run, sink, produced));
+        }
 
         public Task Eject(string device)
         {
@@ -222,6 +313,9 @@ public sealed class VideoStepsTests
     [Fact]
     public void ThePlanCasesPass() => RunCases("engine/plan-steps.cases.json", Case);
 
+    [Fact]
+    public void TheAcquireCasesPass() => RunCases("engine/acquire-steps.cases.json", Case);
+
     static bool Case(string id, JsonValue given, JsonValue expect)
     {
         var step = Steps[EnumWire.Parse<StepKind>(given["step"]!.AsString)!.Value];
@@ -235,8 +329,16 @@ public sealed class VideoStepsTests
             outputs.Add(new StepOutput(StepKind.Probe, ProbeOutput.Encode(new ProbeOutput(listing, fakes.Fingerprint, null, false))));
         }
         outputs.AddRange((given["outputs"]?.AsArray ?? new List<JsonValue>())
-            .Select(o => new StepOutput(EnumWire.Parse<StepKind>(o["kind"]!.AsString)!.Value, o["data"]!)));
+            .Select(o => new StepOutput(EnumWire.Parse<StepKind>(o["kind"]!.AsString)!.Value, o["data"]!, null, (int)(o["readErrors"]?.AsInteger ?? 0))));
         var fs = new MemoryFileSystem();
+        fakes.Fs = fs;
+        var jobId = new Id("00000000-0000-4000-8000-000000000001");
+        var staging = (given["libraries"]?["lib"]?["path"]?.AsString ?? "/lib") + "/.bromelia/staging/" + jobId.Value;
+        foreach (var t in given["tree"]?.AsArray ?? new List<JsonValue>())
+        {
+            if (t.AsString!.EndsWith('/')) fs.PutFolder(staging + "/" + t.AsString!.TrimEnd('/'));
+            else fs.Put(staging + "/" + t.AsString, Array.Empty<byte>());
+        }
         foreach (var f in given["files"]?.AsArray ?? new List<JsonValue>()) fs.CreateDirectory(f.AsString!, parentsMustExist: false);
         foreach (var (path, v) in given["volumes"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
             fs.Volumes[path] = new VolumeInfo(v["id"]!.AsString!, v["free"]!.AsInteger!.Value, "apfs", false);
@@ -245,9 +347,9 @@ public sealed class VideoStepsTests
             : null;
         var request = RequestOf(given["request"]!);
         var cancel = new CancellationSource();
+        fakes.Cancel = cancel;
         StepContext ContextOf(JobSnapshot job) => new(job, cancel.Token, fakes, fakes, fakes, new ToolSet(fakes, null!), fs, null!, fakes, fakes, fakes,
-            config, fakes, fakes, fakes, "/data/jobs/" + job.Id.Value, finishing);
-        var jobId = new Id("00000000-0000-4000-8000-000000000001");
+            config, fakes, fakes, fakes, fakes, "/data/jobs/" + job.Id.Value, finishing);
         if (given["identify"]?.AsBool == true)
         {
             var identified = Run(Steps[StepKind.Identify], ContextOf(new JobSnapshot(jobId, request, null, outputs.ToList())));
@@ -264,8 +366,16 @@ public sealed class VideoStepsTests
             Same(resources["drives"], JsonValue.Of(step.Resources(job).Drives.Select(d => JsonValue.Of(d))), "resources.drives");
             if (resources["libraryWrites"] is { } writes)
                 Same(writes, JsonValue.Of(step.Resources(job).LibraryWrites.Select(d => JsonValue.Of(d))), "resources.libraryWrites");
+            if (resources["acquisition"]?.AsBool is { } acquisition) Same(acquisition, step.Resources(job).Acquisition, "resources.acquisition");
         }
+        if (expect["resumes"] is { } resumes)
+        {
+            Same(resumes["resumability"]!.AsString, EnumWire.Name(step.Resumability), "resumability");
+            Same(resumes["checkpoint"]?.AsString, step.ResumeCheckpoint, "resumeCheckpoint");
+        }
+        fs.Recording = true;
         var (report, thrown) = Run(step, context);
+        fs.Recording = false;
         var error = thrown ?? report?.Error;
         if (expect["error"] is { } expectedError)
         {
@@ -303,12 +413,38 @@ public sealed class VideoStepsTests
         if (expect["plan"] is { } plan)
             Subset(plan, report?.Plan is { } p ? JsonValue.Of(("mode", JsonValue.Of(p.Mode)), ("profileId", JsonValue.Of(p.ProfileId)),
                 ("libraryId", JsonValue.Of(p.LibraryId))) : null, "plan");
+        if (expect["readErrors"]?.AsInteger is { } readErrors) Same(readErrors, (long)(report?.ReadErrors ?? 0), "readErrors");
+        if (expect["tree"] is { } tree)
+            Same(tree, JsonValue.Of((fs.Exists(staging) ? FileTree.Files(fs, staging) : new List<string>()).Select(f => JsonValue.Of(f))), "tree");
+        if (expect["fs"] is { } ops) Same(string.Join(" | ", ops.AsArray!.Select(o => o.AsString)), string.Join(" | ", fs.Ops), "fs");
+        foreach (var (name, wanted) in expect["json"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+        {
+            var want = wanted.AsString == "probe" ? Bromelia.Domain.Listing.Encode(Listing(GeneratedListing(given["probe"]!["disc"]!))) : wanted;
+            Same(want, JsonValue.Parse(fs.Read(staging + "/" + name)), "json " + name);
+        }
         if (expect["question"] is { } question)
         {
             Same(question["code"], JsonValue.Of(fakes.Question is { } q ? MessageCode.Wire(q.Question.Code) : null), "question");
             Same(question["params"] ?? EmptyObject, (JsonValue?)fakes.Question?.Question.Params ?? EmptyObject, "question params");
         }
         return true;
+    }
+
+    /// <summary>The canonical encoding on one line, as JobLog writes it.</summary>
+    static string OneLine(JsonValue value)
+    {
+        var canonical = value.ToString();
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < canonical.Length; i++)
+        {
+            if (canonical[i] != '\n')
+            {
+                sb.Append(canonical[i]);
+                continue;
+            }
+            while (i + 1 < canonical.Length && canonical[i + 1] == ' ') i++;
+        }
+        return sb.ToString();
     }
 
     static Listing Listing(string robot)

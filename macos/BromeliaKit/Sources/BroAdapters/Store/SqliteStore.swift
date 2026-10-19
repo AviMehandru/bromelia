@@ -10,7 +10,7 @@ import SQLite3
 /// enums their wire names, JSON columns the canonical encoding: BroError {code, params?, cause?}, BroMessage {code,
 /// params?, severity? (when not info)}, JobRequest {kind, title, automatic, driveId?, mediaGeneration?, sessionId?,
 /// parentId?, unitId?, options?, details?}, JobPlan {steps, mode?, profileId?, libraryId?, details?}, StepOutput {kind,
-/// data, summary?}.
+/// data, summary?, readErrors? (when not 0)}.
 public final class SqliteStore: Store, @unchecked Sendable {
     private let db: OpaquePointer
     private let clock: any Clock
@@ -330,12 +330,14 @@ private func planOf(_ v: JsonValue) throws(BroError) -> JobPlan {
 }
 
 private func outputJson(_ o: StepOutput) -> JsonValue {
-    object([("kind", .string(o.kind.rawValue)), ("data", o.data), ("summary", o.summary.map(messageJson))])
+    object([("kind", .string(o.kind.rawValue)), ("data", o.data), ("summary", o.summary.map(messageJson)),
+            ("readErrors", o.readErrors > 0 ? .integer(Int64(o.readErrors)) : nil)])
 }
 
 private func outputOf(_ v: JsonValue) throws(BroError) -> StepOutput {
     guard let kind = v["kind"]?.string.flatMap(StepKind.init(rawValue:)) else { throw SqliteStore.failed("read", "output.kind") }
-    return StepOutput(kind: kind, data: v["data"] ?? .null, summary: v["summary"].flatMap { $0.isNull ? nil : messageOf($0) })
+    return StepOutput(kind: kind, data: v["data"] ?? .null, summary: v["summary"].flatMap { $0.isNull ? nil : messageOf($0) },
+                      readErrors: Int(v["readErrors"]?.int ?? 0))
 }
 
 private func strings(_ list: [String]) -> JsonValue { .array(list.map { .string($0) }) }

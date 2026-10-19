@@ -73,6 +73,12 @@ public class OutcomeTests
         Assert.Equal(StatusWord.Failed, stalled.Status);
         Assert.Equal("makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry.",
             English.Render(stalled.Error!.ToJson()));
-        Assert.Equal(StatusWord.Cancelled, RunOutcome.Classify(acc, new ProcessExit(143, 15, Cancelled: true), RunProduct.Titles, new[] { "title_t00.mkv" }).Status);
+        Assert.True(stalled.Abandoned);
+        var cancelled = RunOutcome.Classify(acc, new ProcessExit(143, 15, Cancelled: true), RunProduct.Titles, new[] { "title_t00.mkv" });
+        Assert.Equal(StatusWord.Cancelled, cancelled.Status);
+        Assert.False(cancelled.Abandoned);
+        var abandoned = RunOutcome.Classify(acc, new ProcessExit(-1, 9, Abandoned: true, Cancelled: true), RunProduct.Titles, new[] { "title_t00.mkv" });
+        Assert.Equal(StatusWord.Cancelled, abandoned.Status);
+        Assert.True(abandoned.Abandoned);
     }
 }

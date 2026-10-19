@@ -65,6 +65,7 @@ bro_run_outcome_classify (const BroRunAccumulator *a, const BroProcessExit *exit
 {
   BroRunOutcome *o = g_new0 (BroRunOutcome, 1);
   o->produced = bro_run_outcome_products (product, new_names);
+  o->abandoned = exit->abandoned;
   o->has_saved = a->has_saved;
   o->saved = a->saved;
   o->has_failed = a->has_failed;

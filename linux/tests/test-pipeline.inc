@@ -762,6 +762,15 @@ fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
       data = bro_json_value_new_object ();
       bro_json_value_set (data, "answer", bro_json_value_new_string (answer));
     }
+  if ((v = bro_json_value_member (b, "checkpoint")) && !bro_checkpointer_save (ctx->checkpoint, v, error))
+    return NULL;
+  if (bro_json_value_get_bool (bro_json_value_member (b, "saved"), FALSE))
+    {
+      BroJsonValue *saved = bro_checkpointer_saved (ctx->checkpoint);
+      bro_json_value_unref (data);
+      data = bro_json_value_new_object ();
+      bro_json_value_set (data, "saved", saved ? saved : bro_json_value_new_null ());
+    }
   if ((v = bro_json_value_member (b, "reserve"))
       && !bro_space_reservations_reserve (ctx->space, STEPS_RESERVE_S (v, "volume"), STEPS_RESERVE_S (v, "path"),
                                           bro_json_value_get_integer (bro_json_value_member (v, "need"), 0),
@@ -1597,6 +1606,9 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
             g_assert_true (bro_step_state_from_wire (bro_json_value_get_string (bro_json_value_member (d, "state"), ""), &s->state));
           s->attempt = 1;
           s->output = bro_step_output_new (sk, out ? bro_json_value_ref (out) : bro_json_value_new_object (), NULL);
+          s->output->read_errors = (int) bro_json_value_get_integer (bro_json_value_member (d, "readErrors"), 0);
+          if (bro_json_value_member (d, "checkpoint"))
+            s->checkpoint = bro_json_value_ref (bro_json_value_member (d, "checkpoint"));
           bro_step_repository_save (BRO_STEP_REPOSITORY (h.store), s, NULL);
         }
       if ((done = bro_json_value_member (j, "log")))
@@ -1790,6 +1802,32 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
           }
         same_lines (failures, id, "log file", g_ptr_array_index (v->items, i), codes);
       }
+  for (int pass = 0; pass < 2; pass++)
+    if ((v = bro_json_value_member (expect, pass ? "readErrors" : "checkpoints")))
+      for (guint i = 0; i < v->keys->len; i++)
+        {
+          BroId *jid = g_hash_table_lookup (h.jobs, g_ptr_array_index (v->keys, i));
+          BroJsonValue *want = g_ptr_array_index (v->items, i);
+          g_autoptr (GPtrArray) records = steps_of (h.store, jid->value, FALSE);
+          for (guint k = 0; k < want->keys->len; k++)
+            {
+              BroStepRecord *found = NULL;
+              BroJsonValue *expected = g_ptr_array_index (want->items, k);
+              for (guint n = 0; n < records->len; n++)
+                if (strcmp (bro_step_kind_to_wire (((BroStepRecord *) g_ptr_array_index (records, n))->kind), g_ptr_array_index (want->keys, k)) == 0)
+                  found = g_ptr_array_index (records, n);
+              if (!found)
+                bro_test_fail (failures, id, "no row for %s", (char *) g_ptr_array_index (want->keys, k));
+              else if (pass == 0)
+                {
+                  g_autoptr (BroJsonValue) none = bro_json_value_new_null ();
+                  bro_test_same_json (failures, id, "checkpoint", expected, found->checkpoint ? found->checkpoint : none);
+                }
+              else if (!found->output || found->output->read_errors != expected->integer)
+                bro_test_fail (failures, id, "read errors of %s: expected %" G_GINT64_FORMAT, (char *) g_ptr_array_index (want->keys, k),
+                               expected->integer);
+            }
+        }
   if ((v = bro_json_value_member (expect, "outputs")))
     for (guint i = 0; i < v->keys->len; i++)
       {

@@ -1,7 +1,8 @@
 import BroFoundation
 
 /// What one makemkvcon run amounted to. makemkvcon exits 0 when a title fails, so the saved / failed counts (5036,
-/// 5037, 5004) and the files the run produced decide, not the exit status alone.
+/// 5037, 5004) and the files the run produced decide, not the exit status alone. `abandoned`: the process didn't end
+/// after KILL and may still be writing, so what it wrote must never be reused or removed.
 public struct RunOutcome: Sendable, Equatable {
     public var saved: Int?
     public var failed: Int?
@@ -14,10 +15,11 @@ public struct RunOutcome: Sendable, Equatable {
     public var status: StatusWord
     public var error: BroMessage?
     public var produced: [String]
+    public var abandoned: Bool
 
     public init(saved: Int? = nil, failed: Int? = nil, exitCode: Int, firstError: RobotMessage? = nil, spaceWarning: RobotMessage? = nil,
                 readErrors: [RobotMessage] = [], driveMismatch: BroMessage? = nil, debugLog: String? = nil, status: StatusWord, error: BroMessage? = nil,
-                produced: [String] = []) {
+                produced: [String] = [], abandoned: Bool = false) {
         self.saved = saved
         self.failed = failed
         self.exitCode = exitCode
@@ -29,6 +31,7 @@ public struct RunOutcome: Sendable, Equatable {
         self.status = status
         self.error = error
         self.produced = produced
+        self.abandoned = abandoned
     }
 
     /// Cancelled when the run was cancelled. Failed when MakeMKV's space warning or a renumbered drive stopped it,
@@ -43,7 +46,7 @@ public struct RunOutcome: Sendable, Equatable {
         func with(_ status: StatusWord, _ error: BroMessage?) -> RunOutcome {
             RunOutcome(saved: a.saved, failed: a.failed, exitCode: exit.status, firstError: a.firstError, spaceWarning: a.spaceWarning,
                        readErrors: a.readErrors, driveMismatch: a.driveMismatch, debugLog: a.debugLog, status: status, error: error,
-                       produced: produced)
+                       produced: produced, abandoned: exit.abandoned)
         }
         // These stop makemkvcon themselves, so they come before cancellation.
         if let mismatch = a.driveMismatch { return with(.failed, mismatch) }

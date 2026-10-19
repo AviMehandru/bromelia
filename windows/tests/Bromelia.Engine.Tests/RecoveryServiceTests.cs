@@ -34,7 +34,7 @@ public sealed class RecoveryServiceTests
         public Task Migrate() => Task.CompletedTask;
     }
 
-    /// <summary>A step that only says what it can do after a stop.</summary>
+    /// <summary>A step that only says what it can do after a stop; a resumeFrom one resumes from a "backup" checkpoint.</summary>
     sealed class FakeStep : IStep
     {
         public FakeStep(StepKind kind, Resumability resumability)
@@ -45,6 +45,7 @@ public sealed class RecoveryServiceTests
 
         public StepKind Kind { get; }
         public Resumability Resumability { get; }
+        public string? ResumeCheckpoint => Resumability == Resumability.ResumeFrom ? "backup" : null;
         public ResourceSet Resources(JobSnapshot job) => ResourceSet.None;
         public Task<StepReport> Run(StepContext context) => throw new NotSupportedException();
     }
@@ -133,7 +134,7 @@ public sealed class RecoveryServiceTests
                 {
                     var kind = EnumWire.Parse<StepKind>(r["kind"]!.AsString)!.Value;
                     steps.Save(new StepRecord(jobId, seq++, kind, EnumWire.Parse<StepState>(r["state"]!.AsString)!.Value, 1, w.Clock.Now(), null,
-                        new StepOutput(kind, JsonValue.Of()), r["error"] is { } re ? LibraryServiceTests.Failure(re).Error : null, r["checkpoint"])).Wait();
+                        new StepOutput(kind, JsonValue.Of(), null, (int)(r["readErrors"]?.AsInteger ?? 0)), r["error"] is { } re ? LibraryServiceTests.Failure(re).Error : null, r["checkpoint"])).Wait();
                 }
             }
             var resumability = given["resumability"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>();

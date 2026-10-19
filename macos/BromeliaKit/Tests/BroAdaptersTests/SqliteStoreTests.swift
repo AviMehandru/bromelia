@@ -220,7 +220,8 @@ final class RawDb {
         #expect(try await s.jobs().load(u(2)) == nil)
 
         var step = StepRecord(jobId: u(1), seq: 0, kind: .probe, state: .succeeded, attempt: 2, startedAt: t1, finishedAt: t2,
-                              output: StepOutput(kind: .probe, data: .object([("titles", .integer(3))]), summary: BroMessage(.jobCancelled, severity: .warning)),
+                              output: StepOutput(kind: .probe, data: .object([("titles", .integer(3))]), summary: BroMessage(.jobCancelled, severity: .warning),
+                                                 readErrors: 2),
                               error: BroError("job.cancelled"), checkpoint: .object([("sector", .integer(10))]))
         try await s.steps().save(step)
         step.attempt = 3
