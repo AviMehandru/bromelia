@@ -7,7 +7,7 @@ import Foundation
 import Testing
 
 /// The ports a case gives, recording every call.
-private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup, ProgressReporter, JobLogger, LibraryPort, CatalogQueries,
+private final class StepFakes: Makemkv, Matroska, DriveControl, DriveLookup, MakemkvSetup, ProgressReporter, JobLogger, LibraryPort, CatalogQueries,
     DecisionPort, SpaceReservations, Checkpointer, @unchecked Sendable {
     let given: JsonValue
     private let lock = NSLock()
@@ -197,6 +197,22 @@ private final class StepFakes: Makemkv, DriveControl, DriveLookup, MakemkvSetup,
     }
 
     func scanDrives(_ cancel: CancellationToken) async throws(BroError) -> [MakemkvDrive] { fatalError("not used") }
+
+    /// given.matroska: a probe by file name ({duration, tracks, chapters} or null), missing, cancelled.
+    func probe(_ file: String, cancel: CancellationToken) async throws(BroError) -> MkvProbe? {
+        call("probe " + file)
+        let m = given["matroska"] ?? .object([])
+        if m["missing"]?.bool == true { throw BroError(MessageCode.wire(.toolMissing), [("tool", .string("mkvmerge"))]) }
+        if m["cancelled"]?.bool == true { throw BroError(MessageCode.wire(.jobCancelled)) }
+        guard let p = m[file.split(separator: "/").last.map(String.init) ?? file], p.members != nil else { return nil }
+        return MkvProbe(durationSeconds: p["duration"]?.double,
+                        tracks: (p["tracks"]?.array ?? []).enumerated().map { MkvTrack(id: $0.offset, type: $0.element.string ?? "") },
+                        chapterCount: Int(p["chapters"]?.int ?? 0))
+    }
+
+    func remux(_ arguments: [String], cancel: CancellationToken) async throws(BroError) -> Bool { fatalError("not used") }
+    func split(_ chapters: [Int], input: String, cancel: CancellationToken) async throws(BroError) -> [String]? { fatalError("not used") }
+    func chapterTimes(_ file: String, cancel: CancellationToken) async throws(BroError) -> [Duration]? { fatalError("not used") }
     func rip(_ source: MakemkvSource, title: String, destination: String, invocation: MakemkvInvocation, sink: any RunSink,
              cancel: CancellationToken) async throws(BroError) -> MakemkvRun {
         call("rip \(describe(source)) \(title) \(destination)")
@@ -293,13 +309,15 @@ private func noticeName(_ n: MakemkvNotice?) -> String? {
 /// with fake ports.
 struct VideoStepsTests {
     static let steps: [StepKind: any Step] = Dictionary(uniqueKeysWithValues: ([AwaitMediaStep(), ProbeStep(), ReconcileStep(), IdentifyStep(), PlanStep(),
-                                                                                DecideStep(), AcquireStep(), ReleaseStep()] as [any Step]).map { ($0.kind, $0) })
+                                                                                DecideStep(), AcquireStep(), ReleaseStep(), VerifyRipsStep()] as [any Step]).map { ($0.kind, $0) })
 
     @Test func theSharedCasesPass() async throws { try await cases("engine/video-steps.cases.json") }
 
     @Test func thePlanCasesPass() async throws { try await cases("engine/plan-steps.cases.json") }
 
     @Test func theAcquireCasesPass() async throws { try await cases("engine/acquire-steps.cases.json") }
+
+    @Test func theVerifyRipsCasesPass() async throws { try await cases("engine/verify-rips.cases.json") }
 
     private func cases(_ file: String) async throws {
         var failures: [String] = []
@@ -341,6 +359,9 @@ struct VideoStepsTests {
             let path = t.string ?? ""
             if path.hasSuffix("/") { fs.putFolder(staging + "/" + path.dropLast()) } else { fs.put(staging + "/" + path, []) }
         }
+        for image in given["images"]?.members ?? [] {
+            fs.put(staging + "/" + image.key, [UInt8](repeating: 0, count: 32769) + Array((image.value.string ?? "").utf8))
+        }
         for f in given["files"]?.array ?? [] { try fs.createDirectory(f.string ?? "", parentsMustExist: false) }
         for v in given["volumes"]?.members ?? [] {
             fs.setVolume(v.key, VolumeInfo(id: v.value["id"]?.string ?? "", freeBytes: v.value["free"]?.int ?? 0, fsType: "apfs", caseSensitive: false))
@@ -356,7 +377,7 @@ struct VideoStepsTests {
         let unused = UnusedTools()
         let cancel = fakes.cancel
         func contextOf(_ job: JobSnapshot) -> StepContext {
-            StepContext(job: job, cancel: cancel.token, progress: fakes, log: fakes, decisions: fakes, tools: ToolSet(makemkv: fakes, matroska: unused),
+            StepContext(job: job, cancel: cancel.token, progress: fakes, log: fakes, decisions: fakes, tools: ToolSet(makemkv: fakes, matroska: fakes),
                         fs: fs, clock: ManualClock(), drives: fakes, library: fakes, catalog: fakes, config: config, driveLookup: fakes,
                         makemkvSetup: fakes, space: fakes, checkpoint: fakes, jobDirectory: "/data/jobs/" + job.id.value, finishing: finishing)
         }

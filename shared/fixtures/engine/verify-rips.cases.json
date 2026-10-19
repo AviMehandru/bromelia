@@ -1,0 +1,2293 @@
+{
+  "description": "The VerifyRips step (plan §20.1; session D), run alone with a StepContext the harness builds, like acquire-steps.cases.json (request, probe, outputs, config, libraries, tree and the expectations; the job is 00000000-0000-4000-8000-000000000001, its staging folder <library path>/.bromelia/staging/<job>). Given also: images {name: header} (a file in the staging folder: 32769 zero bytes, then the header); matroska: what Matroska.probe gives for a file in the staging folder by name ({duration (seconds; null: none), tracks [types], chapters}, or null when mkvmerge can't read it), missing (true: every probe fails with tool.missing {tool: mkvmerge}), cancelled (true: every probe fails with job.cancelled). Calls are recorded in order: 'probe <path>'. Each title's MKV files (AcquireOutput, plan order) are checked against Probe's listing title of the same index (RipCheck.check): ripcheck.checking {file} as the progress (the file's place among them), notes as ripcheck.note {file, note} warnings, then ripcheck.checked {file, duration (seconds, rounded), tracks, chapters} and ripcheck.trackSubset {file, have, total} when it has fewer tracks than the listing; problems (or ripcheck.unreadable {file}) as rip.checkFailed {title, problem: ripcheck.mismatch {file, problems}} errors, and the step fails at the end with rip.failed {reason: rip.titleReason} or rip.titlesFailed. Without mkvmerge: ripcheck.cannotCheck (a warning), no MKV is checked, the step succeeds. A kept backup is checked first (BackupCheck.problem): backup.checkFailed {problem}. Data: {checked: [the names that passed: the backup, then the files]}.",
+  "cases": [
+    {
+      "id": "verify-a-title-that-matches",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": {
+            "duration": 6003.7,
+            "tracks": [
+              "video",
+              "audio"
+            ],
+            "chapters": 20
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "checked": [
+            "title_t00.mkv"
+          ]
+        },
+        "log": [
+          {
+            "code": "ripcheck.checked",
+            "params": {
+              "file": "title_t00.mkv",
+              "duration": 6004,
+              "tracks": 2,
+              "chapters": 20
+            }
+          }
+        ],
+        "calls": [
+          "probe /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv"
+        ],
+        "progress": [
+          [
+            0,
+            "ripcheck.checking"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "verify-a-title-of-another-length",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": {
+            "duration": 5400,
+            "tracks": [
+              "video",
+              "audio"
+            ],
+            "chapters": 20
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "rip.failed",
+          "params": {
+            "reason": {
+              "code": "rip.titleReason",
+              "params": {
+                "title": "0",
+                "reason": {
+                  "code": "ripcheck.mismatch",
+                  "params": {
+                    "file": "title_t00.mkv",
+                    "problems": [
+                      {
+                        "code": "ripcheck.duration",
+                        "params": {
+                          "actual": "1:30:00",
+                          "expected": "1:40:00"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "log": [
+          {
+            "code": "rip.checkFailed",
+            "params": {
+              "title": 0,
+              "problem": {
+                "code": "ripcheck.mismatch",
+                "params": {
+                  "file": "title_t00.mkv",
+                  "problems": [
+                    {
+                      "code": "ripcheck.duration",
+                      "params": {
+                        "actual": "1:30:00",
+                        "expected": "1:40:00"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "id": "verify-a-file-mkvmerge-cannot-read",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": null
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "rip.failed",
+          "params": {
+            "reason": {
+              "code": "rip.titleReason",
+              "params": {
+                "title": "0",
+                "reason": {
+                  "code": "ripcheck.unreadable",
+                  "params": {
+                    "file": "title_t00.mkv"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "log": [
+          {
+            "code": "rip.checkFailed",
+            "params": {
+              "title": 0,
+              "problem": {
+                "code": "ripcheck.unreadable",
+                "params": {
+                  "file": "title_t00.mkv"
+                }
+              }
+            },
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "id": "verify-no-video-and-no-duration",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": {
+            "duration": null,
+            "tracks": [
+              "audio"
+            ],
+            "chapters": 20
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "rip.failed",
+          "params": {
+            "reason": {
+              "code": "rip.titleReason",
+              "params": {
+                "title": "0",
+                "reason": {
+                  "code": "ripcheck.mismatch",
+                  "params": {
+                    "file": "title_t00.mkv",
+                    "problems": [
+                      {
+                        "code": "ripcheck.noVideo"
+                      },
+                      {
+                        "code": "ripcheck.noDuration"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "verify-notes-are-warnings",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": {
+            "duration": 6000,
+            "tracks": [
+              "video",
+              "audio",
+              "subtitles"
+            ],
+            "chapters": 12
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "checked": [
+            "title_t00.mkv"
+          ]
+        },
+        "log": [
+          {
+            "code": "ripcheck.note",
+            "params": {
+              "file": "title_t00.mkv",
+              "note": {
+                "code": "ripcheck.moreTracks",
+                "params": {
+                  "have": 3,
+                  "listed": 2
+                }
+              }
+            },
+            "severity": "warning"
+          },
+          {
+            "code": "ripcheck.note",
+            "params": {
+              "file": "title_t00.mkv",
+              "note": {
+                "code": "ripcheck.chapters",
+                "params": {
+                  "have": 12,
+                  "listed": 20
+                }
+              }
+            },
+            "severity": "warning"
+          },
+          {
+            "code": "ripcheck.checked",
+            "params": {
+              "file": "title_t00.mkv",
+              "duration": 6000,
+              "tracks": 3,
+              "chapters": 12
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "verify-fewer-tracks-than-the-disc-has",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": {
+            "duration": 6000,
+            "tracks": [
+              "video"
+            ],
+            "chapters": 20
+          }
+        }
+      },
+      "expect": {
+        "log": [
+          {
+            "code": "ripcheck.checked",
+            "params": {
+              "file": "title_t00.mkv",
+              "duration": 6000,
+              "tracks": 1,
+              "chapters": 20
+            }
+          },
+          {
+            "code": "ripcheck.trackSubset",
+            "params": {
+              "file": "title_t00.mkv",
+              "have": 1,
+              "total": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "verify-two-titles-that-fail",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                },
+                {
+                  "index": 1
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                },
+                {
+                  "index": 1,
+                  "files": [
+                    "title_t01.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": null,
+          "title_t01.mkv": null
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "rip.titlesFailed",
+          "params": {
+            "count": 2,
+            "reasons": [
+              {
+                "code": "rip.titleReason",
+                "params": {
+                  "title": "0",
+                  "reason": {
+                    "code": "ripcheck.unreadable",
+                    "params": {
+                      "file": "title_t00.mkv"
+                    }
+                  }
+                }
+              },
+              {
+                "code": "rip.titleReason",
+                "params": {
+                  "title": "1",
+                  "reason": {
+                    "code": "ripcheck.unreadable",
+                    "params": {
+                      "file": "title_t01.mkv"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "calls": [
+          "probe /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv",
+          "probe /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv"
+        ],
+        "progress": [
+          [
+            0,
+            "ripcheck.checking"
+          ],
+          [
+            0.5,
+            "ripcheck.checking"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "verify-every-title-is-checked-after-one-fails",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                },
+                {
+                  "index": 1
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                },
+                {
+                  "index": 1,
+                  "files": [
+                    "title_t01.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": null,
+          "title_t01.mkv": {
+            "duration": 120,
+            "tracks": [
+              "video",
+              "audio"
+            ],
+            "chapters": 1
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "rip.failed",
+          "params": {
+            "reason": {
+              "code": "rip.titleReason",
+              "params": {
+                "title": "0",
+                "reason": {
+                  "code": "ripcheck.unreadable",
+                  "params": {
+                    "file": "title_t00.mkv"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "log": [
+          {
+            "code": "rip.checkFailed",
+            "params": {
+              "title": 0,
+              "problem": {
+                "code": "ripcheck.unreadable",
+                "params": {
+                  "file": "title_t00.mkv"
+                }
+              }
+            },
+            "severity": "error"
+          },
+          {
+            "code": "ripcheck.checked",
+            "params": {
+              "file": "title_t01.mkv",
+              "duration": 120,
+              "tracks": 2,
+              "chapters": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "verify-without-mkvmerge",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                },
+                {
+                  "index": 1
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                },
+                {
+                  "index": 1,
+                  "files": [
+                    "title_t01.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ],
+        "matroska": {
+          "missing": true
+        }
+      },
+      "expect": {
+        "data": {
+          "checked": []
+        },
+        "log": [
+          {
+            "code": "ripcheck.cannotCheck",
+            "severity": "warning"
+          }
+        ],
+        "calls": [
+          "probe /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv"
+        ]
+      }
+    },
+    {
+      "id": "verify-files-no-title-owns-are-not-checked",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [
+                "title_t07.mkv"
+              ],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv",
+          "title_t07.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": {
+            "duration": 6000,
+            "tracks": [
+              "video",
+              "audio"
+            ],
+            "chapters": 20
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "checked": [
+            "title_t00.mkv"
+          ]
+        },
+        "calls": [
+          "probe /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv"
+        ]
+      }
+    },
+    {
+      "id": "verify-a-cancel",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "cancelled": true
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "job.cancelled"
+        }
+      }
+    },
+    {
+      "id": "verify-a-backup-folder",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "backup/BDMV/STREAM/00001.m2ts",
+          "backup/BDMV/index.bdmv"
+        ]
+      },
+      "expect": {
+        "data": {
+          "checked": [
+            "backup"
+          ]
+        },
+        "log": [],
+        "calls": []
+      }
+    },
+    {
+      "id": "verify-a-backup-without-its-index",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "backup/BDMV/STREAM/00001.m2ts"
+        ]
+      },
+      "expect": {
+        "error": {
+          "code": "backup.checkFailed",
+          "params": {
+            "problem": {
+              "code": "structure.bdmvIndexMissing"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "verify-a-backup-image",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupDecrypted",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup.iso",
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [],
+        "images": {
+          "backup.iso": "CD001"
+        }
+      },
+      "expect": {
+        "data": {
+          "checked": [
+            "backup.iso"
+          ]
+        }
+      }
+    },
+    {
+      "id": "verify-a-backup-image-that-is-not-one",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup.iso",
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [],
+        "images": {
+          "backup.iso": "XXXXX"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "backup.checkFailed",
+          "params": {
+            "problem": {
+              "code": "structure.notImage",
+              "params": {
+                "name": "backup.iso"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "verify-a-backup-that-is-gone",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": []
+      },
+      "expect": {
+        "error": {
+          "code": "backup.checkFailed",
+          "params": {
+            "problem": {
+              "code": "structure.notCreated",
+              "params": {
+                "name": "backup"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "verify-backup-then-mkv-checks-both",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "tree": [
+          "backup/BDMV/index.bdmv",
+          "title_t00.mkv"
+        ],
+        "matroska": {
+          "title_t00.mkv": {
+            "duration": 6000,
+            "tracks": [
+              "video",
+              "audio"
+            ],
+            "chapters": 20
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "checked": [
+            "backup",
+            "title_t00.mkv"
+          ]
+        },
+        "log": [
+          {
+            "code": "ripcheck.checked",
+            "params": {
+              "file": "title_t00.mkv",
+              "duration": 6000,
+              "tracks": 2,
+              "chapters": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "verify-without-an-acquire-output-is-skipped",
+      "given": {
+        "step": "verifyRips",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/movie.iso"
+            }
+          }
+        },
+        "probe": {
+          "disc": {
+            "volume": "SAMPLE_MOVIE",
+            "type": "bluray",
+            "titles": [
+              {
+                "duration": "1:40:00",
+                "source": 1,
+                "chapters": 20
+              },
+              {
+                "duration": "0:02:00",
+                "source": 2,
+                "chapters": 1
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [
+                {
+                  "index": 0
+                }
+              ],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie"
+              }
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/lib"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ]
+        },
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "skipped": true,
+        "calls": []
+      }
+    }
+  ]
+}

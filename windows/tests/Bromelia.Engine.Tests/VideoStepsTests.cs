@@ -8,14 +8,14 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Engine.Tests;
 
-/// <summary>shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json and acquire-steps.cases.json: each step
-/// alone, with fake ports.</summary>
+/// <summary>shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json, acquire-steps.cases.json and
+/// verify-rips.cases.json: each step alone, with fake ports.</summary>
 public sealed class VideoStepsTests
 {
     static JsonValue EmptyObject => JsonValue.Of(Array.Empty<(string, JsonValue)>());
 
     static readonly Dictionary<StepKind, IStep> Steps = new IStep[]
-        { new AwaitMediaStep(), new ProbeStep(), new ReconcileStep(), new IdentifyStep(), new PlanStep(), new DecideStep(), new AcquireStep(), new ReleaseStep() }
+        { new AwaitMediaStep(), new ProbeStep(), new ReconcileStep(), new IdentifyStep(), new PlanStep(), new DecideStep(), new AcquireStep(), new ReleaseStep(), new VerifyRipsStep() }
         .ToDictionary(s => s.Kind);
 
     static JobRequest RequestOf(JsonValue r) => new(
@@ -46,7 +46,7 @@ public sealed class VideoStepsTests
     };
 
     /// <summary>The ports a case gives, recording every call.</summary>
-    sealed class Fakes : IMakemkv, IDriveControl, IDriveLookup, IMakemkvSetup, IProgressReporter, IJobLogger, ILibraryPort, ICatalogQueries,
+    sealed class Fakes : IMakemkv, IMatroska, IDriveControl, IDriveLookup, IMakemkvSetup, IProgressReporter, IJobLogger, ILibraryPort, ICatalogQueries,
         IDecisionPort, ISpaceReservations, ICheckpointer
     {
         readonly JsonValue _given;
@@ -212,6 +212,25 @@ public sealed class VideoStepsTests
 
         public Task<IReadOnlyList<MakemkvDrive>> ScanDrives(CancellationToken cancel) => throw new NotSupportedException();
 
+        /// <summary>given.matroska: a probe by file name ({duration, tracks, chapters} or null), missing, cancelled.</summary>
+        public Task<MkvProbe?> Probe(string file, CancellationToken cancel)
+        {
+            lock (Calls) Calls.Add("probe " + file);
+            var m = _given["matroska"] ?? EmptyObject;
+            if (m["missing"]?.AsBool == true)
+                throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.ToolMissing), ("tool", JsonValue.Of("mkvmerge"))));
+            if (m["cancelled"]?.AsBool == true) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
+            if (m[file[(file.LastIndexOf('/') + 1)..]] is not JsonValue.Object p) return Task.FromResult<MkvProbe?>(null);
+            return Task.FromResult<MkvProbe?>(new MkvProbe(p["duration"]?.AsNumber,
+                (p["tracks"]?.AsArray ?? new List<JsonValue>()).Select((t, i) => new MkvTrack(i, t.AsString!)).ToList(), (int)(p["chapters"]?.AsInteger ?? 0)));
+        }
+
+        public Task<bool> Remux(IReadOnlyList<string> arguments, CancellationToken cancel) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>?> Split(IReadOnlyList<int> chapters, string input, CancellationToken cancel) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Duration>?> ChapterTimes(string file, CancellationToken cancel) => throw new NotSupportedException();
+
         public Task<MakemkvRun> Rip(MakemkvSource source, string title, string destination, MakemkvInvocation invocation, IRunSink sink,
             CancellationToken cancel)
         {
@@ -316,6 +335,9 @@ public sealed class VideoStepsTests
     [Fact]
     public void TheAcquireCasesPass() => RunCases("engine/acquire-steps.cases.json", Case);
 
+    [Fact]
+    public void TheVerifyRipsCasesPass() => RunCases("engine/verify-rips.cases.json", Case);
+
     static bool Case(string id, JsonValue given, JsonValue expect)
     {
         var step = Steps[EnumWire.Parse<StepKind>(given["step"]!.AsString)!.Value];
@@ -339,6 +361,8 @@ public sealed class VideoStepsTests
             if (t.AsString!.EndsWith('/')) fs.PutFolder(staging + "/" + t.AsString!.TrimEnd('/'));
             else fs.Put(staging + "/" + t.AsString, Array.Empty<byte>());
         }
+        foreach (var (name, header) in given["images"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+            fs.Put(staging + "/" + name, new byte[32769].Concat(System.Text.Encoding.ASCII.GetBytes(header.AsString!)).ToArray());
         foreach (var f in given["files"]?.AsArray ?? new List<JsonValue>()) fs.CreateDirectory(f.AsString!, parentsMustExist: false);
         foreach (var (path, v) in given["volumes"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
             fs.Volumes[path] = new VolumeInfo(v["id"]!.AsString!, v["free"]!.AsInteger!.Value, "apfs", false);
@@ -348,7 +372,7 @@ public sealed class VideoStepsTests
         var request = RequestOf(given["request"]!);
         var cancel = new CancellationSource();
         fakes.Cancel = cancel;
-        StepContext ContextOf(JobSnapshot job) => new(job, cancel.Token, fakes, fakes, fakes, new ToolSet(fakes, null!), fs, null!, fakes, fakes, fakes,
+        StepContext ContextOf(JobSnapshot job) => new(job, cancel.Token, fakes, fakes, fakes, new ToolSet(fakes, fakes), fs, null!, fakes, fakes, fakes,
             config, fakes, fakes, fakes, fakes, "/data/jobs/" + job.Id.Value, finishing);
         if (given["identify"]?.AsBool == true)
         {

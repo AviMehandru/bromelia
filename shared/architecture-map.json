@@ -15160,6 +15160,24 @@
             "name": "BroBackupCheck",
             "file": "linux/src/engine/steps/bro-backup-check.h"
           }
+        },
+        {
+          "name": "VerifyRipsStep",
+          "kind": "class",
+          "doc": "Step 10: checks what Acquire made before anything is named, hashed or moved: a kept backup's structure, then each title's MKV files against Probe's listing (mkvmerge, RipCheck).",
+          "phase": 3,
+          "swift": {
+            "name": "VerifyRipsStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/VerifyRipsStep.swift"
+          },
+          "cs": {
+            "name": "VerifyRipsStep",
+            "file": "windows/src/Bromelia.Engine/Steps/VerifyRipsStep.cs"
+          },
+          "c": {
+            "name": "BroVerifyRipsStep",
+            "file": "linux/src/engine/steps/bro-verify-rips-step.h"
+          }
         }
       ],
       "functions": [

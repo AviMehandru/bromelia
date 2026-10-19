@@ -1,7 +1,10 @@
-/* test-steps.inc: shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json and acquire-steps.cases.json: each
- * step alone, with fake ports. Included by test-engine.c (after test-pipeline.inc). */
+/* test-steps.inc: shared/fixtures/engine/video-steps.cases.json, plan-steps.cases.json, acquire-steps.cases.json and
+ * verify-rips.cases.json: each step alone, with fake ports. Included by test-engine.c (after test-pipeline.inc). */
 
 #include "bro-acquire-step.h"
+#include "bro-matroska.h"
+#include "bro-mkv-track.h"
+#include "bro-verify-rips-step.h"
 #include "bro-directory-entry.h"
 #include "bro-file-info.h"
 #include "bro-file-tree.h"
@@ -430,6 +433,14 @@ steps_fakes_describe (const BroMakemkvSource *source)
                                                   : g_strconcat ("file:", source->path, NULL);
 }
 
+static BroJsonValue *
+_steps_tool (const char *tool)
+{
+  BroJsonValue *params = bro_json_value_new_object ();
+  bro_json_value_set (params, "tool", bro_json_value_new_string (tool));
+  return params;
+}
+
 static BroMakemkvRun *
 steps_fakes_rip (BroMakemkv *makemkv, const BroMakemkvSource *source, const char *title, const char *destination,
            const BroMakemkvInvocation *invocation, BroRunSink *sink, BroCancellationToken *cancel, BroBroError **error)
@@ -503,6 +514,45 @@ steps_fakes_backup (BroMakemkv *makemkv, const BroMakemkvSource *source, gboolea
     }
   return steps_fakes_ran (f, run, sink, produced);
 }
+
+/* ---- mkvmerge (given.matroska: a probe by file name, {duration, tracks, chapters} or null; missing; cancelled) ---- */
+
+static BroMkvProbe *
+steps_fakes_probe (BroMatroska *matroska, const char *file, BroCancellationToken *cancel, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (matroska);
+  BroJsonValue *m = bro_json_value_member (f->given, "matroska"), *p, *tracks, *duration;
+  const char *slash = strrchr (file, '/');
+  BroMkvProbe *probe;
+  fakes_call (f, g_strconcat ("probe ", file, NULL));
+  if (bro_json_value_get_bool (bro_json_value_member (m, "missing"), FALSE))
+    {
+      *error = bro_bro_error_new (bro_message_code_wire (BRO_MSG_TOOL_MISSING), _steps_tool ("mkvmerge"), NULL);
+      return NULL;
+    }
+  if (bro_json_value_get_bool (bro_json_value_member (m, "cancelled"), FALSE))
+    {
+      *error = bro_bro_error_new (bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL, NULL);
+      return NULL;
+    }
+  p = bro_json_value_member (m, slash ? slash + 1 : file);
+  if (!p || p->kind != BRO_JSON_VALUE_OBJECT)
+    return NULL;
+  probe = bro_mkv_probe_new ();
+  duration = bro_json_value_member (p, "duration");
+  if (duration && duration->kind != BRO_JSON_VALUE_NULL)
+    {
+      probe->has_duration = TRUE;
+      probe->duration_seconds = bro_json_value_get_number (duration, 0);
+    }
+  tracks = bro_json_value_member (p, "tracks");
+  for (guint i = 0; i < bro_json_value_length (tracks); i++)
+    g_ptr_array_add (probe->tracks, bro_mkv_track_new ((int) i, bro_json_value_get_string (bro_json_value_at (tracks, i), "")));
+  probe->chapter_count = (int) bro_json_value_get_integer (bro_json_value_member (p, "chapters"), 0);
+  return probe;
+}
+
+static void steps_fakes_matroska_iface (BroMatroskaInterface *i) { i->probe = steps_fakes_probe; }
 
 /* ---- the checkpoint (given.checkpoint; a fingerprint "probe" stands for Probe's, both ways) ---- */
 
@@ -935,7 +985,8 @@ G_DEFINE_FINAL_TYPE_WITH_CODE (TestStepFakes, test_step_fakes, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_CATALOG_QUERIES, fakes_catalog_iface)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_DECISION_PORT, fakes_decisions_iface)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_SPACE_RESERVATIONS, fakes_space_iface)
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CHECKPOINTER, steps_fakes_checkpointer_iface))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CHECKPOINTER, steps_fakes_checkpointer_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_MATROSKA, steps_fakes_matroska_iface))
 
 static void
 test_step_fakes_finalize (GObject *object)
@@ -1064,6 +1115,8 @@ steps_step (const char *kind)
     return BRO_STEP (bro_decide_step_new ());
   if (strcmp (kind, "acquire") == 0)
     return BRO_STEP (bro_acquire_step_new ());
+  if (strcmp (kind, "verifyRips") == 0)
+    return BRO_STEP (bro_verify_rips_step_new ());
   if (strcmp (kind, "release") == 0)
     return BRO_STEP (bro_release_step_new ());
   return NULL;
@@ -1153,8 +1206,18 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
         else
           steps_tree_put (fakes, path, g_bytes_new (NULL, 0));
       }
+    for (guint i = 0; (tree = bro_json_value_member (given, "images")) && i < tree->keys->len; i++)
+      {
+        const char *header = bro_json_value_get_string (tree->items->pdata[i], "");
+        g_autofree char *path = g_strconcat (staging, "/", (char *) tree->keys->pdata[i], NULL);
+        GByteArray *bytes = g_byte_array_new ();
+        g_byte_array_set_size (bytes, 32769);
+        memset (bytes->data, 0, 32769);
+        g_byte_array_append (bytes, (const guint8 *) header, strlen (header));
+        steps_tree_put (fakes, path, g_byte_array_free_to_bytes (bytes));
+      }
   }
-  g_autoptr (BroToolSet) tools = bro_tool_set_new (BRO_MAKEMKV (fakes), NULL);
+  g_autoptr (BroToolSet) tools = bro_tool_set_new (BRO_MAKEMKV (fakes), BRO_MATROSKA (fakes));
   g_autoptr (BroStepEnvironment) environment = bro_step_environment_new (tools, BRO_FILE_SYSTEM (fakes), NULL, BRO_DRIVE_CONTROL (fakes),
                                                                          BRO_LIBRARY_PORT (fakes), BRO_CATALOG_QUERIES (fakes), NULL,
                                                                          BRO_DRIVE_LOOKUP (fakes), BRO_MAKEMKV_SETUP (fakes), "/data");
@@ -1370,4 +1433,10 @@ static void
 test_acquire_steps (void)
 {
   bro_test_run_cases ("engine/acquire-steps.cases.json", video_steps_case);
+}
+
+static void
+test_verify_rips (void)
+{
+  bro_test_run_cases ("engine/verify-rips.cases.json", video_steps_case);
 }
