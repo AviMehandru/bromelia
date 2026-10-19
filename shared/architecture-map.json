@@ -16143,24 +16143,6 @@
           "c": "bro_job_service_cancel"
         },
         {
-          "name": "JobService.retry",
-          "params": [
-            "jobId"
-          ],
-          "returns": "JobDto",
-          "doc": "A finished job that failed, was cancelled or was skipped, again as a new job with the same request, started by hand. job.notFound, job.notRetryable.",
-          "throws": true,
-          "async": true,
-          "cNames": [
-            "job_id",
-            "done"
-          ],
-          "phase": 3,
-          "swift": "JobService.retry(_:)",
-          "cs": "JobService.Retry",
-          "c": "bro_job_service_retry"
-        },
-        {
           "name": "JobService.decide",
           "params": [
             "jobId",
@@ -16254,6 +16236,26 @@
           "swift": "JobService.log(_:after:)",
           "cs": "JobService.Log",
           "c": "bro_job_service_log"
+        },
+        {
+          "name": "JobService.retry",
+          "params": [
+            "jobId",
+            "fromStep"
+          ],
+          "returns": "JobDto",
+          "doc": "A finished job again: without a step, one that failed, was cancelled or was skipped as a new job started by hand, an interrupted one continued; from a step, the same job from there (up to Release: from its first step), its checkpoints kept. job.notFound, job.notRetryable, job.unknownStep, server.badRequest.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "from_step",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.retry(_:fromStep:)",
+          "cs": "JobService.Retry",
+          "c": "bro_job_service_retry"
         }
       ]
     },

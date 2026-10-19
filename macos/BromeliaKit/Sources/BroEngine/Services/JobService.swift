@@ -11,8 +11,7 @@ import Foundation
 ///   RecoveryService.recover), in their queues' order.
 /// - Each job's place in its queue is stored, so the order survives a restart (written in a transaction that changes only
 ///   the position: the runner owns the rest of the record).
-/// - Retry from a step, continuing an interrupted job, the continue offer and keep-apart come with the steps they need
-///   (owner, 2026-10-17: sessions D and F).
+/// - The continue offer comes with AutomationService, keep-apart with session F (owner, 2026-10-17/18).
 @EngineActor
 public final class JobService {
     /// A job this service runs, until its run ends.
@@ -115,18 +114,90 @@ public final class JobService {
         try await finishCancelled(record)
     }
 
-    /// Runs a finished job that failed, was cancelled or was skipped again, as a new job with the same request, started
-    /// by hand (not automatic, no media generation). job.notFound; job.notRetryable for any other job (an interrupted one
-    /// is continued in session D; read errors and failed post steps get retries of their own).
-    public func retry(_ jobId: Id) async throws(BroError) -> JobDto {
+    /// Runs a finished job again (plan §13.1's retry(id, fromStep?); owner 2026-10-17/18).
+    /// - Without a step: one that failed, was cancelled or was skipped, as a new job with the same request, started by hand
+    ///   (not automatic, no media generation); an interrupted one is continued: the same job from its first step.
+    /// - From a step: one that failed, was cancelled or was interrupted, the same job, from that step (job.unknownStep {step}
+    ///   when its plan has none; server.badRequest when a step before it isn't done). A step up to Release starts it from its
+    ///   first step instead: the disc is read again (Acquire then keeps what an earlier attempt finished of the same disc).
+    ///
+    /// The same job's steps from there are stored pending (their checkpoints kept), its plan cut back after Plan when Plan
+    /// runs again, and its record queued again (no outcome, by hand, no media generation; acquisition up to Release, else
+    /// processing) with job.retried {step} in its log, then it runs like a new one. job.notFound; job.notRetryable for any
+    /// other job (read errors and failed post steps get retries of their own).
+    public func retry(_ jobId: Id, fromStep: StepKind? = nil) async throws(BroError) -> JobDto {
         let record = try await load(jobId)
-        guard record.state == .finished, let outcome = record.outcome, [.failed, .cancelled, .skipped].contains(outcome) else {
-            throw BroError(MessageCode.wire(.jobNotRetryable), [("jobId", .string(jobId.value))])
+        let notRetryable = BroError(MessageCode.wire(.jobNotRetryable), [("jobId", .string(jobId.value))])
+        guard record.state == .finished, active[jobId] == nil, let outcome = record.outcome else { throw notRetryable }
+        if fromStep == nil && [.failed, .cancelled, .skipped].contains(outcome) {
+            var request = record.request
+            request.automatic = false
+            request.mediaGeneration = nil
+            return try await create(request)
         }
-        var request = record.request
-        request.automatic = false
-        request.mediaGeneration = nil
-        return try await create(request)
+        guard [.failed, .cancelled, .interrupted].contains(outcome) else { throw notRetryable }
+
+        let steps = record.plan?.steps ?? JobPlanner.initial(record.request)
+        var seq = 0
+        if let fromStep {
+            guard let at = steps.firstIndex(of: fromStep) else {
+                throw BroError(MessageCode.wire(.jobUnknownStep), [("step", .string(fromStep.rawValue))])
+            }
+            seq = at
+        }
+        let store = store
+        let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
+        if seq > JobPlanner.done(rows).count {
+            throw BroError(MessageCode.wire(.serverBadRequest), [("detail", .string("fromStep \(fromStep!.rawValue): a step before it isn't done"))])
+        }
+        let release = steps.firstIndex(of: .release)
+        if release == nil || seq <= release! { seq = 0 }
+        for row in rows where row.seq >= seq {
+            var pending = row
+            pending.state = .pending
+            pending.startedAt = nil
+            pending.finishedAt = nil
+            pending.output = nil
+            pending.error = nil
+            let save = pending
+            try await executor.worker { () async throws(BroError) in try await store.steps().save(save) }
+        }
+        var again = record
+        if var plan = again.plan, let planned = steps.firstIndex(of: .plan), seq <= planned {
+            plan.steps = Array(steps[...planned])
+            again.plan = plan
+        }
+        let queue: Queue = release.map { seq > $0 } == true ? .processing : JobPlanner.queue(record.kind)
+        let position = admit(jobId, queue: queue)
+        again.state = .queued
+        again.outcome = nil
+        again.error = nil
+        again.finishedAt = nil
+        again.decision = nil
+        again.blockedBy = nil
+        again.queue = queue
+        again.position = position
+        again.automatic = false
+        again.mediaGeneration = nil
+        again.request.automatic = false
+        again.request.mediaGeneration = nil
+        let queued = again
+        let line = LogLineDto(seq: 0, t: clock.now(), severity: .info, code: .jobRetried, params: [("step", .string(steps[seq].rawValue))])
+        let fs = fs, directory = data + "/jobs/" + jobId.value
+        do throws(BroError) {
+            try await executor.worker { () async throws(BroError) in try await store.jobs().update(queued) }
+            try await executor.worker { () throws(BroError) in try JobLog.append(fs, jobDirectory: directory, lines: [line]) }
+        } catch {
+            forget(jobId)
+            scheduler.finish(jobId)
+            throw error
+        }
+        if asked[jobId] != position { savePosition(jobId) }
+        var dto = JobDto.of(queued)
+        dto.position = scheduler.position(jobId)
+        bus.publish(.jobChanged, data: .object([("job", JobDto.json(dto))]))
+        launch(queued)
+        return dto
     }
 
     /// Answers the job's question `decisionId`. job.notFound; job.notAwaitingDecision when the job isn't waiting for that

@@ -8,6 +8,7 @@ G_BEGIN_DECLS
 
 typedef enum {
   BRO_MSG_JOB_STARTED, /* job.started */
+  BRO_MSG_JOB_RETRIED, /* job.retried */
   BRO_MSG_JOB_SOURCE, /* job.source */
   BRO_MSG_JOB_FINISHED, /* job.finished */
   BRO_MSG_JOB_CANCELLED_BY_USER, /* job.cancelledByUser */

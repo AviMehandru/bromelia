@@ -40,6 +40,14 @@
       },
       "today": "JobRunner.run: \"Bromelia job …\""
     },
+    "job.retried": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "step": "string"
+      },
+      "today": "new: JobService.retry from a step (owner 2026-10-18)"
+    },
     "job.source": {
       "kind": "log",
       "severity": "info",

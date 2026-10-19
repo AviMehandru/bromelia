@@ -19,8 +19,7 @@ namespace Bromelia.Engine;
 /// RecoveryService.recover), in their queues' order.</item>
 /// <item>Each job's place in its queue is stored, so the order survives a restart (written in a transaction that
 /// changes only the position: the runner owns the rest of the record).</item>
-/// <item>Retry from a step, continuing an interrupted job, the continue offer and keep-apart come with the steps they
-/// need (owner, 2026-10-17: sessions D and F).</item>
+/// <item>The continue offer comes with AutomationService, keep-apart with session F (owner, 2026-10-17/18).</item>
 /// </list>
 /// </summary>
 public sealed class JobService
@@ -121,15 +120,71 @@ public sealed class JobService
         await FinishCancelled(record);
     }
 
-    /// <summary>Runs a finished job that failed, was cancelled or was skipped again, as a new job with the same request,
-    /// started by hand (not automatic, no media generation). job.notFound; job.notRetryable for any other job (an
-    /// interrupted one is continued in session D; read errors and failed post steps get retries of their own).</summary>
-    public async Task<JobDto> Retry(Id jobId)
+    /// <summary>Runs a finished job again (plan §13.1's retry(id, fromStep?); owner 2026-10-17/18).
+    /// <list type="bullet">
+    /// <item>Without a step: one that failed, was cancelled or was skipped, as a new job with the same request, started by
+    /// hand (not automatic, no media generation); an interrupted one is continued: the same job from its first step.</item>
+    /// <item>From a step: one that failed, was cancelled or was interrupted, the same job, from that step
+    /// (job.unknownStep {step} when its plan has none; server.badRequest when a step before it isn't done). A step up to
+    /// Release starts it from its first step instead: the disc is read again (Acquire then keeps what an earlier attempt
+    /// finished of the same disc).</item>
+    /// </list>
+    /// The same job's steps from there are stored pending (their checkpoints kept), its plan cut back after Plan when Plan
+    /// runs again, and its record queued again (no outcome, by hand, no media generation; acquisition up to Release, else
+    /// processing) with job.retried {step} in its log, then it runs like a new one. job.notFound; job.notRetryable for any
+    /// other job (read errors and failed post steps get retries of their own).</summary>
+    public async Task<JobDto> Retry(Id jobId, StepKind? fromStep = null)
     {
         var record = await Load(jobId);
-        if (record.State != JobState.Finished || record.Outcome is not (Outcome.Failed or Outcome.Cancelled or Outcome.Skipped))
-            throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobNotRetryable), ("jobId", JsonValue.Of(jobId.Value))));
-        return await Create(record.Request with { Automatic = false, MediaGeneration = null });
+        if (record.State != JobState.Finished || _active.ContainsKey(jobId)) throw NotRetryable(jobId);
+        if (fromStep == null && record.Outcome is Outcome.Failed or Outcome.Cancelled or Outcome.Skipped)
+            return await Create(record.Request with { Automatic = false, MediaGeneration = null });
+        if (record.Outcome is not (Outcome.Failed or Outcome.Cancelled or Outcome.Interrupted)) throw NotRetryable(jobId);
+
+        var steps = (record.Plan?.Steps ?? JobPlanner.Initial(record.Request)).ToList();
+        int seq = fromStep is { } kind ? steps.IndexOf(kind) : 0;
+        if (seq < 0)
+            throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobUnknownStep), ("step", JsonValue.Of(EnumWire.Name(fromStep!.Value)))));
+        var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
+        if (seq > JobPlanner.Done(rows).Count) throw BadRequest("fromStep " + EnumWire.Name(fromStep!.Value) + ": a step before it isn't done");
+        int release = steps.IndexOf(StepKind.Release);
+        if (release < 0 || seq <= release) seq = 0;
+        foreach (var row in rows.Where(r => r.Seq >= seq))
+        {
+            var pending = row with { State = StepState.Pending, StartedAt = null, FinishedAt = null, Output = null, Error = null };
+            await _executor.Worker(() => _store.Steps().Save(pending));
+        }
+        var plan = record.Plan;
+        int planned = steps.IndexOf(StepKind.Plan);
+        if (plan != null && planned >= 0 && seq <= planned) plan = plan with { Steps = steps.Take(planned + 1).ToList() };
+        var queue = release >= 0 && seq > release ? Queue.Processing : JobPlanner.Queue(record.Kind);
+        var position = Admit(jobId, queue);
+        var again = record with
+        {
+            State = JobState.Queued, Outcome = null, Error = null, FinishedAt = null, Decision = null, BlockedBy = null, Queue = queue, Position = position,
+            Plan = plan, Automatic = false, MediaGeneration = null, Request = record.Request with { Automatic = false, MediaGeneration = null },
+        };
+        try
+        {
+            await _executor.Worker(() => _store.Jobs().Update(again));
+            var line = new LogLineDto(0, _clock.Now(), Severity.Info, MessageCode.JobRetried, (JsonValue.Object)JsonValue.Of(("step", JsonValue.Of(EnumWire.Name(steps[seq])))));
+            await _executor.Worker(() =>
+            {
+                JobLog.Append(_fs, _data + "/jobs/" + jobId.Value, new[] { line });
+                return true;
+            });
+        }
+        catch (BroFailure)
+        {
+            Forget(jobId);
+            _scheduler.Finish(jobId);
+            throw;
+        }
+        if (_asked[jobId] != position) SavePosition(jobId);
+        var dto = JobDto.Of(again) with { Position = _scheduler.Position(jobId) };
+        _bus.Publish(EngineEventType.JobChanged, JsonValue.Of(("job", JobDto.Json(dto))));
+        await Launch(again);
+        return dto;
     }
 
     /// <summary>Answers the job's question <paramref name="decisionId"/>. job.notFound; job.notAwaitingDecision when the job
@@ -301,6 +356,8 @@ public sealed class JobService
         var state = _runner.Job(jobId)?.State ?? JobState.Queued;
         if (state is not (JobState.Queued or JobState.WaitingForResources or JobState.Blocked) || _scheduler.Position(jobId) == null) throw NotQueued(jobId);
     }
+
+    static BroFailure NotRetryable(Id jobId) => new(new BroError(MessageCode.Wire(MessageCode.JobNotRetryable), ("jobId", JsonValue.Of(jobId.Value))));
 
     static BroFailure NotQueued(Id jobId) => new(new BroError(MessageCode.Wire(MessageCode.JobNotQueued), ("jobId", JsonValue.Of(jobId.Value))));
 

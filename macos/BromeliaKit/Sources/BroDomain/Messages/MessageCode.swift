@@ -3,6 +3,7 @@
 /// Every message and error code the engine emits (plan §16). The raw value is the wire form.
 public enum MessageCode: String, Sendable, CaseIterable {
     case jobStarted = "job.started"
+    case jobRetried = "job.retried"
     case jobSource = "job.source"
     case jobFinished = "job.finished"
     case jobCancelledByUser = "job.cancelledByUser"

@@ -1219,7 +1219,11 @@ svc_action (gpointer data)
       bro_job_service_create (js, request, svc_job_done, c, NULL);
     }
   else if (strcmp (name, "retry") == 0)
-    bro_job_service_retry (js, &job, svc_job_done, c, NULL);
+    {
+      BroStepKind from;
+      gboolean has = bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_member (arg, "fromStep"), ""), &from);
+      bro_job_service_retry (js, &job, has ? &from : NULL, svc_job_done, c, NULL);
+    }
   else if (strcmp (name, "cancel") == 0)
     bro_job_service_cancel (js, &job, svc_done, c, NULL);
   else if (strcmp (name, "decide") == 0)

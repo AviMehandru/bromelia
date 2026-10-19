@@ -411,7 +411,8 @@ public sealed class PipelineRunnerTests
                 {
                     var id = IdOf(job!);
                     if (arg["as"]?.AsString is { } a) Name(a);
-                    return () => Service.Retry(id);
+                    var from = arg["fromStep"]?.AsString is { } f ? EnumWire.Parse<StepKind>(f) : null;
+                    return () => Service.Retry(id, from);
                 }
                 case "cancel":
                 {

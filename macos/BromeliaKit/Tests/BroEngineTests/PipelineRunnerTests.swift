@@ -241,7 +241,8 @@ final class PipelineHarness {
                                      error: job["error"].map { BroError($0["code"]!.string!, $0["params"]?.members ?? []) })
         }
     }
-    func name(_ id: String) -> String { jobs.first { $0.id.value == id }!.name }
+    /// A job's name; "?" for one no op named (a job the engine made that the case didn't expect), so the case fails by name.
+    func name(_ id: String) -> String { jobs.first { $0.id.value == id }?.name ?? "?" }
 
     /// The engine has settled: everything still going on is parked (a step at a closed gate, a step waiting for an
     /// answer), and every job that was run has finished or waits (for resources, an answer, a gate).
@@ -342,7 +343,8 @@ final class PipelineHarness {
             return { () async throws(BroError) in _ = try await s.create(request) }
         case "retry":
             if let a = arg["as"]?.string { register(a) }
-            return { () async throws(BroError) in _ = try await s.retry(job!) }
+            let from = arg["fromStep"]?.string.flatMap(StepKind.init(rawValue:))
+            return { () async throws(BroError) in _ = try await s.retry(job!, fromStep: from) }
         case "cancel":
             gates.cancelled(job!)
             return { () async throws(BroError) in try await s.cancel(job!) }
@@ -418,16 +420,16 @@ final class PipelineHarness {
                 if let f = job["progress"]?["currentFraction"]?.double { text += " progress \(Int((f * 100).rounded()))" }
                 if let b = job["blockedBy"]?["code"]?.string { text += " blockedBy " + b }
                 if let d = job["decision"]?["id"]?.string { text += " decision " + d }
-                lines[name(job["id"]!.string!)]!.append(text)
+                lines[name(job["id"]!.string!), default: []].append(text)
             case .stepFinished:
-                lines[name(e.data["job"]!.string!)]!.append("step \(e.data["kind"]!.string!) \(e.data["state"]!.string!)")
+                lines[name(e.data["job"]!.string!), default: []].append("step \(e.data["kind"]!.string!) \(e.data["state"]!.string!)")
             case .jobLog:
-                for l in e.data["lines"]!.array! { lines[name(e.data["jobId"]!.string!)]!.append("log " + l["code"]!.string!) }
+                for l in e.data["lines"]!.array! { lines[name(e.data["jobId"]!.string!), default: []].append("log " + l["code"]!.string!) }
             case .jobFinished:
                 let job = e.data["job"]!
                 var text = "finished " + job["outcome"]!.string!
                 if let code = job["error"]?["code"]?.string { text += " " + code }
-                lines[name(job["id"]!.string!)]!.append(text)
+                lines[name(job["id"]!.string!), default: []].append(text)
             default:
                 break
             }

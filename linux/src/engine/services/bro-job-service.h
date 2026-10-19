@@ -56,9 +56,19 @@ void bro_job_service_create (BroJobService *self, const BroJobRequest *request, 
  * finished one stays as it is. job.notFound. */
 void bro_job_service_cancel (BroJobService *self, const BroId *job_id, BroJobServiceDone done, gpointer data, GDestroyNotify destroy);
 
-/* A finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by
- * hand (not automatic, no media generation). job.notFound; job.notRetryable for any other job. */
-void bro_job_service_retry (BroJobService *self, const BroId *job_id, BroJobDtoDone done, gpointer data, GDestroyNotify destroy);
+/* Runs a finished job again (plan §13.1's retry(id, fromStep?); owner 2026-10-17/18).
+ * - Without a step (@from_step NULL): one that failed, was cancelled or was skipped, as a new job with the same request,
+ *   started by hand (not automatic, no media generation); an interrupted one is continued: the same job from its first
+ *   step.
+ * - From a step: one that failed, was cancelled or was interrupted, the same job, from that step (job.unknownStep {step}
+ *   when its plan has none; server.badRequest when a step before it isn't done). A step up to Release starts it from its
+ *   first step instead: the disc is read again (Acquire then keeps what an earlier attempt finished of the same disc).
+ * The same job's steps from there are stored pending (their checkpoints kept), its plan cut back after Plan when Plan runs
+ * again, and its record queued again (no outcome, by hand, no media generation; acquisition up to Release, else
+ * processing) with job.retried {step} in its log, then it runs like a new one. job.notFound; job.notRetryable for any
+ * other job (read errors and failed post steps get retries of their own). */
+void bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroStepKind *from_step, BroJobDtoDone done, gpointer data,
+                            GDestroyNotify destroy);
 
 /* Answers the job's question @decision_id. job.notFound; job.notAwaitingDecision when the job isn't waiting for that
  * question; server.badRequest for an answer it doesn't offer. */

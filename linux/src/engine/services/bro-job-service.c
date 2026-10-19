@@ -52,6 +52,10 @@ typedef struct {
   char *answer;
   Op op;
   int by;
+  gboolean has_from_step; /* retry */
+  BroStepKind from_step;
+  int seq;                /* retry: where the job starts again */
+  char *bad_request;      /* retry: why the step can't be the start */
   BroJobServiceDone done;
   BroJobDtoDone job_done;
   BroJobPageDone page_done;
@@ -84,6 +88,7 @@ call_free (gpointer data)
   g_clear_pointer (&c->lines, g_ptr_array_unref);
   g_free (c->decision_id);
   g_free (c->answer);
+  g_free (c->bad_request);
   g_free (c);
 }
 
@@ -566,16 +571,191 @@ bro_job_service_cancel (BroJobService *self, const BroId *job_id, BroJobServiceD
   load_then (c, cancel_loaded);
 }
 
+static int
+index_of (GArray *steps, BroStepKind kind)
+{
+  for (guint i = 0; i < steps->len; i++)
+    if (g_array_index (steps, BroStepKind, i) == kind)
+      return (int) i;
+  return -1;
+}
+
+static GArray *
+steps_of (const BroJobRecord *record)
+{
+  return record->plan ? g_array_copy (record->plan->steps) : bro_job_planner_initial (record->request);
+}
+
+/* The steps from c->seq on are stored pending (outputs and errors cleared, checkpoints kept), unless a step before the
+ * one asked for isn't done (c->bad_request). */
+static gboolean
+reset_work (gpointer data, BroBroError **error)
+{
+  Call *c = data;
+  g_autoptr (GPtrArray) rows = bro_step_repository_load (bro_store_steps (c->self->store), c->job_id, error);
+  g_autoptr (GPtrArray) done = NULL;
+  g_autoptr (GArray) steps = steps_of (c->record);
+  int release = index_of (steps, BRO_STEP_KIND_RELEASE);
+  if (!rows)
+    return FALSE;
+  done = bro_job_planner_done (rows);
+  if (c->seq > (int) done->len)
+    {
+      c->bad_request = g_strconcat ("fromStep ", bro_step_kind_to_wire (c->from_step), ": a step before it isn't done", NULL);
+      return TRUE;
+    }
+  if (release < 0 || c->seq <= release)
+    c->seq = 0;
+  for (guint i = 0; i < rows->len; i++)
+    {
+      BroStepRecord *row = rows->pdata[i];
+      if (row->seq < c->seq)
+        continue;
+      row->state = BRO_STEP_STATE_PENDING;
+      row->has_started_at = FALSE;
+      row->has_finished_at = FALSE;
+      g_clear_pointer (&row->output, bro_step_output_free);
+      g_clear_pointer (&row->error, bro_bro_error_free);
+      if (!bro_step_repository_save (bro_store_steps (c->self->store), row, error))
+        return FALSE;
+    }
+  return TRUE;
+}
+
+static gboolean
+requeue_work (gpointer data, BroBroError **error)
+{
+  Call *c = data;
+  g_autoptr (GArray) steps = steps_of (c->record);
+  g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);
+  g_autofree char *directory = g_strconcat (c->self->data, "/jobs/", c->job_id.value, NULL);
+  BroJsonValue *params = bro_json_value_new_object ();
+  if (!bro_job_repository_update (bro_store_jobs (c->self->store), c->record, error))
+    {
+      bro_json_value_unref (params);
+      return FALSE;
+    }
+  bro_json_value_set (params, "step", bro_json_value_new_string (bro_step_kind_to_wire (g_array_index (steps, BroStepKind, c->seq))));
+  g_ptr_array_add (lines, bro_log_line_dto_new (0, bro_engine_clock_now (c->self->clock), BRO_SEVERITY_INFO, BRO_MSG_JOB_RETRIED, params));
+  bro_json_value_unref (params);
+  return bro_job_log_append (c->self->fs, directory, lines, error);
+}
+
+static void
+requeue_done (gpointer data, const BroBroError *error)
+{
+  Call *c = data;
+  BroJobService *self = c->self;
+  g_autoptr (BroJobDto) dto = NULL;
+  g_autoptr (BroJsonValue) event = NULL;
+  int position;
+  if (error)
+    {
+      forget (self, &c->job_id);
+      bro_scheduler_finish (self->scheduler, &c->job_id);
+      fail (c, error);
+      return;
+    }
+  if (get_int (self->asked, &c->job_id) != c->position)
+    save_position (self, &c->job_id);
+  dto = bro_job_dto_of (c->record);
+  position = bro_scheduler_position (self->scheduler, &c->job_id);
+  dto->has_position = position >= 0;
+  dto->position = MAX (position, 0);
+  event = bro_json_value_new_object ();
+  bro_json_value_set (event, "job", bro_job_dto_json (dto));
+  bro_engine_event_unref (bro_event_bus_publish (self->bus, BRO_ENGINE_EVENT_TYPE_JOB_CHANGED, event));
+  launch (self, c->record);
+  if (c->job_done)
+    c->job_done (dto, NULL, c->data);
+  c->job_done = NULL;
+}
+
+static void
+reset_done (gpointer data, const BroBroError *error)
+{
+  Call *c = data;
+  BroJobService *self = c->self;
+  g_autoptr (GArray) steps = NULL;
+  BroJobRecord *r = c->record;
+  int release, planned;
+  BroQueue queue;
+  if (error)
+    {
+      fail (c, error);
+      return;
+    }
+  if (c->bad_request)
+    {
+      bad_request (c, c->bad_request);
+      return;
+    }
+  if (g_hash_table_contains (self->active, c->job_id.value)) /* retried twice at once */
+    {
+      fail_with (c, BRO_MSG_JOB_NOT_RETRYABLE, &c->job_id);
+      return;
+    }
+  steps = steps_of (r);
+  release = index_of (steps, BRO_STEP_KIND_RELEASE);
+  planned = index_of (steps, BRO_STEP_KIND_PLAN);
+  if (r->plan && planned >= 0 && c->seq <= planned)
+    g_array_set_size (r->plan->steps, planned + 1);
+  queue = release >= 0 && c->seq > release ? BRO_QUEUE_PROCESSING : bro_job_planner_queue (r->kind);
+  c->position = admit (self, &c->job_id, queue);
+  r->state = BRO_JOB_STATE_QUEUED;
+  r->has_outcome = FALSE;
+  g_clear_pointer (&r->error, bro_bro_error_free);
+  r->has_finished_at = FALSE;
+  g_clear_pointer (&r->decision, bro_json_value_unref);
+  g_clear_pointer (&r->blocked_by, bro_json_value_unref);
+  r->queue = queue;
+  r->position = c->position;
+  r->automatic = FALSE;
+  r->has_media_generation = FALSE;
+  r->media_generation = 0;
+  r->request->automatic = FALSE;
+  r->request->has_media_generation = FALSE;
+  r->request->media_generation = 0;
+  {
+    Call *to = call_hand_off (c);
+    to->record = g_steal_pointer (&c->record);
+    to->job_id = c->job_id;
+    to->position = c->position;
+    to->seq = c->seq;
+    bro_engine_executor_worker (self->executor, requeue_work, requeue_done, to, call_free);
+  }
+}
+
 static void
 retry_loaded (Call *c)
 {
   g_autoptr (BroJobRequest) request = NULL;
   Call *to;
-  if (c->record->state != BRO_JOB_STATE_FINISHED || !c->record->has_outcome
-      || !(c->record->outcome == BRO_OUTCOME_FAILED || c->record->outcome == BRO_OUTCOME_CANCELLED || c->record->outcome == BRO_OUTCOME_SKIPPED))
+  BroOutcome outcome = c->record->outcome;
+  if (c->record->state != BRO_JOB_STATE_FINISHED || !c->record->has_outcome || g_hash_table_contains (c->self->active, c->job_id.value)
+      || (c->has_from_step && !(outcome == BRO_OUTCOME_FAILED || outcome == BRO_OUTCOME_CANCELLED || outcome == BRO_OUTCOME_INTERRUPTED))
+      || (!c->has_from_step && !(outcome == BRO_OUTCOME_FAILED || outcome == BRO_OUTCOME_CANCELLED || outcome == BRO_OUTCOME_SKIPPED
+                                 || outcome == BRO_OUTCOME_INTERRUPTED)))
     {
       fail_with (c, BRO_MSG_JOB_NOT_RETRYABLE, &c->job_id);
       call_free (c);
+      return;
+    }
+  if (c->has_from_step || outcome == BRO_OUTCOME_INTERRUPTED) /* the same job again */
+    {
+      g_autoptr (GArray) steps = steps_of (c->record);
+      c->seq = c->has_from_step ? index_of (steps, c->from_step) : 0;
+      if (c->seq < 0)
+        {
+          BroJsonValue *params = bro_json_value_new_object ();
+          g_autoptr (BroBroError) unknown = NULL;
+          bro_json_value_set (params, "step", bro_json_value_new_string (bro_step_kind_to_wire (c->from_step)));
+          unknown = bro_bro_error_new (bro_message_code_wire (BRO_MSG_JOB_UNKNOWN_STEP), params, NULL);
+          fail (c, unknown);
+          call_free (c);
+          return;
+        }
+      bro_engine_executor_worker (c->self->executor, reset_work, reset_done, c, call_free);
       return;
     }
   request = bro_job_request_copy (c->record->request);
@@ -592,11 +772,14 @@ retry_loaded (Call *c)
 }
 
 void
-bro_job_service_retry (BroJobService *self, const BroId *job_id, BroJobDtoDone done, gpointer data, GDestroyNotify destroy)
+bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroStepKind *from_step, BroJobDtoDone done, gpointer data,
+                       GDestroyNotify destroy)
 {
   Call *c = call_new (self, data, destroy);
   c->job_done = done;
   c->job_id = *job_id;
+  c->has_from_step = from_step != NULL;
+  c->from_step = from_step ? *from_step : BRO_STEP_KIND_AWAIT_MEDIA;
   load_then (c, retry_loaded);
 }
 
