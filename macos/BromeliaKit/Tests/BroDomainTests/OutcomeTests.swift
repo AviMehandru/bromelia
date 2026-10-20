@@ -1,5 +1,6 @@
 import BroDomain
 import BroFoundation
+import BroTestEnglish
 import BroTestSupport
 import Testing
 

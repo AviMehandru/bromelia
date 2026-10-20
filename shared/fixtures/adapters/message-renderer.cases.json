@@ -1,0 +1,1023 @@
+{
+  "description": "MessageTextRenderer (plan §16, session E1 2026-10-19): the host's renderer of {code, params, cause} into text from a catalog of ICU MessageFormat texts (codes.json's 'rendering'). Each case renders given.message (the JSON form, with cause) with the test catalog below, or with the generated English catalog (EnglishMessages, from shared/messages/en.json) when given.catalog is 'english'. given.via 'port' renders through the MessageRenderer port instead: the message is decoded with BroMessage.decode (no cause). catalog.messageLists names the params that are messageList (joined ', '; 'messages' are joined '; '). Numbers have no grouping; bytes are decimal units rounded half up to one decimal (unit chosen after rounding); duration is m:ss or h:mm:ss (fractions dropped), durationPrecise h:mm:ss.sss (rounded to the millisecond). A missing or null param renders as {name} (a select picks other); an unknown code renders the code; an unclosed brace renders the rest as text. Apostrophes follow ICU: '' is one, and an apostrophe before { or } (or # in a plural) quotes up to the next one.",
+  "catalog": {
+    "texts": {
+      "plain": "Hello",
+      "path": "Copying {path}",
+      "count": "{n} files",
+      "flag": "flag is {flag}",
+      "names": "Names: {names}",
+      "titles": "{n, plural, =0 {no titles} one {# title} other {# titles}}",
+      "exactOne": "{n, plural, =1 {just one} one {# title} other {# titles}}",
+      "noZero": "{n, plural, one {# title} other {# titles}}",
+      "hash": "Track #{n}",
+      "nestedPlural": "{kind, select, dvd {{n, plural, one {# DVD} other {# DVDs}}} other {{n} discs}}",
+      "pluralSelect": "{n, plural, other {# in {kind, select, dvd {DVD #} other {other}}}}",
+      "kind": "{kind, select, dvd {DVD} bluray {Blu-ray} other {unknown format}}",
+      "yesNo": "{done, select, true {done} other {not done}}",
+      "size": "{size, bytes}",
+      "twoSizes": "need {need, bytes}, free {free, bytes}",
+      "length": "{s, duration}",
+      "precise": "{s, durationPrecise}",
+      "reason": "Failed: {reason}",
+      "inner": "the {thing} broke",
+      "leaf": "disk full",
+      "notes": "Notes: {notes}",
+      "listed": "{parts} of {total}",
+      "part": "{n} {what}",
+      "spaces": "{ n , plural , one { # item } other { # items } }",
+      "unknownFormat": "{n, number}",
+      "apostrophe": "don't stop",
+      "doubled": "it''s {n}",
+      "quoted": "'{n}' is {n}",
+      "quotedHash": "{n, plural, other {'#' is #}}",
+      "quotedBrace": "{kind, select, a {'}' here} other {x}}",
+      "quotedDoubled": "'{it''s}'",
+      "twice": "{n, plural, other {first} other {second}}",
+      "unbalanced": "Broken {n",
+      "unbalancedBranch": "{n, plural, one {# title other {# titles}}"
+    },
+    "messageLists": {
+      "listed": [
+        "parts"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "plain-text",
+      "given": {
+        "message": {
+          "code": "plain"
+        }
+      },
+      "expect": {
+        "text": "Hello"
+      }
+    },
+    {
+      "id": "a-string-param",
+      "given": {
+        "message": {
+          "code": "path",
+          "params": {
+            "path": "/a b/c"
+          }
+        }
+      },
+      "expect": {
+        "text": "Copying /a b/c"
+      }
+    },
+    {
+      "id": "an-integer-param-has-no-grouping",
+      "given": {
+        "message": {
+          "code": "count",
+          "params": {
+            "n": 1234
+          }
+        }
+      },
+      "expect": {
+        "text": "1234 files"
+      }
+    },
+    {
+      "id": "a-bool-param-is-true-or-false",
+      "given": {
+        "message": {
+          "code": "flag",
+          "params": {
+            "flag": false
+          }
+        }
+      },
+      "expect": {
+        "text": "flag is false"
+      }
+    },
+    {
+      "id": "a-list-param-is-joined-with-commas",
+      "given": {
+        "message": {
+          "code": "names",
+          "params": {
+            "names": [
+              "Ann",
+              "Bo",
+              "Cy"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "text": "Names: Ann, Bo, Cy"
+      }
+    },
+    {
+      "id": "plural-exact-zero",
+      "given": {
+        "message": {
+          "code": "titles",
+          "params": {
+            "n": 0
+          }
+        }
+      },
+      "expect": {
+        "text": "no titles"
+      }
+    },
+    {
+      "id": "plural-one",
+      "given": {
+        "message": {
+          "code": "titles",
+          "params": {
+            "n": 1
+          }
+        }
+      },
+      "expect": {
+        "text": "1 title"
+      }
+    },
+    {
+      "id": "plural-other",
+      "given": {
+        "message": {
+          "code": "titles",
+          "params": {
+            "n": 5
+          }
+        }
+      },
+      "expect": {
+        "text": "5 titles"
+      }
+    },
+    {
+      "id": "plural-exact-beats-one",
+      "given": {
+        "message": {
+          "code": "exactOne",
+          "params": {
+            "n": 1
+          }
+        }
+      },
+      "expect": {
+        "text": "just one"
+      }
+    },
+    {
+      "id": "plural-zero-without-an-exact-branch-is-other",
+      "given": {
+        "message": {
+          "code": "noZero",
+          "params": {
+            "n": 0
+          }
+        }
+      },
+      "expect": {
+        "text": "0 titles"
+      }
+    },
+    {
+      "id": "hash-outside-a-plural-is-text",
+      "given": {
+        "message": {
+          "code": "hash",
+          "params": {
+            "n": 3
+          }
+        }
+      },
+      "expect": {
+        "text": "Track #3"
+      }
+    },
+    {
+      "id": "a-plural-inside-a-select",
+      "given": {
+        "message": {
+          "code": "nestedPlural",
+          "params": {
+            "kind": "dvd",
+            "n": 2
+          }
+        }
+      },
+      "expect": {
+        "text": "2 DVDs"
+      }
+    },
+    {
+      "id": "a-select-other-branch-reads-params",
+      "given": {
+        "message": {
+          "code": "nestedPlural",
+          "params": {
+            "kind": "cd",
+            "n": 2
+          }
+        }
+      },
+      "expect": {
+        "text": "2 discs"
+      }
+    },
+    {
+      "id": "hash-in-a-select-inside-a-plural-is-text",
+      "given": {
+        "message": {
+          "code": "pluralSelect",
+          "params": {
+            "n": 4,
+            "kind": "dvd"
+          }
+        }
+      },
+      "expect": {
+        "text": "4 in DVD #"
+      }
+    },
+    {
+      "id": "select-picks-the-matching-branch",
+      "given": {
+        "message": {
+          "code": "kind",
+          "params": {
+            "kind": "bluray"
+          }
+        }
+      },
+      "expect": {
+        "text": "Blu-ray"
+      }
+    },
+    {
+      "id": "select-falls-back-to-other",
+      "given": {
+        "message": {
+          "code": "kind",
+          "params": {
+            "kind": "hddvd"
+          }
+        }
+      },
+      "expect": {
+        "text": "unknown format"
+      }
+    },
+    {
+      "id": "select-on-a-bool",
+      "given": {
+        "message": {
+          "code": "yesNo",
+          "params": {
+            "done": true
+          }
+        }
+      },
+      "expect": {
+        "text": "done"
+      }
+    },
+    {
+      "id": "select-with-a-missing-param-is-other",
+      "given": {
+        "message": {
+          "code": "yesNo"
+        }
+      },
+      "expect": {
+        "text": "not done"
+      }
+    },
+    {
+      "id": "bytes-under-a-kilobyte",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 999
+          }
+        }
+      },
+      "expect": {
+        "text": "999 B"
+      }
+    },
+    {
+      "id": "bytes-zero",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 0
+          }
+        }
+      },
+      "expect": {
+        "text": "0 B"
+      }
+    },
+    {
+      "id": "bytes-a-kilobyte",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 1000
+          }
+        }
+      },
+      "expect": {
+        "text": "1.0 KB"
+      }
+    },
+    {
+      "id": "bytes-round-half-up",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 1250
+          }
+        }
+      },
+      "expect": {
+        "text": "1.3 KB"
+      }
+    },
+    {
+      "id": "bytes-round-down",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 1249
+          }
+        }
+      },
+      "expect": {
+        "text": "1.2 KB"
+      }
+    },
+    {
+      "id": "bytes-gigabytes",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 4700000000
+          }
+        }
+      },
+      "expect": {
+        "text": "4.7 GB"
+      }
+    },
+    {
+      "id": "bytes-rounding-up-to-the-next-unit",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 999950
+          }
+        }
+      },
+      "expect": {
+        "text": "1.0 MB"
+      }
+    },
+    {
+      "id": "bytes-terabytes-are-the-largest-unit",
+      "given": {
+        "message": {
+          "code": "size",
+          "params": {
+            "size": 2500000000000000
+          }
+        }
+      },
+      "expect": {
+        "text": "2500.0 TB"
+      }
+    },
+    {
+      "id": "bytes-two-params",
+      "given": {
+        "message": {
+          "code": "twoSizes",
+          "params": {
+            "need": 25000000000,
+            "free": 1500000
+          }
+        }
+      },
+      "expect": {
+        "text": "need 25.0 GB, free 1.5 MB"
+      }
+    },
+    {
+      "id": "duration-under-a-minute",
+      "given": {
+        "message": {
+          "code": "length",
+          "params": {
+            "s": 59
+          }
+        }
+      },
+      "expect": {
+        "text": "0:59"
+      }
+    },
+    {
+      "id": "duration-pads-seconds",
+      "given": {
+        "message": {
+          "code": "length",
+          "params": {
+            "s": 65
+          }
+        }
+      },
+      "expect": {
+        "text": "1:05"
+      }
+    },
+    {
+      "id": "duration-under-an-hour",
+      "given": {
+        "message": {
+          "code": "length",
+          "params": {
+            "s": 3599
+          }
+        }
+      },
+      "expect": {
+        "text": "59:59"
+      }
+    },
+    {
+      "id": "duration-an-hour",
+      "given": {
+        "message": {
+          "code": "length",
+          "params": {
+            "s": 3600
+          }
+        }
+      },
+      "expect": {
+        "text": "1:00:00"
+      }
+    },
+    {
+      "id": "duration-hours-minutes-seconds",
+      "given": {
+        "message": {
+          "code": "length",
+          "params": {
+            "s": 37230
+          }
+        }
+      },
+      "expect": {
+        "text": "10:20:30"
+      }
+    },
+    {
+      "id": "duration-drops-fractions",
+      "given": {
+        "message": {
+          "code": "length",
+          "params": {
+            "s": 61.9
+          }
+        }
+      },
+      "expect": {
+        "text": "1:01"
+      }
+    },
+    {
+      "id": "duration-precise-has-milliseconds",
+      "given": {
+        "message": {
+          "code": "precise",
+          "params": {
+            "s": 2531.512
+          }
+        }
+      },
+      "expect": {
+        "text": "0:42:11.512"
+      }
+    },
+    {
+      "id": "duration-precise-whole-seconds",
+      "given": {
+        "message": {
+          "code": "precise",
+          "params": {
+            "s": 61
+          }
+        }
+      },
+      "expect": {
+        "text": "0:01:01.000"
+      }
+    },
+    {
+      "id": "duration-precise-hours",
+      "given": {
+        "message": {
+          "code": "precise",
+          "params": {
+            "s": 7322.25
+          }
+        }
+      },
+      "expect": {
+        "text": "2:02:02.250"
+      }
+    },
+    {
+      "id": "duration-precise-rounds-to-the-millisecond",
+      "given": {
+        "message": {
+          "code": "precise",
+          "params": {
+            "s": 59.9996
+          }
+        }
+      },
+      "expect": {
+        "text": "0:01:00.000"
+      }
+    },
+    {
+      "id": "a-nested-message",
+      "given": {
+        "message": {
+          "code": "reason",
+          "params": {
+            "reason": {
+              "code": "inner",
+              "params": {
+                "thing": "drive"
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "text": "Failed: the drive broke"
+      }
+    },
+    {
+      "id": "a-nested-message-with-its-cause",
+      "given": {
+        "message": {
+          "code": "reason",
+          "params": {
+            "reason": {
+              "code": "inner",
+              "params": {
+                "thing": "drive"
+              },
+              "cause": {
+                "code": "leaf"
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "text": "Failed: the drive broke (disk full)"
+      }
+    },
+    {
+      "id": "messages-are-joined-with-semicolons",
+      "given": {
+        "message": {
+          "code": "notes",
+          "params": {
+            "notes": [
+              {
+                "code": "leaf"
+              },
+              {
+                "code": "inner",
+                "params": {
+                  "thing": "fan"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "text": "Notes: disk full; the fan broke"
+      }
+    },
+    {
+      "id": "a-message-list-is-joined-with-commas",
+      "given": {
+        "message": {
+          "code": "listed",
+          "params": {
+            "parts": [
+              {
+                "code": "part",
+                "params": {
+                  "n": 1,
+                  "what": "changed"
+                }
+              },
+              {
+                "code": "part",
+                "params": {
+                  "n": 2,
+                  "what": "missing"
+                }
+              }
+            ],
+            "total": 9
+          }
+        }
+      },
+      "expect": {
+        "text": "1 changed, 2 missing of 9"
+      }
+    },
+    {
+      "id": "a-cause-follows-in-brackets",
+      "given": {
+        "message": {
+          "code": "inner",
+          "params": {
+            "thing": "copy"
+          },
+          "cause": {
+            "code": "leaf"
+          }
+        }
+      },
+      "expect": {
+        "text": "the copy broke (disk full)"
+      }
+    },
+    {
+      "id": "a-cause-of-a-cause",
+      "given": {
+        "message": {
+          "code": "reason",
+          "params": {
+            "reason": {
+              "code": "leaf"
+            }
+          },
+          "cause": {
+            "code": "inner",
+            "params": {
+              "thing": "disk"
+            },
+            "cause": {
+              "code": "leaf"
+            }
+          }
+        }
+      },
+      "expect": {
+        "text": "Failed: disk full (the disk broke (disk full))"
+      }
+    },
+    {
+      "id": "an-unknown-code-renders-the-code",
+      "given": {
+        "message": {
+          "code": "unknownCode",
+          "params": {
+            "n": 1
+          }
+        }
+      },
+      "expect": {
+        "text": "unknownCode"
+      }
+    },
+    {
+      "id": "a-missing-param-shows-its-name",
+      "given": {
+        "message": {
+          "code": "path"
+        }
+      },
+      "expect": {
+        "text": "Copying {path}"
+      }
+    },
+    {
+      "id": "a-null-param-shows-its-name",
+      "given": {
+        "message": {
+          "code": "path",
+          "params": {
+            "path": null
+          }
+        }
+      },
+      "expect": {
+        "text": "Copying {path}"
+      }
+    },
+    {
+      "id": "a-missing-bytes-param-shows-its-name",
+      "given": {
+        "message": {
+          "code": "size"
+        }
+      },
+      "expect": {
+        "text": "{size}"
+      }
+    },
+    {
+      "id": "a-missing-plural-param-shows-its-name",
+      "given": {
+        "message": {
+          "code": "titles"
+        }
+      },
+      "expect": {
+        "text": "{n}"
+      }
+    },
+    {
+      "id": "spaces-around-names-and-keywords",
+      "given": {
+        "message": {
+          "code": "spaces",
+          "params": {
+            "n": 2
+          }
+        }
+      },
+      "expect": {
+        "text": " 2 items "
+      }
+    },
+    {
+      "id": "an-unknown-format-renders-the-value",
+      "given": {
+        "message": {
+          "code": "unknownFormat",
+          "params": {
+            "n": 1234
+          }
+        }
+      },
+      "expect": {
+        "text": "1234"
+      }
+    },
+    {
+      "id": "a-lone-apostrophe-is-text",
+      "given": {
+        "message": {
+          "code": "apostrophe"
+        }
+      },
+      "expect": {
+        "text": "don't stop"
+      }
+    },
+    {
+      "id": "a-doubled-apostrophe-is-one",
+      "given": {
+        "message": {
+          "code": "doubled",
+          "params": {
+            "n": 2
+          }
+        }
+      },
+      "expect": {
+        "text": "it's 2"
+      }
+    },
+    {
+      "id": "apostrophes-quote-braces",
+      "given": {
+        "message": {
+          "code": "quoted",
+          "params": {
+            "n": 7
+          }
+        }
+      },
+      "expect": {
+        "text": "{n} is 7"
+      }
+    },
+    {
+      "id": "apostrophes-quote-a-hash-in-a-plural",
+      "given": {
+        "message": {
+          "code": "quotedHash",
+          "params": {
+            "n": 3
+          }
+        }
+      },
+      "expect": {
+        "text": "# is 3"
+      }
+    },
+    {
+      "id": "a-quoted-brace-inside-a-branch",
+      "given": {
+        "message": {
+          "code": "quotedBrace",
+          "params": {
+            "kind": "a"
+          }
+        }
+      },
+      "expect": {
+        "text": "} here"
+      }
+    },
+    {
+      "id": "quoted-text-keeps-a-doubled-apostrophe",
+      "given": {
+        "message": {
+          "code": "quotedDoubled"
+        }
+      },
+      "expect": {
+        "text": "{it's}"
+      }
+    },
+    {
+      "id": "the-first-branch-of-a-key-counts",
+      "given": {
+        "message": {
+          "code": "twice",
+          "params": {
+            "n": 2
+          }
+        }
+      },
+      "expect": {
+        "text": "first"
+      }
+    },
+    {
+      "id": "an-unclosed-brace-is-text",
+      "given": {
+        "message": {
+          "code": "unbalanced",
+          "params": {
+            "n": 1
+          }
+        }
+      },
+      "expect": {
+        "text": "Broken {n"
+      }
+    },
+    {
+      "id": "an-unclosed-branch-is-text",
+      "given": {
+        "message": {
+          "code": "unbalancedBranch",
+          "params": {
+            "n": 1
+          }
+        }
+      },
+      "expect": {
+        "text": "{n, plural, one {# title other {# titles}}"
+      }
+    },
+    {
+      "id": "english-plural",
+      "given": {
+        "message": {
+          "code": "rip.readErrors",
+          "params": {
+            "count": 1
+          }
+        },
+        "catalog": "english",
+        "via": "port"
+      },
+      "expect": {
+        "text": "MakeMKV reported 1 read error while reading the disc, so the files may be damaged. They were kept apart from finished archives."
+      }
+    },
+    {
+      "id": "english-plural-and-select",
+      "given": {
+        "message": {
+          "code": "makemkv.stalled",
+          "params": {
+            "minutes": 10,
+            "abandoned": true
+          }
+        },
+        "catalog": "english",
+        "via": "port"
+      },
+      "expect": {
+        "text": "makemkvcon printed nothing for 10 minutes and was stopped (it did not exit; the drive may need to be reset). The drive or disc may be stuck: eject the disc and retry."
+      }
+    },
+    {
+      "id": "english-bytes",
+      "given": {
+        "message": {
+          "code": "space.insufficient",
+          "params": {
+            "path": "/lib",
+            "need": 30000000000,
+            "free": 12345678901
+          }
+        },
+        "catalog": "english",
+        "via": "port"
+      },
+      "expect": {
+        "text": "Not enough free space in /lib: the titles need about 30.0 GB (with a margin), only 12.3 GB is free."
+      }
+    },
+    {
+      "id": "english-message-list",
+      "given": {
+        "message": {
+          "code": "check.damaged",
+          "params": {
+            "parts": [
+              {
+                "code": "check.part.changed",
+                "params": {
+                  "count": 1
+                }
+              },
+              {
+                "code": "check.part.missing",
+                "params": {
+                  "count": 2
+                }
+              }
+            ],
+            "files": 13,
+            "unlisted": 0
+          }
+        },
+        "catalog": "english",
+        "via": "port"
+      },
+      "expect": {
+        "text": "1 changed, 2 missing of 13 files"
+      }
+    },
+    {
+      "id": "english-cause",
+      "given": {
+        "message": {
+          "code": "rip.failed",
+          "params": {
+            "reason": {
+              "code": "process.stalled",
+              "params": {
+                "tool": "mkvmerge",
+                "minutes": 5
+              }
+            }
+          },
+          "cause": {
+            "code": "fs.notFound",
+            "params": {
+              "path": "/x"
+            }
+          }
+        },
+        "catalog": "english"
+      },
+      "expect": {
+        "text": "Rip failed: mkvmerge printed nothing for 5 minutes and was stopped (/x doesn't exist)"
+      }
+    }
+  ]
+}

@@ -16356,7 +16356,7 @@
       "layer": "ports",
       "folder": "",
       "cFolder": "",
-      "doc": "The MessageRenderer port (plan §16; owner 2026-10-14): the engine reaches the host's renderer of shared/messages for text people read, such as INCOMPLETE.txt. The adapters come with the composition roots.",
+      "doc": "The MessageRenderer port (plan §16; owner 2026-10-14): the engine reaches the host's renderer of shared/messages for text people read, such as INCOMPLETE.txt. The adapter is MessageTextRenderer (adapters/message-renderer).",
       "phase": 3,
       "types": [
         {
@@ -16460,6 +16460,175 @@
           "swift": "RandomIdGenerator.next()",
           "cs": "RandomIdGenerator.Next",
           "c": "bro_random_id_generator_next"
+        }
+      ]
+    },
+    "adapters/message-renderer": {
+      "layer": "adapters",
+      "folder": "Messages",
+      "cFolder": "messages",
+      "doc": "The MessageRenderer adapter (plan §16; session E1, 2026-10-19): ICU-lite over a catalog of shared/messages texts ({x}, plural, select, bytes, duration, durationPrecise, nested messages, causes). The English catalog is generated from en.json by tools/gen-messages.py.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "MessageTexts",
+          "kind": "struct",
+          "doc": "One language's message texts by code, and the params that are messageList.",
+          "swift": {
+            "name": "MessageTexts",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Messages/MessageTexts.swift"
+          },
+          "cs": {
+            "name": "MessageTexts",
+            "file": "windows/src/Bromelia.Adapters/Messages/MessageTexts.cs"
+          },
+          "c": {
+            "name": "BroMessageTexts",
+            "file": "linux/src/adapters/messages/bro-message-texts.h"
+          }
+        },
+        {
+          "name": "EnglishMessages",
+          "kind": "enum",
+          "doc": "The English catalog, generated from shared/messages/en.json and codes.json.",
+          "swift": {
+            "name": "EnglishMessages",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Messages/EnglishMessages.swift"
+          },
+          "cs": {
+            "name": "EnglishMessages",
+            "file": "windows/src/Bromelia.Adapters/Messages/EnglishMessages.cs"
+          },
+          "c": {
+            "name": "BroEnglishMessages",
+            "file": "linux/src/adapters/messages/bro-english-messages.h"
+          }
+        },
+        {
+          "name": "MessageTextRenderer",
+          "kind": "class",
+          "doc": "Implements MessageRenderer: a message {code, params, cause} as text from a catalog.",
+          "swift": {
+            "name": "MessageTextRenderer",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Messages/MessageTextRenderer.swift"
+          },
+          "cs": {
+            "name": "MessageTextRenderer",
+            "file": "windows/src/Bromelia.Adapters/Messages/MessageTextRenderer.cs"
+          },
+          "c": {
+            "name": "BroMessageTextRenderer",
+            "file": "linux/src/adapters/messages/bro-message-text-renderer.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "MessageTexts.text",
+          "params": [
+            "code"
+          ],
+          "returns": "String?",
+          "doc": "The text of a code; none when the catalog has none.",
+          "cNames": [
+            "self",
+            "code"
+          ],
+          "swift": "MessageTexts.text(_:)",
+          "cs": "MessageTexts.Text",
+          "c": "bro_message_texts_text"
+        },
+        {
+          "name": "MessageTexts.isMessageList",
+          "params": [
+            "code",
+            "param"
+          ],
+          "returns": "Bool",
+          "doc": "Whether a code's param is a messageList (joined with \", \").",
+          "cNames": [
+            "self",
+            "code",
+            "param"
+          ],
+          "swift": "MessageTexts.isMessageList(_:param:)",
+          "cs": "MessageTexts.IsMessageList",
+          "c": "bro_message_texts_is_message_list"
+        },
+        {
+          "name": "MessageTexts.addText",
+          "params": [
+            "code",
+            "text"
+          ],
+          "doc": "Adds (or replaces) a code's text.",
+          "only": [
+            "c"
+          ],
+          "why": "C builds a catalog by adding to it; Swift and C# take dictionaries in the initializer.",
+          "cNames": [
+            "self",
+            "code",
+            "text"
+          ],
+          "c": "bro_message_texts_add_text"
+        },
+        {
+          "name": "MessageTexts.addMessageList",
+          "params": [
+            "code",
+            "param"
+          ],
+          "doc": "Marks a code's param as a messageList.",
+          "only": [
+            "c"
+          ],
+          "why": "C builds a catalog by adding to it; Swift and C# take dictionaries in the initializer.",
+          "cNames": [
+            "self",
+            "code",
+            "param"
+          ],
+          "c": "bro_message_texts_add_message_list"
+        },
+        {
+          "name": "EnglishMessages.catalog",
+          "params": [],
+          "returns": "MessageTexts",
+          "doc": "Every code's English text (C: a new catalog, yours to free).",
+          "swift": "EnglishMessages.catalog()",
+          "cs": "EnglishMessages.Catalog",
+          "c": "bro_english_messages_catalog"
+        },
+        {
+          "name": "MessageTextRenderer.render",
+          "params": [
+            "message"
+          ],
+          "returns": "String",
+          "doc": "The port: a BroMessage's text.",
+          "cNames": [
+            "self",
+            "message"
+          ],
+          "swift": "MessageTextRenderer.render(_:)",
+          "cs": "MessageTextRenderer.Render",
+          "c": "bro_message_text_renderer_render"
+        },
+        {
+          "name": "MessageTextRenderer.renderJson",
+          "params": [
+            "message"
+          ],
+          "returns": "String",
+          "doc": "The text of a message in its JSON form {code, params, cause}: a BroError's or a nested message's. Never fails.",
+          "cNames": [
+            "self",
+            "message"
+          ],
+          "swift": "MessageTextRenderer.renderJson(_:)",
+          "cs": "MessageTextRenderer.RenderJson",
+          "c": "bro_message_text_renderer_render_json"
         }
       ]
     }

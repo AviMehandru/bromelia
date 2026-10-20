@@ -17,11 +17,13 @@
 
   <ItemGroup>
     <Compile Include="..\Bromelia.Foundation.Tests\Fixtures.cs" Link="Fixtures.cs" />
-    <Compile Include="..\Bromelia.Foundation.Tests\English.cs" Link="English.cs" />
+    <Compile Include="..\Bromelia.Adapters.Tests\English.cs" Link="English.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Bromelia.Domain\Bromelia.Domain.csproj" />
+    <!-- English.cs renders messages with the host's MessageTextRenderer. -->
+    <ProjectReference Include="..\..\src\Bromelia.Adapters\Bromelia.Adapters.csproj" />
   </ItemGroup>
 
 </Project>

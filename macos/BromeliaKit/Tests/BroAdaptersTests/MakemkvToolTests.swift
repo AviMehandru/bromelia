@@ -2,6 +2,7 @@ import BroAdapters
 import BroDomain
 import BroFoundation
 import BroPorts
+import BroTestEnglish
 import BroTestSupport
 import Foundation
 import Testing

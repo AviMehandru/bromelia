@@ -37,6 +37,8 @@
 #include <sqlite3.h>
 #include "bro-system-clock.h"
 #include "bro-random-id-generator.h"
+#include "bro-english-messages.h"
+#include "bro-message-text-renderer.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -2055,6 +2057,49 @@ test_ids_random (void)
     }
 }
 
+/* ---- the message renderer (shared/fixtures/adapters/message-renderer.cases.json) ------------------------------ */
+
+static BroMessageTextRenderer *renderer_test, *renderer_english;
+
+static gboolean
+renderer_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  gboolean english = g_strcmp0 (bro_json_value_get_string (bro_json_value_member (given, "catalog"), NULL), "english") == 0;
+  BroMessageTextRenderer *renderer = english ? renderer_english : renderer_test;
+  const BroJsonValue *message = bro_json_value_member (given, "message");
+  g_autofree char *text = NULL;
+  if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (given, "via"), NULL), "port") == 0) {
+    g_autoptr (BroBroMessage) decoded = bro_bro_message_decode (message);
+    text = bro_message_renderer_render (BRO_MESSAGE_RENDERER (renderer), decoded);
+  } else {
+    text = bro_message_text_renderer_render_json (renderer, message);
+  }
+  bro_test_same_string (failures, id, "text", bro_json_value_get_string (bro_json_value_member (expect, "text"), NULL), text);
+  return TRUE;
+}
+
+static void
+test_message_renderer_cases (void)
+{
+  /* the cases' own catalog: texts by code, and the params that are message lists */
+  g_autoptr (BroJsonValue) doc = bro_test_fixture_json ("adapters/message-renderer.cases.json");
+  const BroJsonValue *catalog = bro_json_value_member (doc, "catalog");
+  const BroJsonValue *texts = bro_json_value_member (catalog, "texts");
+  const BroJsonValue *lists = bro_json_value_member (catalog, "messageLists");
+  BroMessageTexts *test = bro_message_texts_new ();
+  for (guint i = 0; i < texts->keys->len; i++)
+    bro_message_texts_add_text (test, texts->keys->pdata[i], bro_json_value_get_string (texts->items->pdata[i], ""));
+  for (guint i = 0; i < lists->keys->len; i++)
+    for (guint j = 0; j < bro_json_value_length (lists->items->pdata[i]); j++)
+      bro_message_texts_add_message_list (test, lists->keys->pdata[i],
+                                          bro_json_value_get_string (bro_json_value_at (lists->items->pdata[i], j), ""));
+  renderer_test = bro_message_text_renderer_new (test);
+  renderer_english = bro_message_text_renderer_new (bro_english_messages_catalog ());
+  bro_test_run_cases ("adapters/message-renderer.cases.json", renderer_case);
+  g_clear_object (&renderer_test);
+  g_clear_object (&renderer_english);
+}
+
 /* ---- the clock ------------------------------------------------------------------------------------- */
 
 static void
@@ -2210,6 +2255,7 @@ main (int argc, char **argv)
   g_test_add_func ("/keystore/loose-folder", test_keystore_loose_folder);
   g_test_add_func ("/keystore/secret-service", test_keystore_secret_service);
   g_test_add_func ("/ids/random", test_ids_random);
+  g_test_add_func ("/message-renderer/cases", test_message_renderer_cases);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);
