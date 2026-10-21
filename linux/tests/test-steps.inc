@@ -45,7 +45,28 @@ struct _TestStepFakes {
   gboolean recording;
   guint next_run;      /* makemkv.runs taken */
   BroCancellationSource *cancel; /* the case's; not owned */
+  GHashTable *cached;  /* path → GBytes: what a read that doesn't bypass the cache gives instead of what is on disk */
+  GPtrArray *fails;    /* StepsFsFail *: an operation on a path that fails before it acts */
+  void (*on_op) (TestStepFakes *f, const char *op, const char *path); /* hears of each operation before it acts */
+  GHashTable *reads;   /* path → GINT_TO_POINTER (the reads of a file's stream while recording) */
+  int open_streams;    /* the streams open_for_reading gave that aren't closed yet */
 };
+
+/* fails: open, read, sync, syncDirectory, write or remove of a path, with this error. */
+typedef struct {
+  char *op;
+  char *path;
+  BroBroError *error;
+} StepsFsFail;
+
+static void
+steps_fs_fail_free (StepsFsFail *fail)
+{
+  g_free (fail->op);
+  g_free (fail->path);
+  bro_bro_error_free (fail->error);
+  g_free (fail);
+}
 
 static void fakes_call (TestStepFakes *f, char *text);
 static BroBroMessage *fakes_message (BroJsonValue *j, BroSeverity severity);
@@ -101,6 +122,26 @@ steps_tree_not_found (const char *path)
   BroJsonValue *params = bro_json_value_new_object ();
   bro_json_value_set (params, "path", bro_json_value_new_string (path));
   return bro_bro_error_new ("fs.notFound", params, NULL);
+}
+
+/* The hook, then the failure for (@op, @path): FALSE and @error set when the case makes it fail (the op isn't recorded). */
+static gboolean
+steps_tree_check (TestStepFakes *f, const char *op, const char *path, BroBroError **error)
+{
+  BroBroError *failure = NULL;
+  if (f->on_op)
+    f->on_op (f, op, path);
+  g_mutex_lock (&f->lock);
+  for (guint i = 0; i < f->fails->len && !failure; i++)
+    {
+      StepsFsFail *fail = f->fails->pdata[i];
+      if (strcmp (fail->op, op) == 0 && strcmp (fail->path, path) == 0)
+        failure = bro_bro_error_copy (fail->error);
+    }
+  g_mutex_unlock (&f->lock);
+  if (failure)
+    *error = failure;
+  return failure == NULL;
 }
 
 static gboolean
@@ -213,6 +254,8 @@ steps_fakes_write_atomically (BroFileSystem *fs, const char *path, GBytes *bytes
   TestStepFakes *f = TEST_STEP_FAKES (fs);
   g_autofree char *folder = g_path_get_dirname (path);
   gboolean ok;
+  if (!steps_tree_check (f, "write", path, error))
+    return FALSE;
   g_mutex_lock (&f->lock);
   if ((ok = g_hash_table_contains (f->folders, folder)))
     {
@@ -287,6 +330,8 @@ steps_fakes_remove (BroFileSystem *fs, const char *path, BroBroError **error)
 {
   TestStepFakes *f = TEST_STEP_FAKES (fs);
   gboolean ok = TRUE;
+  if (!steps_tree_check (f, "remove", path, error))
+    return FALSE;
   g_mutex_lock (&f->lock);
   if (!g_hash_table_remove (f->files, path))
     {
@@ -329,6 +374,8 @@ steps_fakes_sync_directory (BroFileSystem *fs, const char *path, BroBroError **e
 {
   TestStepFakes *f = TEST_STEP_FAKES (fs);
   gboolean ok;
+  if (!steps_tree_check (f, "syncDirectory", path, error))
+    return FALSE;
   g_mutex_lock (&f->lock);
   if ((ok = g_hash_table_contains (f->folders, path)))
     steps_tree_record (f, g_strconcat ("syncDirectory ", path, NULL));
@@ -343,6 +390,8 @@ steps_fakes_sync_file (BroFileSystem *fs, const char *path, BroBroError **error)
 {
   TestStepFakes *f = TEST_STEP_FAKES (fs);
   gboolean ok;
+  if (!steps_tree_check (f, "sync", path, error))
+    return FALSE;
   g_mutex_lock (&f->lock);
   if ((ok = g_hash_table_contains (f->files, path)))
     steps_tree_record (f, g_strconcat ("sync ", path, NULL));
@@ -350,6 +399,105 @@ steps_fakes_sync_file (BroFileSystem *fs, const char *path, BroBroError **error)
   if (!ok)
     *error = steps_tree_not_found (path);
   return ok;
+}
+
+/* ---- a file read a few bytes at a time (at most 16 a read; 'read' failures are checked on each read) ---- */
+
+#define TEST_TYPE_STEP_STREAM (test_step_stream_get_type ())
+G_DECLARE_FINAL_TYPE (TestStepStream, test_step_stream, TEST, STEP_STREAM, GObject)
+
+struct _TestStepStream {
+  GObject parent;
+  TestStepFakes *fakes; /* a reference */
+  char *path;
+  GBytes *bytes;
+  gsize at;
+  gboolean closed;
+};
+
+static GBytes *
+steps_stream_read (BroByteStream *stream, int max_bytes, BroBroError **error)
+{
+  TestStepStream *s = TEST_STEP_STREAM (stream);
+  TestStepFakes *f = s->fakes;
+  gsize n;
+  GBytes *piece;
+  if (!steps_tree_check (f, "read", s->path, error))
+    return NULL;
+  g_mutex_lock (&f->lock);
+  if (f->recording)
+    g_hash_table_replace (f->reads, g_strdup (s->path), GINT_TO_POINTER (GPOINTER_TO_INT (g_hash_table_lookup (f->reads, s->path)) + 1));
+  g_mutex_unlock (&f->lock);
+  n = MIN (MIN ((gsize) max_bytes, 16), g_bytes_get_size (s->bytes) - s->at);
+  piece = g_bytes_new_from_bytes (s->bytes, s->at, n);
+  s->at += n;
+  return piece;
+}
+
+static void
+steps_stream_close (BroByteStream *stream)
+{
+  TestStepStream *s = TEST_STEP_STREAM (stream);
+  g_mutex_lock (&s->fakes->lock);
+  if (!s->closed)
+    s->fakes->open_streams--;
+  s->closed = TRUE;
+  g_mutex_unlock (&s->fakes->lock);
+}
+
+static void
+steps_stream_iface (BroByteStreamInterface *i)
+{
+  i->read = steps_stream_read;
+  i->close = steps_stream_close;
+}
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (TestStepStream, test_step_stream, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_BYTE_STREAM, steps_stream_iface))
+
+static void
+test_step_stream_finalize (GObject *object)
+{
+  TestStepStream *s = TEST_STEP_STREAM (object);
+  g_object_unref (s->fakes);
+  g_free (s->path);
+  g_bytes_unref (s->bytes);
+  G_OBJECT_CLASS (test_step_stream_parent_class)->finalize (object);
+}
+
+static void
+test_step_stream_class_init (TestStepStreamClass *klass)
+{
+  G_OBJECT_CLASS (klass)->finalize = test_step_stream_finalize;
+}
+
+static void
+test_step_stream_init (TestStepStream *s)
+{
+}
+
+static BroByteStream *
+steps_fakes_open_for_reading (BroFileSystem *fs, const char *path, gboolean bypass_cache, BroBroError **error)
+{
+  TestStepFakes *f = TEST_STEP_FAKES (fs);
+  TestStepStream *s = NULL;
+  GBytes *disk, *cached;
+  if (!steps_tree_check (f, "open", path, error))
+    return NULL;
+  g_mutex_lock (&f->lock);
+  if ((disk = g_hash_table_lookup (f->files, path)))
+    {
+      steps_tree_record (f, g_strdup_printf ("open %s %s", path, bypass_cache ? "disk" : "cache"));
+      cached = bypass_cache ? NULL : g_hash_table_lookup (f->cached, path);
+      s = g_object_new (TEST_TYPE_STEP_STREAM, NULL);
+      s->fakes = g_object_ref (f);
+      s->path = g_strdup (path);
+      s->bytes = g_bytes_ref (cached ? cached : disk);
+      f->open_streams++;
+    }
+  g_mutex_unlock (&f->lock);
+  if (!s)
+    *error = steps_tree_not_found (path);
+  return s ? BRO_BYTE_STREAM (s) : NULL;
 }
 
 /* ---- the scripted makemkvcon runs (makemkv.runs) ---- */
@@ -746,6 +894,7 @@ fakes_listing (BroMakemkv *makemkv, const BroMakemkvSource *source, const BroMak
     if (strcmp (notice, names[i]) == 0)
       read->run->notice = bro_makemkv_notice_new (kinds[i], "");
   read->run->libre_drive = g_strdup (bro_json_value_get_string (bro_json_value_member (m, "libreDrive"), NULL));
+  read->run->version = g_strdup (bro_json_value_get_string (bro_json_value_member (m, "version"), NULL));
   read->run->transcript_problem = fakes_message (bro_json_value_member (m, "transcriptProblem"), BRO_SEVERITY_WARNING);
   read->run->settings_problem = fakes_message (bro_json_value_member (m, "settingsProblem"), BRO_SEVERITY_WARNING);
   read->run->isolation_warning = fakes_message (bro_json_value_member (m, "isolationWarning"), BRO_SEVERITY_WARNING);
@@ -939,6 +1088,7 @@ steps_fakes_fs_iface (BroFileSystemInterface *i)
   i->remove = steps_fakes_remove;
   i->sync_file = steps_fakes_sync_file;
   i->sync_directory = steps_fakes_sync_directory;
+  i->open_for_reading = steps_fakes_open_for_reading;
 }
 static void
 fakes_library_iface (BroLibraryPortInterface *i)
@@ -1001,6 +1151,9 @@ test_step_fakes_finalize (GObject *object)
   g_hash_table_unref (f->files);
   g_hash_table_unref (f->folders);
   g_ptr_array_unref (f->ops);
+  g_hash_table_unref (f->cached);
+  g_ptr_array_unref (f->fails);
+  g_hash_table_unref (f->reads);
   g_mutex_clear (&f->lock);
   G_OBJECT_CLASS (test_step_fakes_parent_class)->finalize (object);
 }
@@ -1022,6 +1175,9 @@ test_step_fakes_init (TestStepFakes *f)
   f->folders = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_hash_table_add (f->folders, g_strdup ("/"));
   f->ops = g_ptr_array_new_with_free_func (g_free);
+  f->cached = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_bytes_unref);
+  f->fails = g_ptr_array_new_with_free_func ((GDestroyNotify) steps_fs_fail_free);
+  f->reads = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 }
 
 /* ---- the cases ---- */
@@ -1220,7 +1376,7 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   g_autoptr (BroToolSet) tools = bro_tool_set_new (BRO_MAKEMKV (fakes), BRO_MATROSKA (fakes));
   g_autoptr (BroStepEnvironment) environment = bro_step_environment_new (tools, BRO_FILE_SYSTEM (fakes), NULL, BRO_DRIVE_CONTROL (fakes),
                                                                          BRO_LIBRARY_PORT (fakes), BRO_CATALOG_QUERIES (fakes), NULL,
-                                                                         BRO_DRIVE_LOOKUP (fakes), BRO_MAKEMKV_SETUP (fakes), "/data");
+                                                                         BRO_DRIVE_LOOKUP (fakes), BRO_MAKEMKV_SETUP (fakes), "/data", NULL, "test");
   g_autoptr (BroCancellationSource) cancel = bro_cancellation_source_new ();
   g_autofree char *directory = g_strconcat ("/data/jobs/", job_id.value, NULL);
   fakes->cancel = cancel;

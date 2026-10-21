@@ -176,7 +176,7 @@ public sealed class PipelineRunner
             _progress.Drop(jobId.Value); // a new step's first progress goes out at once
             live.Progress = new ProgressDto(kind, seq, live.Steps.Count, (double)seq / live.Steps.Count, null,
                 new BroMessage(MessageCode.JobOpStarting));
-            var snapshot = new JobSnapshot(jobId, live.Record.Request, plan with { Steps = live.Steps.ToList() }, outputs.ToList());
+            var snapshot = new JobSnapshot(jobId, live.Record.Request, plan with { Steps = live.Steps.ToList() }, outputs.ToList(), live.Record.StartedAt);
             Lease lease;
             try
             {
@@ -256,7 +256,7 @@ public sealed class PipelineRunner
         if (live.Record == null || !live.LogRead || _registry.Step(StepKind.Release) is not { } release) return;
         var jobId = live.Record.Id;
         if (!_scheduler.Leases().Drives.Any(h => h.Job == jobId)) return;
-        var snapshot = new JobSnapshot(jobId, live.Record.Request, live.Record.Plan, live.Outputs.ToList());
+        var snapshot = new JobSnapshot(jobId, live.Record.Request, live.Record.Plan, live.Outputs.ToList(), live.Record.StartedAt);
         var context = Context(live, snapshot, live.Seq, Silent.Instance) with { Progress = Silent.Instance, Finishing = decided };
         try
         {
@@ -379,7 +379,8 @@ public sealed class PipelineRunner
 
     StepContext Context(Live live, JobSnapshot snapshot, int seq, ICheckpointer checkpoint) => new(snapshot, live.Cancel.Token,
         new Reporter(this, live, seq), new Logger(this, live), new Decisions(this, live), _env.Tools, _env.Fs, _env.Clock, _env.Drives,
-        _env.Library, _env.Catalog, live.Config!, _env.DriveLookup, _env.MakemkvSetup, new Space(this, live), checkpoint, JobDirectory(live.Record.Id));
+        _env.Library, _env.Catalog, live.Config!, _env.DriveLookup, _env.MakemkvSetup, new Space(this, live), checkpoint, JobDirectory(live.Record.Id),
+        _env.Messages, _env.AppVersion);
 
     static readonly JsonValue Empty = JsonValue.Of(Array.Empty<(string, JsonValue)>());
 

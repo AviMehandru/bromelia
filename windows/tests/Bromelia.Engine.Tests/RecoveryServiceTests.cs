@@ -63,8 +63,9 @@ public sealed class RecoveryServiceTests
         }
     }
 
-    /// <summary>'&lt;code&gt;' then ' &lt;key&gt;=&lt;value&gt;' per param (strings as they are, other values as JSON).</summary>
-    sealed class Renderer : IMessageRenderer
+    /// <summary>'&lt;code&gt;' then ' &lt;key&gt;=&lt;value&gt;' per param (strings as they are, other values as JSON); the Seal
+    /// harness uses it too.</summary>
+    internal sealed class Renderer : IMessageRenderer
     {
         public string Render(BroMessage message) => MessageCode.Wire(message.Code) + string.Concat(message.Params.Members.Select(m =>
             " " + m.Key + "=" + (m.Value.AsString ?? Encoding.UTF8.GetString(JsonValue.EncodeCanonical(m.Value)))));

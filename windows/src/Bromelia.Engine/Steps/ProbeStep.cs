@@ -51,14 +51,14 @@ public sealed class ProbeStep : IStep
             if (request.Session is { } session)
             {
                 context.Log.Log(new BroMessage(MessageCode.DiscUsingOpenedListing, Severity.Warning, ("reason", noTitles.ToJson())));
-                return Done(new ProbeOutput(session.Listing, Fingerprint.Of(session.Listing), run.LibreDrive, true));
+                return Done(new ProbeOutput(session.Listing, Fingerprint.Of(session.Listing), run.LibreDrive, true, run.Version));
             }
             context.Log.Log(new BroMessage(MessageCode.DiscContinuingWithoutListing, Severity.Warning, ("reason", noTitles.ToJson())));
-            return Done(new ProbeOutput(null, null, run.LibreDrive, false));
+            return Done(new ProbeOutput(null, null, run.LibreDrive, false, run.Version));
         }
         context.Log.Log(new BroMessage(MessageCode.DiscFound, Severity.Info, ("count", JsonValue.Of(listing.Titles.Count)),
             ("name", JsonValue.Of(listing.Name))));
-        return Done(new ProbeOutput(listing, Fingerprint.Of(listing), run.LibreDrive, false));
+        return Done(new ProbeOutput(listing, Fingerprint.Of(listing), run.LibreDrive, false, run.Version));
     }
 
     static StepReport Done(ProbeOutput output) => StepReport.Done(ProbeOutput.Encode(output));

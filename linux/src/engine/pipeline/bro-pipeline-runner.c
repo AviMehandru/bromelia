@@ -126,6 +126,7 @@ typedef struct {
   GHashTable *checkpoints; /* BroStepKind → BroJsonValue (a reference): each kind's latest, from the rows, then this run's */
   BroLease *lease;
   BroInstant started;
+  gboolean first_start; /* the job's first step is starting: its snapshot shows the record as it was before (no started_at) */
   BroStepReport *report;
   BroBroError *thrown;
   BroDecided *decided; /* how it ended, between conclude and the record's save */
@@ -614,6 +615,8 @@ snapshot (Live *l)
       g_array_append_vals (plan->steps, l->steps->data, l->steps->len);
     }
   s = bro_job_snapshot_new (&l->id, bro_job_request_copy (l->record->request), plan);
+  s->has_started_at = l->record->has_started_at && !l->first_start;
+  s->started_at = s->has_started_at ? l->record->started_at : (BroInstant) { 0 };
   for (guint i = 0; i < l->outputs->len; i++)
     g_ptr_array_add (s->outputs, bro_step_output_copy (g_ptr_array_index (l->outputs, i)));
   return s;
@@ -818,6 +821,7 @@ started (Live *l)
   w->context = bro_step_context_new (snapshot (l), bro_cancellation_source_token (l->cancel), g_object_ref (BRO_PROGRESS_REPORTER (r)),
                                      g_object_ref (BRO_JOB_LOGGER (r)), g_object_ref (BRO_DECISION_PORT (r)),
                                      g_object_ref (BRO_SPACE_RESERVATIONS (r)), BRO_CHECKPOINTER (r), self->environment, l->config, directory);
+  l->first_start = FALSE;
   bro_engine_executor_worker (self->executor, step_work, step_done, w, work_free);
 }
 
@@ -842,6 +846,7 @@ acquired (BroLease *lease, const BroBroError *error, gpointer data)
   g_clear_pointer (&l->blocked_by, bro_bro_message_free);
   l->started = bro_engine_clock_now (self->clock);
   l->record->state = BRO_JOB_STATE_RUNNING;
+  l->first_start = !l->record->has_started_at;
   if (!l->record->has_started_at)
     {
       l->record->has_started_at = TRUE;
@@ -1301,7 +1306,8 @@ bro_pipeline_runner_new (BroEngineExecutor *executor, BroEventBus *bus, BroSched
   self->registry = g_object_ref (registry);
   self->environment = bro_step_environment_new (environment->tools, environment->fs, environment->clock, environment->drives,
                                                 environment->library, environment->catalog, environment->config, environment->drive_lookup,
-                                                environment->makemkv_setup, environment->data_directory);
+                                                environment->makemkv_setup, environment->data_directory, environment->messages,
+                                                environment->app_version);
   self->clock = g_object_ref (clock);
   self->coalescer = bro_coalescer_new (clock, interval, emit_progress, self, NULL);
   return self;

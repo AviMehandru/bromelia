@@ -72,6 +72,9 @@ public sealed class PipelineRunnerTests
                 data = JsonValue.Of((key, context.Config.Document[key] ?? JsonValue.Null.Instance));
             if (_b["echo"]?.AsString is { } echo)
                 data = context.Job.Outputs.Last(o => EnumWire.Name(o.Kind) == echo).Data;
+            if (_b["context"]?.AsBool == true)
+                data = JsonValue.Of(("startedAt", context.Job.StartedAt is { } started ? JsonValue.Of(Instant.Format(started)) : JsonValue.Null.Instance),
+                    ("appVersion", JsonValue.Of(context.AppVersion)), ("message", JsonValue.Of(context.Messages.Render(new BroMessage(MessageCode.JobCancelled)))));
             if (_b["ask"] is { } ask)
             {
                 var question = new DecisionDto(ask["id"]!.AsString!, Message(ask["question"]!),
@@ -154,7 +157,8 @@ public sealed class PipelineRunnerTests
                 _behaviour[kind] = given["steps"]?[EnumWire.Name(kind)] ?? EmptyObject;
                 steps.Add(new FakeStep(this, kind));
             }
-            var env = new StepEnvironment(new ToolSet(null!, null!), Fs, W.Clock, null!, null!, null!, Config, null!, null!, "/data");
+            var env = new StepEnvironment(new ToolSet(null!, null!), Fs, W.Clock, null!, null!, null!, Config, null!, null!, "/data",
+                new RecoveryServiceTests.Renderer(), "test");
             Runner = new PipelineRunner(W.Executor, Bus, Scheduler, Store, new StepRegistry(steps), env, W.EngineClock);
             Ids = new CountingIds(given["jobs"]!.AsArray!.Count);
             Service = new JobService(W.Executor, Bus, Store, Scheduler, Runner, W.EngineClock, Ids, Fs, "/data");

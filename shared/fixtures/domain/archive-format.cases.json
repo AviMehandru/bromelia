@@ -134,6 +134,23 @@
       }
     },
     {
+      "id": "two-spellings-of-a-name",
+      "given": {
+        "produced": [
+          "Café.mkv"
+        ],
+        "tree": [
+          "Café.mkv",
+          "Café.mkv"
+        ]
+      },
+      "expect": {
+        "relative": [
+          "Café.mkv"
+        ]
+      }
+    },
+    {
       "id": "own-sha256sums",
       "from": [
         "macos ArchiveCheckTests.verifiesArchives",

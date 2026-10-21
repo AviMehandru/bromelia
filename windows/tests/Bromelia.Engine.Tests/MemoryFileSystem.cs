@@ -6,7 +6,10 @@ namespace Bromelia.Engine.Tests;
 
 /// <summary>Files and folders in memory: what the engine's tests need of the FileSystem port. Thread-safe. While
 /// <see cref="Recording"/> is on, the calls that change something are written to <see cref="Ops"/> ('write', 'sync',
-/// 'remove', 'rename'); <see cref="Put"/> and <see cref="PutFolder"/> (a tool writing, a case's setup) aren't.</summary>
+/// 'remove', 'rename', 'syncDirectory', and 'open &lt;path&gt; disk|cache'); <see cref="Put"/> and <see cref="PutFolder"/> (a tool
+/// writing, a case's setup) aren't. <see cref="Cached"/> is what a read through the cache gives instead of what is on disk;
+/// <see cref="Fails"/> makes an operation on a path fail before it acts (open, read, sync, syncDirectory, write, remove);
+/// <see cref="OnOp"/> hears of each operation before it acts.</summary>
 internal sealed class MemoryFileSystem : IFileSystem
 {
     readonly object _lock = new();
@@ -18,6 +21,21 @@ internal sealed class MemoryFileSystem : IFileSystem
     public readonly Dictionary<string, VolumeInfo> Volumes = new();
     public readonly List<string> Ops = new();
     public bool Recording;
+    /// <summary>What a read that doesn't bypass the cache gives for these paths.</summary>
+    public readonly Dictionary<string, byte[]> Cached = new();
+    public readonly List<(string Op, string Path, BroError Error)> Fails = new();
+    public Action<string, string>? OnOp;
+    /// <summary>How many pieces of each file were read while <see cref="Recording"/> was on.</summary>
+    public readonly Dictionary<string, int> Reads = new();
+    /// <summary>The streams OpenForReading gave that aren't closed yet.</summary>
+    public int OpenStreams;
+
+    void Check(string op, string path)
+    {
+        OnOp?.Invoke(op, path);
+        foreach (var f in Fails)
+            if (f.Op == op && f.Path == path) throw new BroFailure(f.Error);
+    }
 
     static BroFailure NotFound(string path) => new(new BroError("fs.notFound", ("path", JsonValue.Of(path))));
 
@@ -70,6 +88,7 @@ internal sealed class MemoryFileSystem : IFileSystem
 
     public void WriteAtomically(string path, byte[] bytes, int mode)
     {
+        Check("write", path);
         lock (_lock)
         {
             var folder = path[..path.LastIndexOf('/')];
@@ -133,6 +152,7 @@ internal sealed class MemoryFileSystem : IFileSystem
 
     public void Remove(string path)
     {
+        Check("remove", path);
         lock (_lock)
         {
             if (_files.Remove(path))
@@ -150,6 +170,7 @@ internal sealed class MemoryFileSystem : IFileSystem
 
     public void SyncFile(string path)
     {
+        Check("sync", path);
         lock (_lock)
         {
             if (!_files.ContainsKey(path)) throw NotFound(path);
@@ -161,13 +182,62 @@ internal sealed class MemoryFileSystem : IFileSystem
     public void MoveToTrash(string path, string trash) => throw new NotSupportedException();
     public void SyncDirectory(string path)
     {
+        Check("syncDirectory", path);
         lock (_lock)
         {
             if (!_folders.Contains(path)) throw NotFound(path);
             Record("syncDirectory " + path);
         }
     }
-    public IByteStream OpenForReading(string path, bool bypassCache) => throw new NotSupportedException();
+    public IByteStream OpenForReading(string path, bool bypassCache)
+    {
+        Check("open", path);
+        lock (_lock)
+        {
+            if (!_files.TryGetValue(path, out var disk)) throw NotFound(path);
+            Record($"open {path} {(bypassCache ? "disk" : "cache")}");
+            OpenStreams++;
+            return new Stream(this, path, !bypassCache && Cached.TryGetValue(path, out var cached) ? cached : disk);
+        }
+    }
+
+    /// <summary>A file read a few bytes at a time ('read' fails are checked on each read).</summary>
+    sealed class Stream : IByteStream
+    {
+        readonly MemoryFileSystem _fs;
+        readonly string _path;
+        readonly byte[] _bytes;
+        int _at;
+        bool _closed;
+
+        public Stream(MemoryFileSystem fs, string path, byte[] bytes)
+        {
+            _fs = fs;
+            _path = path;
+            _bytes = bytes;
+        }
+
+        public byte[] Read(int maxBytes)
+        {
+            _fs.Check("read", _path);
+            lock (_fs._lock)
+                if (_fs.Recording) _fs.Reads[_path] = _fs.Reads.GetValueOrDefault(_path) + 1;
+            var n = Math.Min(Math.Min(maxBytes, 16), _bytes.Length - _at);
+            var piece = _bytes.Skip(_at).Take(n).ToArray();
+            _at += n;
+            return piece;
+        }
+
+        public void Close()
+        {
+            lock (_fs._lock)
+                if (!_closed)
+                {
+                    _closed = true;
+                    _fs.OpenStreams--;
+                }
+        }
+    }
 
     public VolumeInfo Volume(string path)
     {

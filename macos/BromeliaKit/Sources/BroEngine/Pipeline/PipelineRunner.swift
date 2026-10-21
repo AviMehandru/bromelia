@@ -171,7 +171,7 @@ public final class PipelineRunner {
                                      currentFraction: nil, operation: BroMessage(.jobOpStarting))
             var snapshotPlan = plan
             snapshotPlan.steps = l.steps
-            let snapshot = JobSnapshot(id: jobId, request: l.record.request, plan: snapshotPlan, outputs: l.outputs)
+            let snapshot = JobSnapshot(id: jobId, request: l.record.request, plan: snapshotPlan, outputs: l.outputs, startedAt: l.record.startedAt)
             let lease: Lease
             do throws(BroError) {
                 lease = try await scheduler.acquire(jobId, resources: step.resources(snapshot), onWait: { [unowned self] wait in self.onWait(l, wait) },
@@ -248,7 +248,7 @@ public final class PipelineRunner {
     private func releaseAtEnd(_ l: Live, _ decided: Decided) async {
         guard let record = l.loaded, l.logRead, let release = registry.step(.release),
               scheduler.leases().drives.contains(where: { $0.job == record.id }) else { return }
-        let snapshot = JobSnapshot(id: record.id, request: record.request, plan: record.plan, outputs: l.outputs)
+        let snapshot = JobSnapshot(id: record.id, request: record.request, plan: record.plan, outputs: l.outputs, startedAt: record.startedAt)
         var ending = makeContext(l, snapshot, l.seq, checkpoint: Silent())
         ending.progress = Silent()
         ending.finishing = decided
@@ -376,7 +376,8 @@ public final class PipelineRunner {
                     log: Logger(runner: self, live: l, executor: executor), decisions: Decisions(runner: self, live: l, executor: executor),
                     tools: environment.tools, fs: environment.fs, clock: environment.clock, drives: environment.drives, library: environment.library,
                     catalog: environment.catalog, config: l.config!, driveLookup: environment.driveLookup, makemkvSetup: environment.makemkvSetup,
-                    space: Space(runner: self, live: l, executor: executor), checkpoint: checkpoint, jobDirectory: jobDirectory(l.record.id))
+                    space: Space(runner: self, live: l, executor: executor), checkpoint: checkpoint, jobDirectory: jobDirectory(l.record.id),
+                    messages: environment.messages, appVersion: environment.appVersion)
     }
 
     static func unexpected(_ detail: String) -> BroError {

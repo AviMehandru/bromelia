@@ -10,7 +10,7 @@ ref_or_null (gpointer object)
 BroStepEnvironment *
 bro_step_environment_new (const BroToolSet *tools, BroFileSystem *fs, BroClock *clock, BroDriveControl *drives, BroLibraryPort *library,
                           BroCatalogQueries *catalog, BroConfigSource *config, BroDriveLookup *drive_lookup, BroMakemkvSetup *makemkv_setup,
-                          const char *data_directory)
+                          const char *data_directory, BroMessageRenderer *messages, const char *app_version)
 {
   BroStepEnvironment *e = g_new0 (BroStepEnvironment, 1);
   e->tools = tools ? bro_tool_set_copy (tools) : bro_tool_set_new (NULL, NULL);
@@ -23,6 +23,8 @@ bro_step_environment_new (const BroToolSet *tools, BroFileSystem *fs, BroClock *
   e->drive_lookup = ref_or_null (drive_lookup);
   e->makemkv_setup = ref_or_null (makemkv_setup);
   e->data_directory = g_strdup (data_directory);
+  e->messages = ref_or_null (messages);
+  e->app_version = g_strdup (app_version ? app_version : "");
   return e;
 }
 
@@ -41,5 +43,7 @@ bro_step_environment_free (BroStepEnvironment *environment)
   g_clear_object (&environment->drive_lookup);
   g_clear_object (&environment->makemkv_setup);
   g_free (environment->data_directory);
+  g_clear_object (&environment->messages);
+  g_free (environment->app_version);
   g_free (environment);
 }

@@ -11,6 +11,30 @@ bro_archive_files_is_own_file (const char *name)
          || g_regex_match (own_log, name, 0, NULL) || strcmp (name, "INCOMPLETE.txt") == 0 || strcmp (name, "READ ERRORS.txt") == 0;
 }
 
+BroId
+bro_archive_files_unit_id (const BroId *job_id)
+{
+  g_autofree char *text = g_strconcat ("bromelia-unit\n", job_id->value, NULL);
+  g_autoptr (GChecksum) sum = g_checksum_new (G_CHECKSUM_SHA256);
+  guint8 b[32];
+  gsize n = sizeof b;
+  BroId id = { { 0 } };
+  GString *out = g_string_new (NULL);
+  g_checksum_update (sum, (const guchar *) text, -1);
+  g_checksum_get_digest (sum, b, &n);
+  b[6] = (b[6] & 0x0F) | 0x80;
+  b[8] = (b[8] & 0x3F) | 0x80;
+  for (int i = 0; i < 16; i++)
+    {
+      if (i == 4 || i == 6 || i == 8 || i == 10)
+        g_string_append_c (out, '-');
+      g_string_append_printf (out, "%02x", b[i]);
+    }
+  g_strlcpy (id.value, out->str, sizeof id.value);
+  g_string_free (out, TRUE);
+  return id;
+}
+
 gboolean
 bro_archive_files_is_leftover (const char *name)
 {

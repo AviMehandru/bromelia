@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
+using Bromelia.Foundation;
 
 namespace Bromelia.Domain;
 
@@ -19,6 +22,18 @@ public static class ArchiveFiles
         || (name.StartsWith("bromelia", StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))
         || OwnLog.IsMatch(name)
         || name is "INCOMPLETE.txt" or "READ ERRORS.txt";
+
+    /// <summary>The unit a job archives: a UUID (version 8, RFC 9562) made from the first 16 bytes of SHA-256 of
+    /// "bromelia-unit\n&lt;jobId&gt;", so a rerun of Seal names the same files (bromelia-&lt;unit8&gt;.json) without any
+    /// randomness.</summary>
+    public static Id UnitId(Id jobId)
+    {
+        var b = SHA256.HashData(Encoding.UTF8.GetBytes("bromelia-unit\n" + jobId.Value));
+        b[6] = (byte)((b[6] & 0x0F) | 0x80);
+        b[8] = (byte)((b[8] & 0x3F) | 0x80);
+        var hex = Convert.ToHexString(b, 0, 16).ToLowerInvariant();
+        return new Id(hex[..8] + "-" + hex[8..12] + "-" + hex[12..16] + "-" + hex[16..20] + "-" + hex[20..32]);
+    }
 
     /// <summary>What a write that was stopped leaves behind: .&lt;name&gt;.bromelia-tmp-&lt;id&gt; (FileSystem.writeAtomically)
     /// and .&lt;name&gt;.part-&lt;id&gt; (DataImager). Startup recovery removes them (review L3-3).</summary>

@@ -20,6 +20,7 @@ bro_probe_output_free (BroProbeOutput *output)
   bro_listing_unref (output->listing);
   g_free (output->fingerprint);
   g_free (output->libre_drive);
+  g_free (output->makemkv_version);
   g_free (output);
 }
 
@@ -37,6 +38,7 @@ bro_probe_output_encode (const BroProbeOutput *output)
   bro_json_value_set (o, "fingerprint", string_or_null (output->fingerprint));
   bro_json_value_set (o, "libreDrive", string_or_null (output->libre_drive));
   bro_json_value_set (o, "fromSession", bro_json_value_new_bool (output->from_session));
+  bro_json_value_set (o, "makemkvVersion", string_or_null (output->makemkv_version));
   return o;
 }
 
@@ -45,7 +47,9 @@ bro_probe_output_decode (const BroJsonValue *json)
 {
   BroJsonValue *l = bro_json_value_member (json, "listing");
   g_autoptr (BroListing) listing = l && l->kind == BRO_JSON_VALUE_OBJECT ? bro_listing_decode (l) : NULL;
-  return bro_probe_output_new (listing, bro_json_value_get_string (bro_json_value_member (json, "fingerprint"), NULL),
-                               bro_json_value_get_string (bro_json_value_member (json, "libreDrive"), NULL),
-                               bro_json_value_get_bool (bro_json_value_member (json, "fromSession"), FALSE));
+  BroProbeOutput *o = bro_probe_output_new (listing, bro_json_value_get_string (bro_json_value_member (json, "fingerprint"), NULL),
+                                            bro_json_value_get_string (bro_json_value_member (json, "libreDrive"), NULL),
+                                            bro_json_value_get_bool (bro_json_value_member (json, "fromSession"), FALSE));
+  o->makemkv_version = g_strdup (bro_json_value_get_string (bro_json_value_member (json, "makemkvVersion"), NULL));
+  return o;
 }

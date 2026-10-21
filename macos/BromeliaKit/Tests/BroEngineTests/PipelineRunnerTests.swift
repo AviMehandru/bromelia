@@ -112,6 +112,10 @@ struct FakeStep: Step {
         var data = behaviour["output"] ?? .object([])
         if let key = behaviour["config"]?.string { data = .object([(key, context.config.document[key] ?? .null)]) }
         if let echo = behaviour["echo"]?.string { data = context.job.outputs.last { $0.kind.rawValue == echo }!.data }
+        if behaviour["context"]?.bool == true {
+            data = .object([("startedAt", context.job.startedAt.map { .string(Instant.format($0)) } ?? .null), ("appVersion", .string(context.appVersion)),
+                            ("message", .string(context.messages.render(BroMessage(.jobCancelled))))])
+        }
         if let ask = behaviour["ask"] {
             let question = DecisionDto(id: ask["id"]!.string!, question: FakeStep.message(ask["question"]!),
                                        answers: FakeStep.strings(ask["answers"]).map {
@@ -185,7 +189,8 @@ final class PipelineHarness {
         let unused = UnusedTools()
         if let document = given["config"] { config.document = document }
         let env = StepEnvironment(tools: ToolSet(makemkv: unused, matroska: unused), fs: fs, clock: world.clock, drives: unused, library: unused,
-                                  catalog: unused, config: config, driveLookup: unused, makemkvSetup: unused, dataDirectory: "/data")
+                                  catalog: unused, config: config, driveLookup: unused, makemkvSetup: unused, dataDirectory: "/data",
+                                  messages: Renderer(), appVersion: "test")
         runner = PipelineRunner(executor: world.executor, bus: bus, scheduler: scheduler, store: store, registry: StepRegistry(steps),
                                 environment: env, clock: world.engineClock)
         jobService = JobService(executor: world.executor, bus: bus, store: store, scheduler: scheduler, runner: runner, clock: world.engineClock,

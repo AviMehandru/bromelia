@@ -112,7 +112,9 @@ public enum JsonValue: Sendable, Equatable, CustomStringConvertible {
                 guard literal(":") else { return nil }
                 skipSpace()
                 guard let v = value(depth: depth + 1) else { return nil }
-                if let at = members.firstIndex(where: { $0.key == key }) { members[at].value = v } else { members.append((key, v)) }
+                // A repeated key replaces the value; keys compare byte for byte as in C# and C (== on String is canonical
+                // equivalence, which would merge an NFC and an NFD spelling of one name).
+                if let at = members.firstIndex(where: { $0.key.utf8.elementsEqual(key.utf8) }) { members[at].value = v } else { members.append((key, v)) }
                 skipSpace()
                 guard let c = peek() else { return nil }
                 i += 1

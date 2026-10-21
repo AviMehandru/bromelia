@@ -39,6 +39,8 @@ bro_step_context_new (BroJobSnapshot *job, BroCancellationToken *cancel, BroProg
   c->space = space;
   c->checkpoint = checkpoint;
   c->job_directory = g_strdup (job_directory);
+  c->messages = ref_or_null (environment->messages);
+  c->app_version = g_strdup (environment->app_version ? environment->app_version : "");
   return c;
 }
 
@@ -64,6 +66,8 @@ bro_step_context_free (BroStepContext *context)
   g_clear_object (&context->space);
   g_clear_object (&context->checkpoint);
   g_free (context->job_directory);
+  g_clear_object (&context->messages);
+  g_free (context->app_version);
   bro_decided_free (context->finishing);
   g_free (context);
 }

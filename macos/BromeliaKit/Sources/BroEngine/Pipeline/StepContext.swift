@@ -6,6 +6,8 @@ import BroPorts
 /// its plan and the outputs of the steps before this one. The configuration is the one the job started with. `checkpoint`
 /// keeps what a resumable step saved between its attempts. `finishing` is set only when the runner runs the Release step
 /// at the end of a job that stopped before it (the job's outcome): the step then decides whether the disc comes out.
+/// `messages` gives a message's text for what a step writes for people to read (Seal's log copy and notes; owner,
+/// 2026-10-19), and `appVersion` is the app's version for the archive record (owner, 2026-10-20).
 public struct StepContext: Sendable {
     public var job: JobSnapshot
     public var cancel: CancellationToken
@@ -24,12 +26,15 @@ public struct StepContext: Sendable {
     public var space: any SpaceReservations
     public var checkpoint: any Checkpointer
     public var jobDirectory: String
+    public var messages: any MessageRenderer
+    public var appVersion: String
     public var finishing: Decided?
 
     public init(job: JobSnapshot, cancel: CancellationToken, progress: any ProgressReporter, log: any JobLogger, decisions: any DecisionPort,
                 tools: ToolSet, fs: any FileSystem, clock: any Clock, drives: any DriveControl, library: any LibraryPort,
                 catalog: any CatalogQueries, config: Config, driveLookup: any DriveLookup, makemkvSetup: any MakemkvSetup,
-                space: any SpaceReservations, checkpoint: any Checkpointer, jobDirectory: String, finishing: Decided? = nil) {
+                space: any SpaceReservations, checkpoint: any Checkpointer, jobDirectory: String, messages: any MessageRenderer,
+                appVersion: String, finishing: Decided? = nil) {
         self.job = job
         self.cancel = cancel
         self.progress = progress
@@ -47,6 +52,8 @@ public struct StepContext: Sendable {
         self.space = space
         self.checkpoint = checkpoint
         self.jobDirectory = jobDirectory
+        self.messages = messages
+        self.appVersion = appVersion
         self.finishing = finishing
     }
 }

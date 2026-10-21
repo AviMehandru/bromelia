@@ -49,13 +49,15 @@ public struct ProbeStep: Step {
             if mode != .backup && mode != .backupDecrypted { return StepReport(notice: run.notice, error: noTitles.toError()) }
             if let session = request.session {
                 context.log.log(BroMessage(.discUsingOpenedListing, [("reason", noTitles.toJson())], severity: .warning))
-                return done(ProbeOutput(listing: session.listing, fingerprint: Fingerprint.of(session.listing), libreDrive: run.libreDrive, fromSession: true))
+                return done(ProbeOutput(listing: session.listing, fingerprint: Fingerprint.of(session.listing), libreDrive: run.libreDrive, fromSession: true,
+                                       makemkvVersion: run.version))
             }
             context.log.log(BroMessage(.discContinuingWithoutListing, [("reason", noTitles.toJson())], severity: .warning))
-            return done(ProbeOutput(listing: nil, fingerprint: nil, libreDrive: run.libreDrive, fromSession: false))
+            return done(ProbeOutput(listing: nil, fingerprint: nil, libreDrive: run.libreDrive, fromSession: false, makemkvVersion: run.version))
         }
         context.log.log(BroMessage(.discFound, [("count", .integer(Int64(listing.titles.count))), ("name", .string(listing.name))]))
-        return done(ProbeOutput(listing: listing, fingerprint: Fingerprint.of(listing), libreDrive: run.libreDrive, fromSession: false))
+        return done(ProbeOutput(listing: listing, fingerprint: Fingerprint.of(listing), libreDrive: run.libreDrive, fromSession: false,
+                                makemkvVersion: run.version))
     }
 
     private func done(_ output: ProbeOutput) -> StepReport { StepReport(data: ProbeOutput.encode(output)) }

@@ -191,7 +191,7 @@ private final class StepFakes: Makemkv, Matroska, DriveControl, DriveLookup, Mak
         default: nil
         }
         return ListingRun(listing: builder.build(),
-                          run: MakemkvRun(outcome: outcome, notice: notice, libreDrive: m["libreDrive"]?.string,
+                          run: MakemkvRun(outcome: outcome, notice: notice, libreDrive: m["libreDrive"]?.string, version: m["version"]?.string,
                                           transcriptProblem: message(m["transcriptProblem"], .warning), settingsProblem: message(m["settingsProblem"], .warning),
                                           isolationWarning: message(m["isolationWarning"], .warning)))
     }
@@ -379,7 +379,8 @@ struct VideoStepsTests {
         func contextOf(_ job: JobSnapshot) -> StepContext {
             StepContext(job: job, cancel: cancel.token, progress: fakes, log: fakes, decisions: fakes, tools: ToolSet(makemkv: fakes, matroska: fakes),
                         fs: fs, clock: ManualClock(), drives: fakes, library: fakes, catalog: fakes, config: config, driveLookup: fakes,
-                        makemkvSetup: fakes, space: fakes, checkpoint: fakes, jobDirectory: "/data/jobs/" + job.id.value, finishing: finishing)
+                        makemkvSetup: fakes, space: fakes, checkpoint: fakes, jobDirectory: "/data/jobs/" + job.id.value, messages: Renderer(),
+                        appVersion: "test", finishing: finishing)
         }
         if given["identify"]?.bool == true {
             let identified = try await IdentifyStep().run(contextOf(JobSnapshot(id: jobId, request: request, plan: nil, outputs: outputs)))

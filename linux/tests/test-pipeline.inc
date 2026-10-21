@@ -3,6 +3,7 @@
 #include "bro-job-log.h"
 #include "bro-job-planner.h"
 #include "bro-job-service.h"
+#include "bro-message-renderer.h"
 #include "bro-pipeline-runner.h"
 
 /* ---- jobs and steps in memory ---------------------------------------------------------------------------------- */
@@ -611,6 +612,25 @@ test_case_config_init (TestCaseConfig *self)
   self->document = bro_json_value_new_object ();
 }
 
+/* The environment's renderer: a message's code. */
+G_DECLARE_FINAL_TYPE (TestPipelineRenderer, test_pipeline_renderer, TEST, PIPELINE_RENDERER, GObject)
+
+struct _TestPipelineRenderer {
+  GObject parent;
+};
+
+static char *
+pipeline_render (BroMessageRenderer *r, const BroBroMessage *message)
+{
+  return g_strdup (bro_message_code_wire (message->code));
+}
+
+static void pipeline_renderer_iface (BroMessageRendererInterface *i) { i->render = pipeline_render; }
+G_DEFINE_FINAL_TYPE_WITH_CODE (TestPipelineRenderer, test_pipeline_renderer, G_TYPE_OBJECT,
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_MESSAGE_RENDERER, pipeline_renderer_iface))
+static void test_pipeline_renderer_class_init (TestPipelineRendererClass *k) {}
+static void test_pipeline_renderer_init (TestPipelineRenderer *r) {}
+
 G_DECLARE_FINAL_TYPE (TestFakeStep, test_fake_step, TEST, FAKE_STEP, GObject)
 
 struct _TestFakeStep {
@@ -741,6 +761,17 @@ fake_run (BroStep *s, const BroStepContext *ctx, BroBroError **error)
             break;
           }
       }
+  if (bro_json_value_get_bool (bro_json_value_member (b, "context"), FALSE))
+    {
+      g_autoptr (BroBroMessage) cancelled = bro_bro_message_new (BRO_MSG_JOB_CANCELLED, NULL, BRO_SEVERITY_INFO);
+      g_autofree char *started = ctx->job->has_started_at ? bro_instant_format (ctx->job->started_at) : NULL;
+      g_autofree char *message = bro_message_renderer_render (ctx->messages, cancelled);
+      bro_json_value_unref (data);
+      data = bro_json_value_new_object ();
+      bro_json_value_set (data, "startedAt", started ? bro_json_value_new_string (started) : bro_json_value_new_null ());
+      bro_json_value_set (data, "appVersion", bro_json_value_new_string (ctx->app_version));
+      bro_json_value_set (data, "message", bro_json_value_new_string (message));
+    }
   if ((v = bro_json_value_member (b, "ask")))
     {
       g_autoptr (BroDecisionDto) d = bro_decision_dto_new (bro_json_value_get_string (bro_json_value_member (v, "id"), ""),
@@ -1493,6 +1524,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
   g_autoptr (GPtrArray) steps = g_ptr_array_new_with_free_func (g_object_unref);
   g_autoptr (BroStepRegistry) registry = NULL;
   g_autoptr (BroStepEnvironment) environment = NULL;
+  g_autoptr (TestPipelineRenderer) renderer = g_object_new (test_pipeline_renderer_get_type (), NULL);
   BroSchedulerLimits limits = { 0, 1, 2, 2 };
   world_init (&h.w);
   gates_init (&h.gates);
@@ -1523,7 +1555,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
     }
   registry = bro_step_registry_new (steps);
   environment = bro_step_environment_new (NULL, BRO_FILE_SYSTEM (h.fs), BRO_CLOCK (h.w.clock), NULL, NULL, NULL,
-                                          BRO_CONFIG_SOURCE (h.config), NULL, NULL, "/data");
+                                          BRO_CONFIG_SOURCE (h.config), NULL, NULL, "/data", BRO_MESSAGE_RENDERER (renderer), "test");
   h.runner = bro_pipeline_runner_new (h.w.executor, h.bus, h.scheduler, BRO_STORE (h.store), registry, environment, h.w.engine_clock);
   h.ids = g_object_new (TEST_TYPE_IDS, NULL);
   h.ids->n = (gint) bro_json_value_length (jobs);

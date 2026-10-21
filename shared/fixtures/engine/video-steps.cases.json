@@ -1,5 +1,5 @@
 {
-  "description": "The first video-disc steps (plan §20.1) run alone, each with a StepContext the harness builds: AwaitMedia, Probe, Reconcile, Identify (its phase 3 form: no lookups) and Release. Given: step (its kind); request (JobRequest: kind, title, automatic, driveId, mediaGeneration, sessionId, options, details; details as DiscRequest.encode writes them); outputs [{kind, data}] (the earlier steps'); config (the configuration document, through ConfigCodec.decode; default {\"version\": 3}); drives {driveId: DriveLocation {makemkvIndex, device, configId, generation, label, flags}} (what DriveLookup.find gives; a drive not listed isn't connected); mount (what DriveControl.waitForMount returns: a path or null); eject (absent: it works; {code, params}: it fails with that error); makemkv (the fake Makemkv.listing: listing (a generated listing, shared/scenarios/README.md) or robot [lines], each parsed with Robot.parseLine, given to the step's sink in order and built into the listing with ListingBuilder; outcome {status (success), error {code, params}, exitCode (0)}; notice (keyExpired, evaluationNotStarted, versionTooOld, libreDriveRequired); libreDrive; settingsProblem / transcriptProblem / isolationWarning {code, params}). The fake MakemkvSetup gives an empty invocation. Calls are recorded in order: 'waitForMount <device> <seconds>', 'eject <device>', 'invocation <selectionOverride or -> minLength=<the profile's makemkv.minLengthSeconds or null>', 'listing <disc:N | iso:path | file:path>'. Expect: resources {drives} (Step.resources of the job); error {code, params} (absent: the step must not fail; a failure may be thrown or reported); notice (the report's MakeMKV notice); skipped (default false); data (the report's data; each key given must match, objects compared the same way, arrays element by element with the same length); log [the job log in order: a code, or {code, params, severity} to compare those too]; calls [exactly]; progress [[fraction, operation code, current item when there is one]] (every report, in order).",
+  "description": "The first video-disc steps (plan §20.1) run alone, each with a StepContext the harness builds: AwaitMedia, Probe, Reconcile, Identify (its phase 3 form: no lookups) and Release. Given: step (its kind); request (JobRequest: kind, title, automatic, driveId, mediaGeneration, sessionId, options, details; details as DiscRequest.encode writes them); outputs [{kind, data}] (the earlier steps'); config (the configuration document, through ConfigCodec.decode; default {\"version\": 3}); drives {driveId: DriveLocation {makemkvIndex, device, configId, generation, label, flags}} (what DriveLookup.find gives; a drive not listed isn't connected); mount (what DriveControl.waitForMount returns: a path or null); eject (absent: it works; {code, params}: it fails with that error); makemkv (the fake Makemkv.listing: listing (a generated listing, shared/scenarios/README.md) or robot [lines], each parsed with Robot.parseLine, given to the step's sink in order and built into the listing with ListingBuilder; outcome {status (success), error {code, params}, exitCode (0)}; notice (keyExpired, evaluationNotStarted, versionTooOld, libreDriveRequired); libreDrive; version (MakemkvRun.version); settingsProblem / transcriptProblem / isolationWarning {code, params}). The fake MakemkvSetup gives an empty invocation. Calls are recorded in order: 'waitForMount <device> <seconds>', 'eject <device>', 'invocation <selectionOverride or -> minLength=<the profile's makemkv.minLengthSeconds or null>', 'listing <disc:N | iso:path | file:path>'. Expect: resources {drives} (Step.resources of the job); error {code, params} (absent: the step must not fail; a failure may be thrown or reported); notice (the report's MakeMKV notice); skipped (default false); data (the report's data; each key given must match, objects compared the same way, arrays element by element with the same length); log [the job log in order: a code, or {code, params, severity} to compare those too]; calls [exactly]; progress [[fraction, operation code, current item when there is one]] (every report, in order).",
   "functions": [
     "Step.run",
     "Step.resources",
@@ -1231,6 +1231,48 @@
           },
           "disc.found"
         ]
+      }
+    },
+    {
+      "id": "probe-keeps-makemkv-s-version",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef"
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          },
+          "version": "MakeMKV v1.18.1 darwin(arm64-release)"
+        }
+      },
+      "expect": {
+        "data": {
+          "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+          "fromSession": false
+        }
       }
     },
     {

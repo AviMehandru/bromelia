@@ -294,6 +294,9 @@ typedef enum {
   BRO_MSG_ARCHIVE_RECORD_WRITTEN, /* archive.recordWritten */
   BRO_MSG_ARCHIVE_RENAME_FAILED, /* archive.renameFailed */
   BRO_MSG_ARCHIVE_SYNCED, /* archive.synced */
+  BRO_MSG_ARCHIVE_FILE_MISSING, /* archive.fileMissing */
+  BRO_MSG_ARCHIVE_UNLISTED, /* archive.unlisted */
+  BRO_MSG_ARCHIVE_CHECKSUMS_REQUIRED, /* archive.checksumsRequired */
   BRO_MSG_ARCHIVE_NOTE_TITLE, /* archive.note.title */
   BRO_MSG_ARCHIVE_NOTE_NOT_FINISHED, /* archive.note.notFinished */
   BRO_MSG_ARCHIVE_NOTE_READ_ERRORS, /* archive.note.readErrors */

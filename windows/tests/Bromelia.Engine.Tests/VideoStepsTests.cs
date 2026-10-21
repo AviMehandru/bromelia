@@ -206,7 +206,7 @@ public sealed class VideoStepsTests
                 new List<string>());
             BroMessage? Problem(string key) => m[key] is { } p ? MessageOf(p, Severity.Warning) : null;
             return Task.FromResult(new ListingRun(builder.Build(),
-                new MakemkvRun(outcome, NoticeOf(m["notice"]?.AsString), m["libreDrive"]?.AsString, null, Problem("transcriptProblem"), Problem("settingsProblem"),
+                new MakemkvRun(outcome, NoticeOf(m["notice"]?.AsString), m["libreDrive"]?.AsString, m["version"]?.AsString, Problem("transcriptProblem"), Problem("settingsProblem"),
                     Problem("isolationWarning"))));
         }
 
@@ -373,7 +373,7 @@ public sealed class VideoStepsTests
         var cancel = new CancellationSource();
         fakes.Cancel = cancel;
         StepContext ContextOf(JobSnapshot job) => new(job, cancel.Token, fakes, fakes, fakes, new ToolSet(fakes, fakes), fs, null!, fakes, fakes, fakes,
-            config, fakes, fakes, fakes, fakes, "/data/jobs/" + job.Id.Value, finishing);
+            config, fakes, fakes, fakes, fakes, "/data/jobs/" + job.Id.Value, new RecoveryServiceTests.Renderer(), "test", finishing);
         if (given["identify"]?.AsBool == true)
         {
             var identified = Run(Steps[StepKind.Identify], ContextOf(new JobSnapshot(jobId, request, null, outputs.ToList())));

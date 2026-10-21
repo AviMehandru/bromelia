@@ -1957,6 +1957,25 @@
       },
       "today": "new: SealStep (invariant I3, backlog 4)"
     },
+    "archive.fileMissing": {
+      "kind": "error",
+      "params": {
+        "file": "string"
+      },
+      "today": "new: SealStep (review L3-1: a produced file that is gone fails the job instead of leaving the unit incomplete)"
+    },
+    "archive.unlisted": {
+      "kind": "error",
+      "params": {
+        "file": "string"
+      },
+      "today": "new: SealStep (owner, 2026-10-20: nothing unhashed is ever committed)"
+    },
+    "archive.checksumsRequired": {
+      "kind": "log",
+      "severity": "warning",
+      "today": "new: SealStep (owner, 2026-10-20: SHA256SUMS and the record are always written; archive.checksums: false is ignored)"
+    },
     "archive.note.title": {
       "kind": "note",
       "params": {

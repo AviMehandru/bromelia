@@ -2,6 +2,8 @@
  * metadata, and which files the produced items are. */
 #pragma once
 
+#include "bro-id.h"
+
 #include <glib.h>
 
 G_BEGIN_DECLS
@@ -10,6 +12,10 @@ G_BEGIN_DECLS
  * (bromelia*.json), the logs (bromelia-log, makemkv-log, makemkv-debug-log; with a unit's short id in v3:
  * bromelia-1a2b3c4d-log.txt …), and the INCOMPLETE / READ ERRORS notes. */
 gboolean bro_archive_files_is_own_file (const char *name);
+
+/* The unit a job archives: a UUID (version 8, RFC 9562) made from the first 16 bytes of SHA-256 of
+ * "bromelia-unit\n<jobId>", so a rerun of Seal names the same files (bromelia-<unit8>.json) without any randomness. */
+BroId bro_archive_files_unit_id (const BroId *job_id);
 
 /* What a write that was stopped leaves behind: .<name>.bromelia-tmp-<id> (FileSystem.writeAtomically) and
  * .<name>.part-<id> (DataImager). Startup recovery removes them (review L3-3). */

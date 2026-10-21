@@ -23,7 +23,9 @@ struct ArchiveFormatTests {
             } else if let text = given["text"]?.string {
                 try Fixtures.same(expect["entries"], entriesJson(Sha256Sums.parse(text)), "entries")
             } else if let produced = given["produced"]?.array {
-                try Fixtures.same(expect["relative"], strings(ArchiveFiles.expand(produced.compactMap(\.string), tree: (given["tree"]?.array ?? []).compactMap(\.string))), "relative")
+                try Fixtures.same((expect["relative"]?.array ?? []).compactMap { $0.string.map { Array($0.utf8) } }, // bytes: == on String is canonical
+                                  ArchiveFiles.expand(produced.compactMap(\.string), tree: (given["tree"]?.array ?? []).compactMap(\.string)).map { Array($0.utf8) },
+                                  "relative")
             } else if let name = given["name"]?.string {
                 if let own = expect["isOwnFile"] {
                     try Fixtures.same(own.bool, ArchiveFiles.isOwnFile(name), "own file")

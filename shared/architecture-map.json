@@ -4575,6 +4575,18 @@
           "swift": "ArchiveFiles.isLeftover(_:)",
           "cs": "ArchiveFiles.IsLeftover",
           "c": "bro_archive_files_is_leftover"
+        },
+        {
+          "name": "ArchiveFiles.unitId",
+          "params": [
+            "jobId"
+          ],
+          "returns": "Id",
+          "doc": "The unit a job archives: a UUID v8 from SHA-256 of 'bromelia-unit\\n<jobId>', so a rerun of Seal names the same files without randomness.",
+          "phase": 3,
+          "swift": "ArchiveFiles.unitId(_:)",
+          "cs": "ArchiveFiles.UnitId",
+          "c": "bro_archive_files_unit_id"
         }
       ]
     },
@@ -6307,22 +6319,6 @@
           }
         },
         {
-          "name": "JobSnapshot",
-          "kind": "struct",
-          "swift": {
-            "name": "JobSnapshot",
-            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/JobSnapshot.swift"
-          },
-          "cs": {
-            "name": "JobSnapshot",
-            "file": "windows/src/Bromelia.Domain/Jobs/JobSnapshot.cs"
-          },
-          "c": {
-            "name": "BroJobSnapshot",
-            "file": "linux/src/domain/jobs/bro-job-snapshot.h"
-          }
-        },
-        {
           "name": "ResourceSet",
           "kind": "struct",
           "swift": {
@@ -6974,6 +6970,30 @@
           "c": {
             "name": "BroStepOutput",
             "file": "linux/src/domain/jobs/bro-step-output.h"
+          }
+        },
+        {
+          "name": "JobSnapshot",
+          "kind": "struct",
+          "fields": [
+            "id",
+            "request",
+            "plan",
+            "outputs",
+            "startedAt"
+          ],
+          "doc": "An immutable view of a job that a step gets in its context (plan §12.2): its request, its plan, the outputs of the steps before it, and when it first started running (owner, 2026-10-20: the archive record's job.startedAt).",
+          "swift": {
+            "name": "JobSnapshot",
+            "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/JobSnapshot.swift"
+          },
+          "cs": {
+            "name": "JobSnapshot",
+            "file": "windows/src/Bromelia.Domain/Jobs/JobSnapshot.cs"
+          },
+          "c": {
+            "name": "BroJobSnapshot",
+            "file": "linux/src/domain/jobs/bro-job-snapshot.h"
           }
         }
       ],
@@ -13967,35 +13987,6 @@
           }
         },
         {
-          "name": "StepEnvironment",
-          "kind": "struct",
-          "fields": [
-            "tools",
-            "fs",
-            "clock",
-            "drives",
-            "library",
-            "catalog",
-            "config",
-            "driveLookup",
-            "makemkvSetup",
-            "dataDirectory"
-          ],
-          "doc": "The parts of a StepContext that every job shares; the composition root builds it.",
-          "swift": {
-            "name": "StepEnvironment",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepEnvironment.swift"
-          },
-          "cs": {
-            "name": "StepEnvironment",
-            "file": "windows/src/Bromelia.Engine/Pipeline/StepEnvironment.cs"
-          },
-          "c": {
-            "name": "BroStepEnvironment",
-            "file": "linux/src/engine/pipeline/bro-step-environment.h"
-          }
-        },
-        {
           "name": "ToolSet",
           "kind": "struct",
           "fields": [
@@ -14357,6 +14348,37 @@
           }
         },
         {
+          "name": "StepEnvironment",
+          "kind": "struct",
+          "fields": [
+            "tools",
+            "fs",
+            "clock",
+            "drives",
+            "library",
+            "catalog",
+            "config",
+            "driveLookup",
+            "makemkvSetup",
+            "dataDirectory",
+            "messages",
+            "appVersion"
+          ],
+          "doc": "The parts of a StepContext that every job shares; the composition root builds it (messages: MessageTextRenderer over the configured language; appVersion: the app's version).",
+          "swift": {
+            "name": "StepEnvironment",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepEnvironment.swift"
+          },
+          "cs": {
+            "name": "StepEnvironment",
+            "file": "windows/src/Bromelia.Engine/Pipeline/StepEnvironment.cs"
+          },
+          "c": {
+            "name": "BroStepEnvironment",
+            "file": "linux/src/engine/pipeline/bro-step-environment.h"
+          }
+        },
+        {
           "name": "StepContext",
           "kind": "struct",
           "fields": [
@@ -14377,9 +14399,11 @@
             "space",
             "checkpoint",
             "jobDirectory",
+            "messages",
+            "appVersion",
             "finishing"
           ],
-          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with; checkpoint keeps what a resumable step saved between attempts; finishing is the job's outcome when the runner runs Release at the end of a job that stopped before it.",
+          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with; checkpoint keeps what a resumable step saved between attempts; messages renders what a step writes for people to read (owner, 2026-10-19); appVersion goes into archive records (owner, 2026-10-20); finishing is the job's outcome when the runner runs Release at the end of a job that stopped before it.",
           "swift": {
             "name": "StepContext",
             "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
@@ -14874,29 +14898,6 @@
           }
         },
         {
-          "name": "ProbeOutput",
-          "kind": "struct",
-          "fields": [
-            "listing",
-            "fingerprint",
-            "libreDrive",
-            "fromSession"
-          ],
-          "doc": "What ProbeStep found.",
-          "swift": {
-            "name": "ProbeOutput",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ProbeOutput.swift"
-          },
-          "cs": {
-            "name": "ProbeOutput",
-            "file": "windows/src/Bromelia.Engine/Steps/ProbeOutput.cs"
-          },
-          "c": {
-            "name": "BroProbeOutput",
-            "file": "linux/src/engine/steps/bro-probe-output.h"
-          }
-        },
-        {
           "name": "ReconcileOutput",
           "kind": "struct",
           "fields": [
@@ -15177,6 +15178,140 @@
           "c": {
             "name": "BroVerifyRipsStep",
             "file": "linux/src/engine/steps/bro-verify-rips-step.h"
+          }
+        },
+        {
+          "name": "ProbeOutput",
+          "kind": "struct",
+          "fields": [
+            "listing",
+            "fingerprint",
+            "libreDrive",
+            "fromSession",
+            "makemkvVersion"
+          ],
+          "doc": "What ProbeStep found, and MakeMKV's version line (for the archive record).",
+          "swift": {
+            "name": "ProbeOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/ProbeOutput.swift"
+          },
+          "cs": {
+            "name": "ProbeOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/ProbeOutput.cs"
+          },
+          "c": {
+            "name": "BroProbeOutput",
+            "file": "linux/src/engine/steps/bro-probe-output.h"
+          }
+        },
+        {
+          "name": "SealStep",
+          "kind": "class",
+          "doc": "Step 13 (§22.3 steps 1-3): the produced items by name (Name's, else Acquire's), each synced, then hashed read back from disk; SHA256SUMS, the logs, the READ ERRORS note and the record written atomically into staging; read errors tag the unit READ ERRORS. Idempotent: a rerun trusts nothing and writes the same files.",
+          "phase": 3,
+          "swift": {
+            "name": "SealStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/SealStep.swift"
+          },
+          "cs": {
+            "name": "SealStep",
+            "file": "windows/src/Bromelia.Engine/Steps/SealStep.cs"
+          },
+          "c": {
+            "name": "BroSealStep",
+            "file": "linux/src/engine/steps/bro-seal-step.h"
+          }
+        },
+        {
+          "name": "SealOutput",
+          "kind": "struct",
+          "fields": [
+            "unitId",
+            "status",
+            "files",
+            "record",
+            "logs",
+            "note",
+            "tag"
+          ],
+          "doc": "What Seal wrote, for Commit: the unit's id, success or errors, the files SHA256SUMS lists (unit_files rows), the record's name, the logs, the note, the quarantine tag (null: a finished archive).",
+          "phase": 3,
+          "swift": {
+            "name": "SealOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/SealOutput.swift"
+          },
+          "cs": {
+            "name": "SealOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/SealOutput.cs"
+          },
+          "c": {
+            "name": "BroSealOutput",
+            "file": "linux/src/engine/steps/bro-seal-output.h"
+          }
+        },
+        {
+          "name": "SealRecord",
+          "kind": "namespace",
+          "doc": "The version 3 archive record (archive-record-3.json) built from the job's outputs, with messages as codes and text.",
+          "phase": 3,
+          "swift": {
+            "name": "SealRecord",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/SealRecord.swift"
+          },
+          "cs": {
+            "name": "SealRecord",
+            "file": "windows/src/Bromelia.Engine/Steps/SealRecord.cs"
+          },
+          "c": {
+            "name": "BroSealRecord",
+            "file": "linux/src/engine/steps/bro-seal-record.h"
+          }
+        },
+        {
+          "name": "NameOutput",
+          "kind": "struct",
+          "fields": [
+            "folder",
+            "name",
+            "merge",
+            "files"
+          ],
+          "doc": "What Name decided (session F fills it): the unit's folder in the library, its name (for _Quarantine/<name> [<tag>]), whether the folder is shared, and every produced item by its name in staging.",
+          "phase": 3,
+          "swift": {
+            "name": "NameOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/NameOutput.swift"
+          },
+          "cs": {
+            "name": "NameOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/NameOutput.cs"
+          },
+          "c": {
+            "name": "BroNameOutput",
+            "file": "linux/src/engine/steps/bro-name-output.h"
+          }
+        },
+        {
+          "name": "NamedFile",
+          "kind": "struct",
+          "fields": [
+            "path",
+            "role",
+            "title"
+          ],
+          "doc": "A produced item by its final name, relative to staging (the unit's folder), with its role in the record and its title.",
+          "phase": 3,
+          "swift": {
+            "name": "NamedFile",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/NamedFile.swift"
+          },
+          "cs": {
+            "name": "NamedFile",
+            "file": "windows/src/Bromelia.Engine/Steps/NamedFile.cs"
+          },
+          "c": {
+            "name": "BroNamedFile",
+            "file": "linux/src/engine/steps/bro-named-file.h"
           }
         }
       ],
@@ -15570,6 +15705,142 @@
           "swift": "BackupCheck.problem(_:path:)",
           "cs": "BackupCheck.Problem",
           "c": "bro_backup_check_problem"
+        },
+        {
+          "name": "SealOutput.encode",
+          "params": [
+            "output"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "SealOutput.encode(_:)",
+          "cs": "SealOutput.Encode",
+          "c": "bro_seal_output_encode"
+        },
+        {
+          "name": "SealOutput.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "SealOutput",
+          "phase": 3,
+          "swift": "SealOutput.decode(_:)",
+          "cs": "SealOutput.Decode",
+          "c": "bro_seal_output_decode"
+        },
+        {
+          "name": "SealOutput.of",
+          "params": [
+            "job"
+          ],
+          "returns": "SealOutput?",
+          "doc": "The job's Seal output; null when Seal hasn't run.",
+          "phase": 3,
+          "swift": "SealOutput.of(_:)",
+          "cs": "SealOutput.Of",
+          "c": "bro_seal_output_of"
+        },
+        {
+          "name": "SealRecord.build",
+          "params": [
+            "job",
+            "plan",
+            "acquired",
+            "unitId",
+            "files",
+            "log",
+            "logs",
+            "finishedAt",
+            "appVersion",
+            "messages"
+          ],
+          "returns": "JsonValue",
+          "doc": "The record's document: status, disc, acquisition, job, titles, files, attempts, counts, problems, logs.",
+          "phase": 3,
+          "swift": "SealRecord.build(_:plan:acquired:unitId:files:log:logs:finishedAt:appVersion:messages:)",
+          "cs": "SealRecord.Build",
+          "c": "bro_seal_record_build"
+        },
+        {
+          "name": "SealStep.logText",
+          "params": [
+            "lines",
+            "messages"
+          ],
+          "returns": "String",
+          "doc": "The job's log as text: per line its UTC time, [DEBUG]/[WARNING]/[ERROR] unless info, and the rendered message.",
+          "phase": 3,
+          "swift": "SealStep.logText(_:messages:)",
+          "cs": "SealStep.LogText",
+          "c": "bro_seal_step_log_text"
+        },
+        {
+          "name": "NameOutput.encode",
+          "params": [
+            "output"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "NameOutput.encode(_:)",
+          "cs": "NameOutput.Encode",
+          "c": "bro_name_output_encode"
+        },
+        {
+          "name": "NameOutput.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "NameOutput",
+          "phase": 3,
+          "swift": "NameOutput.decode(_:)",
+          "cs": "NameOutput.Decode",
+          "c": "bro_name_output_decode"
+        },
+        {
+          "name": "NameOutput.of",
+          "params": [
+            "job"
+          ],
+          "returns": "NameOutput?",
+          "doc": "The job's Name output; null when Name hasn't run.",
+          "phase": 3,
+          "swift": "NameOutput.of(_:)",
+          "cs": "NameOutput.Of",
+          "c": "bro_name_output_of"
+        },
+        {
+          "name": "NameOutput.fromAcquire",
+          "params": [
+            "acquired"
+          ],
+          "returns": "[NamedFile]",
+          "doc": "The produced items as Acquire left them when no Name step ran: titles' files (title), others (no role), the backup (backup), disc-info.json (discInfo).",
+          "phase": 3,
+          "swift": "NameOutput.fromAcquire(_:)",
+          "cs": "NameOutput.FromAcquire",
+          "c": "bro_name_output_from_acquire"
+        },
+        {
+          "name": "NamedFile.encode",
+          "params": [
+            "file"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "NamedFile.encode(_:)",
+          "cs": "NamedFile.Encode",
+          "c": "bro_named_file_encode"
+        },
+        {
+          "name": "NamedFile.decode",
+          "params": [
+            "json"
+          ],
+          "returns": "NamedFile",
+          "phase": 3,
+          "swift": "NamedFile.decode(_:)",
+          "cs": "NamedFile.Decode",
+          "c": "bro_named_file_decode"
         }
       ]
     },

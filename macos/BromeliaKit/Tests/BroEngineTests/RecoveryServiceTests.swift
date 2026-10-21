@@ -48,8 +48,9 @@ private final class Isolation: SettingsIsolation, @unchecked Sendable {
     }
 }
 
-/// '<code>' then ' <key>=<value>' per param (strings as they are, other values as JSON).
-private struct Renderer: MessageRenderer {
+/// '<code>' then ' <key>=<value>' per param (strings as they are, other values as JSON); the pipeline and step harnesses
+/// use it too.
+struct Renderer: MessageRenderer {
     func render(_ message: BroMessage) -> String {
         message.code.rawValue + message.params.map { p in
             " " + p.key + "=" + (p.value.string ?? String(decoding: JsonValue.encodeCanonical(p.value), as: UTF8.self))

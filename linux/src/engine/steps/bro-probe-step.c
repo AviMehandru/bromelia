@@ -51,10 +51,11 @@ describe (const BroMakemkvSource *source)
 }
 
 static BroStepReport *
-done (BroListing *listing, const char *libre_drive, gboolean from_session)
+done (BroListing *listing, const BroMakemkvRun *run, gboolean from_session)
 {
   g_autofree char *fingerprint = listing ? bro_fingerprint_of (listing) : NULL;
-  g_autoptr (BroProbeOutput) output = bro_probe_output_new (listing, fingerprint, libre_drive, from_session);
+  g_autoptr (BroProbeOutput) output = bro_probe_output_new (listing, fingerprint, run->libre_drive, from_session);
+  output->makemkv_version = g_strdup (run->version);
   return bro_step_report_new (bro_probe_output_encode (output));
 }
 
@@ -114,15 +115,15 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
     }
     if (request->session) {
       _bro_step_log (context, BRO_MSG_DISC_USING_OPENED_LISTING, _bro_param ("reason", bro_bro_message_to_json (no_titles)), BRO_SEVERITY_WARNING);
-      return done (request->session->listing, run->libre_drive, TRUE);
+      return done (request->session->listing, run, TRUE);
     }
     _bro_step_log (context, BRO_MSG_DISC_CONTINUING_WITHOUT_LISTING, _bro_param ("reason", bro_bro_message_to_json (no_titles)), BRO_SEVERITY_WARNING);
-    return done (NULL, run->libre_drive, FALSE);
+    return done (NULL, run, FALSE);
   }
   BroJsonValue *found = _bro_param ("count", bro_json_value_new_integer (listing->titles->len));
   bro_json_value_set (found, "name", bro_json_value_new_string (listing->name));
   _bro_step_log (context, BRO_MSG_DISC_FOUND, found, BRO_SEVERITY_INFO);
-  return done (listing, run->libre_drive, FALSE);
+  return done (listing, run, FALSE);
 }
 
 static void
