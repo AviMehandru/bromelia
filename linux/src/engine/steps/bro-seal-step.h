@@ -1,7 +1,8 @@
 /* bro-seal-step.h: BroSealStep: Step 13 (plan §20.1; §22.3 steps 1–3): makes the job's staging folder a sealed unit, so
  * the commit only moves it. What it seals is the produced items by name (review L3-1: the lists, never a count): Name's
- * output, else Acquire's names as they are (bro_name_output_from_acquire). An item that isn't in staging fails with
- * archive.fileMissing, a visible file no step made with archive.unlisted (owner, 2026-10-20), and leftovers of a stopped
+ * output, else Acquire's names as they are (bro_name_output_from_acquire). An item that isn't in staging, or holds no
+ * file (an empty folder, a hidden path, a path through '..'; owner, 2026-10-21), fails with archive.fileMissing before
+ * anything is touched, a visible file no step made with archive.unlisted (owner, 2026-10-20), and leftovers of a stopped
  * write are removed. Then, in order:
  * 1. every file is synced to disk, then every folder from staging down to each file (archive.synced): a folder that
  *    holds only folders (a backup's) is synced too, so each entry on the way to a file is durable;

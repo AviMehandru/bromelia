@@ -11,7 +11,8 @@ namespace Bromelia.Engine;
 
 /// <summary>Step 13 (plan §20.1; §22.3 steps 1–3): makes the job's staging folder a sealed unit, so the commit only
 /// moves it. What it seals is the produced items by name (review L3-1: the lists, never a count): Name's output, else
-/// Acquire's names as they are. An item that isn't in staging fails with archive.fileMissing, a visible file no step
+/// Acquire's names as they are. An item that isn't in staging, or holds no file (an empty folder, a hidden path, a path
+/// through '..'; owner, 2026-10-21), fails with archive.fileMissing before anything is touched, a visible file no step
 /// made with archive.unlisted (owner, 2026-10-20), and leftovers of a stopped write are removed. Then, in order:
 /// 1. every file is synced to disk, then every folder from staging down to each file (archive.synced): a folder that
 ///    holds only folders (a backup's) is synced too, so each entry on the way to a file is durable;
@@ -59,11 +60,14 @@ public sealed class SealStep : IStep
 
         // What is to be sealed, and nothing else.
         var named = NameOutput.Of(job)?.Files ?? NameOutput.FromAcquire(acquired);
+        var walked = FileTree.Files(fs, staging);
+        // An item that isn't there or holds no file (an empty folder, a hidden path, a path through '..') would seal
+        // nothing for itself (owner, 2026-10-21): refused before anything is touched.
         foreach (var item in named)
-            if (!fs.Exists(staging + "/" + item.Path.TrimEnd('/')))
+            if (!ArchiveFiles.Expand(new[] { item.Path }, walked).Any(f => !f.EndsWith('/')))
                 throw Failure(MessageCode.ArchiveFileMissing, ("file", JsonValue.Of(item.Path)));
         var tree = new List<string>();
-        foreach (var f in FileTree.Files(fs, staging))
+        foreach (var f in walked)
         {
             if (!f.EndsWith('/') && ArchiveFiles.IsLeftover(f[(f.LastIndexOf('/') + 1)..])) fs.Remove(staging + "/" + f);
             else tree.Add(f);

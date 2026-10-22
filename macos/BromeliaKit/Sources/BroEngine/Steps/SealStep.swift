@@ -4,8 +4,9 @@ import BroPorts
 
 /// Step 13 (plan §20.1; §22.3 steps 1–3): makes the job's staging folder a sealed unit, so the commit only moves it.
 /// What it seals is the produced items by name (review L3-1: the lists, never a count): Name's output, else Acquire's
-/// names as they are. An item that isn't in staging fails with archive.fileMissing, a visible file no step made with
-/// archive.unlisted (owner, 2026-10-20), and leftovers of a stopped write are removed. Then, in order:
+/// names as they are. An item that isn't in staging, or holds no file (an empty folder, a hidden path, a path through
+/// '..'; owner, 2026-10-21), fails with archive.fileMissing before anything is touched, a visible file no step made
+/// with archive.unlisted (owner, 2026-10-20), and leftovers of a stopped write are removed. Then, in order:
 /// 1. every file is synced to disk, then every folder from staging down to each file (archive.synced): a folder that
 ///    holds only folders (a backup's) is synced too, so each entry on the way to a file is durable;
 /// 2. every file is hashed read back from disk (archive.hashFromDisk, on by default: the cache is bypassed), with
@@ -52,11 +53,14 @@ public struct SealStep: Step {
 
         // What is to be sealed, and nothing else.
         let named = NameOutput.of(job)?.files ?? NameOutput.fromAcquire(acquired)
-        for item in named where !fs.exists(staging + "/" + trimmed(item.path)) {
+        let walked = try FileTree.files(fs, root: staging)
+        // An item that isn't there or holds no file (an empty folder, a hidden path, a path through '..') would seal
+        // nothing for itself (owner, 2026-10-21): refused before anything is touched.
+        for item in named where !ArchiveFiles.expand([item.path], tree: walked).contains(where: { !$0.hasSuffix("/") }) {
             throw failure(.archiveFileMissing, [("file", .string(item.path))])
         }
         var tree: [String] = []
-        for f in try FileTree.files(fs, root: staging) {
+        for f in walked {
             if !f.hasSuffix("/"), ArchiveFiles.isLeftover(String(f.split(separator: "/").last ?? "")) {
                 try fs.remove(staging + "/" + f)
             } else {

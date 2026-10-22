@@ -2025,6 +2025,576 @@
       }
     },
     {
+      "id": "seal-a-named-empty-folder-fails",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "backup/": ""
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "archive.fileMissing",
+          "params": {
+            "file": "backup"
+          }
+        },
+        "fs": [],
+        "tree": [
+          "backup/"
+        ]
+      }
+    },
+    {
+      "id": "seal-a-named-hidden-file-fails",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": ".Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                }
+              ]
+            }
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          ".Sample Movie.mkv": "the first title's bytes",
+          ".SHA256SUMS.bromelia-tmp-1a2b": "half"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "archive.fileMissing",
+          "params": {
+            "file": ".Sample Movie.mkv"
+          }
+        },
+        "fs": [],
+        "tree": [
+          ".SHA256SUMS.bromelia-tmp-1a2b",
+          ".Sample Movie.mkv"
+        ]
+      }
+    },
+    {
+      "id": "seal-a-named-path-through-dot-dot-fails",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Extras/../Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                }
+              ]
+            }
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "Sample Movie.mkv": "the first title's bytes",
+          "Extras/": ""
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "archive.fileMissing",
+          "params": {
+            "file": "Extras/../Sample Movie.mkv"
+          }
+        },
+        "fs": [],
+        "tree": [
+          "Extras/",
+          "Sample Movie.mkv"
+        ]
+      }
+    },
+    {
+      "id": "seal-a-named-folder-of-hidden-files-only-fails",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "backup/.DS_Store": "finder"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "archive.fileMissing",
+          "params": {
+            "file": "backup"
+          }
+        },
+        "fs": [],
+        "tree": [
+          "backup/.DS_Store"
+        ]
+      }
+    },
+    {
       "id": "seal-leaves-hidden-files-and-removes-a-stopped-writes-leftover",
       "given": {
         "step": "seal",

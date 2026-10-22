@@ -325,19 +325,26 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   /* What is to be sealed, and nothing else. */
   name = bro_name_output_of (c->job);
   named = name ? g_ptr_array_ref (name->files) : bro_name_output_from_acquire (acquired);
+  if (!(walked = bro_file_tree_files (fs, staging, error)))
+    return NULL;
+  /* An item that isn't there or holds no file (an empty folder, a hidden path, a path through '..') would seal nothing
+   * for itself (owner, 2026-10-21): refused before anything is touched. */
+  g_ptr_array_add (walked, NULL);
   for (guint i = 0; i < named->len; i++)
     {
       const BroNamedFile *item = named->pdata[i];
-      g_autofree char *item_path = trimmed (item->path);
-      g_autofree char *path = g_strconcat (staging, "/", item_path, NULL);
-      if (!bro_file_system_exists (fs, path))
+      const char *one[] = { item->path, NULL };
+      g_auto (GStrv) expanded = bro_archive_files_expand (one, (const char *const *) walked->pdata);
+      gboolean holds_a_file = FALSE;
+      for (guint j = 0; expanded[j] && !holds_a_file; j++)
+        holds_a_file = !is_folder (expanded[j]);
+      if (!holds_a_file)
         {
           *error = failure (BRO_MSG_ARCHIVE_FILE_MISSING, _bro_param ("file", bro_json_value_new_string (item->path)), NULL);
           return NULL;
         }
     }
-  if (!(walked = bro_file_tree_files (fs, staging, error)))
-    return NULL;
+  g_ptr_array_remove_index (walked, walked->len - 1);
   for (guint i = 0; i < walked->len; i++)
     {
       const char *f = walked->pdata[i];
