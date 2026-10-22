@@ -16,6 +16,18 @@ public class SystemClockTests
         Assert.InRange(now, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1000, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 1000);
     }
 
+    /// <summary>Winter and summer (daylight saving time either side of the equator), a time cut to the second, now.</summary>
+    [Fact]
+    public void LocalTimeIsTheOperatingSystemsOwn()
+    {
+        foreach (var at in new[] { "2026-01-15T12:00:00.000Z", "2026-07-15T12:00:00.000Z", "1999-12-31T23:59:59.999Z", Instant.Format(_clock.Now()) })
+        {
+            var instant = Instant.Parse(at)!.Value;
+            var os = DateTimeOffset.FromUnixTimeMilliseconds(instant.UnixMilliseconds).LocalDateTime;
+            Assert.Equal(new Domain.LocalTime(os.Year, os.Month, os.Day, os.Hour, os.Minute, os.Second), _clock.LocalTime(instant));
+        }
+    }
+
     [Fact]
     public async Task SleepsAndTheMonotonicClockAdvances()
     {

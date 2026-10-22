@@ -13,6 +13,8 @@
 
 /* ---- a clock that moves only when told (the scenarios' fake clock) ------------------------------------------- */
 
+/* Its local time is UTC plus utc_offset_minutes (0 unless set; no daylight saving time). */
+
 typedef struct {
   gatomicrefcount refs;
   gint64 due_ms;
@@ -48,6 +50,7 @@ struct _TestManualClock {
   GObject parent_instance;
   GMutex lock;
   gint64 now_ms;
+  int utc_offset_minutes;
   guint64 made;
   GPtrArray *timers; /* of Pending, references */
 };
@@ -158,6 +161,20 @@ manual_timer (BroClock *clock, const BroTimerSchedule *schedule, BroTimerFunc ha
   return BRO_TIMER_HANDLE (t);
 }
 
+static BroLocalTime
+manual_local_time (BroClock *clock, BroInstant instant)
+{
+  TestManualClock *self = TEST_MANUAL_CLOCK (clock);
+  gint64 seconds = instant.unix_milliseconds / 1000 - (instant.unix_milliseconds % 1000 < 0);
+  g_autoptr (GDateTime) t = NULL;
+  g_mutex_lock (&self->lock);
+  seconds += (gint64) self->utc_offset_minutes * 60;
+  g_mutex_unlock (&self->lock);
+  t = g_date_time_new_from_unix_utc (seconds);
+  return (BroLocalTime) { g_date_time_get_year (t), g_date_time_get_month (t), g_date_time_get_day_of_month (t),
+                          g_date_time_get_hour (t), g_date_time_get_minute (t), g_date_time_get_second (t) };
+}
+
 static void
 test_manual_clock_iface_init (BroClockInterface *iface)
 {
@@ -165,6 +182,7 @@ test_manual_clock_iface_init (BroClockInterface *iface)
   iface->monotonic = manual_monotonic;
   iface->sleep = manual_sleep;
   iface->timer = manual_timer;
+  iface->local_time = manual_local_time;
 }
 
 static void
@@ -501,6 +519,7 @@ typedef struct {
   BroEngineClock *engine_clock;
   GHashTable *timers; /* name → BroEngineTimer; on the executor */
   GPtrArray *fired;   /* on the executor */
+  GPtrArray *local_times;
   gboolean all_on_executor;
   BroCoalescer *coalescer;
 } World;
@@ -521,6 +540,7 @@ world_init (World *w)
   w->engine_clock = bro_engine_clock_new (BRO_CLOCK (w->clock), w->executor);
   w->timers = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
   w->fired = g_ptr_array_new_with_free_func (g_free);
+  w->local_times = g_ptr_array_new_with_free_func (g_free);
   w->all_on_executor = TRUE;
 }
 
@@ -545,6 +565,7 @@ world_clear (World *w)
   bro_engine_executor_stop (w->executor);
   g_hash_table_unref (w->timers);
   g_ptr_array_unref (w->fired);
+  g_ptr_array_unref (w->local_times);
   g_object_unref (w->engine_clock);
   g_object_unref (w->executor);
   g_object_unref (w->clock);
@@ -617,6 +638,20 @@ run_clock_ops (World *w, BroJsonValue *ops)
         manual_advance (w->clock, bro_json_value_get_integer (arg, 0), settle, w);
       else if (strcmp (name, "onExecutor") == 0)
         on_executor (w, arg);
+      else if (strcmp (name, "utcOffsetMinutes") == 0)
+        {
+          g_mutex_lock (&w->clock->lock);
+          w->clock->utc_offset_minutes = (int) bro_json_value_get_integer (arg, 0);
+          g_mutex_unlock (&w->clock->lock);
+        }
+      else if (strcmp (name, "localTime") == 0)
+        {
+          BroInstant at = { 0 };
+          BroLocalTime t;
+          g_assert_true (bro_instant_parse (bro_json_value_get_string (arg, ""), &at));
+          t = bro_engine_clock_local_time (w->engine_clock, at);
+          g_ptr_array_add (w->local_times, g_strdup_printf ("%04d-%02d-%02d %02d:%02d:%02d", t.year, t.month, t.day, t.hour, t.minute, t.second));
+        }
       else if (!here)
         {
           /* timer and cancel run on the executor */
@@ -661,6 +696,10 @@ clock_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray
   run_clock_ops (&w, bro_json_value_member (given, "ops"));
   bro_engine_executor_barrier (w.executor);
   same_lines (failures, id, "fired", bro_json_value_member (expect, "fired"), w.fired);
+  if ((v = bro_json_value_member (expect, "localTimes")))
+    same_lines (failures, id, "localTimes", v, w.local_times);
+  else if (w.local_times->len)
+    bro_test_fail (failures, id, "localTimes: none expected");
   if ((v = bro_json_value_member (expect, "allOnExecutor")) && bro_json_value_get_bool (v, FALSE) != w.all_on_executor)
     bro_test_fail (failures, id, "allOnExecutor: expected %d", bro_json_value_get_bool (v, FALSE));
   if ((v = bro_json_value_member (expect, "now")))

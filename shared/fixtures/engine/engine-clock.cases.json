@@ -1,6 +1,6 @@
 {
-  "description": "EngineClock (plan §3.2, §8): the Clock port as engine code sees it. now and monotonic are the clock's; timer(schedule, handler) asks the clock for a timer whose handler, on whatever thread the clock fires it, posts the real handler to the engine executor, so handlers always run there. EngineTimer.cancel (on the executor) stops the timer: a handler already posted but not yet run doesn't run either. A handler may cancel its own timer. Cancelling twice, or after an 'at' timer fired, does nothing. The harness uses a real EngineExecutor and a manual clock that starts at 2026-10-02T20:00:00.000Z; advance <ms> moves it, firing each due timer in due order (an 'every' timer once per interval passed) from the test's thread and waiting for the executor to settle after each one. Ops: timer {as, at: <ms from the start> | every: <seconds>, cancelSelfAfter: <n fires>}; advance <ms>; cancel <as> (run on the executor); onExecutor [ops] (runs the ops inside one action on the executor, then waits for it to settle). Expect: fired (the timers' names in the order their handlers ran), allOnExecutor (every handler ran on the executor).",
-  "functions": ["EngineClock.now", "EngineClock.monotonic", "EngineClock.timer", "EngineTimer.cancel"],
+  "description": "EngineClock (plan §3.2, §8): the Clock port as engine code sees it. now and monotonic are the clock's; timer(schedule, handler) asks the clock for a timer whose handler, on whatever thread the clock fires it, posts the real handler to the engine executor, so handlers always run there. EngineTimer.cancel (on the executor) stops the timer: a handler already posted but not yet run doesn't run either. A handler may cancel its own timer. Cancelling twice, or after an 'at' timer fired, does nothing. The harness uses a real EngineExecutor and a manual clock that starts at 2026-10-02T20:00:00.000Z; advance <ms> moves it, firing each due timer in due order (an 'every' timer once per interval passed) from the test's thread and waiting for the executor to settle after each one. localTime(instant) is the clock's: the manual clock's local time is a fixed offset from UTC, 0 until set, with no daylight saving time, cut to the second (never rounded). Ops: timer {as, at: <ms from the start> | every: <seconds>, cancelSelfAfter: <n fires>}; advance <ms>; cancel <as> (run on the executor); onExecutor [ops] (runs the ops inside one action on the executor, then waits for it to settle); utcOffsetMinutes <n> (sets the manual clock's offset); localTime <instant> (asks EngineClock.localTime for that instant and keeps the answer). Expect: fired (the timers' names in the order their handlers ran), allOnExecutor (every handler ran on the executor), localTimes (the answers in order, each as YYYY-MM-DD HH:MM:SS).",
+  "functions": ["EngineClock.now", "EngineClock.monotonic", "EngineClock.localTime", "EngineClock.timer", "EngineTimer.cancel"],
   "cases": [
     {
       "id": "at-fires-once",
@@ -90,6 +90,66 @@
         ]
       },
       "expect": {"now": "2026-10-02T20:00:01.500Z", "monotonicSeconds": 1.5, "fired": []}
+    },
+    {
+      "id": "local-time-is-utc-until-an-offset-is-set",
+      "given": {
+        "ops": [
+          {"localTime": "2026-10-02T20:00:00.000Z"}
+        ]
+      },
+      "expect": {"fired": [], "localTimes": ["2026-10-02 20:00:00"]}
+    },
+    {
+      "id": "local-time-ahead-of-utc-is-the-next-day",
+      "given": {
+        "ops": [
+          {"utcOffsetMinutes": 570},
+          {"localTime": "2026-10-02T20:00:00.000Z"}
+        ]
+      },
+      "expect": {"fired": [], "localTimes": ["2026-10-03 05:30:00"]}
+    },
+    {
+      "id": "local-time-behind-utc-is-the-year-before",
+      "given": {
+        "ops": [
+          {"utcOffsetMinutes": -300},
+          {"localTime": "2027-01-01T03:04:05.000Z"}
+        ]
+      },
+      "expect": {"fired": [], "localTimes": ["2026-12-31 22:04:05"]}
+    },
+    {
+      "id": "local-time-on-a-leap-day",
+      "given": {
+        "ops": [
+          {"utcOffsetMinutes": 840},
+          {"localTime": "2028-02-28T12:00:00.000Z"},
+          {"localTime": "2028-02-29T10:00:00.000Z"}
+        ]
+      },
+      "expect": {"fired": [], "localTimes": ["2028-02-29 02:00:00", "2028-03-01 00:00:00"]}
+    },
+    {
+      "id": "local-time-cuts-to-the-second",
+      "given": {
+        "ops": [
+          {"localTime": "2026-10-02T20:00:59.999Z"}
+        ]
+      },
+      "expect": {"fired": [], "localTimes": ["2026-10-02 20:00:59"]}
+    },
+    {
+      "id": "local-time-follows-the-offset-it-is-given",
+      "given": {
+        "ops": [
+          {"localTime": "2026-10-02T20:00:00.000Z"},
+          {"utcOffsetMinutes": -600},
+          {"localTime": "2026-10-02T20:00:00.000Z"}
+        ]
+      },
+      "expect": {"fired": [], "localTimes": ["2026-10-02 20:00:00", "2026-10-02 10:00:00"]}
     }
   ]
 }

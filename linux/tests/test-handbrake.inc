@@ -1,7 +1,8 @@
 /* test-handbrake.inc: BroHandBrake, included by test-adapters.c: shared/fixtures/adapters/handbrake.cases.json against a
  * scripted launcher, and the real HandBrakeCLI where it is installed (the Ubuntu VM). */
 
-/* A clock whose timers fire as soon as they are set (when asked to), recording when they were for. */
+/* A clock whose timers fire as soon as they are set (when asked to), recording when they were for; its local time is
+ * UTC. */
 #define TEST_TYPE_NULL_TIMER (test_null_timer_get_type ())
 G_DECLARE_FINAL_TYPE (TestNullTimer, test_null_timer, TEST, NULL_TIMER, GObject)
 struct _TestNullTimer { GObject parent_instance; };
@@ -49,6 +50,7 @@ test_firing_clock_iface_init (BroClockInterface *iface)
   iface->monotonic = firing_monotonic;
   iface->sleep = firing_sleep;
   iface->timer = firing_timer;
+  iface->local_time = utc_local_time;
 }
 
 /* Keeps the progress values ("current/total/max") and the raw lines. */

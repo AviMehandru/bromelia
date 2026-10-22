@@ -5,6 +5,7 @@
 #include "bro-cancellation-token.h"
 #include "bro-duration.h"
 #include "bro-instant.h"
+#include "bro-local-time.h"
 #include "bro-timer-handle.h"
 #include "bro-timer-schedule.h"
 #include <glib-object.h>
@@ -23,6 +24,7 @@ struct _BroClockInterface {
   BroDuration (*monotonic) (BroClock *self);
   gboolean (*sleep) (BroClock *self, BroDuration duration, BroCancellationToken *cancel, BroBroError **error);
   BroTimerHandle *(*timer) (BroClock *self, const BroTimerSchedule *schedule, BroTimerFunc handler, gpointer data, GDestroyNotify destroy);
+  BroLocalTime (*local_time) (BroClock *self, BroInstant instant);
 };
 
 BroInstant bro_clock_now (BroClock *self);
@@ -34,5 +36,8 @@ BroDuration bro_clock_monotonic (BroClock *self);
 gboolean bro_clock_sleep (BroClock *self, BroDuration duration, BroCancellationToken *cancel, BroBroError **error);
 
 BroTimerHandle *bro_clock_timer (BroClock *self, const BroTimerSchedule *schedule, BroTimerFunc handler, gpointer data, GDestroyNotify destroy);
+
+/* The wall-clock time at @instant in the user's time zone, to the second (the date tokens). */
+BroLocalTime bro_clock_local_time (BroClock *self, BroInstant instant);
 
 G_END_DECLS

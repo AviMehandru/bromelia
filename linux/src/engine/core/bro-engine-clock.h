@@ -1,6 +1,6 @@
-/* bro-engine-clock.h: BroEngineClock: the Clock port as engine code sees it: now and monotonic as the clock says; a
- * timer's handler runs on the executor, whatever thread the clock fires it on, and never after the timer was
- * cancelled. */
+/* bro-engine-clock.h: BroEngineClock: the Clock port as engine code sees it: now, monotonic and local time as the
+ * clock says; a timer's handler runs on the executor, whatever thread the clock fires it on, and never after the
+ * timer was cancelled. */
 #pragma once
 
 #include "bro-clock.h"
@@ -18,6 +18,8 @@ BroEngineClock *bro_engine_clock_new (BroClock *clock, BroEngineExecutor *execut
 BroInstant bro_engine_clock_now (BroEngineClock *self);
 
 BroDuration bro_engine_clock_monotonic (BroEngineClock *self);
+
+BroLocalTime bro_engine_clock_local_time (BroEngineClock *self, BroInstant instant);
 
 /* Call on the executor; @handler (@data) runs there. Like the clock's own timers, it runs until it has fired (at) or
  * is cancelled, whether or not its reference is kept. @destroy frees @data once the timer has ended and is

@@ -1,7 +1,7 @@
 /* test-drives.inc: BroOsDriveState, BroDrivePoller and BroPlatformDeviceMonitor, included by test-adapters.c:
  * shared/fixtures/adapters/os-drive-states.cases.json, and the drive list on this machine (lsblk agrees). */
 
-/* A clock whose timers fire when the test says so. */
+/* A clock whose timers fire when the test says so; its local time is UTC. */
 #define TEST_TYPE_MANUAL_TIMER (test_manual_timer_get_type ())
 G_DECLARE_FINAL_TYPE (TestManualTimer, test_manual_timer, TEST, MANUAL_TIMER, GObject)
 struct _TestManualTimer {
@@ -74,6 +74,7 @@ test_manual_clock_iface_init (BroClockInterface *iface)
   iface->monotonic = firing_monotonic;
   iface->sleep = firing_sleep;
   iface->timer = mc_timer;
+  iface->local_time = utc_local_time;
 }
 
 static char *

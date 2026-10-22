@@ -7922,6 +7922,18 @@
           "swift": "Clock.timer(_:handler:)",
           "cs": "Clock.Timer",
           "c": "bro_clock_timer"
+        },
+        {
+          "name": "Clock.localTime",
+          "params": [
+            "instant"
+          ],
+          "returns": "LocalTime",
+          "doc": "The wall-clock time at instant in the user's time zone, to the second (the date tokens; owner, 2026-10-21).",
+          "phase": 3,
+          "swift": "Clock.localTime(_:)",
+          "cs": "Clock.LocalTime",
+          "c": "bro_clock_local_time"
         }
       ]
     },
@@ -10309,6 +10321,18 @@
           "swift": "SystemClock.timer(_:handler:)",
           "cs": "SystemClock.Timer",
           "c": "bro_system_clock_timer"
+        },
+        {
+          "name": "SystemClock.localTime",
+          "params": [
+            "instant"
+          ],
+          "returns": "LocalTime",
+          "doc": "The OS's time zone, daylight saving time included; milliseconds are cut.",
+          "phase": 3,
+          "swift": "SystemClock.localTime(_:)",
+          "cs": "SystemClock.LocalTime",
+          "c": "bro_system_clock_local_time"
         }
       ]
     },
@@ -12023,7 +12047,7 @@
         {
           "name": "EngineClock",
           "kind": "class",
-          "doc": "The Clock port for engine code: now and monotonic as the clock says; timers whose handlers run on the executor and never after they are cancelled.",
+          "doc": "The Clock port for engine code: now, monotonic and local time as the clock says; timers whose handlers run on the executor and never after they are cancelled.",
           "swift": {
             "name": "EngineClock",
             "file": "macos/BromeliaKit/Sources/BroEngine/Core/EngineClock.swift"
@@ -12577,6 +12601,17 @@
           "why": "Swift starts a task on the actor, not through the mailbox, so activity wouldn't see it until its first worker call; C# (a Task from Worker) and C (a GTask) start the worker at once, which counts it.",
           "phase": 3,
           "swift": "EngineExecutor.spawn(_:)"
+        },
+        {
+          "name": "EngineClock.localTime",
+          "params": [
+            "instant"
+          ],
+          "returns": "LocalTime",
+          "phase": 3,
+          "swift": "EngineClock.localTime(_:)",
+          "cs": "EngineClock.LocalTime",
+          "c": "bro_engine_clock_local_time"
         }
       ]
     },

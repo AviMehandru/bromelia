@@ -60,6 +60,7 @@ public sealed class EngineClockTests
             var timers = new Dictionary<string, EngineTimer>();
             var fired = new List<string>();
             var allOnExecutor = true;
+            var localTimes = new List<string>();
 
             void Run(IEnumerable<JsonValue> ops)
             {
@@ -93,6 +94,15 @@ public sealed class EngineClockTests
                         case "onExecutor":
                             w.OnExecutor(() => Run(arg.AsArray!));
                             break;
+                        case "utcOffsetMinutes":
+                            w.Clock.UtcOffsetMinutes = (int)arg.AsInteger!.Value;
+                            break;
+                        case "localTime":
+                        {
+                            var t = w.EngineClock.LocalTime(Instant.Parse(arg.AsString!)!.Value);
+                            localTimes.Add($"{t.Year:0000}-{t.Month:00}-{t.Day:00} {t.Hour:00}:{t.Minute:00}:{t.Second:00}");
+                            break;
+                        }
                         default:
                             throw new InvalidOperationException("unknown op " + name);
                     }
@@ -104,6 +114,7 @@ public sealed class EngineClockTests
             Same(string.Join(" ", expect["fired"]!.AsArray!.Select(f => f.AsString)), string.Join(" ", fired), "fired");
             if (expect["allOnExecutor"] is { } on) Same(on.AsBool, (bool?)allOnExecutor, "allOnExecutor");
             if (expect["now"] is { } now) Same(now.AsString, Instant.Format(w.EngineClock.Now()), "now");
+            if (expect["localTimes"] is { } lts) Same(string.Join(" | ", lts.AsArray!.Select(l => l.AsString)), string.Join(" | ", localTimes), "localTimes");
             if (expect["monotonicSeconds"] is { } mono) Same(mono.AsNumber, (double?)w.EngineClock.Monotonic().Seconds, "monotonic");
             return true;
         });

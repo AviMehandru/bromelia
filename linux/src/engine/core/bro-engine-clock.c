@@ -32,6 +32,12 @@ bro_engine_clock_monotonic (BroEngineClock *self)
   return bro_clock_monotonic (self->clock);
 }
 
+BroLocalTime
+bro_engine_clock_local_time (BroEngineClock *self, BroInstant instant)
+{
+  return bro_clock_local_time (self->clock, instant);
+}
+
 /* What the clock's timer holds. */
 typedef struct {
   BroEngineExecutor *executor;

@@ -7,13 +7,14 @@ import Foundation
 import SQLite3
 import Testing
 
-/// A clock stopped at 2026-10-04T12:00:00.000Z.
+/// A clock stopped at 2026-10-04T12:00:00.000Z; its local time is UTC.
 struct FixedClock: Clock {
     let at = Instant.parse("2026-10-04T12:00:00.000Z")!
     func now() -> Instant { at }
     func monotonic() -> Duration { Duration(seconds: 0) }
     func sleep(_ duration: Duration, cancel: CancellationToken) async throws(BroError) {}
     func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle { fatalError("not in these tests") }
+    func localTime(_ instant: Instant) -> LocalTime { utcLocalTime(instant) }
 }
 
 /// A second connection to a store's file, for seeding rows and reading what was written.

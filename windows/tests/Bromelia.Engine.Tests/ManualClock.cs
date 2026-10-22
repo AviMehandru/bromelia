@@ -1,3 +1,4 @@
+using Bromelia.Domain;
 using Bromelia.Foundation;
 using Bromelia.Ports;
 using CancellationToken = Bromelia.Foundation.CancellationToken;
@@ -7,7 +8,8 @@ namespace Bromelia.Engine.Tests;
 /// <summary>
 /// A clock that moves only when told (the scenarios' fake clock): it starts at 2026-10-02T20:00:00.000Z, and
 /// <see cref="Advance"/> fires each due timer in due order (ties in the order they were made), with the time set to
-/// its due time, then calls <see cref="Settle"/>. Safe to use from any thread.
+/// its due time, then calls <see cref="Settle"/>. Its local time is UTC plus <see cref="UtcOffsetMinutes"/> (0 unless
+/// set; no daylight saving time). Safe to use from any thread.
 /// </summary>
 internal sealed class ManualClock : IClock
 {
@@ -17,6 +19,9 @@ internal sealed class ManualClock : IClock
     readonly List<PendingTimer> _timers = new();
     long _nowMs = StartMs;
     long _made;
+
+    /// <summary>The local time's fixed offset from UTC.</summary>
+    public volatile int UtcOffsetMinutes;
 
     /// <summary>Runs after each fired timer (a test waits for the executor there).</summary>
     public Action? Settle;
@@ -42,6 +47,12 @@ internal sealed class ManualClock : IClock
     }
 
     public Task Sleep(Duration duration, CancellationToken cancel) => throw new NotSupportedException("not used by the engine");
+
+    public LocalTime LocalTime(Instant instant)
+    {
+        var t = DateTimeOffset.FromUnixTimeMilliseconds(instant.UnixMilliseconds).ToOffset(TimeSpan.FromMinutes(UtcOffsetMinutes));
+        return new LocalTime(t.Year, t.Month, t.Day, t.Hour, t.Minute, t.Second);
+    }
 
     public ITimerHandle Timer(TimerSchedule schedule, Action handler)
     {

@@ -60,6 +60,8 @@ private final class SealFakes: ProgressReporter, JobLogger, LibraryPort, Clock, 
     func monotonic() -> Duration { fatalError("not used") }
     func sleep(_ duration: Duration, cancel: CancellationToken) async throws(BroError) { fatalError("not used") }
     func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle { fatalError("not used") }
+    /// Seal's times are UTC (decision 59).
+    func localTime(_ instant: Instant) -> LocalTime { fatalError("not used") }
 
     func ask(_ decision: DecisionDto) async throws(BroError) -> String { fatalError("not used") }
     var saved: JsonValue? { nil }

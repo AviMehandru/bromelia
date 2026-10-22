@@ -7,7 +7,7 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Adapters.Tests;
 
-/// <summary>A clock whose timers fire as soon as they are set (when asked to), recording when they were for.</summary>
+/// <summary>A clock whose timers fire as soon as they are set (when asked to), recording when they were for; its local time is UTC.</summary>
 internal sealed class FiringClock : IClock
 {
     public readonly Instant At = Instant.Parse("2026-10-04T12:00:00.000Z")!.Value;
@@ -16,6 +16,12 @@ internal sealed class FiringClock : IClock
     public Instant Now() => At;
     public Duration Monotonic() => new(0);
     public Task Sleep(Duration duration, CancellationToken cancel) => Task.CompletedTask;
+
+    public LocalTime LocalTime(Instant instant)
+    {
+        var t = DateTimeOffset.FromUnixTimeMilliseconds(instant.UnixMilliseconds).UtcDateTime;
+        return new LocalTime(t.Year, t.Month, t.Day, t.Hour, t.Minute, t.Second);
+    }
 
     public ITimerHandle Timer(TimerSchedule schedule, Action handler)
     {

@@ -25,4 +25,8 @@ gboolean bro_system_clock_sleep (BroSystemClock *self, BroDuration duration, Bro
 BroTimerHandle *bro_system_clock_timer (BroSystemClock *self, const BroTimerSchedule *schedule, BroTimerFunc handler,
                                         gpointer data, GDestroyNotify destroy);
 
+/* The OS's time zone (g_time_zone_new_local: TZ, else /etc/localtime), daylight saving time included; milliseconds
+ * are cut. */
+BroLocalTime bro_system_clock_local_time (BroSystemClock *self, BroInstant instant);
+
 G_END_DECLS

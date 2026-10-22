@@ -1,7 +1,7 @@
 /* test-store.inc: SqliteStore, included by test-adapters.c. shared/fixtures/adapters/store.cases.json, and every
  * record type read back equal. */
 
-/* A clock stopped at 2026-10-04T12:00:00.000Z. */
+/* A clock stopped at 2026-10-04T12:00:00.000Z; its local time is UTC. */
 #define TEST_TYPE_FIXED_CLOCK (test_fixed_clock_get_type ())
 G_DECLARE_FINAL_TYPE (TestFixedClock, test_fixed_clock, TEST, FIXED_CLOCK, GObject)
 struct _TestFixedClock { GObject parent_instance; };
@@ -11,7 +11,7 @@ static BroInstant fc_now (BroClock *c) { BroInstant t; bro_instant_parse ("2026-
 static BroDuration fc_mono (BroClock *c) { return (BroDuration) { 0 }; }
 static void test_fixed_clock_class_init (TestFixedClockClass *k) {}
 static void test_fixed_clock_init (TestFixedClock *self) {}
-static void test_fixed_clock_iface_init (BroClockInterface *iface) { iface->now = fc_now; iface->monotonic = fc_mono; }
+static void test_fixed_clock_iface_init (BroClockInterface *iface) { iface->now = fc_now; iface->monotonic = fc_mono; iface->local_time = utc_local_time; }
 
 static char *store_dir;
 

@@ -7,13 +7,19 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Adapters.Tests;
 
-/// <summary>A clock whose timers fire when the test says so.</summary>
+/// <summary>A clock whose timers fire when the test says so; its local time is UTC.</summary>
 internal sealed class ManualClock : IClock
 {
     public readonly List<(TimerSchedule Schedule, Action Handler, Handle Timer)> Timers = new();
     public Instant Now() => new(1_790_000_000_000);
     public Duration Monotonic() => new(0);
     public Task Sleep(Duration duration, CancellationToken cancel) => Task.CompletedTask;
+
+    public LocalTime LocalTime(Instant instant)
+    {
+        var t = DateTimeOffset.FromUnixTimeMilliseconds(instant.UnixMilliseconds).UtcDateTime;
+        return new LocalTime(t.Year, t.Month, t.Day, t.Hour, t.Minute, t.Second);
+    }
 
     public ITimerHandle Timer(TimerSchedule schedule, Action handler)
     {

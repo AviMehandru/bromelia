@@ -51,6 +51,13 @@ public sealed class SystemClock : IClock
         return handle;
     }
 
+    /// <summary>The OS's time zone (TimeZoneInfo.Local), daylight saving time included; milliseconds are cut.</summary>
+    public LocalTime LocalTime(Instant instant)
+    {
+        var t = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(instant.UnixMilliseconds), TimeZoneInfo.Local);
+        return new LocalTime(t.Year, t.Month, t.Day, t.Hour, t.Minute, t.Second);
+    }
+
     /// <summary>The running timers: a System.Threading.Timer nobody refers to is collected.</summary>
     static readonly HashSet<Handle> Live = new();
 

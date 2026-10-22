@@ -29,6 +29,14 @@ public final class SystemClock: Clock {
         if !finished || cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
     }
 
+    /// The OS's time zone (TimeZone.current), daylight saving time included, in the Gregorian calendar whatever the
+    /// user's calendar is; milliseconds are cut.
+    public func localTime(_ instant: Instant) -> LocalTime {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        return LocalTime(calendar, instant)
+    }
+
     /// A timer lives until it has fired (at) or is cancelled, whether or not the handle is kept.
     public func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle {
         let source = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
@@ -61,5 +69,14 @@ public final class SystemClock: Clock {
         private let lock = NSLock()
         private var claimed = false
         func claim() -> Bool { lock.withLock { defer { claimed = true }; return !claimed } }
+    }
+}
+
+extension LocalTime {
+    /// `instant` in `calendar`'s time zone, cut to the second.
+    init(_ calendar: Calendar, _ instant: Instant) {
+        let seconds = instant.unixMilliseconds >= 0 ? instant.unixMilliseconds / 1000 : (instant.unixMilliseconds - 999) / 1000
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: Date(timeIntervalSince1970: Double(seconds)))
+        self.init(year: c.year!, month: c.month!, day: c.day!, hour: c.hour!, minute: c.minute!, second: c.second!)
     }
 }

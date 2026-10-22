@@ -67,6 +67,9 @@ public sealed class SealStepTests
         public Task Sleep(Duration duration, CancellationToken cancel) => throw new NotSupportedException();
 
         public ITimerHandle Timer(TimerSchedule schedule, Action handler) => throw new NotSupportedException();
+
+        /// <summary>Seal's times are UTC (decision 59).</summary>
+        public LocalTime LocalTime(Instant instant) => throw new NotSupportedException();
     }
 
     /// <summary>'&lt;code&gt;' then ' &lt;key&gt;=&lt;value&gt;' per param: strings as they are, other values as canonical JSON

@@ -221,6 +221,23 @@ timer_vfunc (BroClock *self, const BroTimerSchedule *schedule, BroTimerFunc hand
   return bro_system_clock_timer (BRO_SYSTEM_CLOCK (self), schedule, handler, data, destroy);
 }
 
+BroLocalTime
+bro_system_clock_local_time (BroSystemClock *self, BroInstant instant)
+{
+  gint64 seconds = instant.unix_milliseconds / 1000 - (instant.unix_milliseconds % 1000 < 0);
+  g_autoptr (GDateTime) t = g_date_time_new_from_unix_local (seconds);
+  if (!t)
+    return (BroLocalTime) { 0 }; /* outside years 1-9999: no clock gives one */
+  return (BroLocalTime) { g_date_time_get_year (t), g_date_time_get_month (t), g_date_time_get_day_of_month (t),
+                          g_date_time_get_hour (t), g_date_time_get_minute (t), g_date_time_get_second (t) };
+}
+
+static BroLocalTime
+local_time_vfunc (BroClock *self, BroInstant instant)
+{
+  return bro_system_clock_local_time (BRO_SYSTEM_CLOCK (self), instant);
+}
+
 static void
 bro_system_clock_class_init (BroSystemClockClass *klass)
 {
@@ -238,6 +255,7 @@ bro_system_clock_iface_init (BroClockInterface *iface)
   iface->monotonic = monotonic_vfunc;
   iface->sleep = sleep_vfunc;
   iface->timer = timer_vfunc;
+  iface->local_time = local_time_vfunc;
 }
 
 BroSystemClock *

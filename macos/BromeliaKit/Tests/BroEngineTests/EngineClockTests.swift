@@ -1,3 +1,4 @@
+import BroDomain
 import BroEngine
 import BroFoundation
 import BroPorts
@@ -28,6 +29,7 @@ final class ClockState {
     var timers: [String: EngineTimer] = [:]
     var fired: [String] = []
     var emitted: [String] = []
+    var localTimes: [String] = []
     var coalescer: Coalescer?
 }
 
@@ -68,10 +70,21 @@ struct EngineClockTests {
                         }
                     }
                 }
+            case "utcOffsetMinutes":
+                w.clock.utcOffsetMinutes = Int(arg.int!)
+            case "localTime":
+                let t = w.engineClock.localTime(Instant.parse(arg.string!)!)
+                let text = "\(pad(t.year, 4))-\(pad(t.month))-\(pad(t.day)) \(pad(t.hour)):\(pad(t.minute)):\(pad(t.second))"
+                await w.onExecutor { state.localTimes.append(text) }
             default:
                 throw FixtureError("unknown op \(name)")
             }
         }
+    }
+
+    static func pad(_ n: Int, _ width: Int = 2) -> String {
+        let s = String(n)
+        return String(repeating: "0", count: max(0, width - s.count)) + s
     }
 
     @Test func theSharedCasesPass() async throws {
@@ -88,6 +101,8 @@ struct EngineClockTests {
                 try Fixtures.same(expect["fired"]!.array!.map { $0.string! }, fired, "fired")
                 if let now = expect["now"]?.string { try Fixtures.same(now, Instant.format(w.engineClock.now()), "now") }
                 if let mono = expect["monotonicSeconds"]?.double { try Fixtures.same(mono, w.engineClock.monotonic().seconds, "monotonic") }
+                let localTimes = await state.localTimes
+                try Fixtures.same(expect["localTimes"]?.array?.map { $0.string! } ?? [], localTimes, "localTimes")
             } catch {
                 failures.append("\(id): \(error)")
             }

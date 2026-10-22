@@ -2,7 +2,7 @@ import BroDomain
 import BroFoundation
 import BroPorts
 
-/// The Clock port as engine code sees it: now and monotonic as the clock says; a timer's handler runs on the
+/// The Clock port as engine code sees it: now, monotonic and local time as the clock says; a timer's handler runs on the
 /// executor, whatever thread the clock fires it on, and never after the timer was cancelled.
 public final class EngineClock: Sendable {
     private let clock: any Clock
@@ -16,6 +16,8 @@ public final class EngineClock: Sendable {
     public func now() -> Instant { clock.now() }
 
     public func monotonic() -> Duration { clock.monotonic() }
+
+    public func localTime(_ instant: Instant) -> LocalTime { clock.localTime(instant) }
 
     @EngineActor
     public func timer(_ schedule: TimerSchedule, handler: @escaping @EngineActor () -> Void) -> EngineTimer {

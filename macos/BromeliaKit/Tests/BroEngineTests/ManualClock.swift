@@ -1,10 +1,12 @@
+import BroDomain
 import BroFoundation
 import BroPorts
 import Foundation
 
 /// A clock that moves only when told (the scenarios' fake clock): it starts at 2026-10-02T20:00:00.000Z, and
 /// `advance` fires each due timer in due order (ties in the order they were made), with the time set to its due time,
-/// then awaits `settle`. Safe to use from any thread.
+/// then awaits `settle`. Its local time is UTC plus `utcOffsetMinutes` (0 unless set; no daylight saving time). Safe
+/// to use from any thread.
 final class ManualClock: Clock, @unchecked Sendable {
     static let startMs: Int64 = 1_790_971_200_000
 
@@ -23,6 +25,13 @@ final class ManualClock: Clock, @unchecked Sendable {
     private var nowMs = ManualClock.startMs
     private var timers: [Pending] = []
     private var made: Int64 = 0
+    private var offsetMinutes = 0
+
+    /// The local time's fixed offset from UTC.
+    var utcOffsetMinutes: Int {
+        get { lock.withLock { offsetMinutes } }
+        set { lock.withLock { offsetMinutes = newValue } }
+    }
 
     func now() -> Instant { lock.withLock { Instant(unixMilliseconds: nowMs) } }
 
@@ -30,6 +39,14 @@ final class ManualClock: Clock, @unchecked Sendable {
 
     func sleep(_ duration: Duration, cancel: CancellationToken) async throws(BroError) {
         fatalError("not used by the engine")
+    }
+
+    func localTime(_ instant: Instant) -> LocalTime {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: utcOffsetMinutes * 60)!
+        let seconds = instant.unixMilliseconds >= 0 ? instant.unixMilliseconds / 1000 : (instant.unixMilliseconds - 999) / 1000
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: Date(timeIntervalSince1970: Double(seconds)))
+        return LocalTime(year: c.year!, month: c.month!, day: c.day!, hour: c.hour!, minute: c.minute!, second: c.second!)
     }
 
     func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle {

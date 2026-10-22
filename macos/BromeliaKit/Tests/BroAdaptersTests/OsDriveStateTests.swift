@@ -6,7 +6,7 @@ import BroTestSupport
 import Foundation
 import Testing
 
-/// A clock whose timers fire when the test says so.
+/// A clock whose timers fire when the test says so; its local time is UTC.
 final class ManualClock: Clock, @unchecked Sendable {
     final class Handle: TimerHandle, @unchecked Sendable {
         var cancelled = false
@@ -17,6 +17,7 @@ final class ManualClock: Clock, @unchecked Sendable {
     func now() -> Instant { Instant(unixMilliseconds: 1_790_000_000_000) }
     func monotonic() -> Duration { Duration(seconds: 0) }
     func sleep(_ duration: Duration, cancel: CancellationToken) async throws(BroError) {}
+    func localTime(_ instant: Instant) -> LocalTime { utcLocalTime(instant) }
 
     func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle {
         let h = Handle()

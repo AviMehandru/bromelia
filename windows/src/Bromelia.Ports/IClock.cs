@@ -18,4 +18,8 @@ public interface IClock
     Task Sleep(Duration duration, CancellationToken cancel);
 
     ITimerHandle Timer(TimerSchedule schedule, Action handler);
+
+    /// <summary>The wall-clock time at <paramref name="instant"/> in the user's time zone, to the second (the date
+    /// tokens).</summary>
+    LocalTime LocalTime(Instant instant);
 }

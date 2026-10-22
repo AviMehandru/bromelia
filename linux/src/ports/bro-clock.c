@@ -35,3 +35,10 @@ bro_clock_timer (BroClock *self, const BroTimerSchedule *schedule, BroTimerFunc 
   g_return_val_if_fail (BRO_IS_CLOCK (self), NULL);
   return BRO_CLOCK_GET_IFACE (self)->timer (self, schedule, handler, data, destroy);
 }
+
+BroLocalTime
+bro_clock_local_time (BroClock *self, BroInstant instant)
+{
+  g_return_val_if_fail (BRO_IS_CLOCK (self), (BroLocalTime) { 0 });
+  return BRO_CLOCK_GET_IFACE (self)->local_time (self, instant);
+}

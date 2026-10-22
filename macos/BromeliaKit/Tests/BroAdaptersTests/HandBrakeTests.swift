@@ -6,7 +6,7 @@ import BroTestSupport
 import Foundation
 import Testing
 
-/// A clock whose timers fire as soon as they are set (when asked to), recording when they were for.
+/// A clock whose timers fire as soon as they are set (when asked to), recording when they were for; its local time is UTC.
 final class FiringClock: Clock, @unchecked Sendable {
     let at = Instant(unixMilliseconds: 1_790_000_000_000)
     private let lock = NSLock()
@@ -17,6 +17,7 @@ final class FiringClock: Clock, @unchecked Sendable {
     func now() -> Instant { at }
     func monotonic() -> Duration { Duration(seconds: 0) }
     func sleep(_ duration: Duration, cancel: CancellationToken) async throws(BroError) {}
+    func localTime(_ instant: Instant) -> LocalTime { utcLocalTime(instant) }
 
     func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle {
         lock.withLock { scheduled.append(schedule) }

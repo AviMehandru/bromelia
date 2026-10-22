@@ -2024,6 +2024,15 @@ test_real_iso (void)
   }
 }
 
+/* The fake clocks' local time: @instant in UTC, cut to the second. */
+static BroLocalTime
+utc_local_time (BroClock *c, BroInstant instant)
+{
+  g_autoptr (GDateTime) t = g_date_time_new_from_unix_utc (instant.unix_milliseconds / 1000 - (instant.unix_milliseconds % 1000 < 0));
+  return (BroLocalTime) { g_date_time_get_year (t), g_date_time_get_month (t), g_date_time_get_day_of_month (t),
+                          g_date_time_get_hour (t), g_date_time_get_minute (t), g_date_time_get_second (t) };
+}
+
 #include "test-store.inc"
 #include "test-http.inc"
 #include "test-metadata.inc"
@@ -2122,6 +2131,34 @@ cancel_soon (gpointer data)
   g_usleep (G_USEC_PER_SEC / 20);
   bro_cancellation_source_cancel (data);
   return NULL;
+}
+
+/* Winter and summer (daylight saving time either side of the equator), a time cut to the second, now; the OS's answer
+ * is libc's localtime_r. */
+static void
+test_clock_local_time (void)
+{
+  g_autoptr (BroSystemClock) clock = bro_system_clock_new ();
+  g_autofree char *now = bro_instant_format (bro_clock_now (BRO_CLOCK (clock)));
+  const char *ats[] = { "2026-01-15T12:00:00.000Z", "2026-07-15T12:00:00.000Z", "1999-12-31T23:59:59.999Z", now };
+  for (gsize i = 0; i < G_N_ELEMENTS (ats); i++)
+    {
+      BroInstant at = { 0 };
+      BroLocalTime t;
+      time_t seconds;
+      struct tm os;
+      g_assert_true (bro_instant_parse (ats[i], &at));
+      seconds = (time_t) (at.unix_milliseconds / 1000);
+      g_assert_nonnull (localtime_r (&seconds, &os));
+      t = bro_clock_local_time (BRO_CLOCK (clock), at);
+      g_test_message ("%s", ats[i]);
+      g_assert_cmpint (t.year, ==, os.tm_year + 1900);
+      g_assert_cmpint (t.month, ==, os.tm_mon + 1);
+      g_assert_cmpint (t.day, ==, os.tm_mday);
+      g_assert_cmpint (t.hour, ==, os.tm_hour);
+      g_assert_cmpint (t.minute, ==, os.tm_min);
+      g_assert_cmpint (t.second, ==, os.tm_sec);
+    }
 }
 
 static void
@@ -2257,6 +2294,7 @@ main (int argc, char **argv)
   g_test_add_func ("/ids/random", test_ids_random);
   g_test_add_func ("/message-renderer/cases", test_message_renderer_cases);
   g_test_add_func ("/clock/now-and-sleep", test_clock_now_and_sleep);
+  g_test_add_func ("/clock/local-time", test_clock_local_time);
   g_test_add_func ("/clock/cancelled-sleep", test_clock_cancelled_sleep);
   g_test_add_func ("/clock/timers", test_clock_timers);
   status = g_test_run ();
