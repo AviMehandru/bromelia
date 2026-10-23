@@ -77,19 +77,24 @@ public struct RunOutcome: Sendable, Equatable {
     }
 
     /// The new names a run of this kind produced, in the order given: MKV files for a rip (a name ending in .mkv, in any
-    /// case, that isn't hidden), the disc structure for a backup (a BDMV, VIDEO_TS or HVDVD_TS folder, or an .iso
+    /// ASCII case, that isn't hidden), the disc structure for a backup (a BDMV, VIDEO_TS or HVDVD_TS folder, or an .iso
     /// image), the file itself for an image (any name that isn't hidden), nothing for a listing. Anything else
-    /// (.DS_Store, Thumbs.db, a partial file) doesn't count.
+    /// (.DS_Store, Thumbs.db, a partial file) doesn't count. Names are bytes, as in C# and C: hidden is a first byte '.'.
     public static func products(_ product: RunProduct, newNames: [String]) -> [String] {
         switch product {
         case .titles:
-            return newNames.filter { !$0.hasPrefix(".") && $0.lowercased().hasSuffix(".mkv") }
+            return newNames.filter { !hidden($0) && ArchiveFiles.endsWith(MessageCatalog.asciiLower($0), ".mkv") }
         case .backup:
-            return newNames.filter { !$0.hasPrefix(".") && (["BDMV", "VIDEO_TS", "HVDVD_TS"].contains($0.uppercased()) || $0.lowercased().hasSuffix(".iso")) }
+            return newNames.filter { n in
+                !hidden(n) && (["bdmv", "video_ts", "hvdvd_ts"].contains { $0.utf8.elementsEqual(MessageCatalog.asciiLower(n).utf8) }
+                               || ArchiveFiles.endsWith(MessageCatalog.asciiLower(n), ".iso"))
+            }
         case .image:
-            return newNames.filter { !$0.hasPrefix(".") }
+            return newNames.filter { !hidden($0) }
         case .nothing:
             return []
         }
     }
+
+    private static func hidden(_ name: String) -> Bool { name.utf8.first == UInt8(ascii: ".") }
 }

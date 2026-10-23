@@ -356,6 +356,68 @@
       }
     },
     {
+      "id": "run-a-dot-and-a-combining-mark-is-hidden",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "titles",
+        "newNames": [
+          ".́title_t01.mkv",
+          "title_t00.mkv"
+        ]
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": [
+          "title_t00.mkv"
+        ]
+      }
+    },
+    {
+      "id": "run-an-mkv-is-told-by-its-last-bytes",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "titles",
+        "newNames": [
+          "title_t00؀.mkv"
+        ]
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": [
+          "title_t00؀.mkv"
+        ]
+      }
+    },
+    {
+      "id": "run-a-disc-folder-is-told-in-ascii-case-only",
+      "given": {
+        "fixture": "mkv-rip.txt",
+        "exitCode": 0,
+        "product": "backup",
+        "newNames": [
+          "VIDEO_Tſ",
+          "Movie؀.iso"
+        ]
+      },
+      "expect": {
+        "statusWord": "success",
+        "failed": false,
+        "readErrors": false,
+        "errorContains": null,
+        "produced": [
+          "Movie؀.iso"
+        ]
+      }
+    },
+    {
       "id": "decide-succeeded",
       "from": [
         "macos JobRunner.run (today's chain of flags); rearchitecture-plan §20.3"

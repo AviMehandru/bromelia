@@ -1013,6 +1013,8 @@ not_drive_case (const char *id)
   return !g_str_has_prefix (id, "drive-");
 }
 
+static GStrv strv_of (BroJsonValue *v);
+
 static gboolean
 identity_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
 {
@@ -1097,6 +1099,15 @@ identity_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
     for (guint i = 0; i < numbers->len; i++)
       bro_json_value_append (actual, bro_json_value_new_integer (g_array_index (numbers, int, i)));
     bro_test_same_json (failures, id, "numbers", J (expect, "numbers"), actual);
+    return TRUE;
+  }
+  if ((v = J (given, "seasonFileNames"))) {
+    g_auto (GStrv) names = strv_of (v);
+    int highest;
+    g_autoptr (BroJsonValue) actual
+        = bro_episode_continuation_highest_in_season ((const char *const *) names, bro_json_value_get_integer (J (given, "season"), 0), &highest)
+              ? bro_json_value_new_integer (highest) : bro_json_value_new_null ();
+    bro_test_same_json (failures, id, "highest in season", J (expect, "highestInSeason"), actual);
     return TRUE;
   }
   if (J (expect, "format")) {

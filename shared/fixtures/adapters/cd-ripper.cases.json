@@ -143,6 +143,20 @@
       }
     },
     {
+      "id": "a-dot-and-a-combining-mark-is-hidden",
+      "given": {
+        "located": ["cyanrip"],
+        "device": "/dev/sr0",
+        "dest": "<root>/Album",
+        "stallMinutes": 10,
+        "lines": [],
+        "saves": ".́cyanrip.log"
+      },
+      "expect": {
+        "error": { "code": "process.savedNothing", "params": { "tool": "cyanrip" } }
+      }
+    },
+    {
       "id": "stalled",
       "given": {
         "located": ["cyanrip"],

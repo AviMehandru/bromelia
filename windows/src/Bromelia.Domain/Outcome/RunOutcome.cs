@@ -74,11 +74,12 @@ public sealed record RunOutcome(
     public static IReadOnlyList<string> Products(RunProduct product, IReadOnlyList<string> newNames) => product switch
     {
         RunProduct.Titles => newNames.Where(n => !n.StartsWith('.') && n.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase)).ToList(),
-        RunProduct.Backup => newNames.Where(n => !n.StartsWith('.') && (DiscFolders.Contains(n.ToUpperInvariant())
+        RunProduct.Backup => newNames.Where(n => !n.StartsWith('.') && (DiscFolders.Contains(n)
             || n.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))).ToList(),
         RunProduct.Image => newNames.Where(n => !n.StartsWith('.')).ToList(),
         _ => Array.Empty<string>(),
     };
 
-    static readonly HashSet<string> DiscFolders = new(StringComparer.Ordinal) { "BDMV", "VIDEO_TS", "HVDVD_TS" };
+    // Ordinal, ASCII case only, as C: ToUpperInvariant would also make VIDEO_T + U+017F (a long s) VIDEO_TS.
+    static readonly HashSet<string> DiscFolders = new(StringComparer.OrdinalIgnoreCase) { "BDMV", "VIDEO_TS", "HVDVD_TS" };
 }

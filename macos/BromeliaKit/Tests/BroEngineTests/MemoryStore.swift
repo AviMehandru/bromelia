@@ -197,9 +197,10 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
 
     private static func notFound(_ path: String) -> BroError { BroError("fs.notFound", [("path", .string(path))]) }
 
+    /// Paths split at the byte '/', as the real file systems do (not at Swift's grapheme '/').
     private static func parent(_ path: String) -> String {
-        guard let i = path.lastIndex(of: "/"), i != path.startIndex else { return "/" }
-        return String(path[..<i])
+        guard let i = path.utf8.lastIndex(of: UInt8(ascii: "/")), i != path.utf8.startIndex else { return "/" }
+        return String(decoding: path.utf8[..<i], as: UTF8.self)
     }
 
     /// The lock held.
@@ -208,8 +209,8 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     /// The lock held.
     private func putFolderLocked(_ path: String) {
         var current = ""
-        for part in path.split(separator: "/") {
-            current += "/" + part
+        for part in path.utf8.split(separator: UInt8(ascii: "/")) {
+            current += "/" + String(decoding: part, as: UTF8.self)
             folders.insert(MemoryFileSystem.key(current))
         }
     }
@@ -232,7 +233,7 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     func createDirectory(_ path: String, parentsMustExist: Bool) throws(BroError) { putFolder(path) }
     func writeAtomically(_ path: String, bytes: [UInt8], mode: Int) throws(BroError) {
         try check("write", path)
-        let folder = String(path[..<path.lastIndex(of: "/")!])
+        let folder = MemoryFileSystem.parent(path)
         let ok = lock.withLock { () -> Bool in
             guard folders.contains(MemoryFileSystem.key(folder)) else { return false }
             files[MemoryFileSystem.key(path)] = bytes

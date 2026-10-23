@@ -43,7 +43,7 @@ public final class CdRipper: Sendable {
         if exit.cancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         if exit.stalled != nil { throw failed(.processStalled, name, [("minutes", .integer(Int64(stallMinutes)))]) }
         if exit.status != 0 { throw failed(.processFailed, name, [("status", .integer(Int64(exit.status)))]) }
-        let saved = ((try? fs.list(dest)) ?? []).map(\.name).filter { !$0.hasPrefix(".") }
+        let saved = ((try? fs.list(dest)) ?? []).map(\.name).filter { $0.utf8.first != UInt8(ascii: ".") }
             .sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }.map { (dest as NSString).appendingPathComponent($0) }
         if saved.isEmpty { throw failed(.processSavedNothing, name, []) }
         return saved

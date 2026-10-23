@@ -102,6 +102,11 @@ struct IdentityTests {
                 try Fixtures.same(expect["numbers"], .array(MenuNumbers.parse(text).map { .integer(Int64($0)) }), "numbers")
                 return true
             }
+            if let names = given["seasonFileNames"]?.array {
+                let highest = EpisodeContinuation.highestInSeason(names.compactMap(\.string), season: Int(given["season"]?.int ?? 0))
+                try Fixtures.same(expect["highestInSeason"]?.int, highest.map(Int64.init), "highest in season")
+                return true
+            }
             if let format = expect["format"]?.string {
                 let detected = FormatDetector.detect(nil, flags: given["flags"].map(flagsOf), indexBdmv: given["indexBdmv"]?.string,
                                                      hasVideoTs: given["backupHasVideoTs"]?.bool ?? false)

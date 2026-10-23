@@ -151,6 +151,42 @@
       }
     },
     {
+      "id": "hidden-by-the-first-byte",
+      "given": {
+        "produced": [
+          "Extras"
+        ],
+        "tree": [
+          "Extras/.́note.txt",
+          "Extras/a.mkv",
+          "Extras/­.note.txt"
+        ]
+      },
+      "expect": {
+        "relative": [
+          "Extras/a.mkv",
+          "Extras/­.note.txt"
+        ]
+      }
+    },
+    {
+      "id": "hidden-after-a-prepended-mark",
+      "given": {
+        "produced": [
+          "Extras؀"
+        ],
+        "tree": [
+          "Extras؀/.DS_Store",
+          "Extras؀/a.mkv"
+        ]
+      },
+      "expect": {
+        "relative": [
+          "Extras؀/a.mkv"
+        ]
+      }
+    },
+    {
       "id": "own-sha256sums",
       "from": [
         "macos ArchiveCheckTests.verifiesArchives",
@@ -307,6 +343,24 @@
       }
     },
     {
+      "id": "own-bromelia-and-a-combining-mark-json",
+      "given": {
+        "name": "bromeliá.json"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
+      "id": "own-bromelia-and-a-prepended-mark-json",
+      "given": {
+        "name": "bromelia؀.json"
+      },
+      "expect": {
+        "isOwnFile": true
+      }
+    },
+    {
       "id": "own-movie-mkv",
       "from": [
         "macos ArchiveCheckTests.verifiesArchives",
@@ -372,6 +426,15 @@
       }
     },
     {
+      "id": "metadata-a-prepended-mark-nfo",
+      "given": {
+        "name": "Movie؀.nfo"
+      },
+      "expect": {
+        "isMetadataFile": true
+      }
+    },
+    {
       "id": "metadata-friends-1994-s02e01-mkv",
       "from": [
         "macos MediaServerMetadataTests.nfoFiles",
@@ -403,6 +466,24 @@
       ],
       "given": {
         "name": ".disc.iso.part-1a2b3c4d"
+      },
+      "expect": {
+        "isLeftover": true
+      }
+    },
+    {
+      "id": "leftover-a-dot-and-a-combining-mark",
+      "given": {
+        "name": ".́x.mkv.bromelia-tmp-1a2b"
+      },
+      "expect": {
+        "isLeftover": true
+      }
+    },
+    {
+      "id": "leftover-a-combining-mark-after-part",
+      "given": {
+        "name": ".disc.iso.part-́1a2b3c4d"
       },
       "expect": {
         "isLeftover": true
@@ -544,6 +625,46 @@
           }
         },
         "summaryText": "2 files OK"
+      }
+    },
+    {
+      "id": "verify-names-are-bytes",
+      "given": {
+        "sums": [
+          "Good.mkv"
+        ],
+        "hashes": {
+          "Good.mkv": "same"
+        },
+        "folder": [
+          "Good.mkv",
+          "SHA256SUMS",
+          ".́note.txt",
+          "Extras/.́note.txt",
+          "Extras؀/.DS_Store",
+          "­.note.txt",
+          "bromelia؀/x.json",
+          "Movie؀.nfo",
+          "Extras؀/poster.jpg",
+          "Extras؀/SHA256SUMS"
+        ]
+      },
+      "expect": {
+        "result": "ok",
+        "files": 1,
+        "unlisted": [
+          "Extras؀/SHA256SUMS",
+          "bromelia؀/x.json",
+          "­.note.txt"
+        ],
+        "summary": {
+          "code": "check.ok",
+          "params": {
+            "files": 1,
+            "unlisted": 3
+          }
+        },
+        "summaryText": "1 file OK; 3 not listed"
       }
     },
     {

@@ -37,7 +37,7 @@ public sealed record VerifyResult(
             var name = f.Substring(f.LastIndexOf('/') + 1);
             bool top = !f.Contains('/');
             return !set.Contains(f) && !(top && ArchiveFiles.IsOwnFile(name)) && !ArchiveFiles.IsMetadataFile(name)
-                   && !f.Split('/').Any(c => c.StartsWith("."));
+                   && !f.Split('/').Any(c => c.StartsWith('.'));
         }).OrderBy(p => p, CodePointOrder.Instance).ToList();
         bool ok = changed.Count == 0 && unreadable.Count == 0 && missing.Count == 0;
         BroMessage summary;

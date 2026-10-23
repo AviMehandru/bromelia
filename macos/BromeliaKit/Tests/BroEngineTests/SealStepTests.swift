@@ -98,7 +98,7 @@ private func subset(_ expected: JsonValue, _ actual: JsonValue?, _ path: String)
 private func snapshot(_ fs: MemoryFileSystem, _ staging: String) throws -> [String: String] {
     guard fs.exists(staging) else { return [:] }
     var result: [String: String] = [:]
-    for f in try FileTree.files(fs, root: staging) where !f.hasSuffix("/") { result[f] = String(decoding: try fs.read(staging + "/" + f), as: UTF8.self) }
+    for f in try FileTree.files(fs, root: staging) where f.utf8.last != UInt8(ascii: "/") { result[f] = String(decoding: try fs.read(staging + "/" + f), as: UTF8.self) }
     return result
 }
 
@@ -129,8 +129,8 @@ struct SealStepTests {
         let staging = (given["libraries"]?["lib"]?["path"]?.string ?? "/lib") + "/.bromelia/staging/" + jobIdText
         let jobDirectory = "/data/jobs/" + jobIdText
         func putStaging(_ rel: String, _ content: JsonValue) {
-            if rel.hasSuffix("/") {
-                fs.putFolder(staging + "/" + rel.dropLast()) // an empty folder
+            if rel.utf8.last == UInt8(ascii: "/") {
+                fs.putFolder(staging + "/" + String(decoding: rel.utf8.dropLast(), as: UTF8.self)) // an empty folder (by bytes: "a\u{600}/")
             } else if let text = content.string {
                 fs.put(staging + "/" + rel, Array(text.utf8))
             } else {

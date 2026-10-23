@@ -100,6 +100,12 @@ public class IdentityTests
             Same(expect["numbers"], JsonValue.Of(MenuNumbers.Parse(text.AsString!).Select(n => JsonValue.Of(n))), "numbers");
             return true;
         }
+        if (given["seasonFileNames"] is { } names)
+        {
+            var highest = EpisodeContinuation.HighestInSeason(names.AsArray!.Select(n => n.AsString!).ToList(), (int)given["season"]!.AsInteger!);
+            Same(expect["highestInSeason"]!.AsInteger, (long?)highest, "highest in season");
+            return true;
+        }
         if (expect["format"] is { } fmt)
         {
             var detected = FormatDetector.Detect(null, given["flags"] is { } flags ? FlagsOf(flags) : null,

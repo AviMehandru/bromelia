@@ -9,9 +9,10 @@ public enum ArchiveFiles {
 
     /// Files Bromelia writes next to the archived ones that SHA256SUMS doesn't list: SHA256SUMS, the records
     /// (bromelia*.json), the logs (bromelia-log, makemkv-log, makemkv-debug-log; with a unit's short id in v3:
-    /// bromelia-1a2b3c4d-log.txt …), and the INCOMPLETE / READ ERRORS notes.
+    /// bromelia-1a2b3c4d-log.txt …), and the INCOMPLETE / READ ERRORS notes. Names are bytes here and below, as in C#
+    /// (ordinal) and C, never Swift's graphemes: a combining or prepended mark next to a '.' or '/' changes nothing.
     public static func isOwnFile(_ name: String) -> Bool {
-        name == Sha256Sums.fileName || (name.hasPrefix("bromelia") && name.hasSuffix(".json"))
+        name == Sha256Sums.fileName || (name.utf8.starts(with: "bromelia".utf8) && endsWith(name, ".json"))
             || ownLog.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
             || name == "INCOMPLETE.txt" || name == "READ ERRORS.txt"
     }
@@ -33,14 +34,38 @@ public enum ArchiveFiles {
     /// What a write that was stopped leaves behind: .<name>.bromelia-tmp-<id> (FileSystem.writeAtomically) and
     /// .<name>.part-<id> (DataImager). Startup recovery removes them (review L3-3).
     public static func isLeftover(_ name: String) -> Bool {
-        name.hasPrefix(".") && (name.contains(".bromelia-tmp-") || name.contains(".part-"))
+        let bytes = Array(name.utf8)
+        return bytes.first == dot && (bytes.firstRange(of: Array(".bromelia-tmp-".utf8)) != nil || bytes.firstRange(of: Array(".part-".utf8)) != nil)
     }
 
     /// Files written for media servers, which SHA256SUMS doesn't list (servers may rewrite them): .nfo files and
     /// poster.jpg.
     public static func isMetadataFile(_ name: String) -> Bool {
-        MessageCatalog.asciiLower(name).hasSuffix(".nfo") || name == "poster.jpg"
+        endsWith(MessageCatalog.asciiLower(name), ".nfo") || name == "poster.jpg"
     }
+
+    // Path helpers for Swift only (package: BroEngine's SealStep uses them; C# and C get the same from ordinal / byte
+    // string functions).
+
+    /// Whether a relative path has a hidden component: one whose first byte is '.' (".\u{301}note" too).
+    package static func isHidden(_ path: some StringProtocol) -> Bool {
+        path.utf8.split(separator: slash).contains { $0.first == dot }
+    }
+
+    /// Whether a relative path is a folder: it ends in '/' (FileTree's empty folders).
+    package static func isFolder(_ path: String) -> Bool { path.utf8.last == slash }
+
+    /// Whether a relative path is at the top of its folder: it holds no '/'.
+    package static func isTop(_ path: String) -> Bool { !path.utf8.contains(slash) }
+
+    /// The components of a relative path, split at each '/' (empty ones kept).
+    package static func components(_ path: String) -> [String] {
+        path.utf8.split(separator: slash, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    static let dot = UInt8(ascii: "."), slash = UInt8(ascii: "/")
+
+    static func endsWith(_ name: String, _ suffix: String) -> Bool { name.utf8.reversed().starts(with: suffix.utf8.reversed()) }
 
     /// The files the produced items are: each produced file, and every file under a produced folder (from `tree`,
     /// the folder's files), relative paths in code point order, each once; hidden files (a component starting with a
@@ -51,7 +76,7 @@ public enum ArchiveFiles {
         for p in produced {
             var item = Array(p.utf8)
             while item.last == UInt8(ascii: "/") { item.removeLast() }
-            for f in tree where !f.split(separator: "/").contains(where: { $0.hasPrefix(".") }) {
+            for f in tree where !isHidden(f) {
                 let bytes = Array(f.utf8)
                 if bytes == item || bytes.starts(with: item + [UInt8(ascii: "/")]) { result[bytes] = f }
             }

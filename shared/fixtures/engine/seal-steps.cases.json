@@ -2782,6 +2782,1057 @@
       }
     },
     {
+      "id": "seal-a-dot-and-a-combining-mark-is-hidden-and-its-leftover-removed",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                },
+                {
+                  "index": 1,
+                  "files": [
+                    "title_t01.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "title_t00.mkv": "the first title's bytes",
+          "title_t01.mkv": "the second title, a little longer",
+          ".́note.txt": "a note",
+          ".́x.mkv.bromelia-tmp-1a2b": "half"
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "status": "success",
+          "files": [
+            {
+              "path": "title_t00.mkv",
+              "size": 23,
+              "sha256": "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2",
+              "role": "title",
+              "title": 0
+            },
+            {
+              "path": "title_t01.mkv",
+              "size": 33,
+              "sha256": "b099a2fc5129037c5d9520c05936500e6ca7fad459180a7a153ecda0f35f5edd",
+              "role": "title",
+              "title": 1
+            }
+          ],
+          "record": "bromelia-36201adf.json",
+          "logs": [
+            "bromelia-36201adf-log.txt",
+            "makemkv-36201adf-log.txt"
+          ],
+          "note": null,
+          "tag": null
+        },
+        "fs": [
+          "remove /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/.́x.mkv.bromelia-tmp-1a2b",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv disk",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/makemkv-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf.json",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "tree": [
+          ".́note.txt",
+          "SHA256SUMS",
+          "bromelia-36201adf-log.txt",
+          "bromelia-36201adf.json",
+          "makemkv-36201adf-log.txt",
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ]
+      }
+    },
+    {
+      "id": "seal-a-dot-and-a-combining-mark-in-a-produced-folder-is-not-sealed",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "backup/BDMV/STREAM/00001.m2ts": "stream one",
+          "backup/BDMV/index.bdmv": "INDX0200",
+          "backup/CERTIFICATE/id.bdmv": "cert",
+          "backup/BDMV/.́note.txt": "hidden"
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "status": "success",
+          "files": [
+            {
+              "path": "backup/BDMV/STREAM/00001.m2ts",
+              "size": 10,
+              "sha256": "da0ec6d5283c61052068846c0e7d11e91849c156bb86d04e32c41140c28d2243",
+              "role": "backup"
+            },
+            {
+              "path": "backup/BDMV/index.bdmv",
+              "size": 8,
+              "sha256": "5e7a3d035b641468adbf53577c363aaa2c29016ae6daa3ae2a0ac35b7af29b9b",
+              "role": "backup"
+            },
+            {
+              "path": "backup/CERTIFICATE/id.bdmv",
+              "size": 4,
+              "sha256": "06298432e8066b29e2223bcc23aa9504b56ae508fabf3435508869b9c3190e22",
+              "role": "backup"
+            }
+          ],
+          "record": "bromelia-36201adf.json",
+          "logs": [
+            "bromelia-36201adf-log.txt",
+            "makemkv-36201adf-log.txt"
+          ],
+          "note": null,
+          "tag": null
+        },
+        "fs": [
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/STREAM/00001.m2ts",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/index.bdmv",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/CERTIFICATE/id.bdmv",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/STREAM",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/CERTIFICATE",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/STREAM/00001.m2ts disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/index.bdmv disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/CERTIFICATE/id.bdmv disk",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/makemkv-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf.json",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "tree": [
+          "SHA256SUMS",
+          "backup/BDMV/.́note.txt",
+          "backup/BDMV/STREAM/00001.m2ts",
+          "backup/BDMV/index.bdmv",
+          "backup/CERTIFICATE/id.bdmv",
+          "bromelia-36201adf-log.txt",
+          "bromelia-36201adf.json",
+          "makemkv-36201adf-log.txt"
+        ]
+      }
+    },
+    {
+      "id": "seal-a-soft-hyphen-before-a-dot-is-not-hidden",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                },
+                {
+                  "index": 1,
+                  "files": [
+                    "title_t01.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "title_t00.mkv": "the first title's bytes",
+          "title_t01.mkv": "the second title, a little longer",
+          "­.note.txt": "mine"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "archive.unlisted",
+          "params": {
+            "file": "­.note.txt"
+          }
+        },
+        "fs": [],
+        "tree": [
+          "title_t00.mkv",
+          "title_t01.mkv",
+          "­.note.txt"
+        ]
+      }
+    },
+    {
+      "id": "seal-syncs-a-folder-whose-name-ends-in-a-prepended-mark",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "driveId": "drv-0123456789abcdef",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Some Show",
+                "kind": "tv",
+                "format": "dvd",
+                "formatCode": "DVD",
+                "encrypted": false,
+                "label": {
+                  "title": "Some Show",
+                  "season": 2,
+                  "part": null,
+                  "volume": null,
+                  "disc": 1,
+                  "set": "Season 2 Disc 1",
+                  "looksLikeSeries": true
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                },
+                {
+                  "index": 1,
+                  "files": [
+                    "title_t01.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Some Show/Season 02",
+              "name": "Some Show S02 D1",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Some Show S02E01.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Extras؀/Some Show - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                }
+              ]
+            }
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "Some Show S02E01.mkv": "the first title's bytes",
+          "Extras؀/Some Show - Extra.mkv": "the second title, a little longer",
+          "Extras؀/.x.mkv.bromelia-tmp-1a2b": "half"
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "status": "success",
+          "files": [
+            {
+              "path": "Extras؀/Some Show - Extra.mkv",
+              "size": 33,
+              "sha256": "b099a2fc5129037c5d9520c05936500e6ca7fad459180a7a153ecda0f35f5edd",
+              "role": "title",
+              "title": 1
+            },
+            {
+              "path": "Some Show S02E01.mkv",
+              "size": 23,
+              "sha256": "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2",
+              "role": "title",
+              "title": 0
+            }
+          ],
+          "record": "bromelia-36201adf.json",
+          "logs": [
+            "bromelia-36201adf-log.txt",
+            "makemkv-36201adf-log.txt"
+          ],
+          "note": null,
+          "tag": null
+        },
+        "fs": [
+          "remove /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Extras؀/.x.mkv.bromelia-tmp-1a2b",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Extras؀/Some Show - Extra.mkv",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Some Show S02E01.mkv",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Extras؀",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Extras؀/Some Show - Extra.mkv disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/Some Show S02E01.mkv disk",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/makemkv-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf.json",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "contents": {
+          "SHA256SUMS": "b099a2fc5129037c5d9520c05936500e6ca7fad459180a7a153ecda0f35f5edd  Extras؀/Some Show - Extra.mkv\ne9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2  Some Show S02E01.mkv\n"
+        }
+      }
+    },
+    {
+      "id": "seal-an-empty-folder-ending-in-a-prepended-mark-is-left-as-it-is",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backup",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": "backup",
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "backup/BDMV/STREAM/00001.m2ts": "stream one",
+          "backup/BDMV/index.bdmv": "INDX0200",
+          "backup/CERTIFICATE/id.bdmv": "cert",
+          "backup/BDMV/AUXDATA؀/": ""
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "status": "success",
+          "files": [
+            {
+              "path": "backup/BDMV/STREAM/00001.m2ts",
+              "size": 10,
+              "sha256": "da0ec6d5283c61052068846c0e7d11e91849c156bb86d04e32c41140c28d2243",
+              "role": "backup"
+            },
+            {
+              "path": "backup/BDMV/index.bdmv",
+              "size": 8,
+              "sha256": "5e7a3d035b641468adbf53577c363aaa2c29016ae6daa3ae2a0ac35b7af29b9b",
+              "role": "backup"
+            },
+            {
+              "path": "backup/CERTIFICATE/id.bdmv",
+              "size": 4,
+              "sha256": "06298432e8066b29e2223bcc23aa9504b56ae508fabf3435508869b9c3190e22",
+              "role": "backup"
+            }
+          ],
+          "record": "bromelia-36201adf.json",
+          "logs": [
+            "bromelia-36201adf-log.txt",
+            "makemkv-36201adf-log.txt"
+          ],
+          "note": null,
+          "tag": null
+        },
+        "fs": [
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/STREAM/00001.m2ts",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/index.bdmv",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/CERTIFICATE/id.bdmv",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/STREAM",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/CERTIFICATE",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/STREAM/00001.m2ts disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/BDMV/index.bdmv disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/backup/CERTIFICATE/id.bdmv disk",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/makemkv-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf.json",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "tree": [
+          "SHA256SUMS",
+          "backup/BDMV/AUXDATA؀/",
+          "backup/BDMV/STREAM/00001.m2ts",
+          "backup/BDMV/index.bdmv",
+          "backup/CERTIFICATE/id.bdmv",
+          "bromelia-36201adf-log.txt",
+          "bromelia-36201adf.json",
+          "makemkv-36201adf-log.txt"
+        ]
+      }
+    },
+    {
+      "id": "seal-a-json-file-in-a-folder-is-not-bromelia-s-own",
+      "given": {
+        "step": "seal",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "sourceFile": "00002.mpls",
+                    "duration": "0:02:00",
+                    "durationSeconds": 120,
+                    "chapters": 1,
+                    "sizeBytes": 100000000,
+                    "segmentMap": "3"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [
+                {
+                  "index": 0,
+                  "files": [
+                    "title_t00.mkv"
+                  ],
+                  "readErrors": []
+                },
+                {
+                  "index": 1,
+                  "files": [
+                    "title_t01.mkv"
+                  ],
+                  "readErrors": []
+                }
+              ],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            },
+            "readErrors": 0
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:00:03.000Z\",\"severity\": \"debug\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"debug line\"}}\n{\"t\": \"2026-10-20T09:30:00.000Z\",\"severity\": \"error\",\"code\": \"makemkv.message\",\"params\": {\"text\": \"Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' occurred while reading '/BDMV/STREAM/00001.m2ts' at offset '1048576'\"}}\n{\"t\": \"2026-10-20T09:40:00.000Z\",\"severity\": \"info\",\"code\": \"archive.outputFolder\",\"params\": {\"path\": \"/lib/Sample Movie\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\nMSG:5036,0,1,\"Copy complete. 1 titles saved.\"\n"
+        },
+        "staging": {
+          "title_t00.mkv": "the first title's bytes",
+          "title_t01.mkv": "the second title, a little longer",
+          "bromelia؀/x.json": "{}"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "archive.unlisted",
+          "params": {
+            "file": "bromelia؀/x.json"
+          }
+        },
+        "fs": [],
+        "tree": [
+          "bromelia؀/x.json",
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ]
+      }
+    },
+    {
       "id": "seal-an-empty-folder-in-a-backup-is-left-as-it-is",
       "given": {
         "step": "seal",

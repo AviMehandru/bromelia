@@ -56,24 +56,24 @@ public struct SealStep: Step {
         let walked = try FileTree.files(fs, root: staging)
         // An item that isn't there or holds no file (an empty folder, a hidden path, a path through '..') would seal
         // nothing for itself (owner, 2026-10-21): refused before anything is touched.
-        for item in named where !ArchiveFiles.expand([item.path], tree: walked).contains(where: { !$0.hasSuffix("/") }) {
+        for item in named where !ArchiveFiles.expand([item.path], tree: walked).contains(where: { !ArchiveFiles.isFolder($0) }) {
             throw failure(.archiveFileMissing, [("file", .string(item.path))])
         }
         var tree: [String] = []
         for f in walked {
-            if !f.hasSuffix("/"), ArchiveFiles.isLeftover(String(f.split(separator: "/").last ?? "")) {
+            if !ArchiveFiles.isFolder(f), ArchiveFiles.isLeftover(ArchiveFiles.components(f).last ?? f) {
                 try fs.remove(staging + "/" + f)
             } else {
                 tree.append(f)
             }
         }
-        let files = ArchiveFiles.expand(named.map(\.path), tree: tree).filter { !$0.hasSuffix("/") }
+        let files = ArchiveFiles.expand(named.map(\.path), tree: tree).filter { !ArchiveFiles.isFolder($0) }
         // Names compare byte for byte (ArchiveFiles.expand): two spellings of one name are two files.
         let sealedFiles = Set(files.map { Array($0.utf8) })
         for f in tree {
-            let hidden = trimmed(f).split(separator: "/").contains { $0.hasPrefix(".") }
-            let own = !f.contains("/") && ArchiveFiles.isOwnFile(f)
-            if !f.hasSuffix("/"), !hidden, !own, !sealedFiles.contains(Array(f.utf8)) { throw failure(.archiveUnlisted, [("file", .string(f))]) }
+            let hidden = ArchiveFiles.isHidden(f)
+            let own = ArchiveFiles.isTop(f) && ArchiveFiles.isOwnFile(f)
+            if !ArchiveFiles.isFolder(f), !hidden, !own, !sealedFiles.contains(Array(f.utf8)) { throw failure(.archiveUnlisted, [("file", .string(f))]) }
         }
         func itemOf(_ file: String) -> NamedFile {
             let bytes = Array(file.utf8)
@@ -158,7 +158,7 @@ public struct SealStep: Step {
         context.log.log(BroMessage(.archiveRecordWritten, [("file", .string(record))]))
 
         // An earlier attempt's own files that this one didn't write (a note, a log no longer there).
-        for f in tree where !f.contains("/") && ArchiveFiles.isOwnFile(f) && !written.contains(where: { $0.utf8.elementsEqual(f.utf8) }) { try fs.remove(staging + "/" + f) }
+        for f in tree where ArchiveFiles.isTop(f) && ArchiveFiles.isOwnFile(f) && !written.contains(where: { $0.utf8.elementsEqual(f.utf8) }) { try fs.remove(staging + "/" + f) }
         try fs.syncDirectory(staging)
 
         return StepReport(data: SealOutput.encode(SealOutput(unitId: unitId, status: readErrors > 0 ? "errors" : "success", files: entries, record: record,
@@ -204,14 +204,14 @@ public struct SealStep: Step {
     /// The folders from `staging` down to the one that holds `file`.
     private static func foldersTo(_ file: String, from staging: String) -> [String] {
         var folders = [staging]
-        for part in file.split(separator: "/", omittingEmptySubsequences: false).dropLast() { folders.append(folders.last! + "/" + part) }
+        for part in ArchiveFiles.components(file).dropLast() { folders.append(folders.last! + "/" + part) }
         return folders
     }
 
     private static func trimmed(_ path: String) -> String {
-        var p = Substring(path)
-        while p.hasSuffix("/") { p = p.dropLast() }
-        return String(p)
+        var p = Array(path.utf8)
+        while p.last == UInt8(ascii: "/") { p.removeLast() }
+        return String(decoding: p, as: UTF8.self)
     }
 
     private static func cancelled(_ context: StepContext) throws(BroError) {

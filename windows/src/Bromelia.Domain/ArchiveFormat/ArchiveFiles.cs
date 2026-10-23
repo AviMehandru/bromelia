@@ -55,7 +55,7 @@ public static class ArchiveFiles
         {
             var item = p.TrimEnd('/');
             foreach (var f in tree)
-                if ((f == item || f.StartsWith(item + "/", StringComparison.Ordinal)) && !f.Split('/').Any(c => c.StartsWith(".")))
+                if ((f == item || f.StartsWith(item + "/", StringComparison.Ordinal)) && !f.Split('/').Any(c => c.StartsWith('.')))
                     result.Add(f);
         }
         return result.ToList();

@@ -39,10 +39,9 @@ public struct VerifyResult: Sendable, Equatable {
         let missing = listed.filter { v($0) == .missing }
         let set = Set(listed)
         let unlisted = folderFiles.filter { f in
-            let name = f.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init) ?? f
-            let top = !f.contains("/")
-            return !set.contains(f) && !(top && ArchiveFiles.isOwnFile(name)) && !ArchiveFiles.isMetadataFile(name)
-                && !f.split(separator: "/").contains(where: { $0.hasPrefix(".") })
+            let name = ArchiveFiles.components(f).last ?? f
+            return !set.contains(f) && !(ArchiveFiles.isTop(f) && ArchiveFiles.isOwnFile(name)) && !ArchiveFiles.isMetadataFile(name)
+                && !ArchiveFiles.isHidden(f)
         }.sorted(by: ordinal)
         let ok = changed.isEmpty && unreadable.isEmpty && missing.isEmpty
         let summary: BroMessage

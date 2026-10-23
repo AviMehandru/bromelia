@@ -19,10 +19,10 @@ public enum EpisodeContinuation {
 
     static let seasonEpisode = try! NSRegularExpression(pattern: "[Ss]([0-9]{1,3})[Ee]([0-9]{1,4})")
 
-    /// The highest episode number of `season` in file names (`… S02E05 …`), or nil.
+    /// The highest episode number of `season` in file names (`… S02E05 …`) that aren't hidden (a first byte '.'), or nil.
     public static func highestInSeason(_ fileNames: [String], season: Int) -> Int? {
         var best: Int?
-        for n in fileNames where !n.hasPrefix(".") {
+        for n in fileNames where n.utf8.first != UInt8(ascii: ".") {
             guard let m = seasonEpisode.firstMatch(in: n, range: NSRange(n.startIndex..., in: n)),
                   let rs = Range(m.range(at: 1), in: n), let re = Range(m.range(at: 2), in: n),
                   Int(n[rs]) == season, let e = Int(n[re]) else { continue }

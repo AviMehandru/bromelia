@@ -9,7 +9,8 @@
     "KindHeuristics.episodeLike",
     "MenuNumbers.parse",
     "MenuNumbers.firstEpisode",
-    "DriveJoin.shortModel"
+    "DriveJoin.shortModel",
+    "EpisodeContinuation.highestInSeason"
   ],
   "description": "What a disc is: its name and place in a set from the label, movie or TV, and the format. Today's macOS IdentityTests cases; Windows and Linux test the same labels.",
   "cases": [
@@ -546,6 +547,21 @@
       },
       "expect": {
         "shortModel": "NEW DRIVE 3.00"
+      }
+    },
+    {
+      "id": "season-files-skip-hidden-names",
+      "given": {
+        "seasonFileNames": [
+          ".́Some Show S02E09.mkv",
+          "Some Show S02E03.mkv",
+          ".Some Show S02E08.mkv",
+          "­Some Show S02E04.mkv"
+        ],
+        "season": 2
+      },
+      "expect": {
+        "highestInSeason": 4
       }
     }
   ]

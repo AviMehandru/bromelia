@@ -22,11 +22,12 @@ public static class EpisodeContinuation
         return new PreviousEpisode(last, query.SeasonFolder ?? "");
     }
 
-    /// <summary>The highest episode number of <paramref name="season"/> in file names (<c>… S02E05 …</c>), or null.</summary>
+    /// <summary>The highest episode number of <paramref name="season"/> in file names (<c>… S02E05 …</c>) that
+    /// aren't hidden (a first character '.'), or null.</summary>
     public static int? HighestInSeason(IEnumerable<string> fileNames, int season)
     {
         int? best = null;
-        foreach (var n in fileNames.Where(n => !n.StartsWith(".")))
+        foreach (var n in fileNames.Where(n => !n.StartsWith('.')))
         {
             var m = SeasonEpisode.Match(n);
             if (m.Success && int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) == season)
