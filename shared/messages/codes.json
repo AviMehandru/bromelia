@@ -1748,6 +1748,25 @@
       },
       "today": "JobRunner.writeMediaServerMetadata"
     },
+    "name.noFolder": {
+      "kind": "error",
+      "today": "new: NameStep (today's apps used the output root itself; a unit needs a folder of its own)"
+    },
+    "name.unusable": {
+      "kind": "error",
+      "params": {
+        "path": "path"
+      },
+      "today": "new: NameStep (owner, 2026-10-21: Name never names an item that would hold no file)"
+    },
+    "name.formatFromBackup": {
+      "kind": "log",
+      "severity": "info",
+      "params": {
+        "format": "string"
+      },
+      "today": "JobRunner.backup (a UHD disc's backup index.bdmv)"
+    },
     "archive.outputFolder": {
       "kind": "log",
       "severity": "info",

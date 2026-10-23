@@ -8,7 +8,8 @@ namespace Bromelia.Engine.Tests;
 /// <see cref="Recording"/> is on, the calls that change something are written to <see cref="Ops"/> ('write', 'sync',
 /// 'remove', 'rename', 'syncDirectory', and 'open &lt;path&gt; disk|cache'); <see cref="Put"/> and <see cref="PutFolder"/> (a tool
 /// writing, a case's setup) aren't. <see cref="Cached"/> is what a read through the cache gives instead of what is on disk;
-/// <see cref="Fails"/> makes an operation on a path fail before it acts (open, read, sync, syncDirectory, write, remove);
+/// <see cref="Fails"/> makes an operation on a path fail before it acts (open, read, sync, syncDirectory, write, remove,
+/// rename: its from path); a rename refuses a path that exists and a folder that isn't there, as the real ones do;
 /// <see cref="OnOp"/> hears of each operation before it acts.</summary>
 internal sealed class MemoryFileSystem : IFileSystem
 {
@@ -128,9 +129,11 @@ internal sealed class MemoryFileSystem : IFileSystem
 
     public void Rename(string from, string to)
     {
+        Check("rename", from);
         lock (_lock)
         {
             if (Exists(to)) throw new BroFailure(new BroError("fs.alreadyExists", ("path", JsonValue.Of(to))));
+            if (!_folders.Contains(Parent(to))) throw new BroFailure(new BroError("fs.parentMissing", ("path", JsonValue.Of(Parent(to)))));
             if (_files.Remove(from, out var b)) _files[to] = b;
             else if (_folders.Contains(from))
             {

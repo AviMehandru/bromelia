@@ -1,10 +1,12 @@
 /* bro-name-output.h: BroNameOutput, what NameStep decided (session F fills it; Seal reads it): the unit's folder relative
  * to the library root (Layouts.paths, ConflictNamer), its name (a quarantined unit goes to _Quarantine/<name> [<tag>]),
- * whether the folder is shared (a media server layout: the commit merges item by item), and every produced item by the
- * name Name gave it in staging. Name renames inside staging, so staging is laid out as the unit's folder will be. */
+ * whether the folder is shared (a media server layout: the commit merges item by item), every produced item by the name
+ * Name gave it in staging, and the identity when Name corrected it (the format a backup showed; NULL: Plan's stands, and
+ * the key is left out). Name renames inside staging, so staging is laid out as the unit's folder will be. */
 #pragma once
 
 #include "bro-acquire-output.h"
+#include "bro-identity.h"
 #include "bro-job-snapshot.h"
 #include "bro-named-file.h"
 
@@ -14,7 +16,8 @@ typedef struct {
   char *folder;
   char *name;
   gboolean merge;
-  GPtrArray *files; /* BroNamedFile * */
+  GPtrArray *files;      /* BroNamedFile * */
+  BroIdentity *identity; /* nullable, owned */
 } BroNameOutput;
 
 /* Empty. */

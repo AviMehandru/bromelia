@@ -25,6 +25,7 @@ bro_name_output_free (BroNameOutput *output)
   g_free (output->folder);
   g_free (output->name);
   g_ptr_array_unref (output->files);
+  bro_identity_free (output->identity);
   g_free (output);
 }
 
@@ -39,6 +40,8 @@ bro_name_output_encode (const BroNameOutput *output)
   bro_json_value_set (o, "name", bro_json_value_new_string (output->name));
   bro_json_value_set (o, "merge", bro_json_value_new_bool (output->merge));
   bro_json_value_set (o, "files", files);
+  if (output->identity)
+    bro_json_value_set (o, "identity", bro_identity_encode (output->identity));
   return o;
 }
 
@@ -47,6 +50,7 @@ bro_name_output_decode (const BroJsonValue *json)
 {
   BroNameOutput *o = bro_name_output_new ();
   BroJsonValue *files = bro_json_value_member (json, "files");
+  BroJsonValue *identity = bro_json_value_member (json, "identity");
   g_free (o->folder);
   o->folder = g_strdup (bro_json_value_get_string (bro_json_value_member (json, "folder"), ""));
   g_free (o->name);
@@ -54,6 +58,8 @@ bro_name_output_decode (const BroJsonValue *json)
   o->merge = bro_json_value_get_bool (bro_json_value_member (json, "merge"), FALSE);
   for (guint i = 0; i < bro_json_value_length (files); i++)
     g_ptr_array_add (o->files, bro_named_file_decode (bro_json_value_at (files, i)));
+  if (identity && identity->kind == BRO_JSON_VALUE_OBJECT)
+    o->identity = bro_identity_decode (identity);
   return o;
 }
 

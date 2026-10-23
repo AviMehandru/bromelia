@@ -6,7 +6,7 @@ import BroPorts
 /// steps found. Messages are kept as codes with parameters and as text in the configured language.
 public enum SealRecord {
     /// A version 3 record. status: errors when MakeMKV reported read errors, else success. disc: the listing Probe read and
-    /// the identity Plan resolved. acquisition: the mode, "Backup" for a backup else "Rip", the job's source as the request
+    /// the identity Plan resolved (Name's when it corrected it). acquisition: the mode, "Backup" for a backup else "Rip", the job's source as the request
     /// gives it (drive:<id>, iso:<path>, folder:<path>, file:<path>), the drive, the profile, MakeMKV's version line and the
     /// app's. titles: each title Acquire ripped that the listing has, with its read errors. files: `files`, as SHA256SUMS
     /// lists them. attempts: this job's. counts: the warnings and errors in the job's log (`log`). problems: each read error
@@ -15,7 +15,7 @@ public enum SealRecord {
                              logs: [String], finishedAt: Instant, appVersion: String, messages: any MessageRenderer) -> JsonValue {
         let probe = JobSnapshot.output(job, .probe).flatMap { $0.members != nil ? ProbeOutput.decode($0) : nil }
         let listing = probe?.listing
-        let identity = plan.identity
+        let identity = NameOutput.of(job)?.identity ?? plan.identity
         let source = DiscRequest.decode(job.request)?.source
         var driveId: String?
         if case .drive(let id)? = source { driveId = id }

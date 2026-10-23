@@ -266,6 +266,9 @@ typedef enum {
   BRO_MSG_PUBLISH_WRITTEN, /* publish.written */
   BRO_MSG_PUBLISH_WRITE_FAILED, /* publish.writeFailed */
   BRO_MSG_PUBLISH_POSTER_FAILED, /* publish.posterFailed */
+  BRO_MSG_NAME_NO_FOLDER, /* name.noFolder */
+  BRO_MSG_NAME_UNUSABLE, /* name.unusable */
+  BRO_MSG_NAME_FORMAT_FROM_BACKUP, /* name.formatFromBackup */
   BRO_MSG_ARCHIVE_OUTPUT_FOLDER, /* archive.outputFolder */
   BRO_MSG_ARCHIVE_HASHING, /* archive.hashing */
   BRO_MSG_ARCHIVE_HASH_FAILED, /* archive.hashFailed */

@@ -15303,30 +15303,6 @@
           }
         },
         {
-          "name": "NameOutput",
-          "kind": "struct",
-          "fields": [
-            "folder",
-            "name",
-            "merge",
-            "files"
-          ],
-          "doc": "What Name decided (session F fills it): the unit's folder in the library, its name (for _Quarantine/<name> [<tag>]), whether the folder is shared, and every produced item by its name in staging.",
-          "phase": 3,
-          "swift": {
-            "name": "NameOutput",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/NameOutput.swift"
-          },
-          "cs": {
-            "name": "NameOutput",
-            "file": "windows/src/Bromelia.Engine/Steps/NameOutput.cs"
-          },
-          "c": {
-            "name": "BroNameOutput",
-            "file": "linux/src/engine/steps/bro-name-output.h"
-          }
-        },
-        {
           "name": "NamedFile",
           "kind": "struct",
           "fields": [
@@ -15347,6 +15323,49 @@
           "c": {
             "name": "BroNamedFile",
             "file": "linux/src/engine/steps/bro-named-file.h"
+          }
+        },
+        {
+          "name": "NameStep",
+          "kind": "class",
+          "doc": "Step 12: the unit's folder in the library (Layouts.folder; a free name when its own folder is taken, or merged into a shared one) and every produced item's name in it (Layouts.paths, ConflictNamer: nothing overwritten, I5), with the date tokens in local time at the job's start; renames inside staging so it is laid out as the unit's folder will be; a folder backup's index.bdmv gives the format (UHD). Idempotent: the names are kept in the 'names' checkpoint before the first rename.",
+          "phase": 3,
+          "swift": {
+            "name": "NameStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/NameStep.swift"
+          },
+          "cs": {
+            "name": "NameStep",
+            "file": "windows/src/Bromelia.Engine/Steps/NameStep.cs"
+          },
+          "c": {
+            "name": "BroNameStep",
+            "file": "linux/src/engine/steps/bro-name-step.h"
+          }
+        },
+        {
+          "name": "NameOutput",
+          "kind": "struct",
+          "fields": [
+            "folder",
+            "name",
+            "merge",
+            "files",
+            "identity"
+          ],
+          "doc": "What Name decided: the unit's folder in the library, its name (for _Quarantine/<name> [<tag>]), whether the folder is shared, every produced item by its name in staging, and the identity when Name corrected it (null: Plan's stands).",
+          "phase": 3,
+          "swift": {
+            "name": "NameOutput",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/NameOutput.swift"
+          },
+          "cs": {
+            "name": "NameOutput",
+            "file": "windows/src/Bromelia.Engine/Steps/NameOutput.cs"
+          },
+          "c": {
+            "name": "BroNameOutput",
+            "file": "linux/src/engine/steps/bro-name-output.h"
           }
         }
       ],

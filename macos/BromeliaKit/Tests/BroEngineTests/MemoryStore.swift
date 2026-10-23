@@ -135,7 +135,8 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
 /// the calls that change something are written to `ops` ('write', 'sync', 'remove', 'rename', 'syncDirectory', and
 /// 'open <path> disk|cache'); `put` and `putFolder` (a tool writing, a case's setup) aren't. `setCached` gives what a read
 /// through the cache gives instead of what is on disk; `fail` makes an operation on a path fail before it acts (open,
-/// read, sync, syncDirectory, write, remove); `onOp` hears of each operation before it acts. Paths are keyed by their
+/// read, sync, syncDirectory, write, remove, rename: its from path); a rename refuses a path that exists and a folder that
+/// isn't there, as the real ones do; `onOp` hears of each operation before it acts. Paths are keyed by their
 /// UTF-8 bytes, as a disk names them: an NFC and an NFD spelling of one name are two files (Swift's `==` on String
 /// would make them one).
 final class MemoryFileSystem: FileSystem, @unchecked Sendable {
@@ -170,6 +171,9 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
 
     /// Makes `op` on `path` fail with `error`, before it acts.
     func fail(_ op: String, _ path: String, _ error: BroError) { lock.withLock { fails.append((op, path, error)) } }
+
+    /// Forgets the failures `fail` set.
+    func clearFails() { lock.withLock { fails.removeAll() } }
 
     /// Forgets the recorded ops and reads.
     func clearRecorded() {
@@ -267,9 +271,12 @@ final class MemoryFileSystem: FileSystem, @unchecked Sendable {
         return Array(bytes[Int(offset)..<min(bytes.count, Int(offset) + length)])
     }
     func rename(_ from: String, to: String) throws(BroError) {
+        try check("rename", from)
         let error = lock.withLock { () -> BroError? in
             let from8 = MemoryFileSystem.key(from), to8 = MemoryFileSystem.key(to), inside = MemoryFileSystem.key(from + "/")
             if files[to8] != nil || folders.contains(to8) { return BroError("fs.alreadyExists", [("path", .string(to))]) }
+            let parent = MemoryFileSystem.parent(to)
+            if !folders.contains(MemoryFileSystem.key(parent)) { return BroError("fs.parentMissing", [("path", .string(parent))]) }
             if let b = files.removeValue(forKey: from8) {
                 files[to8] = b
             } else if folders.contains(from8) {

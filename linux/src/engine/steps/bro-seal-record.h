@@ -11,7 +11,7 @@
 G_BEGIN_DECLS
 
 /* A version 3 record's document (yours to unref). status: errors when MakeMKV reported read errors, else success.
- * disc: the listing Probe read and the identity Plan resolved. acquisition: the mode, "Backup" for a backup else "Rip",
+ * disc: the listing Probe read and the identity Plan resolved (Name's when it corrected it). acquisition: the mode, "Backup" for a backup else "Rip",
  * the job's source as the request gives it (drive:<id>, iso:<path>, folder:<path>, file:<path>), the drive, the
  * profile, MakeMKV's version line and the app's. titles: each title Acquire ripped that the listing has, with its read
  * errors. files: @files (BroUnitFile *), as SHA256SUMS lists them. attempts: this job's. counts: the warnings and

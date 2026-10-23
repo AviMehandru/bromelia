@@ -3,29 +3,35 @@ import BroFoundation
 
 /// What NameStep decided (session F fills it; Seal reads it): the unit's folder relative to the library root
 /// (Layouts.paths, ConflictNamer), its name (a quarantined unit goes to _Quarantine/<name> [<tag>]), whether the folder
-/// is shared (a media server layout: the commit merges item by item), and every produced item by the name Name gave it
-/// in staging. Name renames inside staging, so staging is laid out as the unit's folder will be.
+/// is shared (a media server layout: the commit merges item by item), every produced item by the name Name gave it in
+/// staging, and the identity when Name corrected it (the format a backup showed; nil: Plan's stands, and the key is left
+/// out). Name renames inside staging, so staging is laid out as the unit's folder will be.
 public struct NameOutput: Sendable, Equatable {
     public var folder: String
     public var name: String
     public var merge: Bool
     public var files: [NamedFile]
+    public var identity: Identity?
 
-    public init(folder: String, name: String, merge: Bool, files: [NamedFile]) {
+    public init(folder: String, name: String, merge: Bool, files: [NamedFile], identity: Identity? = nil) {
         self.folder = folder
         self.name = name
         self.merge = merge
         self.files = files
+        self.identity = identity
     }
 
     public static func encode(_ output: NameOutput) -> JsonValue {
-        .object([("folder", .string(output.folder)), ("name", .string(output.name)), ("merge", .bool(output.merge)),
-                 ("files", .array(output.files.map(NamedFile.encode)))])
+        var members: [(key: String, value: JsonValue)] = [("folder", .string(output.folder)), ("name", .string(output.name)),
+                                                          ("merge", .bool(output.merge)), ("files", .array(output.files.map(NamedFile.encode)))]
+        if let identity = output.identity { members.append(("identity", Identity.encode(identity))) }
+        return .object(members)
     }
 
     public static func decode(_ json: JsonValue) -> NameOutput {
         NameOutput(folder: json["folder"]?.string ?? "", name: json["name"]?.string ?? "", merge: json["merge"]?.bool ?? false,
-                   files: (json["files"]?.array ?? []).map(NamedFile.decode))
+                   files: (json["files"]?.array ?? []).map(NamedFile.decode),
+                   identity: json["identity"].flatMap { $0.members != nil ? Identity.decode($0) : nil })
     }
 
     /// The job's Name output; nil when Name hasn't run.

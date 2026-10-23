@@ -52,7 +52,8 @@ struct _TestStepFakes {
   int open_streams;    /* the streams open_for_reading gave that aren't closed yet */
 };
 
-/* fails: open, read, sync, syncDirectory, write or remove of a path, with this error. */
+/* fails: open, read, sync, syncDirectory, write, remove or rename (its from path) of a path, with this error. A rename
+ * refuses a path that exists and a folder that isn't there, as the real ones do. */
 typedef struct {
   char *op;
   char *path;
@@ -272,14 +273,24 @@ static gboolean
 steps_fakes_rename (BroFileSystem *fs, const char *from, const char *to, BroBroError **error)
 {
   TestStepFakes *f = TEST_STEP_FAKES (fs);
+  g_autofree char *parent = g_path_get_dirname (to);
   gboolean ok = TRUE;
   GBytes *b;
+  if (!steps_tree_check (f, "rename", from, error))
+    return FALSE;
   g_mutex_lock (&f->lock);
   if (g_hash_table_contains (f->files, to) || g_hash_table_contains (f->folders, to))
     {
       BroJsonValue *params = bro_json_value_new_object ();
       bro_json_value_set (params, "path", bro_json_value_new_string (to));
       *error = bro_bro_error_new ("fs.alreadyExists", params, NULL);
+      ok = FALSE;
+    }
+  else if (!g_hash_table_contains (f->folders, parent))
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "path", bro_json_value_new_string (parent));
+      *error = bro_bro_error_new ("fs.parentMissing", params, NULL);
       ok = FALSE;
     }
   else if ((b = g_hash_table_lookup (f->files, from)))

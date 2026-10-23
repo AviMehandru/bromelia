@@ -3,6 +3,7 @@
 #include "bro-disc-request.h"
 #include "bro-label-parser.h"
 #include "bro-log-line-dto.h"
+#include "bro-name-output.h"
 #include "bro-probe-output.h"
 #include "bro-seal-output.h"
 #include "bro-step-sources.h"
@@ -87,7 +88,8 @@ bro_seal_record_build (const BroJobSnapshot *job, const BroPlanOutput *plan, con
   BroJsonValue *probe_json = bro_job_snapshot_output (job, BRO_STEP_KIND_PROBE);
   g_autoptr (BroProbeOutput) probe = probe_json && probe_json->kind == BRO_JSON_VALUE_OBJECT ? bro_probe_output_decode (probe_json) : NULL;
   const BroListing *listing = probe ? probe->listing : NULL;
-  const BroIdentity *identity = plan->identity;
+  g_autoptr (BroNameOutput) named = bro_name_output_of (job);
+  const BroIdentity *identity = named && named->identity ? named->identity : plan->identity;
   g_autoptr (BroDiscRequest) request = bro_disc_request_decode (job->request);
   const BroDiscSource *source = request ? request->source : NULL;
   const char *drive_id = source && source->kind == BRO_DISC_SOURCE_DRIVE ? source->value : NULL;

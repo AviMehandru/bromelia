@@ -12,7 +12,7 @@ namespace Bromelia.Engine;
 public static class SealRecord
 {
     /// <summary>A version 3 record. status: errors when MakeMKV reported read errors, else success. disc: the listing
-    /// Probe read and the identity Plan resolved. acquisition: the mode, "Backup" for a backup else "Rip", the job's
+    /// Probe read and the identity Plan resolved (Name's when it corrected it). acquisition: the mode, "Backup" for a backup else "Rip", the job's
     /// source as the request gives it (drive:&lt;id&gt;, iso:&lt;path&gt;, folder:&lt;path&gt;, file:&lt;path&gt;), the drive,
     /// the profile, MakeMKV's version line and the app's. titles: each title Acquire ripped that the listing has, with its
     /// read errors. files: <paramref name="files"/>, as SHA256SUMS lists them. attempts: this job's. counts: the warnings
@@ -23,7 +23,7 @@ public static class SealRecord
     {
         var probe = JobSnapshot.Output(job, StepKind.Probe) is JsonValue.Object p ? ProbeOutput.Decode(p) : null;
         var listing = probe?.Listing;
-        var identity = plan.Identity;
+        var identity = NameOutput.Of(job)?.Identity ?? plan.Identity;
         var source = DiscRequest.Decode(job.Request)?.Source;
         var driveId = source is DiscSource.Drive d ? d.DriveId : null;
         int readErrors = AcquireOutput.ReadErrorCount(acquired);
