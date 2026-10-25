@@ -3,9 +3,8 @@
  * executor; the store and the log files are read and written on workers. A created job is in its queue at once, in the
  * order the jobs were created, and in the store before jobChanged (queued) announces it; then it runs. start() runs the
  * jobs the last engine left unfinished (after recover()), in their queues' order. Each job's place in its queue is
- * stored when it changes (a transaction that changes only the position: the runner owns the rest of the record). Retry
- * from a step, continuing an interrupted job, the continue offer and keep-apart come with the steps they need (owner,
- * 2026-10-17: sessions D and F). shared/fixtures/engine/job-service.cases.json. */
+ * stored when it changes (a transaction that changes only the position: the runner owns the rest of the record). The
+ * continue offer comes with AutomationService (owner, 2026-10-17/18). shared/fixtures/engine/job-service.cases.json. */
 #pragma once
 
 #include "bro-engine-clock.h"
@@ -66,9 +65,19 @@ void bro_job_service_cancel (BroJobService *self, const BroId *job_id, BroJobSer
  * The same job's steps from there are stored pending (their checkpoints kept), its plan cut back after Plan when Plan runs
  * again, and its record queued again (no outcome, by hand, no media generation; acquisition up to Release, else
  * processing) with job.retried {step} in its log, then it runs like a new one. job.notFound; job.notRetryable for any
- * other job (read errors and failed post steps get retries of their own). */
+ * other job (read errors and failed post steps get retries of their own). While the job has an open commit intent, only a
+ * retry from Commit is taken (job.commitOpen). A job that was kept apart is retried from its keepApart step only (that
+ * step again, in the processing queue), or as a new job; any other step is job.notRetryable. */
 void bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroStepKind *from_step, BroJobDtoDone done, gpointer data,
                             GDestroyNotify destroy);
+
+/* Doesn't continue an interrupted job (owner, 2026-10-03 and 2026-10-25; plan §20.4): the same job runs again with a
+ * keepApart step in place of its interrupted step and what follows (KeepApartStep seals what staging holds and quarantines
+ * it as INCOMPLETE; the job then ends cancelled). The step's row is stored pending (output, error and checkpoint cleared),
+ * the plan cut back to the steps before it plus keepApart, and the record queued again in the processing queue (no
+ * outcome; the request as it was); jobChanged, then it runs. job.notFound; job.notInterrupted for a job that isn't
+ * finished and interrupted, that this service runs, or whose Plan step didn't succeed. */
+void bro_job_service_keep_apart (BroJobService *self, const BroId *job_id, BroJobDtoDone done, gpointer data, GDestroyNotify destroy);
 
 /* Answers the job's question @decision_id. job.notFound; job.notAwaitingDecision when the job isn't waiting for that
  * question; server.badRequest for an answer it doesn't offer. */

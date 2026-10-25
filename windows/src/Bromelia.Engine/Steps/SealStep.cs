@@ -111,38 +111,14 @@ public sealed class SealStep : IStep
         var written = new List<string>();
         void Write(string name, byte[] bytes)
         {
-            try
-            {
-                fs.WriteAtomically(staging + "/" + name, bytes, FileMode);
-            }
-            catch (BroFailure f)
-            {
-                throw new BroFailure(new BroMessage(MessageCode.ArchiveWriteFailed, Severity.Error, ("path", JsonValue.Of(staging + "/" + name)),
-                    ("reason", JsonValue.Of(Text(context, f.Error)))).ToError(f.Error));
-            }
+            WriteOwn(context, staging + "/" + name, bytes);
             written.Add(name);
         }
         Write(Sha256Sums.FileName, Encoding.UTF8.GetBytes(Sha256Sums.Render(entries.Select(e => new SumEntry(e.Path, e.Sha256)))));
         context.Log.Log(new BroMessage(MessageCode.ArchiveChecksumsWritten, Severity.Info, ("count", JsonValue.Of(entries.Count)),
             ("file", JsonValue.Of(Sha256Sums.FileName))));
 
-        var logFile = context.JobDirectory + "/" + JobLog.FileName;
-        var log = fs.Exists(logFile) ? JobLog.Decode(fs.Read(logFile)) : new List<LogLineDto>();
-        var logs = new List<string>();
-        if (copyLogs)
-        {
-            if (fs.Exists(logFile))
-            {
-                Write("bromelia-" + unit8 + "-log.txt", Encoding.UTF8.GetBytes(LogText(log, context.Messages)));
-                logs.Add("bromelia-" + unit8 + "-log.txt");
-            }
-            foreach (var (from, to) in new[] { (Transcript, "makemkv-" + unit8 + "-log.txt"), (DebugTranscript, "makemkv-" + unit8 + "-debug-log.txt") })
-                if (fs.Exists(context.JobDirectory + "/" + from))
-                {
-                    Write(to, fs.Read(context.JobDirectory + "/" + from));
-                    logs.Add(to);
-                }
-        }
+        var (log, logs) = CopyLogs(context, unit8, copyLogs, Write);
 
         int readErrors = AcquireOutput.ReadErrorCount(acquired);
         string? note = null;
@@ -171,9 +147,48 @@ public sealed class SealStep : IStep
             readErrors > 0 ? ReadErrorsTag : null)));
     }
 
+    /// <summary>The job's log (its lines, for the record) and, when <paramref name="copy"/>, the copies written through
+    /// <paramref name="write"/>: the log as text (bromelia-&lt;unit8&gt;-log.txt) and MakeMKV's transcripts
+    /// (makemkv-&lt;unit8&gt;-log.txt, makemkv-&lt;unit8&gt;-debug-log.txt), each when the job folder has it; their
+    /// names. KeepApartStep copies them the same way.</summary>
+    internal static (IReadOnlyList<LogLineDto> Log, List<string> Logs) CopyLogs(StepContext context, string unit8, bool copy, Action<string, byte[]> write)
+    {
+        var fs = context.Fs;
+        var logFile = context.JobDirectory + "/" + JobLog.FileName;
+        IReadOnlyList<LogLineDto> log = fs.Exists(logFile) ? JobLog.Decode(fs.Read(logFile)) : new List<LogLineDto>();
+        var logs = new List<string>();
+        if (!copy) return (log, logs);
+        if (fs.Exists(logFile))
+        {
+            write("bromelia-" + unit8 + "-log.txt", Encoding.UTF8.GetBytes(LogText(log, context.Messages)));
+            logs.Add("bromelia-" + unit8 + "-log.txt");
+        }
+        foreach (var (from, to) in new[] { (Transcript, "makemkv-" + unit8 + "-log.txt"), (DebugTranscript, "makemkv-" + unit8 + "-debug-log.txt") })
+            if (fs.Exists(context.JobDirectory + "/" + from))
+            {
+                write(to, fs.Read(context.JobDirectory + "/" + from));
+                logs.Add(to);
+            }
+        return (log, logs);
+    }
+
+    /// <summary>Writes one of Bromelia's own files atomically (0644); archive.writeFailed {path, reason} when it can't.</summary>
+    internal static void WriteOwn(StepContext context, string path, byte[] bytes)
+    {
+        try
+        {
+            context.Fs.WriteAtomically(path, bytes, FileMode);
+        }
+        catch (BroFailure f)
+        {
+            throw new BroFailure(new BroMessage(MessageCode.ArchiveWriteFailed, Severity.Error, ("path", JsonValue.Of(path)),
+                ("reason", JsonValue.Of(Text(context, f.Error)))).ToError(f.Error));
+        }
+    }
+
     /// <summary>A file's SHA-256 and size, read through the FileSystem port (from disk when <paramref name="fromDisk"/>);
     /// archive.hashFailed when it can't be read; job.cancelled between two pieces.</summary>
-    static (string Hash, long Size) Hash(StepContext context, string path, string file, bool fromDisk)
+    internal static (string Hash, long Size) Hash(StepContext context, string path, string file, bool fromDisk)
     {
         IByteStream stream;
         try
@@ -213,7 +228,7 @@ public sealed class SealStep : IStep
     }
 
     /// <summary>The folders from <paramref name="staging"/> down to the one that holds <paramref name="file"/>.</summary>
-    static IEnumerable<string> Folders(string staging, string file)
+    internal static IEnumerable<string> Folders(string staging, string file)
     {
         yield return staging;
         for (int i = file.IndexOf('/'); i >= 0; i = file.IndexOf('/', i + 1)) yield return staging + "/" + file[..i];
@@ -225,7 +240,7 @@ public sealed class SealStep : IStep
         Instant.Format(l.T) + " " + (l.Severity == Severity.Info ? "" : "[" + EnumWire.Name(l.Severity).ToUpperInvariant() + "] ")
         + messages.Render(new BroMessage(l.Code, l.Params, l.Severity)) + "\n"));
 
-    static void Cancelled(StepContext context)
+    internal static void Cancelled(StepContext context)
     {
         if (context.Cancel.IsCancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
     }

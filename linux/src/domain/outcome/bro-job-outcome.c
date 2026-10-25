@@ -39,6 +39,11 @@ problem_code (const BroMakemkvNotice *n, BroMessageCode *out)
 BroDecided *
 bro_job_outcome_decide (GPtrArray *steps, gboolean cancelled, const BroOutcomePolicy *policy)
 {
+  /* A keepApart step that succeeded or was skipped: the job wasn't continued (owner, 2026-10-25). */
+  for (guint i = 0; i < steps->len && !cancelled; i++) {
+    const BroStepResult *s = steps->pdata[i];
+    cancelled = s->kind == BRO_STEP_KIND_KEEP_APART && (s->state == BRO_STEP_STATE_SUCCEEDED || s->state == BRO_STEP_STATE_SKIPPED);
+  }
   if (cancelled)
     return decided (BRO_OUTCOME_CANCELLED, error_of (BRO_MSG_JOB_CANCELLED_BY_USER, BRO_SEVERITY_WARNING, NULL, NULL));
   for (guint i = 0; i < steps->len; i++) {

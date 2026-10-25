@@ -11,7 +11,7 @@ import Foundation
 ///   RecoveryService.recover), in their queues' order.
 /// - Each job's place in its queue is stored, so the order survives a restart (written in a transaction that changes only
 ///   the position: the runner owns the rest of the record).
-/// - The continue offer comes with AutomationService, keep-apart with session F (owner, 2026-10-17/18).
+/// - The continue offer comes with AutomationService (owner, 2026-10-17/18).
 @EngineActor
 public final class JobService {
     /// A job this service runs, until its run ends.
@@ -40,6 +40,8 @@ public final class JobService {
     private let fs: any FileSystem
     private let data: String
     private var active: [Id: Active] = [:]
+    /// Finished jobs a retry or keep-apart is starting again (between reading and storing their rows).
+    private var restarting: Set<Id> = []
     private let positions = Positions()
     /// The positions last asked of the store.
     private var asked: [Id: Int] = [:]
@@ -127,7 +129,8 @@ public final class JobService {
     /// other job (read errors and failed post steps get retries of their own). While the job has an open commit intent
     /// (its files are partly in the library), only a retry from Commit is taken, which finishes it: any other is
     /// job.commitOpen (a step before Commit would change staging under the intent; a new job would archive the disc again
-    /// beside it).
+    /// beside it). A job that was kept apart is retried from its keepApart step only (that step again, in the processing
+    /// queue), or as a new job; any other step is job.notRetryable.
     public func retry(_ jobId: Id, fromStep: StepKind? = nil) async throws(BroError) -> JobDto {
         let record = try await load(jobId)
         let notRetryable = BroError(MessageCode.wire(.jobNotRetryable), [("jobId", .string(jobId.value))])
@@ -139,9 +142,18 @@ public final class JobService {
             try await notCommitting(jobId)
             return try await create(request)
         }
-        guard [.failed, .cancelled, .interrupted].contains(outcome) else { throw notRetryable }
+        guard [.failed, .cancelled, .interrupted].contains(outcome), !restarting.contains(jobId) else { throw notRetryable }
+        restarting.insert(jobId)
+        defer { restarting.remove(jobId) }
+        return try await again(record, fromStep: fromStep)
+    }
 
+    /// Retry's same-job part, while the job is held in `restarting`.
+    private func again(_ record: JobRecord, fromStep: StepKind?) async throws(BroError) -> JobDto {
+        let jobId = record.id
         let steps = record.plan?.steps ?? JobPlanner.initial(record.request)
+        let keptApart = steps.contains(.keepApart)
+        if keptApart && fromStep != .keepApart { throw BroError(MessageCode.wire(.jobNotRetryable), [("jobId", .string(jobId.value))]) }
         var seq = 0
         if let fromStep {
             guard let at = steps.firstIndex(of: fromStep) else {
@@ -155,7 +167,7 @@ public final class JobService {
             throw BroError(MessageCode.wire(.serverBadRequest), [("detail", .string("fromStep \(fromStep!.rawValue): a step before it isn't done"))])
         }
         let release = steps.firstIndex(of: .release)
-        if release == nil || seq <= release! { seq = 0 }
+        if !keptApart && (release == nil || seq <= release!) { seq = 0 }
         if let commit = steps.firstIndex(of: .commit), seq < commit { try await notCommitting(jobId) }
         for row in rows where row.seq >= seq {
             var pending = row
@@ -172,7 +184,7 @@ public final class JobService {
             plan.steps = Array(steps[...planned])
             again.plan = plan
         }
-        let queue: Queue = release.map { seq > $0 } == true ? .processing : JobPlanner.queue(record.kind)
+        let queue: Queue = keptApart || release.map({ seq > $0 }) == true ? .processing : JobPlanner.queue(record.kind)
         let position = admit(jobId, queue: queue)
         again.state = .queued
         again.outcome = nil
@@ -192,6 +204,62 @@ public final class JobService {
         do throws(BroError) {
             try await executor.worker { () async throws(BroError) in try await store.jobs().update(queued) }
             try await executor.worker { () throws(BroError) in try JobLog.append(fs, jobDirectory: directory, lines: [line]) }
+        } catch {
+            forget(jobId)
+            scheduler.finish(jobId)
+            throw error
+        }
+        if asked[jobId] != position { savePosition(jobId) }
+        var dto = JobDto.of(queued)
+        dto.position = scheduler.position(jobId)
+        bus.publish(.jobChanged, data: .object([("job", JobDto.json(dto))]))
+        launch(queued)
+        return dto
+    }
+
+    /// Doesn't continue an interrupted job (owner, 2026-10-03 and 2026-10-25; plan §20.4): the same job runs again with a
+    /// keepApart step in place of its interrupted step and what follows (KeepApartStep seals what staging holds and
+    /// quarantines it as INCOMPLETE; the job then ends cancelled). The step's row is stored pending (output, error and
+    /// checkpoint cleared), the plan cut back to the steps before it plus keepApart, and the record queued again in the
+    /// processing queue (no outcome; the request as it was); jobChanged, then it runs. job.notFound; job.notInterrupted for a
+    /// job that isn't finished and interrupted, that this service runs, or whose Plan step didn't succeed.
+    public func keepApart(_ jobId: Id) async throws(BroError) -> JobDto {
+        let record = try await load(jobId)
+        guard record.state == .finished, record.outcome == .interrupted, active[jobId] == nil, !restarting.contains(jobId) else {
+            throw Self.notInterrupted(jobId)
+        }
+        restarting.insert(jobId)
+        defer { restarting.remove(jobId) }
+        return try await keptApart(record)
+    }
+
+    /// keepApart's part, while the job is held in `restarting`.
+    private func keptApart(_ record: JobRecord) async throws(BroError) -> JobDto {
+        let jobId = record.id
+        let store = store
+        let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
+        let done = JobPlanner.done(rows)
+        guard done.contains(where: { $0.kind == .plan && $0.state == .succeeded }) else { throw Self.notInterrupted(jobId) }
+        let seq = done.count
+        let steps = Array((record.plan?.steps ?? JobPlanner.initial(record.request)).prefix(seq)) + [.keepApart]
+        let row = StepRecord(jobId: jobId, seq: seq, kind: .keepApart, state: .pending, attempt: 1)
+        let position = admit(jobId, queue: .processing)
+        var again = record
+        again.state = .queued
+        again.outcome = nil
+        again.error = nil
+        again.finishedAt = nil
+        again.decision = nil
+        again.blockedBy = nil
+        again.queue = .processing
+        again.position = position
+        var plan = record.plan ?? JobPlan(steps: steps)
+        plan.steps = steps
+        again.plan = plan
+        let queued = again
+        do throws(BroError) {
+            try await executor.worker { () async throws(BroError) in try await store.steps().save(row) }
+            try await executor.worker { () async throws(BroError) in try await store.jobs().update(queued) }
         } catch {
             forget(jobId)
             scheduler.finish(jobId)
@@ -388,6 +456,10 @@ public final class JobService {
         }
         let state = runner.job(jobId)?.state ?? .queued
         guard [.queued, .waitingForResources, .blocked].contains(state), scheduler.position(jobId) != nil else { throw JobService.notQueued(jobId) }
+    }
+
+    private static func notInterrupted(_ jobId: Id) -> BroError {
+        BroError(MessageCode.wire(.jobNotInterrupted), [("jobId", .string(jobId.value))])
     }
 
     private static func notQueued(_ jobId: Id) -> BroError { BroError(MessageCode.wire(.jobNotQueued), [("jobId", .string(jobId.value))]) }

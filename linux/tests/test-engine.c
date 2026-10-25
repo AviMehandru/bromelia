@@ -1196,6 +1196,7 @@ test_engine_executor (void)
 #include "test-seal.inc"
 #include "test-name.inc"
 #include "test-commit.inc"
+#include "test-keep-apart.inc"
 #include "test-services.inc"
 #include "test-makemkv-service.inc"
 #include "test-drive-service.inc"
@@ -1223,6 +1224,7 @@ main (int argc, char **argv)
   g_test_add_func ("/engine/seal-steps", test_seal_steps);
   g_test_add_func ("/engine/name-steps", test_name_steps);
   g_test_add_func ("/engine/commit-steps", test_commit_steps);
+  g_test_add_func ("/engine/keep-apart-steps", test_keep_apart_steps);
   g_test_add_func ("/engine/problem-service", test_problem_service);
   g_test_add_func ("/engine/config-service", test_config_service);
   g_test_add_func ("/engine/makemkv-service", test_makemkv_service);

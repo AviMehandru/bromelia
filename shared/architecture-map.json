@@ -6524,6 +6524,7 @@
             "protect",
             "postProcess",
             "notify",
+            "keepApart",
             "ripAudio",
             "imageData",
             "mergeAttempts",
@@ -6557,6 +6558,7 @@
               ".protect",
               ".postProcess",
               ".notify",
+              ".keepApart",
               ".ripAudio",
               ".imageData",
               ".mergeAttempts",
@@ -6591,6 +6593,7 @@
               "Protect",
               "PostProcess",
               "Notify",
+              "KeepApart",
               "RipAudio",
               "ImageData",
               "MergeAttempts",
@@ -6625,6 +6628,7 @@
               "BRO_STEP_KIND_PROTECT",
               "BRO_STEP_KIND_POST_PROCESS",
               "BRO_STEP_KIND_NOTIFY",
+              "BRO_STEP_KIND_KEEP_APART",
               "BRO_STEP_KIND_RIP_AUDIO",
               "BRO_STEP_KIND_IMAGE_DATA",
               "BRO_STEP_KIND_MERGE_ATTEMPTS",
@@ -15430,6 +15434,24 @@
             "name": "BroNotifyStep",
             "file": "linux/src/engine/steps/bro-notify-step.h"
           }
+        },
+        {
+          "name": "KeepApartStep",
+          "kind": "class",
+          "doc": "The step JobService.keepApart puts in place of an interrupted job's interrupted step and what follows: every visible file left in staging synced and hashed from disk, SHA256SUMS, the logs, INCOMPLETE.txt and a v3 record (status incomplete) written, the checkpoint \"sealed\" saved, then LibraryPort.quarantine(…, \"INCOMPLETE\") → _Quarantine/<name> [INCOMPLETE] and recovery.keptApart. Idempotent; the job then ends cancelled.",
+          "phase": 3,
+          "swift": {
+            "name": "KeepApartStep",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Steps/KeepApartStep.swift"
+          },
+          "cs": {
+            "name": "KeepApartStep",
+            "file": "windows/src/Bromelia.Engine/Steps/KeepApartStep.cs"
+          },
+          "c": {
+            "name": "BroKeepApartStep",
+            "file": "linux/src/engine/steps/bro-keep-apart-step.h"
+          }
         }
       ],
       "functions": [
@@ -15858,27 +15880,6 @@
           "c": "bro_seal_output_of"
         },
         {
-          "name": "SealRecord.build",
-          "params": [
-            "job",
-            "plan",
-            "acquired",
-            "unitId",
-            "files",
-            "log",
-            "logs",
-            "finishedAt",
-            "appVersion",
-            "messages"
-          ],
-          "returns": "JsonValue",
-          "doc": "The record's document: status, disc, acquisition, job, titles, files, attempts, counts, problems, logs.",
-          "phase": 3,
-          "swift": "SealRecord.build(_:plan:acquired:unitId:files:log:logs:finishedAt:appVersion:messages:)",
-          "cs": "SealRecord.Build",
-          "c": "bro_seal_record_build"
-        },
-        {
           "name": "SealStep.logText",
           "params": [
             "lines",
@@ -15992,6 +15993,28 @@
           "swift": "CommitOutput.of(_:)",
           "cs": "CommitOutput.Of",
           "c": "bro_commit_output_of"
+        },
+        {
+          "name": "SealRecord.build",
+          "params": [
+            "job",
+            "plan",
+            "acquired",
+            "unitId",
+            "files",
+            "log",
+            "logs",
+            "finishedAt",
+            "appVersion",
+            "messages",
+            "status"
+          ],
+          "returns": "JsonValue",
+          "doc": "The record's document: status (the one given, KeepApartStep's incomplete; else errors with read errors, else success), disc, acquisition, job, titles, files, attempts, counts, problems, logs.",
+          "phase": 3,
+          "swift": "SealRecord.build(_:plan:acquired:unitId:files:log:logs:finishedAt:appVersion:messages:status:)",
+          "cs": "SealRecord.Build",
+          "c": "bro_seal_record_build"
         }
       ]
     },
@@ -16647,26 +16670,6 @@
           "c": "bro_job_service_log"
         },
         {
-          "name": "JobService.retry",
-          "params": [
-            "jobId",
-            "fromStep"
-          ],
-          "returns": "JobDto",
-          "doc": "A finished job again: without a step, one that failed, was cancelled or was skipped as a new job started by hand, an interrupted one continued; from a step, the same job from there (up to Release: from its first step), its checkpoints kept. job.notFound, job.notRetryable, job.unknownStep, server.badRequest.",
-          "throws": true,
-          "async": true,
-          "cNames": [
-            "job_id",
-            "from_step",
-            "done"
-          ],
-          "phase": 3,
-          "swift": "JobService.retry(_:fromStep:)",
-          "cs": "JobService.Retry",
-          "c": "bro_job_service_retry"
-        },
-        {
           "name": "LibraryService.rollForward",
           "params": [
             "intent"
@@ -16688,6 +16691,44 @@
           "swift": "LibraryService.waiting()",
           "cs": "LibraryService.Waiting",
           "c": "bro_library_service_waiting"
+        },
+        {
+          "name": "JobService.retry",
+          "params": [
+            "jobId",
+            "fromStep"
+          ],
+          "returns": "JobDto",
+          "doc": "A finished job again: without a step, one that failed, was cancelled or was skipped as a new job started by hand, an interrupted one continued; from a step, the same job from there (up to Release: from its first step), its checkpoints kept; a kept-apart job from its keepApart step only. job.notFound, job.notRetryable, job.unknownStep, server.badRequest, job.commitOpen.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "from_step",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.retry(_:fromStep:)",
+          "cs": "JobService.Retry",
+          "c": "bro_job_service_retry"
+        },
+        {
+          "name": "JobService.keepApart",
+          "params": [
+            "jobId"
+          ],
+          "returns": "JobDto",
+          "doc": "Doesn't continue an interrupted job (owner, 2026-10-25): the same job again with a keepApart step in place of its interrupted step and what follows, in the processing queue; it ends cancelled. job.notFound, job.notInterrupted.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.keepApart(_:)",
+          "cs": "JobService.KeepApart",
+          "c": "bro_job_service_keep_apart"
         }
       ]
     },

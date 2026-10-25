@@ -307,8 +307,10 @@ recover_job (BroRecoveryService *self, Run *r, const BroJobRecord *job, BroBroEr
     }
   if (started && resumability == BRO_RESUMABILITY_RESUME_FROM)
     return requeue (self, r, job, job->queue, message (BRO_MSG_RECOVERY_RESUMED, BRO_SEVERITY_INFO, "step", step_name), error);
-  if (done_has (done, BRO_STEP_KIND_ACQUIRE))
-    return requeue (self, r, job, done_has (done, BRO_STEP_KIND_RELEASE) ? BRO_QUEUE_PROCESSING : job->queue,
+  /* Past Acquire, or keeping an interrupted job's files apart (which needs no drive): resumed. */
+  if (done_has (done, BRO_STEP_KIND_ACQUIRE) || kind == BRO_STEP_KIND_KEEP_APART)
+    return requeue (self, r, job,
+                    done_has (done, BRO_STEP_KIND_RELEASE) || kind == BRO_STEP_KIND_KEEP_APART ? BRO_QUEUE_PROCESSING : job->queue,
                     message (BRO_MSG_RECOVERY_RESUMED, BRO_SEVERITY_INFO, "step", step_name), error);
 
   /* Before Acquire. A media generation doesn't outlive the engine (owner, 2026-10-14): an automatic job can't know its

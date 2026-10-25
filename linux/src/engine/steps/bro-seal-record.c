@@ -83,7 +83,7 @@ param (const char *key, BroJsonValue *value)
 BroJsonValue *
 bro_seal_record_build (const BroJobSnapshot *job, const BroPlanOutput *plan, const BroAcquireOutput *acquired, const BroId *unit_id,
                        GPtrArray *files, GPtrArray *log, GPtrArray *logs, BroInstant finished_at, const char *app_version,
-                       BroMessageRenderer *messages)
+                       BroMessageRenderer *messages, const char *status)
 {
   BroJsonValue *probe_json = bro_job_snapshot_output (job, BRO_STEP_KIND_PROBE);
   g_autoptr (BroProbeOutput) probe = probe_json && probe_json->kind == BRO_JSON_VALUE_OBJECT ? bro_probe_output_decode (probe_json) : NULL;
@@ -213,7 +213,7 @@ bro_seal_record_build (const BroJobSnapshot *job, const BroPlanOutput *plan, con
   bro_json_value_set (doc, "format", bro_json_value_new_string ("bromelia-archive"));
   bro_json_value_set (doc, "version", bro_json_value_new_integer (3));
   bro_json_value_set (doc, "unit", unit);
-  bro_json_value_set (doc, "status", bro_json_value_new_string (read_errors > 0 ? "errors" : "success"));
+  bro_json_value_set (doc, "status", bro_json_value_new_string (status ? status : read_errors > 0 ? "errors" : "success"));
   bro_json_value_set (doc, "name", bro_json_value_new_string (identity->name));
   bro_json_value_set (doc, "kind", bro_json_value_new_string (bro_media_kind_to_wire (identity->kind)));
   bro_json_value_set (doc, "disc", disc);

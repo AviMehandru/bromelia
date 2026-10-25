@@ -139,10 +139,21 @@ seal_names (GHashTable *files)
   return g_string_free (text, FALSE);
 }
 
+/* What another step's harness adds to the Seal one (test-keep-apart.inc): the step, and an object that is its library
+ * port and checkpointer, set up with the case's fakes and cancel, told when a run starts (last: the recorded counts are
+ * cleared), and that checks its own expectations. NULL for SealStep. */
+typedef struct {
+  BroStep *step;
+  GObject *port; /* BroLibraryPort and BroCheckpointer */
+  void (*setup) (GObject *port, TestStepFakes *fakes, BroCancellationSource *cancel);
+  void (*start_run) (GObject *port, gboolean last);
+  void (*check) (GObject *port, const char *id, BroJsonValue *expect, GPtrArray *failures);
+} SealHooks;
+
 static gboolean
-seal_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+seal_case_run (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures, const SealHooks *hooks)
 {
-  g_autoptr (BroStep) step = BRO_STEP (bro_seal_step_new ());
+  g_autoptr (BroStep) step = hooks ? g_object_ref (hooks->step) : BRO_STEP (bro_seal_step_new ());
   TestStepFakes *fakes = g_object_new (TEST_TYPE_STEP_FAKES, NULL);
   TestSealClock *clock = g_object_new (TEST_TYPE_SEAL_CLOCK, NULL);
   TestSealRenderer *renderer = g_object_new (TEST_TYPE_SEAL_RENDERER, NULL);
@@ -189,8 +200,12 @@ seal_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtr
       fail->error = bro_bro_error_new (STEPS_JS (why, "code"), params ? bro_json_value_ref (params) : NULL, NULL);
       g_ptr_array_add (fakes->fails, fail);
     }
-  if (bro_json_value_member (given, "cancelAt"))
+  if (g_strcmp0 (STEPS_JS (bro_json_value_member (given, "cancelAt"), "op"), "start") == 0)
+    bro_cancellation_source_cancel (cancel); /* the job is cancelled before the step runs */
+  else if (bro_json_value_member (given, "cancelAt"))
     fakes->on_op = seal_cancel_at;
+  if (hooks)
+    hooks->setup (hooks->port, fakes, cancel);
 
   job = bro_job_snapshot_new (&job_id, steps_request_of (bro_json_value_member (given, "request")), NULL);
   entries = bro_json_value_member (given, "outputs");
@@ -210,12 +225,13 @@ seal_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtr
   bro_json_value_set (default_config, "version", bro_json_value_new_integer (3));
   config_text = bro_json_value_to_text (default_config);
   config = bro_config_codec_decode (config_text, -1, NULL);
-  environment = bro_step_environment_new (NULL, BRO_FILE_SYSTEM (fakes), BRO_CLOCK (clock), NULL, BRO_LIBRARY_PORT (fakes), NULL, NULL, NULL, NULL,
-                                          "/data", BRO_MESSAGE_RENDERER (renderer), STEPS_JS (given, "appVersion"));
+  environment = bro_step_environment_new (NULL, BRO_FILE_SYSTEM (fakes), BRO_CLOCK (clock), NULL,
+                                          hooks ? BRO_LIBRARY_PORT (hooks->port) : BRO_LIBRARY_PORT (fakes), NULL, NULL, NULL, NULL, "/data",
+                                          BRO_MESSAGE_RENDERER (renderer), STEPS_JS (given, "appVersion"));
   context = bro_step_context_new (job, bro_cancellation_source_token (cancel), g_object_ref (BRO_PROGRESS_REPORTER (fakes)),
                                   g_object_ref (BRO_JOB_LOGGER (fakes)), g_object_ref (BRO_DECISION_PORT (fakes)),
-                                  g_object_ref (BRO_SPACE_RESERVATIONS (fakes)), g_object_ref (BRO_CHECKPOINTER (fakes)), environment, config,
-                                  directory);
+                                  g_object_ref (BRO_SPACE_RESERVATIONS (fakes)),
+                                  g_object_ref (hooks ? BRO_CHECKPOINTER (hooks->port) : BRO_CHECKPOINTER (fakes)), environment, config, directory);
 
   if ((v = bro_json_value_member (expect, "resources")))
     {
@@ -242,6 +258,8 @@ seal_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtr
           fakes->recording = TRUE;
           g_mutex_unlock (&fakes->lock);
         }
+      if (hooks)
+        hooks->start_run (hooks->port, run == runs && run > 1);
       g_clear_pointer (&report, bro_step_report_free);
       g_clear_pointer (&thrown, bro_bro_error_free);
       report = bro_step_run (step, context, &thrown);
@@ -351,6 +369,8 @@ seal_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtr
       g_autofree char *what = g_strconcat ("record ", name ? name : "", NULL);
       bro_test_same_string (failures, id, what, v->string, name ? g_hash_table_lookup (after, name) : NULL);
     }
+  if (hooks)
+    hooks->check (hooks->port, id, expect, failures);
   if (bro_json_value_get_bool (bro_json_value_member (expect, "sameAsFirst"), FALSE))
     {
       g_autofree char *before_names = seal_names (first);
@@ -372,6 +392,12 @@ out:
   g_object_unref (clock);
   g_object_unref (fakes);
   return TRUE;
+}
+
+static gboolean
+seal_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  return seal_case_run (id, given, expect, failures, NULL);
 }
 
 static void

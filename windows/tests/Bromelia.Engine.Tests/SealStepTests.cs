@@ -10,18 +10,25 @@ namespace Bromelia.Engine.Tests;
 
 /// <summary>shared/fixtures/engine/seal-steps.cases.json: SealStep alone, on a file tree in memory (a disk and a cache,
 /// failures, a cancel on an operation), a fixed clock and the engine harnesses' fake renderer. The format is in
-/// claudeDocs/tools/rebuild-phase3/gen-seal-cases.py.</summary>
+/// claudeDocs/tools/rebuild-phase3/gen-seal-cases.py. shared/fixtures/engine/keep-apart-steps.cases.json: KeepApartStep the
+/// same way, with a checkpointer and a quarantine that records its calls (gen-keep-apart-cases.py).</summary>
 public sealed class SealStepTests
 {
     const string JobId = "00000000-0000-4000-8000-000000000001";
     static JsonValue.Object EmptyObject => new(new List<KeyValuePair<string, JsonValue>>());
 
-    sealed class Fakes : IProgressReporter, IJobLogger, ILibraryPort, IClock
+    sealed class Fakes : IProgressReporter, IJobLogger, ILibraryPort, IClock, ICheckpointer
     {
         readonly JsonValue _given;
         public readonly MemoryFileSystem Fs;
         public readonly List<BroMessage> Log = new();
         public readonly List<JsonValue> Progress = new();
+        public readonly List<JsonValue> Calls = new();
+        /// <summary>What the checkpointer holds; <see cref="Saved"/> is what it held when the run started.</summary>
+        public JsonValue? Held;
+        public JsonValue? Saved { get; set; }
+        public int Saves;
+        public CancellationSource? CancelOnQuarantine;
 
         public Fakes(JsonValue given, MemoryFileSystem fs)
         {
@@ -57,8 +64,22 @@ public sealed class SealStepTests
 
         public Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, CancellationToken cancel) => throw new NotSupportedException();
 
-        public Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag, CancellationToken cancel) =>
-            throw new NotSupportedException();
+        public Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag, CancellationToken cancel)
+        {
+            lock (Calls) Calls.Add(CommitStepTests.CallJson("quarantine", unit, intent, files, tag));
+            CancelOnQuarantine?.Cancel();
+            if (cancel.IsCancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
+            var port = _given["port"];
+            if (port?["error"] is { } e) throw new BroFailure(new BroError(e["code"]!.AsString!, (JsonValue.Object)(e["params"] ?? EmptyObject)));
+            return Task.FromResult(new CommitResult(unit.Id, port?["destination"]?.AsString ?? intent.Destination + " [" + tag + "]", files, false));
+        }
+
+        public Task Save(JsonValue checkpoint)
+        {
+            Held = checkpoint;
+            Saves++;
+            return Task.CompletedTask;
+        }
 
         public Instant Now() => Instant.Parse(_given["now"]!.AsString!)!.Value;
 
@@ -122,11 +143,14 @@ public sealed class SealStepTests
     [Fact]
     public void TheSealCasesPass() => RunCases("engine/seal-steps.cases.json", Case);
 
+    [Fact]
+    public void TheKeepApartCasesPass() => RunCases("engine/keep-apart-steps.cases.json", Case);
+
     static bool Case(string id, JsonValue given, JsonValue expect)
     {
-        var step = new SealStep();
+        IStep step = given["step"]?.AsString == "keepApart" ? new KeepApartStep() : new SealStep();
         var fs = new MemoryFileSystem();
-        var fakes = new Fakes(given, fs);
+        var fakes = new Fakes(given, fs) { Held = given["checkpoint"] is { } held and not JsonValue.Null ? held : null };
         var staging = (given["libraries"]?["lib"]?["path"]?.AsString ?? "/lib") + "/.bromelia/staging/" + JobId;
         var jobDirectory = "/data/jobs/" + JobId;
         void PutStaging(string rel, JsonValue content)
@@ -146,7 +170,9 @@ public sealed class SealStepTests
             fs.Fails.Add((f["op"]!.AsString!, f["path"]!.AsString!, new BroError(f["error"]!["code"]!.AsString!,
                 (JsonValue.Object)(f["error"]!["params"] ?? EmptyObject))));
         var cancel = new CancellationSource();
-        if (given["cancelAt"] is { } at)
+        if (given["cancelAt"]?["op"]?.AsString == "start") cancel.Cancel(); // the job is cancelled before the step runs
+        else if (given["cancelAt"]?["op"]?.AsString == "quarantine") fakes.CancelOnQuarantine = cancel;
+        else if (given["cancelAt"] is { } at)
             fs.OnOp = (op, path) =>
             {
                 if (op == at["op"]!.AsString && path == at["path"]!.AsString) cancel.Cancel();
@@ -156,7 +182,7 @@ public sealed class SealStepTests
             .ToList();
         var job = new JobSnapshot(new Id(JobId), RequestOf(given["request"]!), null, outputs, Instant.Parse(given["startedAt"]!.AsString!));
         var context = new StepContext(job, cancel.Token, fakes, fakes, null!, new ToolSet(null!, null!), fs, fakes, null!, fakes, null!, null!, null!,
-            null!, null!, null!, jobDirectory, new Renderer(), given["appVersion"]!.AsString!);
+            null!, null!, fakes, jobDirectory, new Renderer(), given["appVersion"]!.AsString!);
 
         if (expect["resources"] is { } resources)
             Same(resources["libraryWrites"], JsonValue.Of(step.Resources(job).LibraryWrites.Select(d => JsonValue.Of(d))), "resources.libraryWrites");
@@ -176,8 +202,10 @@ public sealed class SealStepTests
                 fs.Reads.Clear();
                 fakes.Log.Clear();
                 fakes.Progress.Clear();
+                fakes.Saves = 0;
                 fs.Recording = true;
             }
+            fakes.Saved = fakes.Held;
             (report, thrown) = Run(step, context);
             fs.Recording = false;
             if (run == 1 && runs > 1)
@@ -227,6 +255,9 @@ public sealed class SealStepTests
             var name = report?.Data["record"]?.AsString ?? "";
             Same(record, after.GetValueOrDefault(name), "record " + name);
         }
+        if (expect["calls"] is { } calls) Same(calls, JsonValue.Of(fakes.Calls), "calls");
+        if (expect.AsObject!.Any(m => m.Key == "checkpoint")) Same(expect["checkpoint"]!, fakes.Held ?? JsonValue.Null.Instance, "checkpoint");
+        if (expect["saves"] is { } saves) Same(saves.AsInteger, (long)fakes.Saves, "saves");
         if (expect["sameAsFirst"]?.AsBool == true)
         {
             Same(string.Join("\n", first!.Keys.OrderBy(k => k, StringComparer.Ordinal)), string.Join("\n", after.Keys.OrderBy(k => k, StringComparer.Ordinal)),

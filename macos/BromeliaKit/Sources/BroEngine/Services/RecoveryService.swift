@@ -134,8 +134,9 @@ public final class RecoveryService {
             try await requeue(job, job.queue, BroMessage(.recoveryResumed, step))
             return true
         }
-        if done.contains(where: { $0.kind == .acquire }) {
-            let queue: Queue = done.contains(where: { $0.kind == .release }) ? .processing : job.queue
+        // Past Acquire, or keeping an interrupted job's files apart (which needs no drive): resumed.
+        if done.contains(where: { $0.kind == .acquire }) || kind == .keepApart {
+            let queue: Queue = done.contains(where: { $0.kind == .release }) || kind == .keepApart ? .processing : job.queue
             try await requeue(job, queue, BroMessage(.recoveryResumed, step))
             return true
         }

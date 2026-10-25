@@ -20,6 +20,7 @@ struct _BroJobService {
   BroFileSystem *fs;
   char *data;
   GHashTable *active;    /* job id → Active: the jobs this service runs, until their run ends */
+  GHashTable *restarting; /* job ids: finished jobs a retry or keep-apart is starting again (reading and storing their rows) */
   GHashTable *asked;     /* job id → GINT_TO_POINTER (position + 1): the positions last asked of the store */
   GMutex lock;           /* guards positions: the store's workers read it */
   GHashTable *positions; /* job id → GINT_TO_POINTER (position + 1): where each active job should be stored */
@@ -54,7 +55,9 @@ typedef struct {
   int by;
   gboolean has_from_step; /* retry */
   BroStepKind from_step;
-  int seq;                /* retry: where the job starts again */
+  int seq;                /* retry, keep-apart: where the job starts again */
+  gboolean holding;       /* retry, keep-apart: holds job_id in restarting until the call is freed */
+  gboolean not_interrupted; /* keep-apart: its Plan step didn't succeed */
   char *bad_request;      /* retry: why the step can't be the start */
   BroJobServiceDone done;
   BroJobDtoDone job_done;
@@ -80,6 +83,8 @@ call_free (gpointer data)
   Call *c = data;
   if (c->destroy)
     c->destroy (c->data);
+  if (c->holding)
+    g_hash_table_remove (c->self->restarting, c->job_id.value);
   g_object_unref (c->self);
   bro_job_record_free (c->record);
   g_clear_pointer (&c->records, g_ptr_array_unref);
@@ -623,7 +628,7 @@ reset_work (gpointer data, BroBroError **error)
       c->bad_request = g_strconcat ("fromStep ", bro_step_kind_to_wire (c->from_step), ": a step before it isn't done", NULL);
       return TRUE;
     }
-  if (release < 0 || c->seq <= release)
+  if (index_of (steps, BRO_STEP_KIND_KEEP_APART) < 0 && (release < 0 || c->seq <= release))
     c->seq = 0;
   if (c->seq < index_of (steps, BRO_STEP_KIND_COMMIT) && !not_committing (c, error))
     return FALSE;
@@ -721,7 +726,8 @@ reset_done (gpointer data, const BroBroError *error)
   planned = index_of (steps, BRO_STEP_KIND_PLAN);
   if (r->plan && planned >= 0 && c->seq <= planned)
     g_array_set_size (r->plan->steps, planned + 1);
-  queue = release >= 0 && c->seq > release ? BRO_QUEUE_PROCESSING : bro_job_planner_queue (r->kind);
+  queue = index_of (steps, BRO_STEP_KIND_KEEP_APART) >= 0 || (release >= 0 && c->seq > release) ? BRO_QUEUE_PROCESSING
+                                                                                                 : bro_job_planner_queue (r->kind);
   c->position = admit (self, &c->job_id, queue);
   r->state = BRO_JOB_STATE_QUEUED;
   r->has_outcome = FALSE;
@@ -793,6 +799,15 @@ retry_loaded (Call *c)
   if (c->has_from_step || outcome == BRO_OUTCOME_INTERRUPTED) /* the same job again */
     {
       g_autoptr (GArray) steps = steps_of (c->record);
+      if (g_hash_table_contains (c->self->restarting, c->job_id.value)
+          || (index_of (steps, BRO_STEP_KIND_KEEP_APART) >= 0 && !(c->has_from_step && c->from_step == BRO_STEP_KIND_KEEP_APART)))
+        {
+          fail_with (c, BRO_MSG_JOB_NOT_RETRYABLE, &c->job_id);
+          call_free (c);
+          return;
+        }
+      g_hash_table_add (c->self->restarting, g_strdup (c->job_id.value));
+      c->holding = TRUE;
       c->seq = c->has_from_step ? index_of (steps, c->from_step) : 0;
       if (c->seq < 0)
         {
@@ -820,6 +835,103 @@ bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroStepKi
   c->has_from_step = from_step != NULL;
   c->from_step = from_step ? *from_step : BRO_STEP_KIND_AWAIT_MEDIA;
   load_then (c, retry_loaded);
+}
+
+/* The row at the first step not done is stored as keepApart pending (output, error and checkpoint cleared), unless the
+ * job's Plan step didn't succeed (c->not_interrupted). */
+static gboolean
+keep_apart_work (gpointer data, BroBroError **error)
+{
+  Call *c = data;
+  g_autoptr (GPtrArray) rows = bro_step_repository_load (bro_store_steps (c->self->store), c->job_id, error);
+  g_autoptr (GPtrArray) done = NULL;
+  g_autoptr (BroStepRecord) row = NULL;
+  gboolean planned = FALSE;
+  if (!rows)
+    return FALSE;
+  done = bro_job_planner_done (rows);
+  for (guint i = 0; i < done->len && !planned; i++)
+    planned = ((BroStepRecord *) done->pdata[i])->kind == BRO_STEP_KIND_PLAN && ((BroStepRecord *) done->pdata[i])->state == BRO_STEP_STATE_SUCCEEDED;
+  if (!planned)
+    {
+      c->not_interrupted = TRUE;
+      return TRUE;
+    }
+  c->seq = (int) done->len;
+  row = bro_step_record_new ();
+  row->job_id = c->job_id;
+  row->seq = c->seq;
+  row->kind = BRO_STEP_KIND_KEEP_APART;
+  row->state = BRO_STEP_STATE_PENDING;
+  row->attempt = 1;
+  return bro_step_repository_save (bro_store_steps (c->self->store), row, error);
+}
+
+static void
+keep_apart_done (gpointer data, const BroBroError *error)
+{
+  Call *c = data;
+  BroJobService *self = c->self;
+  BroJobRecord *r = c->record;
+  BroStepKind keep = BRO_STEP_KIND_KEEP_APART;
+  if (error)
+    {
+      fail (c, error);
+      return;
+    }
+  if (c->not_interrupted)
+    {
+      fail_with (c, BRO_MSG_JOB_NOT_INTERRUPTED, &c->job_id);
+      return;
+    }
+  if (!r->plan)
+    {
+      r->plan = bro_job_plan_new ();
+      g_array_unref (r->plan->steps);
+      r->plan->steps = bro_job_planner_initial (r->request);
+    }
+  g_array_set_size (r->plan->steps, MIN ((guint) c->seq, r->plan->steps->len));
+  g_array_append_val (r->plan->steps, keep);
+  c->position = admit (self, &c->job_id, BRO_QUEUE_PROCESSING);
+  r->state = BRO_JOB_STATE_QUEUED;
+  r->has_outcome = FALSE;
+  g_clear_pointer (&r->error, bro_bro_error_free);
+  r->has_finished_at = FALSE;
+  g_clear_pointer (&r->decision, bro_json_value_unref);
+  g_clear_pointer (&r->blocked_by, bro_json_value_unref);
+  r->queue = BRO_QUEUE_PROCESSING;
+  r->position = c->position;
+  {
+    Call *to = call_hand_off (c);
+    to->record = g_steal_pointer (&c->record);
+    to->job_id = c->job_id;
+    to->position = c->position;
+    bro_engine_executor_worker (self->executor, update_work, requeue_done, to, call_free);
+  }
+}
+
+static void
+keep_apart_loaded (Call *c)
+{
+  if (c->record->state != BRO_JOB_STATE_FINISHED || !c->record->has_outcome || c->record->outcome != BRO_OUTCOME_INTERRUPTED
+      || g_hash_table_contains (c->self->active, c->job_id.value) || g_hash_table_contains (c->self->restarting, c->job_id.value))
+    {
+      fail_with (c, BRO_MSG_JOB_NOT_INTERRUPTED, &c->job_id);
+      call_free (c);
+      return;
+    }
+  g_hash_table_add (c->self->restarting, g_strdup (c->job_id.value));
+  c->holding = TRUE;
+  bro_engine_executor_worker (c->self->executor, keep_apart_work, keep_apart_done, c, call_free);
+}
+
+void
+bro_job_service_keep_apart (BroJobService *self, const BroId *job_id, BroJobDtoDone done, gpointer data, GDestroyNotify destroy)
+{
+  Call *c = call_new (self, data, destroy);
+  c->job_done = done;
+  c->job_id = *job_id;
+  load_then (c, keep_apart_loaded);
 }
 
 static void
@@ -1085,6 +1197,7 @@ bro_job_service_finalize (GObject *object)
       g_object_unref (self->queues);
     }
   g_hash_table_unref (self->active);
+  g_hash_table_unref (self->restarting);
   g_hash_table_unref (self->asked);
   g_hash_table_unref (self->positions);
   g_mutex_clear (&self->lock);
@@ -1110,6 +1223,7 @@ static void
 bro_job_service_init (BroJobService *self)
 {
   self->active = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  self->restarting = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->asked = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->positions = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_mutex_init (&self->lock);

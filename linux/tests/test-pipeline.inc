@@ -1293,6 +1293,8 @@ svc_action (gpointer data)
       gboolean has = bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_member (arg, "fromStep"), ""), &from);
       bro_job_service_retry (js, &job, has ? &from : NULL, svc_job_done, c, NULL);
     }
+  else if (strcmp (name, "keepApart") == 0)
+    bro_job_service_keep_apart (js, &job, svc_job_done, c, NULL);
   else if (strcmp (name, "cancel") == 0)
     bro_job_service_cancel (js, &job, svc_done, c, NULL);
   else if (strcmp (name, "decide") == 0)
@@ -1712,13 +1714,16 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
   for (guint i = 0; i < h.calls->len; i++)
     {
       SvcCall *c = g_ptr_array_index (h.calls, i);
-      BroJsonValue *arg, *want;
+      BroJsonValue *arg, *want, *maybe;
       g_autofree char *what = NULL;
       op_name (c->op, &arg);
       want = arg->kind == BRO_JSON_VALUE_OBJECT ? bro_json_value_member (arg, "expectError") : NULL;
+      maybe = arg->kind == BRO_JSON_VALUE_OBJECT ? bro_json_value_member (arg, "maybeError") : NULL;
       what = bro_json_value_to_text (c->op);
       if (!c->done)
         bro_test_fail (failures, id, "the op hasn't finished: %s", what);
+      if (maybe && (!c->error || g_strcmp0 (c->error, maybe->string) == 0)) /* that error or none: ops that race */
+        continue;
       bro_test_same_string (failures, id, what, want ? want->string : NULL, c->error);
     }
   if (service)

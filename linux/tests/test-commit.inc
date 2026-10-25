@@ -141,17 +141,12 @@ commit_intent_json (const BroCommitIntent *i)
   return o;
 }
 
-static BroCommitResult *
-commit_port_called (TestCommitPort *p, const char *op, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, const char *tag,
-                    BroCancellationToken *cancel, BroBroError **error)
+/* A recorded commit or quarantine call (test-keep-apart.inc records its quarantines the same way). */
+static BroJsonValue *
+commit_call_json (const char *op, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, const char *tag)
 {
   BroJsonValue *call = bro_json_value_new_object ();
   BroJsonValue *rows = bro_json_value_new_array ();
-  BroJsonValue *port = bro_json_value_member (p->given, "port");
-  BroJsonValue *why = bro_json_value_member (port, "error");
-  const char *slash = strrchr (intent->destination, '/');
-  g_autofree char *destination = NULL;
-  GPtrArray *copy;
   for (guint i = 0; i < files->len; i++)
     {
       const BroUnitFile *f = files->pdata[i];
@@ -169,6 +164,19 @@ commit_port_called (TestCommitPort *p, const char *op, const BroUnitRecord *unit
   bro_json_value_set (call, "unit", commit_unit_json (unit));
   bro_json_value_set (call, "intent", commit_intent_json (intent));
   bro_json_value_set (call, "files", rows);
+  return call;
+}
+
+static BroCommitResult *
+commit_port_called (TestCommitPort *p, const char *op, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, const char *tag,
+                    BroCancellationToken *cancel, BroBroError **error)
+{
+  BroJsonValue *call = commit_call_json (op, unit, intent, files, tag);
+  BroJsonValue *port = bro_json_value_member (p->given, "port");
+  BroJsonValue *why = bro_json_value_member (port, "error");
+  const char *slash = strrchr (intent->destination, '/');
+  g_autofree char *destination = NULL;
+  GPtrArray *copy;
   g_mutex_lock (&p->lock);
   bro_json_value_append (p->calls, call);
   g_mutex_unlock (&p->lock);

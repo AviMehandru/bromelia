@@ -4,7 +4,7 @@
     "LibraryService.stagingFolders",
     "LibraryService.setAside"
   ],
-  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job; a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<job title or folder, Sanitizer.component> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], []) each rendered by the MessageRenderer, one per line; removed instead when it holds no file). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as JSON). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
+  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. A next step that is keepApart (running or not started; F8) is resumed the same way, in the processing queue. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job; a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<job title or folder, Sanitizer.component> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], []) each rendered by the MessageRenderer, one per line; removed instead when it holds no file). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as JSON). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
   "cases": [
     {
       "id": "nothing-to-recover",
@@ -775,6 +775,199 @@
           "jobChanged j1 queued"
         ],
         "rule": "plan §20.4: after Release, resumes automatically, in the processing queue (recovery-resumes-after-release)"
+      }
+    },
+    {
+      "id": "a-job-keeping-its-files-apart-is-resumed-in-the-processing-queue",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "running",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "keepApart"
+            ],
+            "rows": [
+              {
+                "kind": "awaitMedia",
+                "state": "succeeded"
+              },
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "keepApart",
+                "state": "running"
+              }
+            ],
+            "driveId": "drive",
+            "automatic": true,
+            "mediaGeneration": 4
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "keepApart"
+            ],
+            "mediaGeneration": 4
+          }
+        },
+        "steps": {
+          "j1": [
+            "awaitMedia succeeded",
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "keepApart running"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.resumed",
+              "params": {
+                "step": "keepApart"
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "F8: keepApart needs no drive and is idempotent: resumed, never the drive rules of a job before Acquire, never interrupted"
+      }
+    },
+    {
+      "id": "a-job-that-had-not-started-keeping-its-files-apart-is-resumed-too",
+      "given": {
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Disc",
+            "state": "queued",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "keepApart"
+            ],
+            "rows": [
+              {
+                "kind": "awaitMedia",
+                "state": "succeeded"
+              },
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "keepApart",
+                "state": "pending"
+              }
+            ],
+            "queue": "processing",
+            "driveId": "drive",
+            "automatic": false
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "awaitMedia",
+              "probe",
+              "identify",
+              "plan",
+              "keepApart"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "steps": {
+          "j1": [
+            "awaitMedia succeeded",
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "keepApart pending"
+          ]
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "info",
+              "code": "recovery.resumed",
+              "params": {
+                "step": "keepApart"
+              }
+            }
+          ]
+        },
+        "eventLines": [
+          "jobChanged j1 queued"
+        ],
+        "rule": "F8: JobService.keepApart stores the row pending before the job runs; a manual drive job isn't started again from its first step"
       }
     },
     {

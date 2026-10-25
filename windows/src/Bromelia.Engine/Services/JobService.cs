@@ -19,7 +19,7 @@ namespace Bromelia.Engine;
 /// RecoveryService.recover), in their queues' order.</item>
 /// <item>Each job's place in its queue is stored, so the order survives a restart (written in a transaction that
 /// changes only the position: the runner owns the rest of the record).</item>
-/// <item>The continue offer comes with AutomationService, keep-apart with session F (owner, 2026-10-17/18).</item>
+/// <item>The continue offer comes with AutomationService (owner, 2026-10-17/18).</item>
 /// </list>
 /// </summary>
 public sealed class JobService
@@ -40,6 +40,8 @@ public sealed class JobService
     readonly IFileSystem _fs;
     readonly string _data;
     readonly Dictionary<Id, Active> _active = new();
+    /// <summary>Finished jobs a retry or keep-apart is starting again (between reading and storing their rows).</summary>
+    readonly HashSet<Id> _restarting = new();
     /// <summary>Where each active job should be stored in its queue; read by the store's workers, hence the lock.</summary>
     readonly Dictionary<Id, int> _positions = new();
     /// <summary>The positions last asked of the store, on the executor.</summary>
@@ -135,7 +137,8 @@ public sealed class JobService
     /// other job (read errors and failed post steps get retries of their own). While the job has an open commit intent
     /// (its files are partly in the library), only a retry from Commit is taken, which finishes it: any other is
     /// job.commitOpen (a step before Commit would change staging under the intent; a new job would archive the disc again
-    /// beside it).</summary>
+    /// beside it). A job that was kept apart is retried from its keepApart step only (that step again, in the processing
+    /// queue), or as a new job; any other step is job.notRetryable.</summary>
     public async Task<JobDto> Retry(Id jobId, StepKind? fromStep = null)
     {
         var record = await Load(jobId);
@@ -145,16 +148,31 @@ public sealed class JobService
             await NotCommitting(jobId);
             return await Create(record.Request with { Automatic = false, MediaGeneration = null });
         }
-        if (record.Outcome is not (Outcome.Failed or Outcome.Cancelled or Outcome.Interrupted)) throw NotRetryable(jobId);
+        if (record.Outcome is not (Outcome.Failed or Outcome.Cancelled or Outcome.Interrupted) || !_restarting.Add(jobId)) throw NotRetryable(jobId);
+        try
+        {
+            return await Again(record, fromStep);
+        }
+        finally
+        {
+            _restarting.Remove(jobId);
+        }
+    }
 
+    /// <summary>Retry's same-job part, while the job is held in _restarting.</summary>
+    async Task<JobDto> Again(JobRecord record, StepKind? fromStep)
+    {
+        var jobId = record.Id;
         var steps = (record.Plan?.Steps ?? JobPlanner.Initial(record.Request)).ToList();
+        bool keptApart = steps.Contains(StepKind.KeepApart);
+        if (keptApart && fromStep != StepKind.KeepApart) throw NotRetryable(jobId);
         int seq = fromStep is { } kind ? steps.IndexOf(kind) : 0;
         if (seq < 0)
             throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobUnknownStep), ("step", JsonValue.Of(EnumWire.Name(fromStep!.Value)))));
         var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
         if (seq > JobPlanner.Done(rows).Count) throw BadRequest("fromStep " + EnumWire.Name(fromStep!.Value) + ": a step before it isn't done");
         int release = steps.IndexOf(StepKind.Release);
-        if (release < 0 || seq <= release) seq = 0;
+        if (!keptApart && (release < 0 || seq <= release)) seq = 0;
         if (seq < steps.IndexOf(StepKind.Commit)) await NotCommitting(jobId);
         foreach (var row in rows.Where(r => r.Seq >= seq))
         {
@@ -164,7 +182,7 @@ public sealed class JobService
         var plan = record.Plan;
         int planned = steps.IndexOf(StepKind.Plan);
         if (plan != null && planned >= 0 && seq <= planned) plan = plan with { Steps = steps.Take(planned + 1).ToList() };
-        var queue = release >= 0 && seq > release ? Queue.Processing : JobPlanner.Queue(record.Kind);
+        var queue = keptApart || (release >= 0 && seq > release) ? Queue.Processing : JobPlanner.Queue(record.Kind);
         var position = Admit(jobId, queue);
         var again = record with
         {
@@ -180,6 +198,61 @@ public sealed class JobService
                 JobLog.Append(_fs, _data + "/jobs/" + jobId.Value, new[] { line });
                 return true;
             });
+        }
+        catch (BroFailure)
+        {
+            Forget(jobId);
+            _scheduler.Finish(jobId);
+            throw;
+        }
+        if (_asked[jobId] != position) SavePosition(jobId);
+        var dto = JobDto.Of(again) with { Position = _scheduler.Position(jobId) };
+        _bus.Publish(EngineEventType.JobChanged, JsonValue.Of(("job", JobDto.Json(dto))));
+        await Launch(again);
+        return dto;
+    }
+
+    /// <summary>Doesn't continue an interrupted job (owner, 2026-10-03 and 2026-10-25; plan §20.4): the same job runs again
+    /// with a keepApart step in place of its interrupted step and what follows (KeepApartStep seals what staging holds and
+    /// quarantines it as INCOMPLETE; the job then ends cancelled). The step's row is stored pending (output, error and
+    /// checkpoint cleared), the plan cut back to the steps before it plus keepApart, and the record queued again in the
+    /// processing queue (no outcome; the request as it was); jobChanged, then it runs. job.notFound; job.notInterrupted for
+    /// a job that isn't finished and interrupted, that this service runs, or whose Plan step didn't succeed.</summary>
+    public async Task<JobDto> KeepApart(Id jobId)
+    {
+        var record = await Load(jobId);
+        if (record.State != JobState.Finished || record.Outcome != Outcome.Interrupted || _active.ContainsKey(jobId) || !_restarting.Add(jobId))
+            throw NotInterrupted(jobId);
+        try
+        {
+            return await KeptApart(record);
+        }
+        finally
+        {
+            _restarting.Remove(jobId);
+        }
+    }
+
+    /// <summary>KeepApart's part, while the job is held in _restarting.</summary>
+    async Task<JobDto> KeptApart(JobRecord record)
+    {
+        var jobId = record.Id;
+        var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
+        var done = JobPlanner.Done(rows);
+        if (!done.Any(r => r.Kind == StepKind.Plan && r.State == StepState.Succeeded)) throw NotInterrupted(jobId);
+        int seq = done.Count;
+        var steps = (record.Plan?.Steps ?? JobPlanner.Initial(record.Request)).Take(seq).Append(StepKind.KeepApart).ToList();
+        var row = new StepRecord(jobId, seq, StepKind.KeepApart, StepState.Pending, 1, null);
+        var position = Admit(jobId, Queue.Processing);
+        var again = record with
+        {
+            State = JobState.Queued, Outcome = null, Error = null, FinishedAt = null, Decision = null, BlockedBy = null, Queue = Queue.Processing,
+            Position = position, Plan = (record.Plan ?? new JobPlan(steps)) with { Steps = steps },
+        };
+        try
+        {
+            await _executor.Worker(() => _store.Steps().Save(row));
+            await _executor.Worker(() => _store.Jobs().Update(again));
         }
         catch (BroFailure)
         {
@@ -372,6 +445,8 @@ public sealed class JobService
     }
 
     static BroFailure NotRetryable(Id jobId) => new(new BroError(MessageCode.Wire(MessageCode.JobNotRetryable), ("jobId", JsonValue.Of(jobId.Value))));
+
+    static BroFailure NotInterrupted(Id jobId) => new(new BroError(MessageCode.Wire(MessageCode.JobNotInterrupted), ("jobId", JsonValue.Of(jobId.Value))));
 
     static BroFailure NotQueued(Id jobId) => new(new BroError(MessageCode.Wire(MessageCode.JobNotQueued), ("jobId", JsonValue.Of(jobId.Value))));
 

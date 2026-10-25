@@ -315,6 +315,7 @@
         "protect",
         "postProcess",
         "notify",
+        "keepApart",
         "ripAudio",
         "imageData",
         "mergeAttempts",

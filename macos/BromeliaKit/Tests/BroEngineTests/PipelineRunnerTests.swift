@@ -351,6 +351,8 @@ final class PipelineHarness {
             if let a = arg["as"]?.string { register(a) }
             let from = arg["fromStep"]?.string.flatMap(StepKind.init(rawValue:))
             return { () async throws(BroError) in _ = try await s.retry(job!, fromStep: from) }
+        case "keepApart":
+            return { () async throws(BroError) in _ = try await s.keepApart(job!) }
         case "cancel":
             gates.cancelled(job!)
             return { () async throws(BroError) in try await s.cancel(job!) }
@@ -406,11 +408,14 @@ final class PipelineHarness {
         return text
     }
 
-    /// Every JobService op has ended as it expects (its expectError, else no error).
+    /// Every JobService op has ended as it expects (its expectError, else no error; maybeError: that error or none, for
+    /// ops that race).
     func checkCalls() async throws {
         for (i, call) in calls.enumerated() {
             await call.task.value
-            try Fixtures.same(call.op.members!.first!.value["expectError"]?.string, callErrors[i], "error of \(call.op)")
+            let arg = call.op.members!.first!.value
+            if let maybe = arg["maybeError"]?.string, callErrors[i] == nil || callErrors[i] == maybe { continue }
+            try Fixtures.same(arg["expectError"]?.string, callErrors[i], "error of \(call.op)")
         }
     }
 

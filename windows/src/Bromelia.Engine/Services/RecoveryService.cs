@@ -134,9 +134,10 @@ public sealed class RecoveryService
             await Requeue(job, job.Queue, new BroMessage(MessageCode.RecoveryResumed, Severity.Info, ("step", step)));
             return true;
         }
-        if (done.Any(s => s.Kind == StepKind.Acquire))
+        // Past Acquire, or keeping an interrupted job's files apart (which needs no drive): resumed.
+        if (done.Any(s => s.Kind == StepKind.Acquire) || kind == StepKind.KeepApart)
         {
-            var queue = done.Any(s => s.Kind == StepKind.Release) ? Queue.Processing : job.Queue;
+            var queue = done.Any(s => s.Kind == StepKind.Release) || kind == StepKind.KeepApart ? Queue.Processing : job.Queue;
             await Requeue(job, queue, new BroMessage(MessageCode.RecoveryResumed, Severity.Info, ("step", step)));
             return true;
         }

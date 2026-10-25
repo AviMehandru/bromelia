@@ -8,13 +8,20 @@ import Testing
 
 private let jobIdText = "00000000-0000-4000-8000-000000000001"
 
-/// The progress, the log, the library and the clock a Seal case gives the step.
+/// The progress, the log, the library and the clock a Seal case gives the step; the checkpointer and the recording
+/// quarantine a keep-apart case gives it.
 private final class SealFakes: ProgressReporter, JobLogger, LibraryPort, Clock, DecisionPort, Checkpointer, @unchecked Sendable {
     let given: JsonValue
     let fs: MemoryFileSystem
     private let lock = NSLock()
     private var _log: [BroMessage] = []
     private var _progress: [JsonValue] = []
+    private var _calls: [JsonValue] = []
+    /// What the checkpointer holds; `saved` is what it held when the run started.
+    private var _held: JsonValue?
+    private var _saved: JsonValue?
+    private var _saves = 0
+    var cancelOnQuarantine: CancellationSource?
 
     init(_ given: JsonValue, _ fs: MemoryFileSystem) {
         self.given = given
@@ -23,13 +30,23 @@ private final class SealFakes: ProgressReporter, JobLogger, LibraryPort, Clock, 
 
     var logged: [BroMessage] { lock.withLock { _log } }
     var progressed: [JsonValue] { lock.withLock { _progress } }
+    var calls: [JsonValue] { lock.withLock { _calls } }
+    var held: JsonValue? {
+        get { lock.withLock { _held } }
+        set { lock.withLock { _held = newValue } }
+    }
+    var saves: Int { lock.withLock { _saves } }
 
     func clear() {
         lock.withLock {
             _log.removeAll()
             _progress.removeAll()
+            _saves = 0
         }
     }
+
+    /// Before each run: what the step sees as saved.
+    func startRun() { lock.withLock { _saved = _held } }
 
     func report(_ fraction: Double, operation: BroMessage, current: String?) {
         var item: [JsonValue] = [.number(fraction), .string(operation.code.rawValue)]
@@ -53,7 +70,13 @@ private final class SealFakes: ProgressReporter, JobLogger, LibraryPort, Clock, 
 
     func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], cancel: CancellationToken) async throws(BroError) -> CommitResult { fatalError("not used") }
     func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String, cancel: CancellationToken) async throws(BroError) -> CommitResult {
-        fatalError("not used")
+        let call = commitCallJson("quarantine", unit, intent, files, tag)
+        lock.withLock { _calls.append(call) }
+        cancelOnQuarantine?.cancel()
+        if cancel.isCancelled { throw BroError(MessageCode.wire(.jobCancelled)) }
+        let port = given["port"]
+        if let e = port?["error"] { throw BroError(e["code"]?.string ?? "", e["params"]?.members ?? []) }
+        return CommitResult(unitId: unit.id, destination: port?["destination"]?.string ?? intent.destination + " [" + tag + "]", files: files, merged: false)
     }
 
     func now() -> Instant { Instant.parse(given["now"]?.string ?? "")! }
@@ -64,8 +87,13 @@ private final class SealFakes: ProgressReporter, JobLogger, LibraryPort, Clock, 
     func localTime(_ instant: Instant) -> LocalTime { fatalError("not used") }
 
     func ask(_ decision: DecisionDto) async throws(BroError) -> String { fatalError("not used") }
-    var saved: JsonValue? { nil }
-    func save(_ checkpoint: JsonValue) async throws(BroError) { fatalError("not used") }
+    var saved: JsonValue? { lock.withLock { _saved } }
+    func save(_ checkpoint: JsonValue) async throws(BroError) {
+        lock.withLock {
+            _held = checkpoint
+            _saves += 1
+        }
+    }
 }
 
 /// '<code>' then ' <key>=<value>' per param: strings as they are, other values as canonical JSON without its final
@@ -104,11 +132,16 @@ private func snapshot(_ fs: MemoryFileSystem, _ staging: String) throws -> [Stri
 
 /// shared/fixtures/engine/seal-steps.cases.json: SealStep alone, on a file tree in memory (a disk and a cache, failures, a
 /// cancel on an operation), a fixed clock and the engine harnesses' fake renderer. The format is in
-/// claudeDocs/tools/rebuild-phase3/gen-seal-cases.py.
+/// claudeDocs/tools/rebuild-phase3/gen-seal-cases.py. shared/fixtures/engine/keep-apart-steps.cases.json: KeepApartStep the
+/// same way, with a checkpointer and a quarantine that records its calls (gen-keep-apart-cases.py).
 struct SealStepTests {
-    @Test func theSealCasesPass() async throws {
+    @Test func theSealCasesPass() async throws { try await cases("engine/seal-steps.cases.json") }
+
+    @Test func theKeepApartCasesPass() async throws { try await cases("engine/keep-apart-steps.cases.json") }
+
+    private func cases(_ file: String) async throws {
         var failures: [String] = []
-        let doc = try Fixtures.json("engine/seal-steps.cases.json")
+        let doc = try Fixtures.json(file)
         let cases = doc["cases"]?.array ?? []
         #expect(!cases.isEmpty)
         for c in cases {
@@ -123,9 +156,10 @@ struct SealStepTests {
     }
 
     private func run(_ given: JsonValue, _ expect: JsonValue) async throws {
-        let step = SealStep()
+        let step: any Step = given["step"]?.string == "keepApart" ? KeepApartStep() : SealStep()
         let fs = MemoryFileSystem()
         let fakes = SealFakes(given, fs)
+        if let held = given["checkpoint"], held != .null { fakes.held = held }
         let staging = (given["libraries"]?["lib"]?["path"]?.string ?? "/lib") + "/.bromelia/staging/" + jobIdText
         let jobDirectory = "/data/jobs/" + jobIdText
         func putStaging(_ rel: String, _ content: JsonValue) {
@@ -144,7 +178,11 @@ struct SealStepTests {
             fs.fail(f["op"]?.string ?? "", f["path"]?.string ?? "", BroError(f["error"]?["code"]?.string ?? "", f["error"]?["params"]?.members ?? []))
         }
         let cancel = CancellationSource()
-        if let at = given["cancelAt"] {
+        if given["cancelAt"]?["op"]?.string == "start" {
+            cancel.cancel() // the job is cancelled before the step runs
+        } else if given["cancelAt"]?["op"]?.string == "quarantine" {
+            fakes.cancelOnQuarantine = cancel
+        } else if let at = given["cancelAt"] {
             let op = at["op"]?.string, path = at["path"]?.string
             fs.onOp = { o, p in if o == op && p == path { cancel.cancel() } }
         }
@@ -180,6 +218,7 @@ struct SealStepTests {
             }
             report = nil
             error = nil
+            fakes.startRun()
             do throws(BroError) {
                 report = try await step.run(context)
                 error = report?.error
@@ -228,6 +267,9 @@ struct SealStepTests {
             let name = report?.data["record"]?.string ?? ""
             try Fixtures.same(record, after[name], "record " + name)
         }
+        if let calls = expect["calls"] { try Fixtures.same(calls, .array(fakes.calls), "calls") }
+        if expect.members?.contains(where: { $0.key == "checkpoint" }) == true { try Fixtures.same(expect["checkpoint"] ?? .null, fakes.held ?? .null, "checkpoint") }
+        if let saves = expect["saves"] { try Fixtures.same(Int(saves.int ?? -1), fakes.saves, "saves") }
         if expect["sameAsFirst"]?.bool == true {
             let order: (String, String) -> Bool = { $0.utf8.lexicographicallyPrecedes($1.utf8) }
             try Fixtures.same(first.keys.sorted(by: order).joined(separator: "\n"), after.keys.sorted(by: order).joined(separator: "\n"), "the files after the rerun")

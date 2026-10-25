@@ -1,5 +1,6 @@
 /* bro-seal-step.c */
 #include "bro-seal-step.h"
+#include "bro-seal-step-private.h"
 #include "bro-acquire-output.h"
 #include "bro-archive-files.h"
 #include "bro-archive-record-codec.h"
@@ -56,8 +57,8 @@ step_resources (BroStep *step, const BroJobSnapshot *job)
 /* ---- failures ---- */
 
 /* job.cancelled once the job is cancelled. */
-static gboolean
-cancelled (const BroStepContext *c, BroBroError **error)
+gboolean
+_bro_seal_cancelled (const BroStepContext *c, BroBroError **error)
 {
   if (!bro_cancellation_token_is_cancelled (c->cancel))
     return FALSE;
@@ -99,8 +100,8 @@ with_reason (const BroStepContext *c, BroMessageCode code, const char *key, BroJ
 
 /* A file's SHA-256 (g_free it) and size, read through the FileSystem port (from disk when @from_disk);
  * archive.hashFailed when it can't be read; job.cancelled between two pieces. NULL and @error set on failure. */
-static char *
-hash (const BroStepContext *c, const char *path, const char *file, gboolean from_disk, gint64 *size, BroBroError **error)
+char *
+_bro_seal_hash (const BroStepContext *c, const char *path, const char *file, gboolean from_disk, gint64 *size, BroBroError **error)
 {
   BroBroError *cause = NULL;
   g_autoptr (BroByteStream) stream = bro_file_system_open_for_reading (c->fs, path, from_disk, &cause);
@@ -113,7 +114,7 @@ hash (const BroStepContext *c, const char *path, const char *file, gboolean from
     }
   hasher = bro_sha256_hasher_new ();
   *size = 0;
-  while (!cancelled (c, error))
+  while (!_bro_seal_cancelled (c, error))
     {
       g_autoptr (GBytes) piece = bro_byte_stream_read (stream, CHUNK, &cause);
       gsize n;
@@ -209,16 +210,38 @@ by_bytes (gconstpointer a, gconstpointer b)
   return strcmp (*(const char *const *) a, *(const char *const *) b);
 }
 
-/* What one run of the step has. */
-typedef struct {
-  const BroStepContext *c;
-  const char *staging;
-  GPtrArray *written; /* char *: Bromelia's own files this run wrote */
-} Run;
+GPtrArray *
+_bro_seal_folders (const char *staging, GPtrArray *files)
+{
+  GPtrArray *folders = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < files->len; i++)
+    {
+      const char *f = files->pdata[i];
+      gsize n = 0;
+      do /* every folder from staging down to the file's: one holding only folders (a backup's) too */
+        {
+          const char *slash = strchr (f + n, '/');
+          char *folder = n == 0 ? g_strdup (staging) : g_strdup_printf ("%s/%.*s", staging, (int) (n - 1), f);
+          gboolean seen = FALSE;
+          for (guint k = 0; k < folders->len && !seen; k++)
+            seen = strcmp (folders->pdata[k], folder) == 0;
+          if (seen)
+            g_free (folder);
+          else
+            g_ptr_array_add (folders, folder);
+          n = slash ? (gsize) (slash - f) + 1 : 0;
+        }
+      while (n > 0);
+    }
+  g_ptr_array_sort (folders, by_bytes);
+  return folders;
+}
+
+typedef BroSealRun Run;
 
 /* Writes @name into staging atomically (0644); archive.writeFailed with the cause. */
-static gboolean
-write_own (Run *r, const char *name, GBytes *bytes, BroBroError **error)
+gboolean
+_bro_seal_write (BroSealRun *r, const char *name, GBytes *bytes, BroBroError **error)
 {
   g_autofree char *path = g_strconcat (r->staging, "/", name, NULL);
   BroBroError *cause = NULL;
@@ -231,20 +254,62 @@ write_own (Run *r, const char *name, GBytes *bytes, BroBroError **error)
   return TRUE;
 }
 
-static gboolean
-write_text (Run *r, const char *name, const char *text, BroBroError **error)
+gboolean
+_bro_seal_write_text (BroSealRun *r, const char *name, const char *text, BroBroError **error)
 {
   g_autoptr (GBytes) bytes = g_bytes_new (text, strlen (text));
-  return write_own (r, name, bytes, error);
+  return _bro_seal_write (r, name, bytes, error);
 }
 
-static gboolean
-was_written (Run *r, const char *name)
+gboolean
+_bro_seal_was_written (BroSealRun *r, const char *name)
 {
   for (guint i = 0; i < r->written->len; i++)
     if (strcmp (r->written->pdata[i], name) == 0)
       return TRUE;
   return FALSE;
+}
+
+GPtrArray *
+_bro_seal_copy_logs (BroSealRun *r, const char *unit8, gboolean copy, GPtrArray *logs, BroBroError **error)
+{
+  const BroStepContext *c = r->c;
+  BroFileSystem *fs = c->fs;
+  g_autofree char *log_file = g_strconcat (c->job_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+  g_autoptr (GPtrArray) log = NULL;
+  const char *from[] = { BRO_SEAL_STEP_TRANSCRIPT, BRO_SEAL_STEP_DEBUG_TRANSCRIPT };
+  const char *to[] = { "makemkv-%s-log.txt", "makemkv-%s-debug-log.txt" };
+  if (bro_file_system_exists (fs, log_file))
+    {
+      g_autoptr (GBytes) bytes = bro_file_system_read (fs, log_file, error);
+      if (!bytes)
+        return NULL;
+      log = bro_job_log_decode (bytes);
+    }
+  else
+    log = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);
+  if (!copy)
+    return g_steal_pointer (&log);
+  if (bro_file_system_exists (fs, log_file))
+    {
+      g_autofree char *name = g_strdup_printf ("bromelia-%s-log.txt", unit8);
+      g_autofree char *text = bro_seal_step_log_text (log, c->messages);
+      if (!_bro_seal_write_text (r, name, text, error))
+        return NULL;
+      g_ptr_array_add (logs, g_steal_pointer (&name));
+    }
+  for (guint i = 0; i < G_N_ELEMENTS (from); i++)
+    {
+      g_autofree char *source = g_strconcat (c->job_directory, "/", from[i], NULL);
+      g_autofree char *name = g_strdup_printf (to[i], unit8);
+      g_autoptr (GBytes) bytes = NULL;
+      if (!bro_file_system_exists (fs, source))
+        continue;
+      if (!(bytes = bro_file_system_read (fs, source, error)) || !_bro_seal_write (r, name, bytes, error))
+        return NULL;
+      g_ptr_array_add (logs, g_steal_pointer (&name));
+    }
+  return g_steal_pointer (&log);
 }
 
 /* The READ ERRORS note's text: the job, its outcome, rip.readErrors, the read errors (titles', then the run-level ones)
@@ -290,7 +355,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   g_autoptr (GPtrArray) tree = g_ptr_array_new_with_free_func (g_free); /* the walk without the leftovers removed */
   g_autoptr (GPtrArray) files = g_ptr_array_new_with_free_func (g_free);
   g_autoptr (GHashTable) sealed = g_hash_table_new (g_str_hash, g_str_equal);
-  g_autoptr (GPtrArray) folders = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (GPtrArray) folders = NULL;
   g_autoptr (GArray) sizes = g_array_new (FALSE, FALSE, sizeof (gint64));
   g_autoptr (GPtrArray) entries = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_unit_file_free);
   g_autoptr (GPtrArray) written = g_ptr_array_new_with_free_func (g_free);
@@ -298,7 +363,6 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   g_autoptr (GPtrArray) log = NULL;
   g_autoptr (BroSealOutput) output = NULL;
   g_autoptr (BroJsonValue) document = NULL;
-  g_autofree char *log_file = NULL;
   g_autofree char *note = NULL;
   BroJsonValue *archive, *checksums;
   gboolean hash_from_disk, copy_logs;
@@ -385,31 +449,15 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
     }
 
   /* 1. Durable before it is read back. */
-  if (cancelled (c, error))
+  if (_bro_seal_cancelled (c, error))
     return NULL;
   for (guint i = 0; i < files->len; i++)
     {
-      const char *f = files->pdata[i];
-      g_autofree char *path = g_strconcat (staging, "/", f, NULL);
-      gsize n = 0;
+      g_autofree char *path = g_strconcat (staging, "/", (char *) files->pdata[i], NULL);
       if (!bro_file_system_sync_file (fs, path, error))
         return NULL;
-      do /* every folder from staging down to the file's: one holding only folders (a backup's) too */
-        {
-          const char *slash = strchr (f + n, '/');
-          char *folder = n == 0 ? g_strdup (staging) : g_strdup_printf ("%s/%.*s", staging, (int) (n - 1), f);
-          gboolean seen = FALSE;
-          for (guint k = 0; k < folders->len && !seen; k++)
-            seen = strcmp (folders->pdata[k], folder) == 0;
-          if (seen)
-            g_free (folder);
-          else
-            g_ptr_array_add (folders, folder);
-          n = slash ? (gsize) (slash - f) + 1 : 0;
-        }
-      while (n > 0);
     }
-  g_ptr_array_sort (folders, by_bytes);
+  folders = _bro_seal_folders (staging, files);
   for (guint i = 0; i < folders->len; i++)
     if (!bro_file_system_sync_directory (fs, folders->pdata[i], error))
       return NULL;
@@ -435,10 +483,10 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
       BroUnitFile *entry;
       gint64 size = 0;
       char *digest;
-      if (cancelled (c, error))
+      if (_bro_seal_cancelled (c, error))
         return NULL;
       bro_progress_reporter_report (c->progress, (double) done / total, operation, file);
-      if (!(digest = hash (c, path, file, hash_from_disk, &size, error)))
+      if (!(digest = _bro_seal_hash (c, path, file, hash_from_disk, &size, error)))
         return NULL;
       item = item_of (named, file);
       entry = bro_unit_file_new ();
@@ -451,7 +499,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
       g_ptr_array_add (entries, entry);
       done += g_array_index (sizes, gint64, i);
     }
-  if (cancelled (c, error))
+  if (_bro_seal_cancelled (c, error))
     return NULL;
 
   /* 3. Bromelia's own files, each written atomically. */
@@ -463,7 +511,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
     for (guint i = 0; i < entries->len; i++)
       g_ptr_array_add (sums, bro_sum_entry_new (((BroUnitFile *) entries->pdata[i])->path, ((BroUnitFile *) entries->pdata[i])->sha256));
     text = bro_sha256_sums_render (sums);
-    if (!write_text (&run, BRO_SHA256_SUMS_FILE_NAME, text, error))
+    if (!_bro_seal_write_text (&run, BRO_SHA256_SUMS_FILE_NAME, text, error))
       return NULL;
   }
   {
@@ -472,46 +520,14 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
     _bro_step_log (c, BRO_MSG_ARCHIVE_CHECKSUMS_WRITTEN, params, BRO_SEVERITY_INFO);
   }
 
-  log_file = g_strconcat (c->job_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
-  if (bro_file_system_exists (fs, log_file))
-    {
-      g_autoptr (GBytes) bytes = bro_file_system_read (fs, log_file, error);
-      if (!bytes)
-        return NULL;
-      log = bro_job_log_decode (bytes);
-    }
-  else
-    log = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);
-  if (copy_logs)
-    {
-      const char *from[] = { BRO_SEAL_STEP_TRANSCRIPT, BRO_SEAL_STEP_DEBUG_TRANSCRIPT };
-      const char *to[] = { "makemkv-%s-log.txt", "makemkv-%s-debug-log.txt" };
-      if (bro_file_system_exists (fs, log_file))
-        {
-          g_autofree char *copy = g_strdup_printf ("bromelia-%s-log.txt", unit8);
-          g_autofree char *text = bro_seal_step_log_text (log, c->messages);
-          if (!write_text (&run, copy, text, error))
-            return NULL;
-          g_ptr_array_add (logs, g_steal_pointer (&copy));
-        }
-      for (guint i = 0; i < G_N_ELEMENTS (from); i++)
-        {
-          g_autofree char *source = g_strconcat (c->job_directory, "/", from[i], NULL);
-          g_autofree char *copy = g_strdup_printf (to[i], unit8);
-          g_autoptr (GBytes) bytes = NULL;
-          if (!bro_file_system_exists (fs, source))
-            continue;
-          if (!(bytes = bro_file_system_read (fs, source, error)) || !write_own (&run, copy, bytes, error))
-            return NULL;
-          g_ptr_array_add (logs, g_steal_pointer (&copy));
-        }
-    }
+  if (!(log = _bro_seal_copy_logs (&run, unit8, copy_logs, logs, error)))
+    return NULL;
 
   read_errors = bro_acquire_output_read_error_count (acquired);
   if (read_errors > 0)
     {
       g_autofree char *text = note_text (c, acquired, read_errors, logs);
-      if (!write_text (&run, BRO_SEAL_STEP_READ_ERRORS_NOTE, text, error))
+      if (!_bro_seal_write_text (&run, BRO_SEAL_STEP_READ_ERRORS_NOTE, text, error))
         return NULL;
       note = g_strdup (BRO_SEAL_STEP_READ_ERRORS_NOTE);
     }
@@ -520,14 +536,15 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   output->unit_id = unit_id;
   g_free (output->record);
   output->record = g_strdup_printf ("bromelia-%s.json", unit8);
-  document = bro_seal_record_build (c->job, plan, acquired, &unit_id, entries, log, logs, bro_clock_now (c->clock), c->app_version, c->messages);
+  document = bro_seal_record_build (c->job, plan, acquired, &unit_id, entries, log, logs, bro_clock_now (c->clock), c->app_version, c->messages,
+                                    NULL);
   {
     BroArchiveRecord record = { 0 };
     g_autoptr (GBytes) bytes = NULL;
     record.version = 3;
     record.document = document;
     bytes = bro_archive_record_codec_encode_v3 (&record);
-    if (!write_own (&run, output->record, bytes, error))
+    if (!_bro_seal_write (&run, output->record, bytes, error))
       return NULL;
   }
   _bro_step_log (c, BRO_MSG_ARCHIVE_RECORD_WRITTEN, _bro_param ("file", bro_json_value_new_string (output->record)), BRO_SEVERITY_INFO);
@@ -536,7 +553,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   for (guint i = 0; i < tree->len; i++)
     {
       const char *f = tree->pdata[i];
-      if (!strchr (f, '/') && bro_archive_files_is_own_file (f) && !was_written (&run, f))
+      if (!strchr (f, '/') && bro_archive_files_is_own_file (f) && !_bro_seal_was_written (&run, f))
         {
           g_autofree char *path = g_strconcat (staging, "/", f, NULL);
           if (!bro_file_system_remove (fs, path, error))

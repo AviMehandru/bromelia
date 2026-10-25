@@ -61,16 +61,7 @@ public sealed class CommitStepTests
 
         CommitResult Called(string op, UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string? tag, CancellationToken cancel)
         {
-            var call = new List<(string, JsonValue)> { ("op", JsonValue.Of(op)) };
-            if (tag != null) call.Add(("tag", JsonValue.Of(tag)));
-            call.Add(("unit", UnitJson(unit)));
-            call.Add(("intent", IntentJson(intent)));
-            call.Add(("files", JsonValue.Of(files.Select(f => JsonValue.Of(new[]
-            {
-                JsonValue.Of(f.Path), JsonValue.Of(f.Size), JsonValue.Of(f.Sha256), JsonValue.Of(f.Role),
-                f.Title is { } t ? JsonValue.Of(t) : JsonValue.Null.Instance,
-            })))));
-            lock (Calls) Calls.Add(JsonValue.Of(call.ToArray()));
+            lock (Calls) Calls.Add(CallJson(op, unit, intent, files, tag));
             CancelOnCall?.Cancel();
             // LibraryService ends its wait for the unit so when the token it was given is cancelled.
             if (cancel.IsCancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
@@ -94,6 +85,21 @@ public sealed class CommitStepTests
     }
 
     static JsonValue N(int? v) => v is { } x ? JsonValue.Of(x) : JsonValue.Null.Instance;
+
+    /// <summary>A recorded commit or quarantine call (the Seal harness's keep-apart cases record theirs the same way).</summary>
+    internal static JsonValue CallJson(string op, UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string? tag)
+    {
+        var call = new List<(string, JsonValue)> { ("op", JsonValue.Of(op)) };
+        if (tag != null) call.Add(("tag", JsonValue.Of(tag)));
+        call.Add(("unit", UnitJson(unit)));
+        call.Add(("intent", IntentJson(intent)));
+        call.Add(("files", JsonValue.Of(files.Select(f => JsonValue.Of(new[]
+        {
+            JsonValue.Of(f.Path), JsonValue.Of(f.Size), JsonValue.Of(f.Sha256), JsonValue.Of(f.Role),
+            f.Title is { } t ? JsonValue.Of(t) : JsonValue.Null.Instance,
+        })))));
+        return JsonValue.Of(call.ToArray());
+    }
 
     static JsonValue UnitJson(UnitRecord u) => JsonValue.Of(
         ("id", JsonValue.Of(u.Id.Value)), ("libraryId", JsonValue.Of(u.LibraryId)), ("physicalDiscId", JsonValue.Of(u.PhysicalDiscId?.Value)),

@@ -22,6 +22,7 @@ static const char *const names[] = {
   "protect",
   "postProcess",
   "notify",
+  "keepApart",
   "ripAudio",
   "imageData",
   "mergeAttempts",

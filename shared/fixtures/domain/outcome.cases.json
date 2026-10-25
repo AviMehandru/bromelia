@@ -711,6 +711,80 @@
           "code": "archive.someNotMoved"
         }
       }
+    },
+    {
+      "id": "decide-a-kept-apart-job-is-cancelled",
+      "from": [
+        "rearchitecture-plan §20.1 KeepApart, §20.4 (owner, 2026-10-25)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "plan",
+            "state": "succeeded"
+          },
+          {
+            "kind": "keepApart",
+            "state": "succeeded"
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "cancelled",
+        "error": {
+          "code": "job.cancelledByUser"
+        }
+      }
+    },
+    {
+      "id": "decide-a-skipped-keep-apart-is-cancelled-too",
+      "from": [
+        "rearchitecture-plan §20.1 KeepApart, §20.4 (owner, 2026-10-25)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "keepApart",
+            "state": "skipped"
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "cancelled",
+        "error": {
+          "code": "job.cancelledByUser"
+        }
+      }
+    },
+    {
+      "id": "decide-a-failed-keep-apart-fails-the-job",
+      "from": [
+        "rearchitecture-plan §20.1 KeepApart, §20.4 (owner, 2026-10-25)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "plan",
+            "state": "succeeded"
+          },
+          {
+            "kind": "keepApart",
+            "state": "failed",
+            "error": {
+              "code": "archive.hashFailed"
+            }
+          }
+        ],
+        "cancelled": false
+      },
+      "expect": {
+        "outcome": "failed",
+        "error": {
+          "code": "archive.hashFailed"
+        }
+      }
     }
   ]
 }

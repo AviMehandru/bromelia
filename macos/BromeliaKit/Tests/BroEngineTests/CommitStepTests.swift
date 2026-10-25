@@ -56,14 +56,8 @@ private final class CommitFakes: ProgressReporter, JobLogger, LibraryPort, Clock
 
     private func called(_ op: String, _ unit: UnitRecord, _ intent: CommitIntent, _ files: [UnitFile], _ tag: String?,
                         _ cancel: CancellationToken) throws(BroError) -> CommitResult {
-        var call: [(key: String, value: JsonValue)] = [("op", .string(op))]
-        if let tag { call.append(("tag", .string(tag))) }
-        call.append(("unit", unitJson(unit)))
-        call.append(("intent", intentJson(intent)))
-        call.append(("files", .array(files.map { f in
-            .array([.string(f.path), .integer(f.size), .string(f.sha256), .string(f.role), f.title.map { .integer(Int64($0)) } ?? .null])
-        })))
-        lock.withLock { _calls.append(.object(call)) }
+        let call = commitCallJson(op, unit, intent, files, tag)
+        lock.withLock { _calls.append(call) }
         cancelOnCall?.cancel()
         // LibraryService ends its wait for the unit so when the token it was given is cancelled.
         if cancel.isCancelled { throw BroError(MessageCode.wire(.jobCancelled)) }
@@ -88,6 +82,18 @@ private final class CommitFakes: ProgressReporter, JobLogger, LibraryPort, Clock
 }
 
 private func n(_ v: Int?) -> JsonValue { v.map { .integer(Int64($0)) } ?? .null }
+
+/// A recorded commit or quarantine call (the Seal harness's keep-apart cases record theirs the same way).
+func commitCallJson(_ op: String, _ unit: UnitRecord, _ intent: CommitIntent, _ files: [UnitFile], _ tag: String?) -> JsonValue {
+    var call: [(key: String, value: JsonValue)] = [("op", .string(op))]
+    if let tag { call.append(("tag", .string(tag))) }
+    call.append(("unit", unitJson(unit)))
+    call.append(("intent", intentJson(intent)))
+    call.append(("files", .array(files.map { f in
+        .array([.string(f.path), .integer(f.size), .string(f.sha256), .string(f.role), f.title.map { .integer(Int64($0)) } ?? .null])
+    })))
+    return .object(call)
+}
 
 /// UnitRecord's fields in its order; enums by their wire names, instants formatted.
 private func unitJson(_ u: UnitRecord) -> JsonValue {

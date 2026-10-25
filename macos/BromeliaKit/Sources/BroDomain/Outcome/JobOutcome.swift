@@ -9,12 +9,15 @@ public enum JobOutcome {
     /// failures never fail a job, and the PipelineRunner goes on after them.
     public static func afterCommit(_ kind: StepKind) -> Bool { afterCommitKinds.contains(kind) }
 
-    /// In order: cancelled (job.cancelledByUser); interrupted (recovery.interrupted); skipped (the skip reason); a
+    /// In order: cancelled, or a keepApart step that succeeded or was skipped (the job wasn't continued; owner,
+    /// 2026-10-25), both job.cancelledByUser; interrupted (recovery.interrupted); skipped (the skip reason); a
     /// failed step that isn't after the commit fails the job with its error, or with the MakeMKV problem that
     /// explains it (the error as its cause); read errors give succeededWithReadErrors (rip.readErrors); a failed
     /// post-commit step that affects the outcome gives succeededStepsFailed; else succeeded.
     public static func decide(_ stepResults: [StepResult], cancelled: Bool, policy: OutcomePolicy) -> Decided {
-        if cancelled { return Decided(outcome: .cancelled, error: BroMessage(.jobCancelledByUser, severity: .warning).toError()) }
+        if cancelled || stepResults.contains(where: { $0.kind == .keepApart && ($0.state == .succeeded || $0.state == .skipped) }) {
+            return Decided(outcome: .cancelled, error: BroMessage(.jobCancelledByUser, severity: .warning).toError())
+        }
         if let interrupted = stepResults.first(where: { $0.state == .interrupted }) {
             return Decided(outcome: .interrupted, error: BroMessage(.recoveryInterrupted, [("step", .string(interrupted.kind.rawValue))],
                                                                     severity: .warning).toError())

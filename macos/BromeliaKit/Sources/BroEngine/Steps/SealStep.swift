@@ -112,31 +112,13 @@ public struct SealStep: Step {
         let unit8 = String(unitId.value.prefix(8))
         var written: [String] = []
         func write(_ name: String, _ bytes: [UInt8]) throws(BroError) {
-            do {
-                try fs.writeAtomically(staging + "/" + name, bytes: bytes, mode: fileMode)
-            } catch {
-                throw BroMessage(.archiveWriteFailed, [("path", .string(staging + "/" + name)), ("reason", .string(text(context, error)))],
-                                 severity: .error).toError(cause: error)
-            }
+            try writeOwn(context, staging + "/" + name, bytes)
             written.append(name)
         }
         try write(Sha256Sums.fileName, Array(Sha256Sums.render(entries.map { SumEntry(path: $0.path, sha256: $0.sha256) }).utf8))
         context.log.log(BroMessage(.archiveChecksumsWritten, [("count", .integer(Int64(entries.count))), ("file", .string(Sha256Sums.fileName))]))
 
-        let logFile = context.jobDirectory + "/" + JobLog.fileName
-        let log = fs.exists(logFile) ? JobLog.decode(try fs.read(logFile)) : []
-        var logs: [String] = []
-        if copyLogs {
-            if fs.exists(logFile) {
-                try write("bromelia-" + unit8 + "-log.txt", Array(logText(log, messages: context.messages).utf8))
-                logs.append("bromelia-" + unit8 + "-log.txt")
-            }
-            for (from, to) in [(transcript, "makemkv-" + unit8 + "-log.txt"), (debugTranscript, "makemkv-" + unit8 + "-debug-log.txt")]
-            where fs.exists(context.jobDirectory + "/" + from) {
-                try write(to, try fs.read(context.jobDirectory + "/" + from))
-                logs.append(to)
-            }
-        }
+        let (log, logs) = try SealStep.copyLogs(context, unit8: unit8, copy: copyLogs, write: write)
 
         let readErrors = AcquireOutput.readErrorCount(acquired)
         var note: String?
@@ -165,9 +147,41 @@ public struct SealStep: Step {
                                                              logs: logs, note: note, tag: readErrors > 0 ? readErrorsTag : nil)))
     }
 
+    /// The job's log (its lines, for the record) and, when `copy`, the copies written through `write`: the log as text
+    /// (bromelia-<unit8>-log.txt) and MakeMKV's transcripts (makemkv-<unit8>-log.txt, makemkv-<unit8>-debug-log.txt), each
+    /// when the job folder has it; their names. KeepApartStep copies them the same way.
+    static func copyLogs(_ context: StepContext, unit8: String, copy: Bool,
+                         write: (String, [UInt8]) throws(BroError) -> Void) throws(BroError) -> ([LogLineDto], [String]) {
+        let fs = context.fs
+        let logFile = context.jobDirectory + "/" + JobLog.fileName
+        let log = fs.exists(logFile) ? JobLog.decode(try fs.read(logFile)) : []
+        var logs: [String] = []
+        guard copy else { return (log, logs) }
+        if fs.exists(logFile) {
+            try write("bromelia-" + unit8 + "-log.txt", Array(logText(log, messages: context.messages).utf8))
+            logs.append("bromelia-" + unit8 + "-log.txt")
+        }
+        for (from, to) in [(transcript, "makemkv-" + unit8 + "-log.txt"), (debugTranscript, "makemkv-" + unit8 + "-debug-log.txt")]
+        where fs.exists(context.jobDirectory + "/" + from) {
+            try write(to, try fs.read(context.jobDirectory + "/" + from))
+            logs.append(to)
+        }
+        return (log, logs)
+    }
+
+    /// Writes one of Bromelia's own files atomically (0644); archive.writeFailed {path, reason} when it can't.
+    static func writeOwn(_ context: StepContext, _ path: String, _ bytes: [UInt8]) throws(BroError) {
+        do {
+            try context.fs.writeAtomically(path, bytes: bytes, mode: fileMode)
+        } catch {
+            throw BroMessage(.archiveWriteFailed, [("path", .string(path)), ("reason", .string(text(context, error)))], severity: .error)
+                .toError(cause: error)
+        }
+    }
+
     /// A file's SHA-256 and size, read through the FileSystem port (from disk when `fromDisk`); archive.hashFailed when it
     /// can't be read; job.cancelled between two pieces.
-    private static func hashOf(_ context: StepContext, _ path: String, _ file: String, fromDisk: Bool) throws(BroError) -> (String, Int64) {
+    static func hashOf(_ context: StepContext, _ path: String, _ file: String, fromDisk: Bool) throws(BroError) -> (String, Int64) {
         let stream: any ByteStream
         do {
             stream = try context.fs.openForReading(path, bypassCache: fromDisk)
@@ -202,7 +216,7 @@ public struct SealStep: Step {
     }
 
     /// The folders from `staging` down to the one that holds `file`.
-    private static func foldersTo(_ file: String, from staging: String) -> [String] {
+    static func foldersTo(_ file: String, from staging: String) -> [String] {
         var folders = [staging]
         for part in ArchiveFiles.components(file).dropLast() { folders.append(folders.last! + "/" + part) }
         return folders
@@ -214,7 +228,7 @@ public struct SealStep: Step {
         return String(decoding: p, as: UTF8.self)
     }
 
-    private static func cancelled(_ context: StepContext) throws(BroError) {
+    static func cancelled(_ context: StepContext) throws(BroError) {
         if context.cancel.isCancelled { throw BroError(MessageCode.wire(.jobCancelled)) }
     }
 

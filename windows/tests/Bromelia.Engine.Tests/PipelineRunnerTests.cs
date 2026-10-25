@@ -419,6 +419,11 @@ public sealed class PipelineRunnerTests
                     var from = arg["fromStep"]?.AsString is { } f ? EnumWire.Parse<StepKind>(f) : null;
                     return () => Service.Retry(id, from);
                 }
+                case "keepApart":
+                {
+                    var id = IdOf(job!);
+                    return () => Service.KeepApart(id);
+                }
                 case "cancel":
                 {
                     var id = IdOf(job!);
@@ -505,13 +510,15 @@ public sealed class PipelineRunnerTests
 
         readonly List<(JsonValue Op, Task Task)> _calls = new();
 
-        /// <summary>Every JobService op has ended as it expects (its expectError, else no error).</summary>
+        /// <summary>Every JobService op has ended as it expects (its expectError, else no error; maybeError: that error or
+        /// none, for ops that race).</summary>
         public void CheckCalls()
         {
             foreach (var (op, task) in _calls)
             {
                 Assert.True(task.IsCompleted, "the op hasn't finished: " + op);
                 var error = task.Exception?.InnerException is BroFailure f ? f.Error.Code : task.Exception?.InnerException?.ToString();
+                if (Arg(op).AsObject != null && Arg(op)["maybeError"]?.AsString is { } maybe && (error == null || error == maybe)) continue;
                 Same(Arg(op).AsObject != null ? Arg(op)["expectError"]?.AsString : null, error, "error of " + op);
             }
         }

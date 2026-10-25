@@ -11,7 +11,8 @@ namespace Bromelia.Engine;
 /// the job's steps found. Messages are kept as codes with parameters and as text in the configured language.</summary>
 public static class SealRecord
 {
-    /// <summary>A version 3 record. status: errors when MakeMKV reported read errors, else success. disc: the listing
+    /// <summary>A version 3 record. status: <paramref name="status"/> when given (KeepApartStep's incomplete), else errors
+    /// when MakeMKV reported read errors, else success. disc: the listing
     /// Probe read and the identity Plan resolved (Name's when it corrected it). acquisition: the mode, "Backup" for a backup else "Rip", the job's
     /// source as the request gives it (drive:&lt;id&gt;, iso:&lt;path&gt;, folder:&lt;path&gt;, file:&lt;path&gt;), the drive,
     /// the profile, MakeMKV's version line and the app's. titles: each title Acquire ripped that the listing has, with its
@@ -19,7 +20,7 @@ public static class SealRecord
     /// and errors in the job's log (<paramref name="log"/>). problems: each read error (makemkv.message), then
     /// rip.readErrors. logs: the log files copied into the folder.</summary>
     public static JsonValue Build(JobSnapshot job, PlanOutput plan, AcquireOutput acquired, Id unitId, IReadOnlyList<UnitFile> files,
-        IReadOnlyList<LogLineDto> log, IReadOnlyList<string> logs, Instant finishedAt, string appVersion, IMessageRenderer messages)
+        IReadOnlyList<LogLineDto> log, IReadOnlyList<string> logs, Instant finishedAt, string appVersion, IMessageRenderer messages, string? status = null)
     {
         var probe = JobSnapshot.Output(job, StepKind.Probe) is JsonValue.Object p ? ProbeOutput.Decode(p) : null;
         var listing = probe?.Listing;
@@ -86,7 +87,7 @@ public static class SealRecord
         return JsonValue.Of(
             ("format", JsonValue.Of("bromelia-archive")), ("version", JsonValue.Of(3)),
             ("unit", JsonValue.Of(("id", JsonValue.Of(unitId.Value)), ("short", JsonValue.Of(unitId.Value[..8])), ("library", JsonValue.Of(plan.LibraryId)))),
-            ("status", JsonValue.Of(readErrors > 0 ? "errors" : "success")),
+            ("status", JsonValue.Of(status ?? (readErrors > 0 ? "errors" : "success"))),
             ("name", JsonValue.Of(identity.Name)), ("kind", JsonValue.Of(EnumWire.Name(identity.Kind))),
             ("disc", disc), ("acquisition", JsonValue.Of(acquisition.ToArray())),
             ("job", JsonValue.Of(("id", JsonValue.Of(job.Id.Value)), ("startedAt", JsonValue.Of(started)), ("finishedAt", JsonValue.Of(Instant.Format(finishedAt))))),
