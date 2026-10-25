@@ -15438,7 +15438,7 @@
         {
           "name": "KeepApartStep",
           "kind": "class",
-          "doc": "The step JobService.keepApart puts in place of an interrupted job's interrupted step and what follows: every visible file left in staging synced and hashed from disk, SHA256SUMS, the logs, INCOMPLETE.txt and a v3 record (status incomplete) written, the checkpoint \"sealed\" saved, then LibraryPort.quarantine(…, \"INCOMPLETE\") → _Quarantine/<name> [INCOMPLETE] and recovery.keptApart. Idempotent; the job then ends cancelled.",
+          "doc": "The step JobService.keepApart puts in place of the step an interrupted, failed or cancelled job stopped at and what follows: every visible file left in staging synced and hashed from disk, SHA256SUMS, the logs, INCOMPLETE.txt (the job's outcome and error from the \"outcome\" checkpoint) and a v3 record (status incomplete) written, the checkpoint \"sealed\" saved, then LibraryPort.quarantine(…, \"INCOMPLETE\") → _Quarantine/<name> [INCOMPLETE] and recovery.keptApart. Idempotent; the job then ends cancelled.",
           "phase": 3,
           "swift": {
             "name": "KeepApartStep",
@@ -16015,6 +16015,19 @@
           "swift": "SealRecord.build(_:plan:acquired:unitId:files:log:logs:finishedAt:appVersion:messages:status:)",
           "cs": "SealRecord.Build",
           "c": "bro_seal_record_build"
+        },
+        {
+          "name": "KeepApartStep.kept",
+          "params": [
+            "outcome",
+            "error"
+          ],
+          "returns": "JsonValue",
+          "doc": "The checkpoint JobService.keepApart stores with the step: {kind: \"outcome\", outcome, error?}, the outcome (interrupted, failed, cancelled) and error the job had, which the note names (F9, owner 2026-10-25).",
+          "phase": 3,
+          "swift": "KeepApartStep.kept(_:error:)",
+          "cs": "KeepApartStep.Kept",
+          "c": "bro_keep_apart_step_kept"
         }
       ]
     },
@@ -16413,22 +16426,6 @@
           "c": "bro_library_service_staging_folders"
         },
         {
-          "name": "LibraryService.setAside",
-          "params": [
-            "libraryId",
-            "folder",
-            "name",
-            "note"
-          ],
-          "returns": "String?",
-          "doc": "A staging folder no job will continue goes to _Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with the note as INCOMPLETE.txt; one with no file is removed (null) (review L3-3, owner 2026-10-14).",
-          "throws": true,
-          "async": true,
-          "swift": "LibraryService.setAside(_:folder:name:note:)",
-          "cs": "LibraryService.SetAside",
-          "c": "bro_library_service_set_aside"
-        },
-        {
           "name": "RecoveryService.recover",
           "params": [],
           "returns": "BroMessage?",
@@ -16699,7 +16696,7 @@
             "fromStep"
           ],
           "returns": "JobDto",
-          "doc": "A finished job again: without a step, one that failed, was cancelled or was skipped as a new job started by hand, an interrupted one continued; from a step, the same job from there (up to Release: from its first step), its checkpoints kept; a kept-apart job from its keepApart step only. job.notFound, job.notRetryable, job.unknownStep, server.badRequest, job.commitOpen.",
+          "doc": "A finished job again: without a step, one that failed, was cancelled or was skipped as a new job started by hand, an interrupted one continued; from a step, the same job from there (up to Release: from its first step), its checkpoints kept; a kept-apart job from its keepApart step only. job.notFound, job.notRetryable, job.unknownStep, server.badRequest, job.commitOpen, job.alreadyCommitted (a step before Commit once the job's unit is in a library; owner 2026-10-25).",
           "throws": true,
           "async": true,
           "cNames": [
@@ -16718,7 +16715,7 @@
             "jobId"
           ],
           "returns": "JobDto",
-          "doc": "Doesn't continue an interrupted job (owner, 2026-10-25): the same job again with a keepApart step in place of its interrupted step and what follows, in the processing queue; it ends cancelled. job.notFound, job.notInterrupted.",
+          "doc": "Doesn't continue an interrupted, failed or cancelled job (owner, 2026-10-25): the same job again with a keepApart step (checkpoint KeepApartStep.kept of its outcome and error) in place of the step it stopped at and what follows, in the processing queue; it ends cancelled. job.notFound, job.notInterrupted (any other job, or one kept apart already), job.commitOpen, job.alreadyCommitted.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -16729,6 +16726,23 @@
           "swift": "JobService.keepApart(_:)",
           "cs": "JobService.KeepApart",
           "c": "bro_job_service_keep_apart"
+        },
+        {
+          "name": "LibraryService.setAside",
+          "params": [
+            "libraryId",
+            "folder",
+            "name",
+            "note",
+            "logs"
+          ],
+          "returns": "String?",
+          "doc": "A staging folder no job will continue goes to _Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with the note as INCOMPLETE.txt and the job's log copies (name, bytes) next to it, written before the move; one with no file is removed (null), nothing written (review L3-3, owner 2026-10-14 and 2026-10-25).",
+          "throws": true,
+          "async": true,
+          "swift": "LibraryService.setAside(_:folder:name:note:logs:)",
+          "cs": "LibraryService.SetAside",
+          "c": "bro_library_service_set_aside"
         }
       ]
     },

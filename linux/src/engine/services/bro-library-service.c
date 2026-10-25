@@ -1808,8 +1808,9 @@ bro_library_service_staging_folders (BroLibraryService *self, const char *librar
 
 char *
 bro_library_service_set_aside (BroLibraryService *self, const char *library_id, const char *folder, const char *name, GBytes *note,
-                               BroBroError **error)
+                               GHashTable *logs, BroBroError **error)
 {
+  g_autoptr (GPtrArray) log_names = logs ? g_hash_table_get_keys_as_ptr_array (logs) : g_ptr_array_new ();
   g_autofree char *library_name = NULL;
   g_autofree char *root = NULL;
   g_autofree char *staging = NULL;
@@ -1837,6 +1838,13 @@ bro_library_service_set_aside (BroLibraryService *self, const char *library_id, 
     {
       remove_empty (self, staging, error);
       return NULL;
+    }
+  g_ptr_array_sort (log_names, ordinal);
+  for (guint i = 0; i < log_names->len; i++)
+    {
+      g_autofree char *log_path = g_strconcat (staging, "/", (const char *) log_names->pdata[i], NULL);
+      if (!bro_file_system_write_atomically (self->fs, log_path, g_hash_table_lookup (logs, log_names->pdata[i]), FILE_MODE, error))
+        return NULL;
     }
   note_path = g_strconcat (staging, "/" INCOMPLETE_NOTE, NULL);
   quarantine = g_strconcat (root, "/" QUARANTINE_FOLDER, NULL);

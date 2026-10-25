@@ -151,22 +151,27 @@ public sealed class SealStep : IStep
     /// <paramref name="write"/>: the log as text (bromelia-&lt;unit8&gt;-log.txt) and MakeMKV's transcripts
     /// (makemkv-&lt;unit8&gt;-log.txt, makemkv-&lt;unit8&gt;-debug-log.txt), each when the job folder has it; their
     /// names. KeepApartStep copies them the same way.</summary>
-    internal static (IReadOnlyList<LogLineDto> Log, List<string> Logs) CopyLogs(StepContext context, string unit8, bool copy, Action<string, byte[]> write)
+    internal static (IReadOnlyList<LogLineDto> Log, List<string> Logs) CopyLogs(StepContext context, string unit8, bool copy, Action<string, byte[]> write) =>
+        CopyLogs(context.Fs, context.JobDirectory, context.Messages, unit8, copy, write);
+
+    /// <summary>CopyLogs from the job folder <paramref name="jobDirectory"/>, outside a step: RecoveryService's set-aside
+    /// copies a failed or cancelled job's logs the same way (owner, 2026-10-25).</summary>
+    internal static (IReadOnlyList<LogLineDto> Log, List<string> Logs) CopyLogs(IFileSystem fs, string jobDirectory, IMessageRenderer messages, string unit8,
+        bool copy, Action<string, byte[]> write)
     {
-        var fs = context.Fs;
-        var logFile = context.JobDirectory + "/" + JobLog.FileName;
+        var logFile = jobDirectory + "/" + JobLog.FileName;
         IReadOnlyList<LogLineDto> log = fs.Exists(logFile) ? JobLog.Decode(fs.Read(logFile)) : new List<LogLineDto>();
         var logs = new List<string>();
         if (!copy) return (log, logs);
         if (fs.Exists(logFile))
         {
-            write("bromelia-" + unit8 + "-log.txt", Encoding.UTF8.GetBytes(LogText(log, context.Messages)));
+            write("bromelia-" + unit8 + "-log.txt", Encoding.UTF8.GetBytes(LogText(log, messages)));
             logs.Add("bromelia-" + unit8 + "-log.txt");
         }
         foreach (var (from, to) in new[] { (Transcript, "makemkv-" + unit8 + "-log.txt"), (DebugTranscript, "makemkv-" + unit8 + "-debug-log.txt") })
-            if (fs.Exists(context.JobDirectory + "/" + from))
+            if (fs.Exists(jobDirectory + "/" + from))
             {
-                write(to, fs.Read(context.JobDirectory + "/" + from));
+                write(to, fs.Read(jobDirectory + "/" + from));
                 logs.Add(to);
             }
         return (log, logs);

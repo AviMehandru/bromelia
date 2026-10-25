@@ -5,9 +5,10 @@ import Foundation
 
 /// Runs once at startup, before the libraries start (plan §11.1, §15.1, §20.4, §15.8; review L3-3, L3-9). It sorts out
 /// the jobs the last engine left unfinished by where each stopped and what its step can do after a stop (its
-/// Resumability), rolls open commit intents forward, sets aside staging folders no job will continue, and removes the
-/// temporary files a stopped write leaves. Library work runs per library and may take at most 30 s of the startup: a
-/// share that doesn't answer can't keep the engine from starting, and its work goes on.
+/// Resumability), rolls open commit intents forward, sets aside staging folders no job will continue (a failed or cancelled
+/// job's with its logs: owner, 2026-10-25), and removes the temporary files a stopped write leaves. Library work runs per
+/// library and may take at most 30 s of the startup: a share that doesn't answer can't keep the engine from starting, and
+/// its work goes on.
 /// shared/fixtures/engine/recovery-service.cases.json.
 @EngineActor
 public final class RecoveryService {
@@ -251,12 +252,32 @@ public final class RecoveryService {
             if unfinished.contains(folder) || committing.contains(path) { continue }
             let job = try? await executor.worker { () async throws(BroError) -> JobRecord? in try await store.jobs().load(Id(folder)) }
             if job?.outcome == .interrupted { continue } // kept so it can be continued (owner, 2026-10-03)
-            let lines = Notes.render(Id(folder), outcome: job?.outcome ?? .interrupted, error: job?.error, readErrors: [], logs: [])
+            let copies = if let job { await logs(job) } else { [(String, [UInt8])]() }
+            let lines = Notes.render(Id(folder), outcome: job?.outcome ?? .interrupted, error: job?.error, readErrors: [], logs: copies.map(\.0))
             let note = Array(lines.map { renderer.render($0) + "\n" }.joined().utf8)
             let title = Sanitizer.component(job?.title ?? "")
-            _ = try? await library.setAside(libraryId, folder: folder, name: title.isEmpty ? folder : title, note: note)
+            _ = try? await library.setAside(libraryId, folder: folder, name: title.isEmpty ? folder : title, note: note, logs: copies)
             // a failure leaves it hidden in staging; the next start tries again
         }
+    }
+
+    /// The job's logs as Seal copies them (SealStep.copyLogs: its log as text, MakeMKV's transcripts, each when the job
+    /// folder has it; none when its Plan's profile has archive.archiveRecord false), by name; on a worker. When they can't
+    /// be read, the files are set aside without them.
+    private func logs(_ job: JobRecord) async -> [(String, [UInt8])] {
+        let store = store, fs = fs, renderer = renderer, jobId = job.id, directory = jobDirectory(job.id)
+        let copies = try? await executor.worker { () async throws(BroError) -> [(String, [UInt8])] in
+            let rows = try await store.steps().load(jobId)
+            let data = rows.last(where: { $0.kind == .plan && $0.state == .succeeded })?.output?.data
+            let plan = data.flatMap { $0.members != nil ? PlanOutput.decode($0) : nil }
+            var copies: [(String, [UInt8])] = []
+            _ = try SealStep.copyLogs(fs, jobDirectory: directory, messages: renderer, unit8: String(ArchiveFiles.unitId(jobId).value.prefix(8)),
+                                      copy: plan?.profile["archive"]?["archiveRecord"]?.bool ?? true) { (name, bytes) throws(BroError) in
+                copies.append((name, bytes))
+            }
+            return copies
+        }
+        return copies ?? []
     }
 
     /// Removes what a stopped write leaves (ArchiveFiles.isLeftover) from the folder, and its subfolders when `recursive`.

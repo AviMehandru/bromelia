@@ -152,18 +152,24 @@ public struct SealStep: Step {
     /// when the job folder has it; their names. KeepApartStep copies them the same way.
     static func copyLogs(_ context: StepContext, unit8: String, copy: Bool,
                          write: (String, [UInt8]) throws(BroError) -> Void) throws(BroError) -> ([LogLineDto], [String]) {
-        let fs = context.fs
-        let logFile = context.jobDirectory + "/" + JobLog.fileName
+        try copyLogs(context.fs, jobDirectory: context.jobDirectory, messages: context.messages, unit8: unit8, copy: copy, write: write)
+    }
+
+    /// copyLogs from the job folder `jobDirectory`, outside a step: RecoveryService's set-aside copies a failed or cancelled
+    /// job's logs the same way (owner, 2026-10-25).
+    static func copyLogs(_ fs: any FileSystem, jobDirectory: String, messages: any MessageRenderer, unit8: String, copy: Bool,
+                         write: (String, [UInt8]) throws(BroError) -> Void) throws(BroError) -> ([LogLineDto], [String]) {
+        let logFile = jobDirectory + "/" + JobLog.fileName
         let log = fs.exists(logFile) ? JobLog.decode(try fs.read(logFile)) : []
         var logs: [String] = []
         guard copy else { return (log, logs) }
         if fs.exists(logFile) {
-            try write("bromelia-" + unit8 + "-log.txt", Array(logText(log, messages: context.messages).utf8))
+            try write("bromelia-" + unit8 + "-log.txt", Array(logText(log, messages: messages).utf8))
             logs.append("bromelia-" + unit8 + "-log.txt")
         }
         for (from, to) in [(transcript, "makemkv-" + unit8 + "-log.txt"), (debugTranscript, "makemkv-" + unit8 + "-debug-log.txt")]
-        where fs.exists(context.jobDirectory + "/" + from) {
-            try write(to, try fs.read(context.jobDirectory + "/" + from))
+        where fs.exists(jobDirectory + "/" + from) {
+            try write(to, try fs.read(jobDirectory + "/" + from))
             logs.append(to)
         }
         return (log, logs)

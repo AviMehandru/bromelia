@@ -77,10 +77,12 @@ int bro_library_service_waiting (BroLibraryService *self);
 GPtrArray *bro_library_service_staging_folders (BroLibraryService *self, const char *library_id, BroBroError **error);
 
 /* A staging folder no job will continue goes to <library>/_Quarantine/<ConflictNamer('<@name> [INCOMPLETE]')> with
- * @note as INCOMPLETE.txt (written first, so the folder arrives marked: I1), never reused or deleted (review L3-3,
- * P1-3); the folders are synced. The new path (yours to free); NULL when the folder held no file and was removed
- * instead (@error unset), or on failure (@error set). On a worker, never the executor. */
+ * @note as INCOMPLETE.txt and @logs (nullable; char * name → GBytes *: the job's log copies; owner, 2026-10-25) next to it,
+ * each written atomically before the move (the logs in name order, then the note), so the folder arrives marked (I1);
+ * never reused or deleted (review L3-3, P1-3); the folders are synced. The new path (yours to free); NULL when the folder
+ * held no file and was removed instead, nothing written (@error unset), or on failure (@error set). On a worker, never the
+ * executor. */
 char *bro_library_service_set_aside (BroLibraryService *self, const char *library_id, const char *folder, const char *name, GBytes *note,
-                                     BroBroError **error);
+                                     GHashTable *logs, BroBroError **error);
 
 G_END_DECLS

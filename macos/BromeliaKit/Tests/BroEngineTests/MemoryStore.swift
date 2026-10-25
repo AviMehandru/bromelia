@@ -12,6 +12,7 @@ final class MemoryStore: Store, JobRepository, StepRepository, UnitRepository, @
     private var order: [Id] = [] // jobs in the order they were inserted
     private var stepsByKey: [String: StepRecord] = [:]
     private var intents: [CommitIntent] = []
+    private var unitsById: [Id: UnitRecord] = [:]
 
     func jobs() -> any JobRepository { self }
     func steps() -> any StepRepository { self }
@@ -141,7 +142,17 @@ final class MemoryStore: Store, JobRepository, StepRepository, UnitRepository, @
     func beginCommit(_ unit: UnitRecord, intent: CommitIntent) async throws(BroError) { fatalError("not used") }
     func markMoved(_ unitId: Id, seq: Int) async throws(BroError) { fatalError("not used") }
     func finishCommit(_ intent: CommitIntent, record: UnitRecord, files: [UnitFile]) async throws(BroError) { fatalError("not used") }
-    func get(_ unitId: Id) async throws(BroError) -> UnitRecord? { fatalError("not used") }
+    /// The job's unit (ArchiveFiles.unitId), stored in that state.
+    func storeUnit(_ jobId: Id, _ state: UnitState) {
+        let id = ArchiveFiles.unitId(jobId)
+        lock.withLock {
+            unitsById[id] = UnitRecord(id: id, libraryId: "lib", jobId: jobId, path: "Movies/Unit", recordFile: "bromelia-unit.json", recordVersion: 3,
+                                   state: state, status: .success, name: "Unit", kind: .movie, format: "bluray", formatCode: "BD", encrypted: false,
+                                   label: "UNIT", makemkvVersion: "", bytes: 0, fileCount: 0, attempts: 1, createdAt: Instant(unixMilliseconds: 0))
+        }
+    }
+
+    func get(_ unitId: Id) async throws(BroError) -> UnitRecord? { lock.withLock { unitsById[unitId] } }
     func query(_ query: UnitQuery) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func leastRecentlyVerified(_ limit: Int) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func markMissing(_ unitId: Id) async throws(BroError) { fatalError("not used") }

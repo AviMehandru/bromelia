@@ -94,11 +94,11 @@ so far has settled* (finished, blocked, or awaiting a decision), unless it names
 | `open: {iso: true \| drive \| folder \| file, as}` | `openSession`; `as` names the session. |
 | `choose: {session, titles, tracks: {<title>: [stream, …]}, names: {<title>: name}, name, kind, year, onlineId, firstEpisode}` | `patchSession` with the session's current rev. |
 | `insert: {drive, disc}` / `remove: {drive}` / `openTray: {drive}` | The fake drive reports a medium arriving / leaving / the tray opening (DeviceMonitor events). |
-| `keepApart: <job>` | Don't continue an interrupted job: its staging moves to `_Quarantine/<name> [INCOMPLETE]`. |
+| `keepApart: <job>` | Don't continue an interrupted, failed or cancelled job: its staging, sealed, moves to `_Quarantine/<name> [INCOMPLETE]` (owner, 2026-10-25). |
 | `cancel: <job>` / `retry: {job, drive, fromStep}` / `decide: {job, answer}` / `move: {job, by}` / `startNow: <job>` | The job commands. |
 | `verify: {library \| path \| unit, as}` | `EngineAPI.verify`. |
 | `advance: <seconds>` | Move the fake clock; due timers fire in order. |
-| `kill: {at: <crash point>}` then `restart: {}` | Stop the engine graph abruptly at a named crash point (see below) and build a new one on the same root, database and data folder. |
+| `kill: {at: <crash point>}` then `restart: {}` | Stop the engine graph abruptly at a named crash point (see below) and build a new one on the same root, database and data folder. `restart: {}` alone stops the settled engine and builds a new one the same way (startup recovery runs: a failed or cancelled job's staging is set aside). |
 | `swapDisc: <disc>` | The ISO (or folder) now holds another disc: a disc opened earlier is no longer the one a job reads. |
 | `mounted: {drive, after}` | The OS mounts the drive's disc (after that many seconds of the fake clock). |
 | `cancelCountdown: {drive}` | Stop an automatic rip's countdown. |

@@ -68,7 +68,7 @@ public sealed class RecoveryServiceTests
     internal sealed class Renderer : IMessageRenderer
     {
         public string Render(BroMessage message) => MessageCode.Wire(message.Code) + string.Concat(message.Params.Members.Select(m =>
-            " " + m.Key + "=" + (m.Value.AsString ?? Encoding.UTF8.GetString(JsonValue.EncodeCanonical(m.Value)))));
+            " " + m.Key + "=" + (m.Value.AsString ?? Encoding.UTF8.GetString(JsonValue.EncodeCanonical(m.Value)).TrimEnd('\n'))));
     }
 
     static JsonValue? Error(BroError? e)
@@ -104,6 +104,8 @@ public sealed class RecoveryServiceTests
             foreach (var d in given["dirs"]?.AsArray ?? new List<JsonValue>()) tree.MakeDirs(d.AsString!);
             foreach (var (p, t) in given["files"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>()) tree.Put(p, t.AsString!);
             foreach (var h in given["hold"]?.AsArray ?? new List<JsonValue>()) tree.Holds.Add((h["op"]!.AsString!, h["path"]!.AsString!));
+            foreach (var f in given["fail"]?.AsArray ?? new List<JsonValue>())
+                tree.Fails.Add((f["op"]!.AsString!, f["path"]!.AsString!, f["error"]!, (int)(f["times"]?.AsInteger ?? -1)));
             var store = new Store();
             var db = store.Db;
             foreach (var l in given["libraries"]?.AsArray ?? new List<JsonValue>())
@@ -135,7 +137,7 @@ public sealed class RecoveryServiceTests
                 {
                     var kind = EnumWire.Parse<StepKind>(r["kind"]!.AsString)!.Value;
                     steps.Save(new StepRecord(jobId, seq++, kind, EnumWire.Parse<StepState>(r["state"]!.AsString)!.Value, 1, w.Clock.Now(), null,
-                        new StepOutput(kind, JsonValue.Of(), null, (int)(r["readErrors"]?.AsInteger ?? 0)), r["error"] is { } re ? LibraryServiceTests.Failure(re).Error : null, r["checkpoint"])).Wait();
+                        new StepOutput(kind, r["output"] ?? JsonValue.Of(), null, (int)(r["readErrors"]?.AsInteger ?? 0)), r["error"] is { } re ? LibraryServiceTests.Failure(re).Error : null, r["checkpoint"])).Wait();
                 }
             }
             var resumability = given["resumability"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>();

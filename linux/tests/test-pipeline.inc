@@ -1,5 +1,6 @@
 /* test-pipeline.inc: shared/fixtures/engine/pipeline-runner.cases.json, job-service.cases.json (the same harness with a
  * JobService over the runner) and job-planner.cases.json (included by test-engine.c, after test-scheduler.inc). */
+#include "bro-archive-files.h"
 #include "bro-job-log.h"
 #include "bro-job-planner.h"
 #include "bro-job-service.h"
@@ -19,6 +20,7 @@ struct _TestMemoryStore {
   GHashTable *steps; /* "id/seq" → BroStepRecord */
   BroUnitRepository *units;         /* nullable: a test that needs units sets it; else the store's own open intents */
   GPtrArray *intents;               /* BroCommitIntent *: the open intents of the store's own units */
+  GHashTable *unit_states;          /* unit id → BroUnitState: the store's own units (the jobs' units, stored in that state) */
   BroLibraryRepository *libraries;  /* nullable */
   GCond released;
   gboolean holding; /* job inserts wait until released (a test's way to act while one is written) */
@@ -333,6 +335,33 @@ store_open_intent (TestMemoryStore *self, const BroId *job_id)
   g_mutex_unlock (&self->lock);
 }
 
+/* The job's unit (bro_archive_files_unit_id), stored in @state. */
+static void
+store_unit (TestMemoryStore *self, const BroId *job_id, BroUnitState state)
+{
+  BroId unit = bro_archive_files_unit_id (job_id);
+  g_mutex_lock (&self->lock);
+  g_hash_table_replace (self->unit_states, g_strdup (unit.value), GINT_TO_POINTER (state));
+  g_mutex_unlock (&self->lock);
+}
+
+static BroUnitRecord *
+units_get (BroUnitRepository *repo, BroId unit_id, BroBroError **error)
+{
+  TestMemoryStore *self = TEST_MEMORY_STORE (repo);
+  BroUnitRecord *unit = NULL;
+  gpointer state;
+  g_mutex_lock (&self->lock);
+  if (g_hash_table_lookup_extended (self->unit_states, unit_id.value, NULL, &state))
+    {
+      unit = bro_unit_record_new ();
+      unit->id = unit_id;
+      unit->state = (BroUnitState) GPOINTER_TO_INT (state);
+    }
+  g_mutex_unlock (&self->lock);
+  return unit;
+}
+
 static GPtrArray *
 units_open_intents (BroUnitRepository *repo, BroBroError **error)
 {
@@ -345,11 +374,12 @@ units_open_intents (BroUnitRepository *repo, BroBroError **error)
   return copy;
 }
 
-/* Only the open intents: JobService.retry asks for them. */
+/* Only the open intents and the units by id: JobService.retry and keepApart ask for them. */
 static void
 store_units_iface_init (BroUnitRepositoryInterface *iface)
 {
   iface->open_intents = units_open_intents;
+  iface->get = units_get;
 }
 
 static void
@@ -361,6 +391,7 @@ test_memory_store_finalize (GObject *object)
   g_hash_table_unref (self->steps);
   g_hash_table_unref (self->hold_loads);
   g_ptr_array_unref (self->intents);
+  g_hash_table_unref (self->unit_states);
   g_clear_object (&self->units);
   g_clear_object (&self->libraries);
   g_mutex_clear (&self->lock);
@@ -384,6 +415,7 @@ test_memory_store_init (TestMemoryStore *self)
   self->steps = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_step_record_free);
   self->hold_loads = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->intents = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_commit_intent_free);
+  self->unit_states = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 }
 
 /* ---- files and folders in memory ------------------------------------------------------------------------------- */
@@ -1635,6 +1667,12 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
         g_assert_true (bro_job_state_from_wire (v->string, &r->state));
       if ((v = bro_json_value_member (j, "outcome")))
         r->has_outcome = bro_outcome_from_wire (v->string, &r->outcome);
+      if ((v = bro_json_value_member (j, "error")))
+        {
+          BroJsonValue *params = bro_json_value_member (v, "params");
+          r->error = bro_bro_error_new (bro_json_value_get_string (bro_json_value_member (v, "code"), ""),
+                                        params ? bro_json_value_ref (params) : bro_json_value_new_object (), NULL);
+        }
       if (r->state == BRO_JOB_STATE_FINISHED)
         {
           r->has_finished_at = TRUE;
@@ -1689,6 +1727,12 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
         }
       if (bro_json_value_get_bool (bro_json_value_member (j, "intent"), FALSE))
         store_open_intent (h.store, jid);
+      if ((v = bro_json_value_member (j, "unit")))
+        {
+          BroUnitState state;
+          g_assert_true (bro_unit_state_from_wire (v->string, &state));
+          store_unit (h.store, jid, state);
+        }
       if ((done = bro_json_value_member (j, "log")))
         {
           g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);

@@ -1,7 +1,8 @@
-title: Without the archive record the logs stay in the job's folder only; the note names that log
+title: Without the archive record the logs stay in the job's folder only, also when the files are set aside at the next start; the note names that log
 from:
   - macos SafetyTests.logsFollowFilesOnlyWithTheArchiveRecord
   - docs/configuration.md#archive-files
+  - owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)
 given:
   disc: sample-movie-one-title
   profile: {archive: {archiveRecord: false}}
@@ -10,6 +11,9 @@ steps:
   - rip: {iso: true, titles: [0], as: job}
   - expect:
       job: {name: job, outcome: failed}
+      files: {under: library, include: [".bromelia/staging/{jobId}/title_t00.mkv"], exclude: ["_Quarantine"]}
+  - restart: {}
+  - expect:
       files:
         under: "library/_Quarantine/Sample Movie [INCOMPLETE]"
         exactly: ["INCOMPLETE.txt", "title_t00.mkv"]

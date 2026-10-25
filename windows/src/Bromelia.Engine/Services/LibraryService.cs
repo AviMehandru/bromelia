@@ -236,10 +236,12 @@ public sealed class LibraryService : ILibraryPort
     });
 
     /// <summary>A staging folder no job will continue goes to &lt;library&gt;/_Quarantine/&lt;ConflictNamer('&lt;name&gt;
-    /// [INCOMPLETE]')&gt; with <paramref name="note"/> as INCOMPLETE.txt (written first, so the folder arrives marked: I1),
-    /// never reused or deleted (review L3-3, P1-3); one that holds no file is removed instead (null). The folders are
-    /// synced. Any thread but the executor.</summary>
-    public Task<string?> SetAside(string libraryId, string folder, string name, byte[] note) => _executor.Worker(async () =>
+    /// [INCOMPLETE]')&gt; with <paramref name="note"/> as INCOMPLETE.txt and <paramref name="logs"/> (the job's log copies,
+    /// by name; owner, 2026-10-25) next to it, each written atomically before the move, so the folder arrives marked (I1);
+    /// never reused or deleted (review L3-3, P1-3); one that holds no file is removed instead (null), and nothing is
+    /// written into it. The folders are synced. Any thread but the executor.</summary>
+    public Task<string?> SetAside(string libraryId, string folder, string name, byte[] note, IReadOnlyList<(string Name, byte[] Bytes)> logs) =>
+        _executor.Worker(async () =>
     {
         var lib = await Configured(libraryId).ConfigureAwait(false);
         await CheckMarker(lib).ConfigureAwait(false);
@@ -250,6 +252,7 @@ public sealed class LibraryService : ILibraryPort
             RemoveEmpty(staging);
             return (string?)null;
         }
+        foreach (var (logName, bytes) in logs) _fs.WriteAtomically(staging + "/" + logName, bytes, FileMode);
         _fs.WriteAtomically(staging + "/" + IncompleteNote, note, FileMode);
         var quarantine = lib.Path + "/" + QuarantineFolder;
         EnsureFolders(lib.Path, quarantine);

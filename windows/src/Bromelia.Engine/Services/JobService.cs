@@ -137,8 +137,11 @@ public sealed class JobService
     /// other job (read errors and failed post steps get retries of their own). While the job has an open commit intent
     /// (its files are partly in the library), only a retry from Commit is taken, which finishes it: any other is
     /// job.commitOpen (a step before Commit would change staging under the intent; a new job would archive the disc again
-    /// beside it). A job that was kept apart is retried from its keepApart step only (that step again, in the processing
-    /// queue), or as a new job; any other step is job.notRetryable.</summary>
+    /// beside it). Once the job's unit is in a library (stored committed, quarantined or missing), a retry from a step before
+    /// Commit, or continuing it, is job.alreadyCommitted (owner, 2026-10-25): the same job would rip the disc again as the
+    /// same unit; from Commit or later, or as a new job (Decide asks whether to archive it again), it is taken. A job that
+    /// was kept apart is retried from its keepApart step only (that step again, in the processing queue), or as a new job;
+    /// any other step is job.notRetryable.</summary>
     public async Task<JobDto> Retry(Id jobId, StepKind? fromStep = null)
     {
         var record = await Load(jobId);
@@ -173,7 +176,11 @@ public sealed class JobService
         if (seq > JobPlanner.Done(rows).Count) throw BadRequest("fromStep " + EnumWire.Name(fromStep!.Value) + ": a step before it isn't done");
         int release = steps.IndexOf(StepKind.Release);
         if (!keptApart && (release < 0 || seq <= release)) seq = 0;
-        if (seq < steps.IndexOf(StepKind.Commit)) await NotCommitting(jobId);
+        if (seq < steps.IndexOf(StepKind.Commit))
+        {
+            await NotCommitting(jobId);
+            await NotCommitted(jobId);
+        }
         foreach (var row in rows.Where(r => r.Seq >= seq))
         {
             var pending = row with { State = StepState.Pending, StartedAt = null, FinishedAt = null, Output = null, Error = null };
@@ -212,16 +219,20 @@ public sealed class JobService
         return dto;
     }
 
-    /// <summary>Doesn't continue an interrupted job (owner, 2026-10-03 and 2026-10-25; plan §20.4): the same job runs again
-    /// with a keepApart step in place of its interrupted step and what follows (KeepApartStep seals what staging holds and
-    /// quarantines it as INCOMPLETE; the job then ends cancelled). The step's row is stored pending (output, error and
-    /// checkpoint cleared), the plan cut back to the steps before it plus keepApart, and the record queued again in the
-    /// processing queue (no outcome; the request as it was); jobChanged, then it runs. job.notFound; job.notInterrupted for
-    /// a job that isn't finished and interrupted, that this service runs, or whose Plan step didn't succeed.</summary>
+    /// <summary>Doesn't continue an interrupted, failed or cancelled job (owner, 2026-10-03 and 2026-10-25; plan §20.4): the
+    /// same job runs again with a keepApart step in place of the step it stopped at and what follows (KeepApartStep seals
+    /// what staging holds and quarantines it as INCOMPLETE; the job then ends cancelled). The step's row is stored pending
+    /// (output and error cleared) with the checkpoint KeepApartStep.kept(the job's outcome and error), for its note; the plan
+    /// cut back to the steps before it plus keepApart, and the record queued again in the processing queue (no outcome; the
+    /// request as it was); jobChanged, then it runs. job.notFound; job.notInterrupted for a job that isn't finished
+    /// interrupted, failed or cancelled, that was kept apart already (retry its keepApart step instead), that this service
+    /// runs, or whose Plan step didn't succeed; job.commitOpen while it has an open commit intent (retry it from Commit);
+    /// job.alreadyCommitted once its unit is in a library.</summary>
     public async Task<JobDto> KeepApart(Id jobId)
     {
         var record = await Load(jobId);
-        if (record.State != JobState.Finished || record.Outcome != Outcome.Interrupted || _active.ContainsKey(jobId) || !_restarting.Add(jobId))
+        if (record.State != JobState.Finished || record.Outcome is not (Outcome.Interrupted or Outcome.Failed or Outcome.Cancelled)
+            || record.Plan?.Steps.Contains(StepKind.KeepApart) == true || _active.ContainsKey(jobId) || !_restarting.Add(jobId))
             throw NotInterrupted(jobId);
         try
         {
@@ -240,9 +251,11 @@ public sealed class JobService
         var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
         var done = JobPlanner.Done(rows);
         if (!done.Any(r => r.Kind == StepKind.Plan && r.State == StepState.Succeeded)) throw NotInterrupted(jobId);
+        await NotCommitting(jobId);
+        await NotCommitted(jobId);
         int seq = done.Count;
         var steps = (record.Plan?.Steps ?? JobPlanner.Initial(record.Request)).Take(seq).Append(StepKind.KeepApart).ToList();
-        var row = new StepRecord(jobId, seq, StepKind.KeepApart, StepState.Pending, 1, null);
+        var row = new StepRecord(jobId, seq, StepKind.KeepApart, StepState.Pending, 1, null, Checkpoint: KeepApartStep.Kept(record.Outcome!.Value, record.Error));
         var position = Admit(jobId, Queue.Processing);
         var again = record with
         {
@@ -430,6 +443,14 @@ public sealed class JobService
     {
         if ((await _executor.Worker(() => _store.Units().OpenIntents())).Any(i => i.JobId == jobId))
             throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCommitOpen), ("jobId", JsonValue.Of(jobId.Value))));
+    }
+
+    /// <summary>job.alreadyCommitted once the job's unit is stored in a library (committed, quarantined or missing; a unit
+    /// still committing has an open intent, which NotCommitting refuses).</summary>
+    async Task NotCommitted(Id jobId)
+    {
+        if (await _executor.Worker(() => _store.Units().Get(ArchiveFiles.UnitId(jobId))) is { State: not UnitState.Committing })
+            throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobAlreadyCommitted), ("jobId", JsonValue.Of(jobId.Value))));
     }
 
     /// <summary>Fails unless the job waits to start a step (queued, waiting for resources, blocked).</summary>

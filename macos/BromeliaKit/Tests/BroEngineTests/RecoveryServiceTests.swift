@@ -48,12 +48,14 @@ private final class Isolation: SettingsIsolation, @unchecked Sendable {
     }
 }
 
-/// '<code>' then ' <key>=<value>' per param (strings as they are, other values as JSON); the pipeline and step harnesses
-/// use it too.
+/// '<code>' then ' <key>=<value>' per param (strings as they are, other values as canonical JSON without its final
+/// newline); the pipeline and step harnesses use it too.
 struct Renderer: MessageRenderer {
     func render(_ message: BroMessage) -> String {
         message.code.rawValue + message.params.map { p in
-            " " + p.key + "=" + (p.value.string ?? String(decoding: JsonValue.encodeCanonical(p.value), as: UTF8.self))
+            var json = JsonValue.encodeCanonical(p.value)
+            if json.last == UInt8(ascii: "\n") { json.removeLast() }
+            return " " + p.key + "=" + (p.value.string ?? String(decoding: json, as: UTF8.self))
         }.joined()
     }
 }
@@ -114,6 +116,7 @@ struct RecoveryServiceTests {
         for d in given["dirs"]?.array ?? [] { tree.makeDirs(d.string!) }
         for (p, t) in given["files"]?.members ?? [] { tree.put(p, t.string!) }
         for h in given["hold"]?.array ?? [] { tree.holds.append((h["op"]!.string!, h["path"]!.string!)) }
+        for f in given["fail"]?.array ?? [] { tree.fails.append((f["op"]!.string!, f["path"]!.string!, f["error"]!, Int(f["times"]?.int ?? -1))) }
         let store = RecoveryStore()
         let db = store.db
         for l in given["libraries"]?.array ?? [] {
@@ -152,7 +155,7 @@ struct RecoveryServiceTests {
             for (seq, r) in j["rows"]!.array!.enumerated() {
                 let kind = StepKind(rawValue: r["kind"]!.string!)!
                 try await store.memory.save(StepRecord(jobId: jobId, seq: seq, kind: kind, state: StepState(rawValue: r["state"]!.string!)!, attempt: 1,
-                                                       startedAt: world.clock.now(), finishedAt: nil, output: StepOutput(kind: kind, data: .object([]),
+                                                       startedAt: world.clock.now(), finishedAt: nil, output: StepOutput(kind: kind, data: r["output"] ?? .object([]),
                                                                                                                     readErrors: Int(r["readErrors"]?.int ?? 0)),
                                                        error: r["error"].map(caseError), checkpoint: r["checkpoint"]))
             }

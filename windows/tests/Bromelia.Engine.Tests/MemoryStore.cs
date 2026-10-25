@@ -178,7 +178,21 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository, IUn
     Task IUnitRepository.BeginCommit(UnitRecord unit, CommitIntent intent) => throw new NotSupportedException();
     Task IUnitRepository.MarkMoved(Id unitId, int seq) => throw new NotSupportedException();
     Task IUnitRepository.FinishCommit(CommitIntent intent, UnitRecord record, IReadOnlyList<UnitFile> files) => throw new NotSupportedException();
-    Task<UnitRecord?> IUnitRepository.Get(Id unitId) => throw new NotSupportedException();
+    readonly Dictionary<Id, UnitRecord> _units = new();
+
+    /// <summary>The job's unit (ArchiveFiles.unitId), stored in that state.</summary>
+    public void StoreUnit(Id jobId, UnitState state)
+    {
+        var id = ArchiveFiles.UnitId(jobId);
+        lock (_lock)
+            _units[id] = new UnitRecord(id, "lib", null, jobId, "Movies/Unit", "bromelia-unit.json", 3, state, UnitStatus.Success, "Unit",
+                MediaKind.Movie, "bluray", "BD", false, null, "UNIT", null, null, null, null, "", 0, 0, 1, new Instant(0));
+    }
+
+    Task<UnitRecord?> IUnitRepository.Get(Id unitId)
+    {
+        lock (_lock) return Task.FromResult(_units.GetValueOrDefault(unitId));
+    }
     Task<IReadOnlyList<UnitRecord>> IUnitRepository.Query(UnitQuery query) => throw new NotSupportedException();
     Task<IReadOnlyList<UnitRecord>> IUnitRepository.LeastRecentlyVerified(int limit) => throw new NotSupportedException();
     Task IUnitRepository.MarkMissing(Id unitId) => throw new NotSupportedException();

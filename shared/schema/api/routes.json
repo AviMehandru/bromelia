@@ -291,10 +291,12 @@
         "job.notFound",
         "job.notRetryable",
         "job.unknownStep",
+        "job.commitOpen",
+        "job.alreadyCommitted",
         "drive.notFound",
         "drive.busy"
       ],
-      "note": "A job that didn't succeed is run again as a new job. An interrupted job is continued from its kept staging (the same disc must be in the drive, or the backup must be complete)."
+      "note": "A job that didn't succeed is run again as a new job. An interrupted job is continued from its kept staging (the same disc must be in the drive, or the backup must be complete). While its files are being moved into the library only a retry from Commit is taken (job.commitOpen); once its unit is in the library, not from a step before Commit (job.alreadyCommitted; owner, 2026-10-25)."
     },
     {
       "operation": "keepApart",
@@ -307,9 +309,11 @@
       "errors": [
         "job.notFound",
         "job.notInterrupted",
+        "job.commitOpen",
+        "job.alreadyCommitted",
         "library.offline"
       ],
-      "note": "Don't continue an interrupted rip: its staged files move to _Quarantine/<name> [INCOMPLETE] with a note, and the job can't be continued any more. Not in plan §13.1's list (owner, 2026-10-03)."
+      "note": "Don't continue an interrupted, failed or cancelled job: its staged files move to _Quarantine/<name> [INCOMPLETE] with a note, and the job can't be continued any more (owner, 2026-10-03 and 2026-10-25)."
     },
     {
       "operation": "decide",

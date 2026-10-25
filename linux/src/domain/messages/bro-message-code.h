@@ -20,6 +20,7 @@ typedef enum {
   BRO_MSG_JOB_NOT_INTERRUPTED, /* job.notInterrupted */
   BRO_MSG_JOB_UNKNOWN_STEP, /* job.unknownStep */
   BRO_MSG_JOB_COMMIT_OPEN, /* job.commitOpen */
+  BRO_MSG_JOB_ALREADY_COMMITTED, /* job.alreadyCommitted */
   BRO_MSG_JOB_OP_STARTING, /* job.op.starting */
   BRO_MSG_JOB_OP_CANCELLING, /* job.op.cancelling */
   BRO_MSG_JOB_OP_AUTOMATIC, /* job.op.automatic */

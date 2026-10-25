@@ -8,7 +8,9 @@
 #include "bro-job-planner.h"
 #include "bro-message-code.h"
 #include "bro-notes.h"
+#include "bro-plan-output.h"
 #include "bro-sanitizer.h"
+#include "bro-seal-step-private.h"
 #include "bro-step-result.h"
 #include <string.h>
 
@@ -474,6 +476,48 @@ roll_forward_all (BroRecoveryService *self, const char *library_id)
     }
 }
 
+/* A BroSealWriteFunc that keeps each log copy in @data (GHashTable: name → GBytes). */
+static gboolean
+keep_copy (gpointer data, const char *name, GBytes *bytes, BroBroError **error)
+{
+  g_hash_table_replace (data, g_strdup (name), g_bytes_ref (bytes));
+  return TRUE;
+}
+
+/* The job's logs as Seal copies them (_bro_seal_copy_logs_from: its log as text, MakeMKV's transcripts, each when the job
+ * folder has it; none when its Plan's profile has archive.archiveRecord false) into @logs (name → GBytes), their names
+ * into @names. When they can't be read, there are none: the files are set aside without them. */
+static void
+copy_logs (BroRecoveryService *self, const BroJobRecord *job, GHashTable *logs, GPtrArray *names)
+{
+  g_autoptr (GPtrArray) rows = bro_step_repository_load (bro_store_steps (self->store), job->id, NULL);
+  g_autoptr (BroPlanOutput) plan = NULL;
+  g_autoptr (GPtrArray) log = NULL;
+  g_autofree char *directory = job_directory (self, &job->id);
+  BroId unit = bro_archive_files_unit_id (&job->id);
+  char unit8[9];
+  if (!rows)
+    return;
+  for (guint i = rows->len; i > 0 && !plan; i--)
+    {
+      const BroStepRecord *row = rows->pdata[i - 1];
+      if (row->kind == BRO_STEP_KIND_PLAN && row->state == BRO_STEP_STATE_SUCCEEDED && row->output && row->output->data
+          && row->output->data->kind == BRO_JSON_VALUE_OBJECT)
+        plan = bro_plan_output_decode (row->output->data);
+    }
+  g_strlcpy (unit8, unit.value, sizeof unit8);
+  log = _bro_seal_copy_logs_from (self->fs, directory, self->renderer, unit8,
+                                  bro_json_value_get_bool (bro_json_value_member (bro_json_value_member (plan ? plan->profile : NULL, "archive"),
+                                                                                  "archiveRecord"),
+                                                           TRUE),
+                                  keep_copy, logs, names, NULL);
+  if (!log)
+    {
+      g_hash_table_remove_all (logs);
+      g_ptr_array_set_size (names, 0);
+    }
+}
+
 static gboolean
 tidy_work (gpointer data, BroBroError **error)
 {
@@ -505,8 +549,9 @@ tidy_work (gpointer data, BroBroError **error)
       g_autoptr (GBytes) note = NULL;
       g_autofree char *title = NULL;
       g_autofree char *dest = NULL;
+      g_autoptr (GHashTable) logs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_bytes_unref);
+      g_autoptr (GPtrArray) names = g_ptr_array_new_with_free_func (g_free);
       GString *text;
-      static const char *const no_logs[] = { NULL };
       g_strlcpy (id.value, folder, sizeof id.value);
       remove_leftovers (self->fs, path, TRUE);
       if (g_hash_table_contains (r->unfinished, folder) || g_hash_table_contains (committing, path))
@@ -514,8 +559,12 @@ tidy_work (gpointer data, BroBroError **error)
       job = bro_job_repository_load (bro_store_jobs (self->store), id, NULL);
       if (job && job->has_outcome && job->outcome == BRO_OUTCOME_INTERRUPTED)
         continue; /* kept so it can be continued (owner, 2026-10-03) */
+      if (job)
+        copy_logs (self, job, logs, names);
+      g_ptr_array_add (names, NULL);
       read_errors = g_ptr_array_new ();
-      lines = bro_notes_render (&id, job && job->has_outcome ? job->outcome : BRO_OUTCOME_INTERRUPTED, job ? job->error : NULL, read_errors, no_logs);
+      lines = bro_notes_render (&id, job && job->has_outcome ? job->outcome : BRO_OUTCOME_INTERRUPTED, job ? job->error : NULL, read_errors,
+                                (const char *const *) names->pdata);
       text = g_string_new ("");
       for (guint k = 0; k < lines->len; k++)
         {
@@ -526,7 +575,7 @@ tidy_work (gpointer data, BroBroError **error)
       note = g_string_free_to_bytes (text);
       title = bro_sanitizer_component (job ? job->title : "");
       /* a failure leaves it hidden in staging; the next start tries again */
-      dest = bro_library_service_set_aside (self->library, t->library_id, folder, *title ? title : folder, note, NULL);
+      dest = bro_library_service_set_aside (self->library, t->library_id, folder, *title ? title : folder, note, logs, NULL);
     }
   return TRUE;
 }

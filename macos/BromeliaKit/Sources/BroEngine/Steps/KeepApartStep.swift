@@ -2,15 +2,17 @@ import BroDomain
 import BroFoundation
 import BroPorts
 
-/// The step JobService.keepApart puts in place of an interrupted job's interrupted step and what follows (owner, 2026-10-03
-/// and 2026-10-25; plan §20.1, §20.4): the job isn't continued, and what it left in staging becomes a sealed unit in
-/// <library>/_Quarantine/<name> [INCOMPLETE] with a quarantined row of status incomplete.
+/// The step JobService.keepApart puts in place of the step an interrupted, failed or cancelled job stopped at and what
+/// follows (owner, 2026-10-03 and 2026-10-25; plan §20.1, §20.4): the job isn't continued, and what it left in staging
+/// becomes a sealed unit in <library>/_Quarantine/<name> [INCOMPLETE] with a quarantined row of status incomplete.
 /// 1. Sealed as Seal seals, but with no produced lists (Acquire never finished): every visible file in staging (none hidden
 ///    by its first byte, not one of Bromelia's own at the top; leftovers of a stopped write removed) is synced, then each
 ///    folder down to it (archive.synced), and hashed read back from disk (archive.hashFromDisk) with archive.hashing
-///    progress. SHA256SUMS, the logs as Seal copies them, INCOMPLETE.txt (the note recovery writes, with the logs) and the
-///    record (status incomplete, no titles acquired) are written atomically; an earlier attempt's own files that this one
-///    doesn't write go. Staging with no such file holds nothing to keep: its empty folders are removed and no unit is made.
+///    progress. SHA256SUMS, the logs as Seal copies them, INCOMPLETE.txt (the note recovery writes, with the logs, for the
+///    outcome and error of the "outcome" checkpoint JobService stores with the step: interrupted without one) and the record
+///    (status incomplete, no titles acquired) are written atomically; an earlier attempt's own files that this one doesn't
+///    write go. Staging with no such file (a job that stopped before Acquire has an empty one) holds nothing to keep: its
+///    empty folders are removed and no unit is made.
 /// 2. The checkpoint "sealed" (the files and Bromelia's own files) is saved before the unit is handed to the library: a
 ///    rerun with it doesn't seal again (staging may already be moving) and hands over the same unit.
 /// 3. library.quarantine(unit, intent, files, "INCOMPLETE"): the intent's items are staging's top-level entries that hold
@@ -25,6 +27,7 @@ public struct KeepApartStep: Step {
     public static let tag = "INCOMPLETE"
     public static let note = "INCOMPLETE.txt"
     public static let sealedCheckpoint = "sealed"
+    public static let outcomeCheckpoint = "outcome"
     private static let quarantineFolder = "_Quarantine"
 
     public init() {}
@@ -83,6 +86,14 @@ public struct KeepApartStep: Step {
         return StepReport(data: CommitOutput.encode(CommitOutput(unitId: unitId, library: plan.libraryId, path: kept, merged: false, quarantined: true)))
     }
 
+    /// The checkpoint JobService.keepApart stores with the step: the outcome the job had (interrupted, failed, cancelled) and
+    /// its error, which the note names.
+    public static func kept(_ outcome: Outcome, error: BroError?) -> JsonValue {
+        var members: [(key: String, value: JsonValue)] = [("kind", .string(outcomeCheckpoint)), ("outcome", .string(outcome.rawValue))]
+        if let error { members.append(("error", JsonDto.error(error))) }
+        return .object(members)
+    }
+
     /// Seals what staging holds; its files (none: nothing to keep, staging's empty folders removed) and Bromelia's own files
     /// (the record first), once the checkpoint that names them is stored.
     private static func seal(_ context: StepContext, _ plan: PlanOutput, _ staging: String, _ unitId: Id) async throws(BroError)
@@ -135,7 +146,11 @@ public struct KeepApartStep: Step {
         try write(Sha256Sums.fileName, Array(Sha256Sums.render(files.map { SumEntry(path: $0.path, sha256: $0.sha256) }).utf8))
         context.log.log(BroMessage(.archiveChecksumsWritten, [("count", .integer(Int64(files.count))), ("file", .string(Sha256Sums.fileName))]))
         let (log, logs) = try SealStep.copyLogs(context, unit8: unit8, copy: copyLogs, write: write)
-        let lines = Notes.render(context.job.id, outcome: .interrupted, error: nil, readErrors: [], logs: logs)
+        let kept = context.checkpoint.saved.flatMap { $0["kind"]?.string == outcomeCheckpoint ? $0 : nil }
+        var error: BroError?
+        if let e = kept?["error"], e.members != nil, let code = e["code"]?.string { error = BroError(code, e["params"]?.members ?? []) }
+        let lines = Notes.render(context.job.id, outcome: kept?["outcome"]?.string.flatMap(Outcome.init(rawValue:)) ?? .interrupted, error: error,
+                                 readErrors: [], logs: logs)
         try write(note, Array(lines.map { context.messages.render($0) + "\n" }.joined().utf8))
         let record = "bromelia-" + unit8 + ".json"
         let acquired = AcquireOutput(titles: [], others: [], backup: nil, discInfo: nil, readErrors: [])

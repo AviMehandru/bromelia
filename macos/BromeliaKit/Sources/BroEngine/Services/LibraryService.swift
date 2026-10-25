@@ -230,9 +230,12 @@ public final class LibraryService: LibraryPort {
     }
 
     /// A staging folder no job will continue goes to <library>/_Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with
-    /// `note` as INCOMPLETE.txt (written first, so the folder arrives marked: I1), never reused or deleted (review L3-3,
-    /// P1-3); one that holds no file is removed instead (nil). The folders are synced. Any thread but the executor.
-    public nonisolated func setAside(_ libraryId: String, folder: String, name: String, note: [UInt8]) async throws(BroError) -> String? {
+    /// `note` as INCOMPLETE.txt and `logs` (the job's log copies, by name; owner, 2026-10-25) next to it, each written
+    /// atomically before the move, so the folder arrives marked (I1); never reused or deleted (review L3-3, P1-3); one that
+    /// holds no file is removed instead (nil), and nothing is written into it. The folders are synced. Any thread but the
+    /// executor.
+    public nonisolated func setAside(_ libraryId: String, folder: String, name: String, note: [UInt8],
+                                     logs: [(String, [UInt8])]) async throws(BroError) -> String? {
         let lib = try await configured(libraryId)
         return try await executor.worker { [self] () async throws(BroError) -> String? in
             try await checkMarker(lib)
@@ -242,6 +245,7 @@ public final class LibraryService: LibraryPort {
                 try removeEmpty(staging)
                 return nil
             }
+            for (logName, bytes) in logs { try fs.writeAtomically(staging + "/" + logName, bytes: bytes, mode: Self.fileMode) }
             try fs.writeAtomically(staging + "/" + Self.incompleteNote, bytes: note, mode: Self.fileMode)
             let quarantine = lib.path + "/" + Self.quarantineFolder
             try ensureFolders(lib.path, quarantine)

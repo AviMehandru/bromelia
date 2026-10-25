@@ -1,5 +1,5 @@
 {
-  "description": "KeepApartStep (plan §20.1 KeepApart, §20.4; owner 2026-10-03 and 2026-10-25), alone: an interrupted job's staging sealed and handed to LibraryPort.quarantine(unit, intent, files, \"INCOMPLETE\"). Skipped without Plan's output; holds LibraryWrite(plan.libraryId); idempotent. library.require (an offline library fails before anything), a cancel check, stagingDirectory. A saved checkpoint of kind \"sealed\" that names Bromelia's own files skips the sealing and gives the files and own files again. Otherwise: leftovers of a stopped write removed; the files are every visible file of staging (no component starting with '.', not one of Bromelia's own files at the top), in ordinal order; none: staging's empty folders (and staging, once empty) removed, nothing logged, data {}. Each file synced, then staging and every folder down to each file (archive.synced {count}); each hashed (archive.hashFromDisk: from disk unless false) with archive.hashing progress (done bytes / all bytes, the file); SHA256SUMS (archive.checksumsWritten), the logs as Seal copies them unless archive.archiveRecord is false, INCOMPLETE.txt (Notes.render(job, interrupted, null, [], logs) rendered line by line), the record bromelia-<unit8>.json (SealRecord.build with no titles acquired and status incomplete; archive.recordWritten), each written atomically; an earlier attempt's own files not written now removed; staging synced; then the checkpoint {kind: sealed, files [{path, size, sha256}], own [record, logs..., note]}. The unit row: id ArchiveFiles.unitId(job), the library, physicalDiscId null, the job, path _Quarantine/<name>, the record, version 3, committing, incomplete, Plan's identity, Probe's fingerprint, the label (the listing's name, else the source's label), Probe's MakeMKV version or \"\", bytes and count from the files, attempts 1, createdAt now. <name>: Plan's identity name, the request's title, the listing's name, the source's label, the job id: the first that Sanitizer.component leaves non-empty. The intent: destination <library>/_Quarantine/<name>, merge false, quarantine false, createdAt now, items staging's top-level entries holding the files in ordinal order (a file with its SHA-256, a folder with none), then the own files, each in place. archive.moving at 0, quarantine; its error fails the step as it is. recovery.keptApart {path: the result's destination} (warning); data CommitOutput {unitId, library, path (the destination relative to the library), merged false, quarantined true}. The harness: as gen-keep-apart-cases.py's docstring says (the Seal harness, given.step keepApart, a checkpointer and a quarantine that records its calls).",
+  "description": "KeepApartStep (plan §20.1 KeepApart, §20.4; owner 2026-10-03 and 2026-10-25), alone: an interrupted job's staging sealed and handed to LibraryPort.quarantine(unit, intent, files, \"INCOMPLETE\"). Skipped without Plan's output; holds LibraryWrite(plan.libraryId); idempotent. library.require (an offline library fails before anything), a cancel check, stagingDirectory (made when it isn't there: a job that stopped before Acquire keeps nothing, F9). A saved checkpoint of kind \"sealed\" that names Bromelia's own files skips the sealing and gives the files and own files again. Otherwise: leftovers of a stopped write removed; the files are every visible file of staging (no component starting with '.', not one of Bromelia's own files at the top), in ordinal order; none: staging's empty folders (and staging, once empty) removed, nothing logged, data {}. Each file synced, then staging and every folder down to each file (archive.synced {count}); each hashed (archive.hashFromDisk: from disk unless false) with archive.hashing progress (done bytes / all bytes, the file); SHA256SUMS (archive.checksumsWritten), the logs as Seal copies them unless archive.archiveRecord is false, INCOMPLETE.txt (Notes.render(job, the outcome and error of a saved checkpoint of kind \"outcome\" (F9: what JobService.keepApart stores, KeepApartStep.kept), else interrupted and none, [], logs) rendered line by line), the record bromelia-<unit8>.json (SealRecord.build with no titles acquired and status incomplete; archive.recordWritten), each written atomically; an earlier attempt's own files not written now removed; staging synced; then the checkpoint {kind: sealed, files [{path, size, sha256}], own [record, logs..., note]}. The unit row: id ArchiveFiles.unitId(job), the library, physicalDiscId null, the job, path _Quarantine/<name>, the record, version 3, committing, incomplete, Plan's identity, Probe's fingerprint, the label (the listing's name, else the source's label), Probe's MakeMKV version or \"\", bytes and count from the files, attempts 1, createdAt now. <name>: Plan's identity name, the request's title, the listing's name, the source's label, the job id: the first that Sanitizer.component leaves non-empty. The intent: destination <library>/_Quarantine/<name>, merge false, quarantine false, createdAt now, items staging's top-level entries holding the files in ordinal order (a file with its SHA-256, a folder with none), then the own files, each in place. archive.moving at 0, quarantine; its error fails the step as it is. recovery.keptApart {path: the result's destination} (warning); data CommitOutput {unitId, library, path (the destination relative to the library), merged false, quarantined true}. The harness: as gen-keep-apart-cases.py's docstring says (the Seal harness, given.step keepApart, a checkpointer and a quarantine that records its calls).",
   "cases": [
     {
       "id": "keep-apart-holds-the-library-write-and-is-idempotent",
@@ -5952,6 +5952,769 @@
         "resources": {
           "libraryWrites": []
         }
+      }
+    },
+    {
+      "id": "keep-apart-of-a-failed-job-names-its-outcome-and-error-in-the-note",
+      "given": {
+        "step": "keepApart",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 1,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:10:00.000Z\",\"severity\": \"error\",\"code\": \"recovery.interrupted\",\"params\": {\"step\": \"acquire\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\n"
+        },
+        "staging": {
+          "title_t00.mkv": "the first title's bytes",
+          "title_t01.mkv": "half of the second ti"
+        },
+        "checkpoint": {
+          "kind": "outcome",
+          "outcome": "failed",
+          "error": {
+            "code": "process.savedNothing",
+            "params": {
+              "tool": "makemkvcon"
+            }
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "_Quarantine/Sample Movie [INCOMPLETE]",
+          "merged": false,
+          "quarantined": true
+        },
+        "log": [
+          {
+            "code": "archive.synced",
+            "params": {
+              "count": 2
+            }
+          },
+          {
+            "code": "archive.checksumsWritten",
+            "params": {
+              "count": 2,
+              "file": "SHA256SUMS"
+            }
+          },
+          {
+            "code": "archive.recordWritten",
+            "params": {
+              "file": "bromelia-36201adf.json"
+            }
+          },
+          {
+            "code": "recovery.keptApart",
+            "params": {
+              "path": "/lib/_Quarantine/Sample Movie [INCOMPLETE]"
+            },
+            "severity": "warning"
+          }
+        ],
+        "progress": [
+          [
+            0,
+            "archive.hashing",
+            "title_t00.mkv"
+          ],
+          [
+            0.5227272727272727,
+            "archive.hashing",
+            "title_t01.mkv"
+          ],
+          [
+            0,
+            "archive.moving"
+          ]
+        ],
+        "fs": [
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv disk",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/makemkv-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/INCOMPLETE.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf.json",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "tree": [
+          "INCOMPLETE.txt",
+          "SHA256SUMS",
+          "bromelia-36201adf-log.txt",
+          "bromelia-36201adf.json",
+          "makemkv-36201adf-log.txt",
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ],
+        "contents": {
+          "SHA256SUMS": "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2  title_t00.mkv\n68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b  title_t01.mkv\n",
+          "INCOMPLETE.txt": "archive.note.title jobId=00000000-0000-4000-8000-000000000001 outcome=failed\narchive.note.notFinished\nprocess.savedNothing tool=makemkvcon\narchive.note.logs log=bromelia-36201adf-log.txt hasMakemkv=true makemkvLog=makemkv-36201adf-log.txt\n",
+          "bromelia-36201adf-log.txt": "2026-10-20T09:00:01.000Z disc.found name=Sample Movie\n2026-10-20T09:00:02.500Z [WARNING] ripcheck.note file=title_t00.mkv\n2026-10-20T09:10:00.000Z [ERROR] recovery.interrupted step=acquire\n",
+          "makemkv-36201adf-log.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\n",
+          "bromelia-36201adf.json": "{\n  \"format\": \"bromelia-archive\",\n  \"version\": 3,\n  \"unit\": {\n    \"id\": \"36201adf-6273-8342-bb9b-410e87adc4e5\",\n    \"short\": \"36201adf\",\n    \"library\": \"lib\"\n  },\n  \"status\": \"incomplete\",\n  \"name\": \"Sample Movie\",\n  \"kind\": \"movie\",\n  \"disc\": {\n    \"label\": \"Sample Movie\",\n    \"volumeName\": \"SAMPLE_MOVIE\",\n    \"type\": \"Blu-ray disc\",\n    \"format\": \"bluray\",\n    \"formatCode\": \"BR\",\n    \"encrypted\": false,\n    \"season\": null,\n    \"part\": null,\n    \"volume\": null,\n    \"disc\": null,\n    \"set\": \"\",\n    \"fingerprint\": \"v1:0123456789abcdef0123456789abcdef\",\n    \"libreDrive\": null\n  },\n  \"acquisition\": {\n    \"mode\": \"mkv\",\n    \"rip\": \"Rip\",\n    \"source\": \"iso:/rips/sample-movie.iso\",\n    \"profile\": \"default\",\n    \"makemkv\": \"MakeMKV v1.18.1 darwin(arm64-release)\",\n    \"bromelia\": \"3.0.0-test\",\n    \"tools\": {}\n  },\n  \"job\": {\n    \"id\": \"00000000-0000-4000-8000-000000000001\",\n    \"startedAt\": \"2026-10-20T09:00:00.000Z\",\n    \"finishedAt\": \"2026-10-20T10:00:00.000Z\"\n  },\n  \"titles\": [],\n  \"episodes\": [],\n  \"files\": [\n    {\n      \"path\": \"title_t00.mkv\",\n      \"size\": 23,\n      \"sha256\": \"e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2\"\n    },\n    {\n      \"path\": \"title_t01.mkv\",\n      \"size\": 21,\n      \"sha256\": \"68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b\"\n    }\n  ],\n  \"attempts\": [\n    {\n      \"job\": \"00000000-0000-4000-8000-000000000001\",\n      \"startedAt\": \"2026-10-20T09:00:00.000Z\",\n      \"titles\": {},\n      \"kept\": []\n    }\n  ],\n  \"counts\": {\n    \"warnings\": 1,\n    \"errors\": 1\n  },\n  \"problems\": [],\n  \"logs\": [\n    \"bromelia-36201adf-log.txt\",\n    \"makemkv-36201adf-log.txt\"\n  ]\n}\n"
+        },
+        "calls": [
+          {
+            "op": "quarantine",
+            "tag": "INCOMPLETE",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "_Quarantine/Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "incomplete",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 44,
+              "fileCount": 2,
+              "attempts": 1,
+              "createdAt": "2026-10-20T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/_Quarantine/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-20T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "title_t00.mkv",
+                  "title_t00.mkv",
+                  "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "title_t01.mkv",
+                  "title_t01.mkv",
+                  "68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "INCOMPLETE.txt",
+                  "INCOMPLETE.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "title_t00.mkv",
+                23,
+                "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2",
+                "",
+                null
+              ],
+              [
+                "title_t01.mkv",
+                21,
+                "68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b",
+                "",
+                null
+              ]
+            ]
+          }
+        ],
+        "checkpoint": {
+          "kind": "sealed",
+          "files": [
+            {
+              "path": "title_t00.mkv",
+              "size": 23,
+              "sha256": "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2"
+            },
+            {
+              "path": "title_t01.mkv",
+              "size": 21,
+              "sha256": "68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b"
+            }
+          ],
+          "own": [
+            "bromelia-36201adf.json",
+            "bromelia-36201adf-log.txt",
+            "makemkv-36201adf-log.txt",
+            "INCOMPLETE.txt"
+          ]
+        },
+        "saves": 1
+      }
+    },
+    {
+      "id": "keep-apart-of-a-cancelled-job-names-it-cancelled-in-the-note",
+      "given": {
+        "step": "keepApart",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 1,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:10:00.000Z\",\"severity\": \"error\",\"code\": \"recovery.interrupted\",\"params\": {\"step\": \"acquire\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\n"
+        },
+        "staging": {
+          "title_t00.mkv": "the first title's bytes",
+          "title_t01.mkv": "half of the second ti"
+        },
+        "checkpoint": {
+          "kind": "outcome",
+          "outcome": "cancelled",
+          "error": {
+            "code": "job.cancelledByUser"
+          }
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "_Quarantine/Sample Movie [INCOMPLETE]",
+          "merged": false,
+          "quarantined": true
+        },
+        "log": [
+          {
+            "code": "archive.synced",
+            "params": {
+              "count": 2
+            }
+          },
+          {
+            "code": "archive.checksumsWritten",
+            "params": {
+              "count": 2,
+              "file": "SHA256SUMS"
+            }
+          },
+          {
+            "code": "archive.recordWritten",
+            "params": {
+              "file": "bromelia-36201adf.json"
+            }
+          },
+          {
+            "code": "recovery.keptApart",
+            "params": {
+              "path": "/lib/_Quarantine/Sample Movie [INCOMPLETE]"
+            },
+            "severity": "warning"
+          }
+        ],
+        "progress": [
+          [
+            0,
+            "archive.hashing",
+            "title_t00.mkv"
+          ],
+          [
+            0.5227272727272727,
+            "archive.hashing",
+            "title_t01.mkv"
+          ],
+          [
+            0,
+            "archive.moving"
+          ]
+        ],
+        "fs": [
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv",
+          "sync /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t00.mkv disk",
+          "open /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv disk",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/SHA256SUMS",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/makemkv-36201adf-log.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/INCOMPLETE.txt",
+          "write /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/bromelia-36201adf.json",
+          "syncDirectory /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "tree": [
+          "INCOMPLETE.txt",
+          "SHA256SUMS",
+          "bromelia-36201adf-log.txt",
+          "bromelia-36201adf.json",
+          "makemkv-36201adf-log.txt",
+          "title_t00.mkv",
+          "title_t01.mkv"
+        ],
+        "contents": {
+          "SHA256SUMS": "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2  title_t00.mkv\n68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b  title_t01.mkv\n",
+          "INCOMPLETE.txt": "archive.note.title jobId=00000000-0000-4000-8000-000000000001 outcome=cancelled\narchive.note.notFinished\njob.cancelledByUser\narchive.note.logs log=bromelia-36201adf-log.txt hasMakemkv=true makemkvLog=makemkv-36201adf-log.txt\n",
+          "bromelia-36201adf-log.txt": "2026-10-20T09:00:01.000Z disc.found name=Sample Movie\n2026-10-20T09:00:02.500Z [WARNING] ripcheck.note file=title_t00.mkv\n2026-10-20T09:10:00.000Z [ERROR] recovery.interrupted step=acquire\n",
+          "makemkv-36201adf-log.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\n"
+        },
+        "calls": [
+          {
+            "op": "quarantine",
+            "tag": "INCOMPLETE",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "_Quarantine/Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "incomplete",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 44,
+              "fileCount": 2,
+              "attempts": 1,
+              "createdAt": "2026-10-20T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/_Quarantine/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-20T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "title_t00.mkv",
+                  "title_t00.mkv",
+                  "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "title_t01.mkv",
+                  "title_t01.mkv",
+                  "68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "INCOMPLETE.txt",
+                  "INCOMPLETE.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "title_t00.mkv",
+                23,
+                "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2",
+                "",
+                null
+              ],
+              [
+                "title_t01.mkv",
+                21,
+                "68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b",
+                "",
+                null
+              ]
+            ]
+          }
+        ],
+        "checkpoint": {
+          "kind": "sealed",
+          "files": [
+            {
+              "path": "title_t00.mkv",
+              "size": 23,
+              "sha256": "e9715a08126bcca7865e6180f010d6b5ab0108dc8179228a02c00c79fa5138f2"
+            },
+            {
+              "path": "title_t01.mkv",
+              "size": 21,
+              "sha256": "68fdb1cf6d2d73286e7e71e7e67f2ee949d706b4de7d9d029b78d26d0c97b49b"
+            }
+          ],
+          "own": [
+            "bromelia-36201adf.json",
+            "bromelia-36201adf-log.txt",
+            "makemkv-36201adf-log.txt",
+            "INCOMPLETE.txt"
+          ]
+        },
+        "saves": 1
+      }
+    },
+    {
+      "id": "keep-apart-of-a-job-that-stopped-before-acquire-keeps-nothing",
+      "given": {
+        "step": "keepApart",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 1,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:10:00.000Z\",\"severity\": \"error\",\"code\": \"recovery.interrupted\",\"params\": {\"step\": \"acquire\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\n"
+        },
+        "staging": {},
+        "checkpoint": {
+          "kind": "outcome",
+          "outcome": "failed",
+          "error": {
+            "code": "process.savedNothing",
+            "params": {
+              "tool": "makemkvcon"
+            }
+          }
+        }
+      },
+      "expect": {
+        "data": {},
+        "log": [],
+        "fs": [
+          "remove /lib/.bromelia/staging/00000000-0000-4000-8000-000000000001"
+        ],
+        "tree": [],
+        "calls": [],
+        "checkpoint": {
+          "kind": "outcome",
+          "outcome": "failed",
+          "error": {
+            "code": "process.savedNothing",
+            "params": {
+              "tool": "makemkvcon"
+            }
+          }
+        },
+        "saves": 0
       }
     }
   ]

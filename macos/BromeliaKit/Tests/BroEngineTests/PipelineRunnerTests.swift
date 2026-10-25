@@ -210,6 +210,7 @@ final class PipelineHarness {
             let plan = j["plan"].map { JobPlan(steps: FakeStep.strings($0).map { StepKind(rawValue: $0)! }) }
             let state = JobState(rawValue: j["state"]?.string ?? "queued")!
             let record = JobRecord(id: id, kind: kind, state: state, outcome: j["outcome"]?.string.flatMap(Outcome.init(rawValue:)),
+                                   error: j["error"].map { BroError($0["code"]!.string!, $0["params"]?.members ?? []) },
                                    queue: Queue(rawValue: j["queue"]?.string ?? "acquisition")!, position: Int(j["position"]?.int ?? 0),
                                    driveId: request.driveId, mediaGeneration: request.mediaGeneration, automatic: request.automatic, title: title,
                                    request: request, plan: plan, createdAt: j["created"]?.string.flatMap(Instant.parse) ?? world.clock.now(),
@@ -225,6 +226,7 @@ final class PipelineHarness {
                 seq += 1
             }
             if j["intent"]?.bool == true { store.openIntent(id) }
+            if let unit = j["unit"]?.string { store.storeUnit(id, UnitState(rawValue: unit)!) }
             if let log = j["log"] {
                 let lines = FakeStep.strings(log).enumerated().map { n, c in
                     LogLineDto(seq: Int64(n + 1), t: world.clock.now(), severity: .info, code: MessageCode(rawValue: c)!, params: [])

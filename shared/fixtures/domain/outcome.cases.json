@@ -785,6 +785,184 @@
           "code": "archive.hashFailed"
         }
       }
+    },
+    {
+      "id": "decide-a-cancel-after-commit-only-stops-the-steps-after-it",
+      "from": [
+        "rearchitecture-plan §20.3 (owner, 2026-10-25: a cancel after Commit has finished only stops the steps after it)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 0
+          },
+          {
+            "kind": "seal",
+            "state": "succeeded"
+          },
+          {
+            "kind": "commit",
+            "state": "succeeded"
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "succeeded"
+      }
+    },
+    {
+      "id": "decide-a-cancel-after-a-quarantining-commit-gives-read-errors",
+      "from": [
+        "rearchitecture-plan §20.3 (owner, 2026-10-25: a cancel after Commit has finished only stops the steps after it)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 2
+          },
+          {
+            "kind": "seal",
+            "state": "succeeded"
+          },
+          {
+            "kind": "commit",
+            "state": "succeeded",
+            "quarantined": true
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "succeededWithReadErrors",
+        "error": {
+          "code": "rip.readErrors",
+          "params": {
+            "count": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "decide-a-cancel-after-commit-keeps-a-failed-post-step",
+      "from": [
+        "rearchitecture-plan §20.3 (owner, 2026-10-25: a cancel after Commit has finished only stops the steps after it)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 0
+          },
+          {
+            "kind": "commit",
+            "state": "succeeded"
+          },
+          {
+            "kind": "postProcess",
+            "state": "failed",
+            "affectsOutcome": true
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "succeededStepsFailed"
+      }
+    },
+    {
+      "id": "decide-a-cancelled-commit-is-not-committed",
+      "from": [
+        "rearchitecture-plan §20.3 (owner, 2026-10-25: a cancel after Commit has finished only stops the steps after it)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 0
+          },
+          {
+            "kind": "seal",
+            "state": "succeeded"
+          },
+          {
+            "kind": "commit",
+            "state": "cancelled"
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "cancelled",
+        "error": {
+          "code": "job.cancelledByUser"
+        }
+      }
+    },
+    {
+      "id": "decide-a-skipped-commit-is-not-committed",
+      "from": [
+        "rearchitecture-plan §20.3 (owner, 2026-10-25: a cancel after Commit has finished only stops the steps after it)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 0
+          },
+          {
+            "kind": "commit",
+            "state": "skipped"
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "cancelled",
+        "error": {
+          "code": "job.cancelledByUser"
+        }
+      }
+    },
+    {
+      "id": "decide-a-failed-commit-is-not-committed",
+      "from": [
+        "rearchitecture-plan §20.3 (owner, 2026-10-25: a cancel after Commit has finished only stops the steps after it)"
+      ],
+      "given": {
+        "steps": [
+          {
+            "kind": "acquire",
+            "state": "succeeded",
+            "readErrors": 0
+          },
+          {
+            "kind": "seal",
+            "state": "succeeded"
+          },
+          {
+            "kind": "commit",
+            "state": "failed",
+            "error": {
+              "code": "fs.alreadyExists"
+            }
+          }
+        ],
+        "cancelled": true
+      },
+      "expect": {
+        "outcome": "cancelled",
+        "error": {
+          "code": "job.cancelledByUser"
+        }
+      }
     }
   ]
 }

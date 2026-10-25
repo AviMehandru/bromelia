@@ -122,7 +122,9 @@ recovery_render (BroMessageRenderer *r, const BroBroMessage *message)
       else
         {
           g_autoptr (GBytes) bytes = bro_json_value_encode_canonical (v);
-          g_string_append_len (text, g_bytes_get_data (bytes, NULL), g_bytes_get_size (bytes));
+          gsize size = g_bytes_get_size (bytes);
+          const char *json = g_bytes_get_data (bytes, NULL);
+          g_string_append_len (text, json, size > 0 && json[size - 1] == '\n' ? size - 1 : size); /* without its final newline */
         }
     }
   return g_string_free (text, FALSE);
@@ -398,7 +400,8 @@ recovery_given_jobs (RecoveryHarness *h, BroJsonValue *jobs)
           s->attempt = 1;
           s->has_started_at = TRUE;
           s->started_at = r->created_at;
-          s->output = bro_step_output_new (s->kind, bro_json_value_new_object (), NULL);
+          v = bro_json_value_member (row, "output");
+          s->output = bro_step_output_new (s->kind, v ? bro_json_value_ref (v) : bro_json_value_new_object (), NULL);
           s->output->read_errors = (int) bro_json_value_get_integer (bro_json_value_member (row, "readErrors"), 0);
           if ((v = bro_json_value_member (row, "error")))
             s->error = recovery_case_error (v);
@@ -549,6 +552,17 @@ recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   list = bro_json_value_member (given, "files");
   for (guint i = 0; list && i < list->keys->len; i++)
     tree_put (h.lib.tree, list->keys->pdata[i], bro_json_value_get_string (list->items->pdata[i], ""));
+  list = bro_json_value_member (given, "fail");
+  for (guint i = 0; list && i < bro_json_value_length (list); i++)
+    {
+      BroJsonValue *f = bro_json_value_at (list, i);
+      TreeFail *tf = g_new0 (TreeFail, 1);
+      tf->op = g_strdup (bro_json_value_get_string (bro_json_value_member (f, "op"), ""));
+      tf->path = g_strdup (bro_json_value_get_string (bro_json_value_member (f, "path"), ""));
+      tf->error = bro_json_value_ref (bro_json_value_member (f, "error"));
+      tf->times = (int) bro_json_value_get_integer (bro_json_value_member (f, "times"), -1);
+      g_ptr_array_add (h.lib.tree->fails, tf);
+    }
   list = bro_json_value_member (given, "hold");
   for (guint i = 0; list && i < bro_json_value_length (list); i++)
     {

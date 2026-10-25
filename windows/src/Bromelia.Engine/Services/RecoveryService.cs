@@ -12,9 +12,10 @@ namespace Bromelia.Engine;
 /// <summary>
 /// Runs once at startup, before the libraries start (plan §11.1, §15.1, §20.4, §15.8; review L3-3, L3-9). It sorts out
 /// the jobs the last engine left unfinished by where each stopped and what its step can do after a stop (its
-/// Resumability), rolls open commit intents forward, sets aside staging folders no job will continue, and removes
-/// the temporary files a stopped write leaves. Library work runs on a worker per library and may take at most 30 s of
-/// the startup: a share that doesn't answer can't keep the engine from starting, and its work goes on.
+/// Resumability), rolls open commit intents forward, sets aside staging folders no job will continue (a failed or cancelled
+/// job's with its logs: owner, 2026-10-25), and removes the temporary files a stopped write leaves. Library work runs on a
+/// worker per library and may take at most 30 s of the startup: a share that doesn't answer can't keep the engine from
+/// starting, and its work goes on.
 /// shared/fixtures/engine/recovery-service.cases.json.
 /// </summary>
 public sealed class RecoveryService
@@ -225,13 +226,35 @@ public sealed class RecoveryService
             if (unfinished.Contains(folder) || committing.Contains(path)) continue;
             var job = await _executor.Worker(() => _store.Jobs().Load(new Id(folder)));
             if (job?.Outcome == Outcome.Interrupted) continue; // kept so it can be continued (owner, 2026-10-03)
-            var lines = Notes.Render(new Id(folder), job?.Outcome ?? Outcome.Interrupted, job?.Error, Array.Empty<RobotMessage>(), Array.Empty<string>());
+            var copies = job == null ? new List<(string, byte[])>() : await Logs(job);
+            var lines = Notes.Render(new Id(folder), job?.Outcome ?? Outcome.Interrupted, job?.Error, Array.Empty<RobotMessage>(),
+                copies.Select(c => c.Item1).ToList());
             var note = Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => _renderer.Render(l) + "\n")));
             var name = Sanitizer.Component(job?.Title ?? "") is { Length: > 0 } title ? title : folder;
-            try { await _library.SetAside(libraryId, folder, name, note); }
+            try { await _library.SetAside(libraryId, folder, name, note, copies); }
             catch (BroFailure) { } // left hidden in staging; the next start tries again
         }
     }
+
+    /// <summary>The job's logs as Seal copies them (SealStep.copyLogs: its log as text, MakeMKV's transcripts, each when the
+    /// job folder has it; none when its Plan's profile has archive.archiveRecord false), by name; on a worker. When they
+    /// can't be read, the files are set aside without them.</summary>
+    Task<List<(string, byte[])>> Logs(JobRecord job) => _executor.Worker(async () =>
+    {
+        var copies = new List<(string, byte[])>();
+        try
+        {
+            var plan = (await _store.Steps().Load(job.Id)).LastOrDefault(r => r.Kind == StepKind.Plan && r.State == StepState.Succeeded)?.Output
+                is { Data: JsonValue.Object data } ? PlanOutput.Decode(data) : null;
+            bool copy = plan?.Profile["archive"]?["archiveRecord"]?.AsBool ?? true;
+            SealStep.CopyLogs(_fs, JobDirectory(job.Id), _renderer, ArchiveFiles.UnitId(job.Id).Value[..8], copy, (name, bytes) => copies.Add((name, bytes)));
+        }
+        catch (BroFailure)
+        {
+            copies.Clear();
+        }
+        return copies;
+    });
 
     Task RemoveLeftovers(string folder, bool recursive) => _executor.Worker(() =>
     {

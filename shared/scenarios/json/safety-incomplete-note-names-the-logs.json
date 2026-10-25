@@ -1,8 +1,9 @@
 {
-  "title": "The INCOMPLETE note names the logs next to it, and makemkv's log has everything it printed",
+  "title": "The INCOMPLETE note of a failed job set aside at the next start names the logs next to it, and makemkv's log has everything it printed",
   "from": [
     "macos SafetyTests.failureInASharedFolderUsesASubfolder",
-    "docs/configuration.md#archive-files"
+    "docs/configuration.md#archive-files",
+    "owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)"
   ],
   "given": {
     "disc": "sample-movie-one-title",
@@ -19,6 +20,26 @@
         ],
         "as": "job"
       }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed"
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            ".bromelia/staging/{jobId}/title_t00.mkv"
+          ],
+          "exclude": [
+            "_Quarantine"
+          ]
+        }
+      }
+    },
+    {
+      "restart": {}
     },
     {
       "expect": {

@@ -1,8 +1,9 @@
 {
-  "title": "An MKV whose length doesn't match its title fails the job; titles that passed are logged as checked",
+  "title": "An MKV whose length doesn't match its title fails the job; titles that passed are logged as checked; kept apart, the files are sealed in quarantine",
   "from": [
     "macos SafetyTests.ripsAreCheckedAgainstTheListing",
-    "docs/configuration.md#output-folder-read-errors-and-checks"
+    "docs/configuration.md#output-folder-read-errors-and-checks",
+    "owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)"
   ],
   "given": {
     "disc": "sample-movie-three-titles",
@@ -43,11 +44,50 @@
           ]
         },
         "files": {
+          "under": "library",
+          "include": [
+            ".bromelia/staging/{jobId}/title_t01.mkv"
+          ],
+          "exclude": [
+            "_Quarantine"
+          ]
+        }
+      }
+    },
+    {
+      "keepApart": "job"
+    },
+    {
+      "expect": {
+        "files": {
           "under": "library/_Quarantine/Sample Movie [INCOMPLETE]",
           "include": [
+            "title_t00.mkv",
             "title_t01.mkv",
-            "INCOMPLETE.txt"
+            "INCOMPLETE.txt",
+            "SHA256SUMS"
           ]
+        },
+        "sums": {
+          "folder": "library/_Quarantine/Sample Movie [INCOMPLETE]",
+          "ok": true
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.keptApart"
+          ]
+        },
+        "db": {
+          "archive_units": {
+            "count": 1,
+            "rows": [
+              {
+                "state": "quarantined",
+                "status": "incomplete"
+              }
+            ]
+          }
         }
       }
     }

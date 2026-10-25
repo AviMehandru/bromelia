@@ -1,8 +1,9 @@
-title: A failure in a folder other jobs share is quarantined without touching the shared folder; the logs go with the files
+title: A failure in a folder other jobs share is set aside without touching the shared folder; the logs go with the files
 from:
   - macos SafetyTests.failureInASharedFolderUsesASubfolder
   - docs/configuration.md#output-folder-read-errors-and-checks
   - docs/configuration.md#archive-files
+  - owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)
 given:
   disc: sample-movie-one-title
   profile: {naming: {folderTemplate: "", conflictPolicy: merge}}
@@ -12,6 +13,10 @@ steps:
   - rip: {iso: true, titles: [0], as: job}
   - expect:
       job: {name: job, outcome: failed}
+      files: {under: library, exactly: ["other.mkv"]}
+      file: {path: "library/.bromelia/staging/{jobId}/title_t00.mkv", exists: true}
+  - restart: {}
+  - expect:
       files:
         under: library
         exactly:

@@ -15,6 +15,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case jobNotInterrupted = "job.notInterrupted"
     case jobUnknownStep = "job.unknownStep"
     case jobCommitOpen = "job.commitOpen"
+    case jobAlreadyCommitted = "job.alreadyCommitted"
     case jobOpStarting = "job.op.starting"
     case jobOpCancelling = "job.op.cancelling"
     case jobOpAutomatic = "job.op.automatic"

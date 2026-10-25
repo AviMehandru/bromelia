@@ -17,6 +17,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "job.notInterrupted",
   "job.unknownStep",
   "job.commitOpen",
+  "job.alreadyCommitted",
   "job.op.starting",
   "job.op.cancelling",
   "job.op.automatic",

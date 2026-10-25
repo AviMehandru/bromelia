@@ -1,5 +1,5 @@
 {
-  "description": "JobService (plan §11.1, §13.1; owner 2026-10-17): creates jobs, runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones. create(request): a new id from the IdGenerator; the job goes into its queue (JobPlanner.queue(kind)) at once, in the order jobs are created, at the end of it; its record is stored (state queued, its place in the queue as position, the request, the planner's steps as its plan when there are any, createdAt now) before jobChanged announces it (with its position), then it runs. start() runs the jobs the store has unfinished (what RecoveryService left queued), in the store's order (queue, position, createdAt). Every active job's place in its queue is stored when it changes (a transaction that changes only the position). cancel(job): a job it runs is cancelled through the runner (one cancelled before its run starts runs no step); one nothing runs is finished at once as cancelled (job.cancelledByUser, jobFinished); a finished one stays as it is; job.notFound. retry(job, fromStep?): without a step, a finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by hand (not automatic, no media generation), and an interrupted one is continued: the same job again from its first step. With a step (owner 2026-10-18), a finished job that failed, was cancelled or was interrupted runs again, the same job, from that step (job.unknownStep {step} when its plan has none; server.badRequest when a step before it isn't done); a step up to Release starts it from its first step instead, since the disc is read again. Its steps from there are stored pending (outputs and errors cleared, checkpoints kept: Acquire keeps what an earlier attempt finished), a plan cut back after Plan when Plan runs again, the record queued again (no outcome, by hand, no media generation; acquisition up to Release, else processing), job.retried {step} in its log, jobChanged, then it runs. job.notRetryable for any other job; job.notFound. While the job has an open commit intent (its unit half moved into a library), only a retry from Commit is taken: any other, a new job or continuing an interrupted one included, is job.commitOpen {jobId} (F5). decide(job, decisionId, answer): job.notAwaitingDecision unless the job waits for that question, server.badRequest for an answer it doesn't offer, job.notFound. move(job, by) and startNow(job): a job that waits to start a step (queued, waitingForResources, blocked) moves in its queue (stopping at the ends) or goes first and past the acquisitions cap; job.notQueued for one that runs a step, waits for an answer or has finished; job.notFound. query(q): newest first (createdAt, then id), a page of limit (1-500, default 50) from cursor (an offset as text), next (null on the last page) and total; running jobs as the runner sees them, waiting ones with their position; the states are the stored ones; server.badRequest for a bad limit or cursor. log(job, after): the lines after seq, including a running step's lines not yet written; job.notFound. The harness is pipeline-runner's (real executor, Scheduler, EventBus and PipelineRunner, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, the same fake steps) with a JobService over it and an IdGenerator that counts on from the given jobs (00000000-0000-4000-8000-000000000001, ...); a name it doesn't know (nosuch) is the id 00000000-0000-4000-8000-0000000000ff. Given: limits (SchedulerLimits: acquisitions), and per job also state (queued), outcome, position (0), automatic, mediaGeneration, created (an instant; default the clock's), intent (true: the store has an open commit intent of the job). Ops: start; create {as, kind (videoDisc), title (its name), driveId, automatic, mediaGeneration}; cancel <job> or {job, expectError}; retry {job, as, fromStep, expectError} (as: a new job's name); decide {job, decisionId, answer, expectError}; move {job, by, expectError}; startNow <job> or {job, expectError}; open <gate>; steps {kind: behaviour} (from then on); query {states, outcomes, kind, queue, driveId, cursor, limit, expectError} and log {job, after, expectError} (their results, in order, are expect.queries and expect.logs); holdInserts / releaseInserts (the store's job inserts wait from then on until released; a held insert counts as parked); holdLoads <job> / releaseLoads (the store's loads of that job's record wait from then on until released, counted as parked: a run that is slow to load). After each op the harness settles as pipeline-runner's does; an op's error is checked once the case's ops are done. Always: no jobChanged comes before the job's record is stored. Expect: outcomes, lines (pipeline-runner's, and 'changed queued - position <n>' for create's), queueLines, steps, outputs as pipeline-runner's; records {job: {state, outcome, queue, position, automatic, mediaGeneration, title, driveId, plan}} (only the members given; null: absent); queries [{items ['<job> <state>[ <outcome>][ position <n>][ step <progress.step>]'], next, total} or {error}]; logs [['<seq> <code>'] or {error}]. keepApart {job, expectError} (F8; owner 2026-10-25; any op may give maybeError instead: that error or none, for two ops that race, the expectations then show which ran): a finished interrupted job whose Plan step succeeded and that the service doesn't run runs again as the same job: the row at the first step not done is stored as keepApart pending (no output, error or checkpoint), the plan cut to the steps before it plus keepApart, the record queued in the processing queue with no outcome (the request unchanged), jobChanged, then it runs; a succeeded keepApart step ends the job cancelled (job.cancelledByUser). job.notInterrupted for any other job (and while it runs), job.notFound. A kept-apart job is retried from its keepApart step only (in the processing queue) or as a new job; from any other step job.notRetryable.",
+  "description": "JobService (plan §11.1, §13.1; owner 2026-10-17): creates jobs, runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones. create(request): a new id from the IdGenerator; the job goes into its queue (JobPlanner.queue(kind)) at once, in the order jobs are created, at the end of it; its record is stored (state queued, its place in the queue as position, the request, the planner's steps as its plan when there are any, createdAt now) before jobChanged announces it (with its position), then it runs. start() runs the jobs the store has unfinished (what RecoveryService left queued), in the store's order (queue, position, createdAt). Every active job's place in its queue is stored when it changes (a transaction that changes only the position). cancel(job): a job it runs is cancelled through the runner (one cancelled before its run starts runs no step); one nothing runs is finished at once as cancelled (job.cancelledByUser, jobFinished); a finished one stays as it is; job.notFound. retry(job, fromStep?): without a step, a finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by hand (not automatic, no media generation), and an interrupted one is continued: the same job again from its first step. With a step (owner 2026-10-18), a finished job that failed, was cancelled or was interrupted runs again, the same job, from that step (job.unknownStep {step} when its plan has none; server.badRequest when a step before it isn't done); a step up to Release starts it from its first step instead, since the disc is read again. Its steps from there are stored pending (outputs and errors cleared, checkpoints kept: Acquire keeps what an earlier attempt finished), a plan cut back after Plan when Plan runs again, the record queued again (no outcome, by hand, no media generation; acquisition up to Release, else processing), job.retried {step} in its log, jobChanged, then it runs. job.notRetryable for any other job; job.notFound. While the job has an open commit intent (its unit half moved into a library), only a retry from Commit is taken: any other, a new job or continuing an interrupted one included, is job.commitOpen {jobId} (F5). Once the job's unit is in a library (the store holds ArchiveFiles.unitId(job) committed, quarantined or missing), a retry from a step before Commit, or continuing an interrupted job, is job.alreadyCommitted {jobId}; from Commit or later, or as a new job, it is taken (F9, owner 2026-10-25). A cancel after a Commit step that succeeded only stops the steps after it: the job ends succeeded (succeededWithReadErrors with read errors), JobOutcome.decide. decide(job, decisionId, answer): job.notAwaitingDecision unless the job waits for that question, server.badRequest for an answer it doesn't offer, job.notFound. move(job, by) and startNow(job): a job that waits to start a step (queued, waitingForResources, blocked) moves in its queue (stopping at the ends) or goes first and past the acquisitions cap; job.notQueued for one that runs a step, waits for an answer or has finished; job.notFound. query(q): newest first (createdAt, then id), a page of limit (1-500, default 50) from cursor (an offset as text), next (null on the last page) and total; running jobs as the runner sees them, waiting ones with their position; the states are the stored ones; server.badRequest for a bad limit or cursor. log(job, after): the lines after seq, including a running step's lines not yet written; job.notFound. The harness is pipeline-runner's (real executor, Scheduler, EventBus and PipelineRunner, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, the same fake steps) with a JobService over it and an IdGenerator that counts on from the given jobs (00000000-0000-4000-8000-000000000001, ...); a name it doesn't know (nosuch) is the id 00000000-0000-4000-8000-0000000000ff. Given: limits (SchedulerLimits: acquisitions), and per job also state (queued), outcome, position (0), automatic, mediaGeneration, created (an instant; default the clock's), intent (true: the store has an open commit intent of the job), unit (committed | quarantined | missing | committing: the store holds the job's unit, ArchiveFiles.unitId, in that state), error (its stored error). Ops: start; create {as, kind (videoDisc), title (its name), driveId, automatic, mediaGeneration}; cancel <job> or {job, expectError}; retry {job, as, fromStep, expectError} (as: a new job's name); decide {job, decisionId, answer, expectError}; move {job, by, expectError}; startNow <job> or {job, expectError}; open <gate>; steps {kind: behaviour} (from then on); query {states, outcomes, kind, queue, driveId, cursor, limit, expectError} and log {job, after, expectError} (their results, in order, are expect.queries and expect.logs); holdInserts / releaseInserts (the store's job inserts wait from then on until released; a held insert counts as parked); holdLoads <job> / releaseLoads (the store's loads of that job's record wait from then on until released, counted as parked: a run that is slow to load). After each op the harness settles as pipeline-runner's does; an op's error is checked once the case's ops are done. Always: no jobChanged comes before the job's record is stored. Expect: outcomes, lines (pipeline-runner's, and 'changed queued - position <n>' for create's), queueLines, steps, outputs as pipeline-runner's; records {job: {state, outcome, queue, position, automatic, mediaGeneration, title, driveId, plan}} (only the members given; null: absent); queries [{items ['<job> <state>[ <outcome>][ position <n>][ step <progress.step>]'], next, total} or {error}]; logs [['<seq> <code>'] or {error}]. keepApart {job, expectError} (F8; owner 2026-10-25; any op may give maybeError instead: that error or none, for two ops that race, the expectations then show which ran): a finished job that was interrupted, failed or was cancelled (F9), whose Plan step succeeded, that wasn't kept apart already (its plan holds no keepApart) and that the service doesn't run, runs again as the same job: the row at the first step not done is stored as keepApart pending (no output or error; the checkpoint {kind: outcome, outcome: the job's, error: the job's when it has one}), the plan cut to the steps before it plus keepApart, the record queued in the processing queue with no outcome (the request unchanged), jobChanged, then it runs; a succeeded keepApart step ends the job cancelled (job.cancelledByUser). job.notInterrupted for any other job (and while it runs), job.commitOpen while it has an open commit intent, job.alreadyCommitted once its unit is in a library, job.notFound. A kept-apart job is retried from its keepApart step only (in the processing queue) or as a new job; from any other step job.notRetryable.",
   "functions": [
     "JobService.start",
     "JobService.create",
@@ -1731,6 +1731,697 @@
       }
     },
     {
+      "id": "retry-from-before-commit-is-refused-once-the-job-s-unit-is-committed",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "committed",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/x",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "retry": {
+              "job": "f",
+              "fromStep": "seal",
+              "expectError": "job.alreadyCommitted"
+            }
+          },
+          {
+            "retry": {
+              "job": "f",
+              "fromStep": "release",
+              "expectError": "job.alreadyCommitted"
+            }
+          },
+          {
+            "retry": {
+              "job": "f",
+              "fromStep": "probe",
+              "expectError": "job.alreadyCommitted"
+            }
+          },
+          {
+            "retry": {
+              "job": "f",
+              "fromStep": "commit"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "f": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "f": [
+            "changed queued - position 0",
+            "changed running commit",
+            "step commit succeeded",
+            "finished succeeded"
+          ]
+        },
+        "steps": {
+          "f": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "seal succeeded",
+            "commit succeeded"
+          ]
+        },
+        "records": {
+          "f": {
+            "state": "finished",
+            "outcome": "succeeded",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "retry-after-commit-of-a-job-whose-unit-is-committed-runs-the-steps-after-it",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "unit": "committed",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              },
+              {
+                "kind": "commit"
+              },
+              {
+                "kind": "notify",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/x",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "retry": {
+              "job": "f",
+              "fromStep": "notify"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "f": {
+            "outcome": "succeeded"
+          }
+        },
+        "lines": {
+          "f": [
+            "changed queued - position 0",
+            "changed running notify",
+            "step notify succeeded",
+            "finished succeeded"
+          ]
+        },
+        "steps": {
+          "f": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "seal succeeded",
+            "commit succeeded",
+            "notify succeeded"
+          ]
+        }
+      }
+    },
+    {
+      "id": "retry-as-a-new-job-is-taken-once-the-job-s-unit-is-committed",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "cancelled",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "committed",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              }
+            ]
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "retry": {
+              "job": "f",
+              "as": "n"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "n": {
+            "outcome": "succeeded"
+          }
+        },
+        "records": {
+          "f": {
+            "state": "finished",
+            "outcome": "cancelled",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-unit-quarantined-or-missing-counts-as-committed-and-one-committing-does-not",
+      "given": {
+        "jobs": [
+          {
+            "name": "q",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "quarantined",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/x",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "m",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "missing",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/x",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "c",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "committing",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/x",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "retry": {
+              "job": "q",
+              "fromStep": "seal",
+              "expectError": "job.alreadyCommitted"
+            }
+          },
+          {
+            "retry": {
+              "job": "m",
+              "fromStep": "seal",
+              "expectError": "job.alreadyCommitted"
+            }
+          },
+          {
+            "retry": {
+              "job": "c",
+              "fromStep": "seal"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "c": {
+            "outcome": "succeeded"
+          }
+        },
+        "records": {
+          "q": {
+            "outcome": "failed"
+          },
+          "m": {
+            "outcome": "failed"
+          },
+          "c": {
+            "outcome": "succeeded"
+          }
+        }
+      }
+    },
+    {
+      "id": "continuing-an-interrupted-job-whose-unit-is-committed-is-refused",
+      "given": {
+        "jobs": [
+          {
+            "name": "i",
+            "state": "finished",
+            "outcome": "interrupted",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "committed",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire",
+                "state": "interrupted",
+                "checkpoint": {
+                  "kind": "titles",
+                  "titles": [
+                    0
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "retry": {
+              "job": "i",
+              "expectError": "job.alreadyCommitted"
+            }
+          },
+          {
+            "retry": {
+              "job": "i",
+              "fromStep": "acquire",
+              "expectError": "job.alreadyCommitted"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "records": {
+          "i": {
+            "state": "finished",
+            "outcome": "interrupted"
+          }
+        }
+      }
+    },
+    {
+      "id": "a-cancel-while-commit-moves-the-unit-only-stops-the-steps-after-it",
+      "given": {
+        "jobs": [
+          {
+            "name": "j",
+            "plan": [
+              "probe",
+              "plan",
+              "commit",
+              "notify"
+            ]
+          }
+        ],
+        "steps": {
+          "commit": {
+            "gate": "g",
+            "ignoresCancel": true
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "cancel": "j"
+          },
+          {
+            "open": "g"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "j": {
+            "outcome": "succeeded"
+          }
+        },
+        "steps": {
+          "j": [
+            "probe succeeded",
+            "plan succeeded",
+            "commit succeeded"
+          ]
+        },
+        "records": {
+          "j": {
+            "state": "finished",
+            "outcome": "succeeded"
+          }
+        }
+      }
+    },
+    {
+      "id": "a-cancel-while-a-quarantining-commit-moves-the-unit-ends-with-read-errors",
+      "given": {
+        "jobs": [
+          {
+            "name": "j",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "commit",
+              "notify"
+            ]
+          }
+        ],
+        "steps": {
+          "acquire": {
+            "readErrors": 2
+          },
+          "commit": {
+            "gate": "g",
+            "ignoresCancel": true,
+            "quarantined": true
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "cancel": "j"
+          },
+          {
+            "open": "g"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "j": {
+            "outcome": "succeededWithReadErrors",
+            "error": {
+              "code": "rip.readErrors",
+              "params": {
+                "count": 2
+              }
+            }
+          }
+        },
+        "steps": {
+          "j": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "commit succeeded"
+          ]
+        }
+      }
+    },
+    {
+      "id": "a-cancel-that-stops-commit-before-it-moves-anything-cancels-the-job",
+      "given": {
+        "jobs": [
+          {
+            "name": "j",
+            "plan": [
+              "probe",
+              "plan",
+              "commit",
+              "notify"
+            ]
+          }
+        ],
+        "steps": {
+          "commit": {
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "cancel": "j"
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "j": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "steps": {
+          "j": [
+            "probe succeeded",
+            "plan succeeded",
+            "commit cancelled"
+          ]
+        }
+      }
+    },
+    {
       "id": "decide-answers-the-question",
       "given": {
         "jobs": [],
@@ -2562,7 +3253,10 @@
         "outputs": {
           "i": {
             "keepApart": {
-              "saved": null
+              "saved": {
+                "kind": "outcome",
+                "outcome": "interrupted"
+              }
             }
           }
         },
@@ -2809,7 +3503,7 @@
       }
     },
     {
-      "id": "keep-apart-of-a-job-that-isn-t-interrupted-is-refused",
+      "id": "keep-apart-of-a-job-that-succeeded-was-skipped-runs-or-was-kept-apart-is-refused",
       "given": {
         "jobs": [
           {
@@ -2830,15 +3524,12 @@
             ]
           },
           {
-            "name": "f",
+            "name": "x",
             "state": "finished",
-            "outcome": "failed",
+            "outcome": "skipped",
             "plan": [
               "probe",
-              "plan",
-              "acquire",
-              "release",
-              "seal"
+              "plan"
             ],
             "done": [
               {
@@ -2846,16 +3537,6 @@
               },
               {
                 "kind": "plan"
-              },
-              {
-                "kind": "acquire",
-                "state": "failed",
-                "error": {
-                  "code": "process.savedNothing",
-                  "params": {
-                    "tool": "makemkvcon"
-                  }
-                }
               }
             ]
           },
@@ -2869,6 +3550,58 @@
             "done": [
               {
                 "kind": "probe"
+              }
+            ]
+          },
+          {
+            "name": "k",
+            "state": "finished",
+            "outcome": "cancelled",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "keepApart"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "keepApart"
+              }
+            ]
+          },
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "keepApart"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "keepApart",
+                "state": "failed",
+                "error": {
+                  "code": "archive.hashFailed",
+                  "params": {
+                    "file": "t",
+                    "reason": "r"
+                  }
+                }
               }
             ]
           },
@@ -2894,13 +3627,25 @@
           },
           {
             "keepApart": {
-              "job": "f",
+              "job": "x",
               "expectError": "job.notInterrupted"
             }
           },
           {
             "keepApart": {
               "job": "c",
+              "expectError": "job.notInterrupted"
+            }
+          },
+          {
+            "keepApart": {
+              "job": "k",
+              "expectError": "job.notInterrupted"
+            }
+          },
+          {
+            "keepApart": {
+              "job": "f",
               "expectError": "job.notInterrupted"
             }
           },
@@ -2934,11 +3679,27 @@
           "s": {
             "outcome": "succeeded"
           },
-          "f": {
-            "outcome": "failed"
+          "x": {
+            "outcome": "skipped"
           },
           "c": {
             "outcome": "cancelled"
+          },
+          "k": {
+            "outcome": "cancelled",
+            "plan": [
+              "probe",
+              "plan",
+              "keepApart"
+            ]
+          },
+          "f": {
+            "outcome": "failed",
+            "plan": [
+              "probe",
+              "plan",
+              "keepApart"
+            ]
           }
         }
       }
@@ -3356,6 +4117,529 @@
             "plan succeeded",
             "keepApart succeeded"
           ]
+        }
+      }
+    },
+    {
+      "id": "keep-apart-runs-a-failed-job-s-keep-apart-step-in-place-of-its-failed-step",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed",
+            "error": {
+              "code": "process.savedNothing",
+              "params": {
+                "tool": "makemkvcon"
+              }
+            },
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire",
+                "state": "failed",
+                "error": {
+                  "code": "process.savedNothing",
+                  "params": {
+                    "tool": "makemkvcon"
+                  }
+                },
+                "checkpoint": {
+                  "kind": "titles",
+                  "titles": [
+                    0
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "steps": {
+          "keepApart": {
+            "saved": true
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "keepApart": {
+              "job": "f"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "f": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "lines": {
+          "f": [
+            "changed queued - position 0",
+            "changed running keepApart",
+            "step keepApart succeeded",
+            "finished cancelled job.cancelledByUser"
+          ]
+        },
+        "steps": {
+          "f": [
+            "probe succeeded",
+            "plan succeeded",
+            "keepApart succeeded"
+          ]
+        },
+        "outputs": {
+          "f": {
+            "keepApart": {
+              "saved": {
+                "kind": "outcome",
+                "outcome": "failed",
+                "error": {
+                  "code": "process.savedNothing",
+                  "params": {
+                    "tool": "makemkvcon"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "queueLines": [
+          "processing: f",
+          "processing: "
+        ],
+        "records": {
+          "f": {
+            "state": "finished",
+            "outcome": "cancelled",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "keepApart"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "keep-apart-runs-a-cancelled-job-s-keep-apart-step-after-the-steps-it-finished",
+      "given": {
+        "jobs": [
+          {
+            "name": "c",
+            "state": "finished",
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            },
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal",
+                "state": "cancelled",
+                "error": {
+                  "code": "job.cancelled"
+                }
+              }
+            ]
+          }
+        ],
+        "steps": {
+          "keepApart": {
+            "saved": true
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "keepApart": {
+              "job": "c"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "c": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "steps": {
+          "c": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "keepApart succeeded"
+          ]
+        },
+        "outputs": {
+          "c": {
+            "keepApart": {
+              "saved": {
+                "kind": "outcome",
+                "outcome": "cancelled",
+                "error": {
+                  "code": "job.cancelledByUser"
+                }
+              }
+            }
+          }
+        },
+        "records": {
+          "c": {
+            "state": "finished",
+            "outcome": "cancelled",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "keepApart"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "keep-apart-of-a-job-with-an-open-commit-or-a-committed-unit-is-refused",
+      "given": {
+        "jobs": [
+          {
+            "name": "o",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "intent": true,
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/x",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "u",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "committed",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/x",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "q",
+            "state": "finished",
+            "outcome": "cancelled",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ],
+            "unit": "quarantined",
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire"
+              },
+              {
+                "kind": "release"
+              },
+              {
+                "kind": "seal"
+              }
+            ]
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "keepApart": {
+              "job": "o",
+              "expectError": "job.commitOpen"
+            }
+          },
+          {
+            "keepApart": {
+              "job": "u",
+              "expectError": "job.alreadyCommitted"
+            }
+          },
+          {
+            "keepApart": {
+              "job": "q",
+              "expectError": "job.alreadyCommitted"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "steps": {
+          "o": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "seal succeeded",
+            "commit failed"
+          ],
+          "u": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "seal succeeded",
+            "commit failed"
+          ]
+        },
+        "records": {
+          "o": {
+            "state": "finished",
+            "outcome": "failed",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ]
+          },
+          "u": {
+            "state": "finished",
+            "outcome": "failed",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ]
+          },
+          "q": {
+            "state": "finished",
+            "outcome": "cancelled",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal",
+              "commit"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a-kept-apart-failed-job-retried-from-keep-apart-keeps-its-outcome-for-the-note",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "keepApart"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "keepApart",
+                "state": "failed",
+                "error": {
+                  "code": "archive.hashFailed",
+                  "params": {
+                    "file": "t",
+                    "reason": "r"
+                  }
+                },
+                "checkpoint": {
+                  "kind": "outcome",
+                  "outcome": "failed",
+                  "error": {
+                    "code": "process.savedNothing",
+                    "params": {
+                      "tool": "makemkvcon"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "steps": {
+          "keepApart": {
+            "saved": true
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "retry": {
+              "job": "f",
+              "fromStep": "keepApart"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "f": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "outputs": {
+          "f": {
+            "keepApart": {
+              "saved": {
+                "kind": "outcome",
+                "outcome": "failed",
+                "error": {
+                  "code": "process.savedNothing",
+                  "params": {
+                    "tool": "makemkvcon"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

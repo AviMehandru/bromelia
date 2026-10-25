@@ -1,7 +1,8 @@
-title: A title that failed keeps MakeMKV's file name, in an INCOMPLETE folder in quarantine
+title: A title that failed keeps MakeMKV's file name; kept apart, it is in an INCOMPLETE folder in quarantine
 from:
   - macos SafetyTests.failedTitleIsKeptUnderMakeMKVsNameInAnIncompleteFolder
   - docs/configuration.md#output-folder-read-errors-and-checks
+  - owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)
 given:
   disc: sample-movie-three-titles
   profile: {titles: {skipDuplicates: false}}
@@ -9,7 +10,12 @@ given:
 steps:
   - rip: {iso: true, titles: [0, 1], as: job}
   - expect:
-      job: {name: job, outcome: failed, error: {code: rip.failed}, errorText: "Failed to save title 1", unit: {state: quarantined, status: incomplete}}
+      job: {name: job, outcome: failed, error: {code: rip.failed}, errorText: "Failed to save title 1"}
+      files: {under: library, include: [".bromelia/staging/{jobId}/title_t01.mkv"], exclude: ["_Quarantine", "Sample Movie"]}
+      calls: {makemkvcon: {counts: {" mkv ": 2}}}
+  - keepApart: job
+  - expect:
+      job: {name: job, outcome: cancelled, unit: {state: quarantined, status: incomplete}}
       files:
         under: library
         include:
@@ -17,6 +23,6 @@ steps:
           - "_Quarantine/Sample Movie [INCOMPLETE]/title_t01.mkv"
           - "_Quarantine/Sample Movie [INCOMPLETE]/bromelia-{unit8}-log.txt"
         exclude:
-          - "_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS"
           - "Sample Movie"
-      calls: {makemkvcon: {counts: {" mkv ": 2}}}
+          - ".bromelia/staging/{jobId}"
+      file: {path: "library/_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt", contains: ["NOT a finished archive", "Failed to save title 1"]}

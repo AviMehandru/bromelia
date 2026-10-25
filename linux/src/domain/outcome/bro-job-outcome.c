@@ -39,12 +39,16 @@ problem_code (const BroMakemkvNotice *n, BroMessageCode *out)
 BroDecided *
 bro_job_outcome_decide (GPtrArray *steps, gboolean cancelled, const BroOutcomePolicy *policy)
 {
-  /* A keepApart step that succeeded or was skipped: the job wasn't continued (owner, 2026-10-25). */
-  for (guint i = 0; i < steps->len && !cancelled; i++) {
+  /* A cancel after a Commit step that succeeded only stops the steps after it; a keepApart step that succeeded or was
+   * skipped: the job wasn't continued (owner, 2026-10-25). */
+  gboolean committed = FALSE, kept_apart = FALSE;
+  for (guint i = 0; i < steps->len; i++) {
     const BroStepResult *s = steps->pdata[i];
-    cancelled = s->kind == BRO_STEP_KIND_KEEP_APART && (s->state == BRO_STEP_STATE_SUCCEEDED || s->state == BRO_STEP_STATE_SKIPPED);
+    committed = committed || (s->kind == BRO_STEP_KIND_COMMIT && s->state == BRO_STEP_STATE_SUCCEEDED);
+    kept_apart = kept_apart
+                 || (s->kind == BRO_STEP_KIND_KEEP_APART && (s->state == BRO_STEP_STATE_SUCCEEDED || s->state == BRO_STEP_STATE_SKIPPED));
   }
-  if (cancelled)
+  if ((cancelled && !committed) || kept_apart)
     return decided (BRO_OUTCOME_CANCELLED, error_of (BRO_MSG_JOB_CANCELLED_BY_USER, BRO_SEVERITY_WARNING, NULL, NULL));
   for (guint i = 0; i < steps->len; i++) {
     const BroStepResult *s = steps->pdata[i];

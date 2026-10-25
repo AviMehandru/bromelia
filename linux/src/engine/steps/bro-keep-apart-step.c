@@ -111,6 +111,30 @@ from_checkpoint (const BroJsonValue *saved, GPtrArray *files, GPtrArray *own)
     g_ptr_array_add (own, g_strdup (bro_json_value_get_string (bro_json_value_at (o, i), "")));
 }
 
+/* {code, params, cause} (shared/schema/common.json BroError), params left out when empty. */
+static BroJsonValue *
+error_json (const BroBroError *error)
+{
+  BroJsonValue *o = bro_json_value_new_object ();
+  bro_json_value_set (o, "code", bro_json_value_new_string (error->code));
+  if (bro_json_value_length (error->params) > 0)
+    bro_json_value_set (o, "params", bro_json_value_ref (error->params));
+  if (error->cause)
+    bro_json_value_set (o, "cause", error_json (error->cause));
+  return o;
+}
+
+BroJsonValue *
+bro_keep_apart_step_kept (BroOutcome outcome, const BroBroError *error)
+{
+  BroJsonValue *checkpoint = bro_json_value_new_object ();
+  bro_json_value_set (checkpoint, "kind", bro_json_value_new_string (BRO_KEEP_APART_STEP_OUTCOME_CHECKPOINT));
+  bro_json_value_set (checkpoint, "outcome", bro_json_value_new_string (bro_outcome_to_wire (outcome)));
+  if (error)
+    bro_json_value_set (checkpoint, "error", error_json (error));
+  return checkpoint;
+}
+
 /* Seals what staging holds into @files (BroUnitFile *) and @own (char *: the record first, the logs, the note), once the
  * checkpoint that names them is stored; neither filled when staging holds no file to keep (its empty folders removed). */
 static gboolean
@@ -231,7 +255,22 @@ seal (const BroStepContext *c, const BroPlanOutput *plan, const char *staging, c
   for (guint i = 0; i < logs->len; i++)
     g_ptr_array_add (log_names, logs->pdata[i]);
   g_ptr_array_add (log_names, NULL);
-  lines = bro_notes_render (&c->job->id, BRO_OUTCOME_INTERRUPTED, NULL, NULL, (const char *const *) log_names->pdata);
+  {
+    /* The outcome and error JobService.keepApart stored with the step; interrupted and none without them. */
+    g_autoptr (BroJsonValue) saved = bro_checkpointer_saved (c->checkpoint);
+    BroJsonValue *kept = saved && g_strcmp0 (bro_json_value_get_string (bro_json_value_member (saved, "kind"), NULL),
+                                             BRO_KEEP_APART_STEP_OUTCOME_CHECKPOINT) == 0 ? saved : NULL;
+    BroJsonValue *e = bro_json_value_member (kept, "error");
+    const char *code = bro_json_value_get_string (bro_json_value_member (e, "code"), NULL);
+    BroJsonValue *params = bro_json_value_member (e, "params");
+    g_autoptr (BroBroError) kept_error = NULL;
+    BroOutcome outcome = BRO_OUTCOME_INTERRUPTED;
+    bro_outcome_from_wire (bro_json_value_get_string (bro_json_value_member (kept, "outcome"), NULL), &outcome);
+    if (code)
+      kept_error = bro_bro_error_new (code, params && params->kind == BRO_JSON_VALUE_OBJECT ? bro_json_value_ref (params) : bro_json_value_new_object (),
+                                      NULL);
+    lines = bro_notes_render (&c->job->id, outcome, kept_error, NULL, (const char *const *) log_names->pdata);
+  }
   {
     GString *text = g_string_new ("");
     g_autofree char *note = NULL;

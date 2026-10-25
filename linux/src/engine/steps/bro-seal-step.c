@@ -239,6 +239,13 @@ _bro_seal_folders (const char *staging, GPtrArray *files)
 
 typedef BroSealRun Run;
 
+/* A BroSealWriteFunc for a sealing run: _bro_seal_write. */
+static gboolean
+write_into_staging (gpointer data, const char *name, GBytes *bytes, BroBroError **error)
+{
+  return _bro_seal_write (data, name, bytes, error);
+}
+
 /* Writes @name into staging atomically (0644); archive.writeFailed with the cause. */
 gboolean
 _bro_seal_write (BroSealRun *r, const char *name, GBytes *bytes, BroBroError **error)
@@ -273,9 +280,14 @@ _bro_seal_was_written (BroSealRun *r, const char *name)
 GPtrArray *
 _bro_seal_copy_logs (BroSealRun *r, const char *unit8, gboolean copy, GPtrArray *logs, BroBroError **error)
 {
-  const BroStepContext *c = r->c;
-  BroFileSystem *fs = c->fs;
-  g_autofree char *log_file = g_strconcat (c->job_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+  return _bro_seal_copy_logs_from (r->c->fs, r->c->job_directory, r->c->messages, unit8, copy, write_into_staging, r, logs, error);
+}
+
+GPtrArray *
+_bro_seal_copy_logs_from (BroFileSystem *fs, const char *job_directory, BroMessageRenderer *messages, const char *unit8, gboolean copy,
+                          BroSealWriteFunc write, gpointer data, GPtrArray *logs, BroBroError **error)
+{
+  g_autofree char *log_file = g_strconcat (job_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
   g_autoptr (GPtrArray) log = NULL;
   const char *from[] = { BRO_SEAL_STEP_TRANSCRIPT, BRO_SEAL_STEP_DEBUG_TRANSCRIPT };
   const char *to[] = { "makemkv-%s-log.txt", "makemkv-%s-debug-log.txt" };
@@ -293,19 +305,20 @@ _bro_seal_copy_logs (BroSealRun *r, const char *unit8, gboolean copy, GPtrArray 
   if (bro_file_system_exists (fs, log_file))
     {
       g_autofree char *name = g_strdup_printf ("bromelia-%s-log.txt", unit8);
-      g_autofree char *text = bro_seal_step_log_text (log, c->messages);
-      if (!_bro_seal_write_text (r, name, text, error))
+      char *text = bro_seal_step_log_text (log, messages);
+      g_autoptr (GBytes) bytes = g_bytes_new_take (text, strlen (text));
+      if (!write (data, name, bytes, error))
         return NULL;
       g_ptr_array_add (logs, g_steal_pointer (&name));
     }
   for (guint i = 0; i < G_N_ELEMENTS (from); i++)
     {
-      g_autofree char *source = g_strconcat (c->job_directory, "/", from[i], NULL);
+      g_autofree char *source = g_strconcat (job_directory, "/", from[i], NULL);
       g_autofree char *name = g_strdup_printf (to[i], unit8);
       g_autoptr (GBytes) bytes = NULL;
       if (!bro_file_system_exists (fs, source))
         continue;
-      if (!(bytes = bro_file_system_read (fs, source, error)) || !_bro_seal_write (r, name, bytes, error))
+      if (!(bytes = bro_file_system_read (fs, source, error)) || !write (data, name, bytes, error))
         return NULL;
       g_ptr_array_add (logs, g_steal_pointer (&name));
     }

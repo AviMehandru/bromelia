@@ -1,8 +1,9 @@
 {
-  "title": "A backup without a disc structure fails the check; it is kept in quarantine with the logs, but counts as nothing produced",
+  "title": "A backup without a disc structure fails the check; at the next start it is set aside in quarantine with the logs, but counts as nothing produced",
   "from": [
     "macos ReliabilityTests.folderWithoutADiscIsNotAcceptedAsAnISO",
-    "docs/configuration.md#output-folder-read-errors-and-checks"
+    "docs/configuration.md#output-folder-read-errors-and-checks",
+    "owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)"
   ],
   "given": {
     "drives": [
@@ -47,12 +48,34 @@
           }
         },
         "files": {
+          "under": "library",
+          "include": [
+            ".bromelia/staging/{jobId}/**/file"
+          ],
+          "exclude": [
+            "_Quarantine"
+          ]
+        }
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "files": {
           "under": "library/_Quarantine/Sample Movie [INCOMPLETE]",
           "include": [
             "INCOMPLETE.txt",
             "bromelia-{unit8}-log.txt",
-            "makemkv-{unit8}-log.txt"
+            "makemkv-{unit8}-log.txt",
+            "**/file"
           ]
+        },
+        "db": {
+          "archive_units": {
+            "count": 0
+          }
         }
       }
     }

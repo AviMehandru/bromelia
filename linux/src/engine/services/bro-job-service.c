@@ -1,9 +1,11 @@
 /* bro-job-service.c */
 #include "bro-job-service.h"
+#include "bro-archive-files.h"
 
 #include "bro-job-log.h"
 #include "bro-job-outcome.h"
 #include "bro-job-planner.h"
+#include "bro-keep-apart-step.h"
 #include "bro-log-line-dto.h"
 #include "bro-message-code.h"
 #include <string.h>
@@ -610,6 +612,28 @@ not_committing (Call *c, BroBroError **error)
   return TRUE;
 }
 
+/* job.alreadyCommitted once the job's unit is stored in a library (on a worker): committed, quarantined or missing (a unit
+ * still committing has an open intent, which not_committing refuses). */
+static gboolean
+not_committed (Call *c, BroBroError **error)
+{
+  BroBroError *failed = NULL;
+  g_autoptr (BroUnitRecord) unit = bro_unit_repository_get (bro_store_units (c->self->store), bro_archive_files_unit_id (&c->job_id), &failed);
+  if (failed)
+    {
+      *error = failed;
+      return FALSE;
+    }
+  if (unit && unit->state != BRO_UNIT_STATE_COMMITTING)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "jobId", bro_json_value_new_string (c->job_id.value));
+      *error = bro_bro_error_new (bro_message_code_wire (BRO_MSG_JOB_ALREADY_COMMITTED), params, NULL);
+      return FALSE;
+    }
+  return TRUE;
+}
+
 /* The steps from c->seq on are stored pending (outputs and errors cleared, checkpoints kept), unless a step before the
  * one asked for isn't done (c->bad_request). */
 static gboolean
@@ -630,7 +654,7 @@ reset_work (gpointer data, BroBroError **error)
     }
   if (index_of (steps, BRO_STEP_KIND_KEEP_APART) < 0 && (release < 0 || c->seq <= release))
     c->seq = 0;
-  if (c->seq < index_of (steps, BRO_STEP_KIND_COMMIT) && !not_committing (c, error))
+  if (c->seq < index_of (steps, BRO_STEP_KIND_COMMIT) && (!not_committing (c, error) || !not_committed (c, error)))
     return FALSE;
   for (guint i = 0; i < rows->len; i++)
     {
@@ -837,8 +861,9 @@ bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroStepKi
   load_then (c, retry_loaded);
 }
 
-/* The row at the first step not done is stored as keepApart pending (output, error and checkpoint cleared), unless the
- * job's Plan step didn't succeed (c->not_interrupted). */
+/* The row at the first step not done is stored as keepApart pending (output and error cleared, the checkpoint
+ * bro_keep_apart_step_kept of the job's outcome and error), unless the job's Plan step didn't succeed (c->not_interrupted);
+ * job.commitOpen while it has an open commit intent, job.alreadyCommitted once its unit is in a library. */
 static gboolean
 keep_apart_work (gpointer data, BroBroError **error)
 {
@@ -857,6 +882,8 @@ keep_apart_work (gpointer data, BroBroError **error)
       c->not_interrupted = TRUE;
       return TRUE;
     }
+  if (!not_committing (c, error) || !not_committed (c, error))
+    return FALSE;
   c->seq = (int) done->len;
   row = bro_step_record_new ();
   row->job_id = c->job_id;
@@ -864,6 +891,7 @@ keep_apart_work (gpointer data, BroBroError **error)
   row->kind = BRO_STEP_KIND_KEEP_APART;
   row->state = BRO_STEP_STATE_PENDING;
   row->attempt = 1;
+  row->checkpoint = bro_keep_apart_step_kept (c->record->outcome, c->record->error);
   return bro_step_repository_save (bro_store_steps (c->self->store), row, error);
 }
 
@@ -913,7 +941,10 @@ keep_apart_done (gpointer data, const BroBroError *error)
 static void
 keep_apart_loaded (Call *c)
 {
-  if (c->record->state != BRO_JOB_STATE_FINISHED || !c->record->has_outcome || c->record->outcome != BRO_OUTCOME_INTERRUPTED
+  BroOutcome outcome = c->record->outcome;
+  if (c->record->state != BRO_JOB_STATE_FINISHED || !c->record->has_outcome
+      || !(outcome == BRO_OUTCOME_INTERRUPTED || outcome == BRO_OUTCOME_FAILED || outcome == BRO_OUTCOME_CANCELLED)
+      || (c->record->plan && index_of (c->record->plan->steps, BRO_STEP_KIND_KEEP_APART) >= 0)
       || g_hash_table_contains (c->self->active, c->job_id.value) || g_hash_table_contains (c->self->restarting, c->job_id.value))
     {
       fail_with (c, BRO_MSG_JOB_NOT_INTERRUPTED, &c->job_id);

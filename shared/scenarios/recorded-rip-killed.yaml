@@ -1,8 +1,9 @@
-title: "Recorded makemkvcon run rip-killed: exit 143, a file written → failed"
+title: "Recorded makemkvcon run rip-killed: exit 143, a file written → failed; the file is set aside at the next start"
 from:
   - shared/fixtures/rip-outcomes.json
   - macos RecordedRunTests.everyRecordedRunEndsAsExpected
   - docs/architecture.md#stopping-processes
+  - owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)
 given:
   disc: sample-movie
   tools: {makemkvcon: tools/makemkvcon-recorded-rip-killed.yaml}
@@ -10,4 +11,8 @@ steps:
   - rip: {iso: true, titles: [0], as: job}
   - expect:
       job: {name: job, outcome: failed, errorText: "exit status 143"}
-      files: {under: library, include: ["_Quarantine/Sample Movie [INCOMPLETE]/*.mkv"], exclude: ["Sample Movie"]}
+      files: {under: library, include: [".bromelia/staging/{jobId}/*.mkv"], exclude: ["Sample Movie", "_Quarantine"]}
+  - restart: {}
+  - expect:
+      job: {name: job, outcome: failed}
+      files: {under: library, include: ["_Quarantine/Sample Movie [INCOMPLETE]/*.mkv"], exclude: ["Sample Movie", ".bromelia/staging/{jobId}"]}

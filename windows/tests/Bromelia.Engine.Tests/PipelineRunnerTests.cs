@@ -176,7 +176,7 @@ public sealed class PipelineRunnerTests
                 var queue = EnumWire.Parse<Queue>(j["queue"]?.AsString ?? "acquisition")!.Value;
                 var jobState = EnumWire.Parse<JobState>(j["state"]?.AsString ?? "queued")!.Value;
                 var created = j["created"]?.AsString is { } c ? Instant.Parse(c)!.Value : W.Clock.Now();
-                var record = new JobRecord(id, kind, null, jobState, EnumWire.Parse<Outcome>(j["outcome"]?.AsString), null, null, null, queue,
+                var record = new JobRecord(id, kind, null, jobState, EnumWire.Parse<Outcome>(j["outcome"]?.AsString), j["error"] is { } e ? Error(e) : null, null, null, queue,
                     (int)(j["position"]?.AsInteger ?? 0), request.DriveId, request.MediaGeneration, request.Automatic, null, title, null, request, plan,
                     null, created, FinishedAt: jobState == JobState.Finished ? W.Clock.Now() : null);
                 ((IJobRepository)Store).Insert(record).Wait();
@@ -189,6 +189,7 @@ public sealed class PipelineRunnerTests
                         new StepOutput(k, d["output"] ?? EmptyObject, null, (int)(d["readErrors"]?.AsInteger ?? 0)), null, d["checkpoint"])).Wait();
                 }
                 if (j["intent"]?.AsBool == true) Store.OpenIntent(id);
+                if (j["unit"]?.AsString is { } unit) Store.StoreUnit(id, EnumWire.Parse<UnitState>(unit)!.Value);
                 if (j["log"] is { } log)
                 {
                     long line = 0;

@@ -9,17 +9,18 @@ using Bromelia.Ports;
 
 namespace Bromelia.Engine;
 
-/// <summary>The step JobService.keepApart puts in place of an interrupted job's interrupted step and what follows (owner,
-/// 2026-10-03 and 2026-10-25; plan §20.1, §20.4): the job isn't continued, and what it left in staging becomes a sealed
-/// unit in &lt;library&gt;/_Quarantine/&lt;name&gt; [INCOMPLETE] with a quarantined row of status incomplete.
+/// <summary>The step JobService.keepApart puts in place of the step an interrupted, failed or cancelled job stopped at and
+/// what follows (owner, 2026-10-03 and 2026-10-25; plan §20.1, §20.4): the job isn't continued, and what it left in staging
+/// becomes a sealed unit in &lt;library&gt;/_Quarantine/&lt;name&gt; [INCOMPLETE] with a quarantined row of status incomplete.
 /// <list type="number">
 /// <item>Sealed as Seal seals, but with no produced lists (Acquire never finished): every visible file in staging (none
 /// hidden by its first byte, not one of Bromelia's own at the top; leftovers of a stopped write removed) is synced, then
 /// each folder down to it (archive.synced), and hashed read back from disk (archive.hashFromDisk) with archive.hashing
-/// progress. SHA256SUMS, the logs as Seal copies them, INCOMPLETE.txt (the note recovery writes, with the logs) and the
-/// record (status incomplete, no titles acquired) are written atomically; an earlier attempt's own files that this one
-/// doesn't write go. Staging with no such file holds nothing to keep: its empty folders are removed and no unit is
-/// made.</item>
+/// progress. SHA256SUMS, the logs as Seal copies them, INCOMPLETE.txt (the note recovery writes, with the logs, for the
+/// outcome and error of the "outcome" checkpoint JobService stores with the step: interrupted without one) and the record
+/// (status incomplete, no titles acquired) are written atomically; an earlier attempt's own files that this one doesn't
+/// write go. Staging with no such file (a job that stopped before Acquire has an empty one) holds nothing to keep: its
+/// empty folders are removed and no unit is made.</item>
 /// <item>The checkpoint "sealed" (the files and Bromelia's own files) is saved before the unit is handed to the library: a
 /// rerun with it doesn't seal again (staging may already be moving) and hands over the same unit.</item>
 /// <item>library.quarantine(unit, intent, files, "INCOMPLETE"): the intent's items are staging's top-level entries that
@@ -35,6 +36,7 @@ public sealed class KeepApartStep : IStep
     public const string Tag = "INCOMPLETE";
     public const string Note = "INCOMPLETE.txt";
     public const string SealedCheckpoint = "sealed";
+    public const string OutcomeCheckpoint = "outcome";
     const string QuarantineFolder = "_Quarantine";
 
     public StepKind Kind => StepKind.KeepApart;
@@ -78,6 +80,15 @@ public sealed class KeepApartStep : IStep
         context.Log.Log(new BroMessage(MessageCode.RecoveryKeptApart, Severity.Warning, ("path", JsonValue.Of(result.Destination))));
         var kept = result.Destination.StartsWith(root + "/", StringComparison.Ordinal) ? result.Destination[(root.Length + 1)..] : result.Destination;
         return StepReport.Done(CommitOutput.Encode(new CommitOutput(unitId, plan.LibraryId, kept, false, true)));
+    }
+
+    /// <summary>The checkpoint JobService.keepApart stores with the step: the outcome the job had (interrupted, failed,
+    /// cancelled) and its error, which the note names.</summary>
+    public static JsonValue Kept(Outcome outcome, BroError? error)
+    {
+        var members = new List<(string, JsonValue)> { ("kind", JsonValue.Of(OutcomeCheckpoint)), ("outcome", JsonValue.Of(EnumWire.Name(outcome))) };
+        if (error != null) members.Add(("error", JsonDto.Error(error)));
+        return JsonValue.Of(members.ToArray());
     }
 
     /// <summary>Seals what staging holds; its files (none: nothing to keep, staging's empty folders removed) and Bromelia's
@@ -132,7 +143,11 @@ public sealed class KeepApartStep : IStep
         context.Log.Log(new BroMessage(MessageCode.ArchiveChecksumsWritten, Severity.Info, ("count", JsonValue.Of(files.Count)),
             ("file", JsonValue.Of(Sha256Sums.FileName))));
         var (log, logs) = SealStep.CopyLogs(context, unit8, copyLogs, Write);
-        var lines = Notes.Render(context.Job.Id, Outcome.Interrupted, null, Array.Empty<RobotMessage>(), logs);
+        var kept = context.Checkpoint.Saved is { } k && k["kind"]?.AsString == OutcomeCheckpoint ? k : null;
+        var error = kept?["error"] is JsonValue.Object e && e["code"]?.AsString is { } code
+            ? new BroError(code, e["params"] as JsonValue.Object ?? new JsonValue.Object(new List<KeyValuePair<string, JsonValue>>())) : null;
+        var lines = Notes.Render(context.Job.Id, EnumWire.Parse<Outcome>(kept?["outcome"]?.AsString) ?? Outcome.Interrupted, error,
+            Array.Empty<RobotMessage>(), logs);
         Write(Note, Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => context.Messages.Render(l) + "\n"))));
         var record = "bromelia-" + unit8 + ".json";
         var acquired = new AcquireOutput(new List<AcquiredTitle>(), new List<string>(), null, null, new List<string>());
