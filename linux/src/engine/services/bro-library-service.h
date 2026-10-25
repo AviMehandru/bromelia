@@ -4,7 +4,8 @@
  * offline library is blocked in the scheduler and raised as a problem. A check that hasn't come back by the next tick (a
  * share that froze, review L3-9) counts as offline and isn't started again until it comes back. As the BroLibraryPort
  * of the steps it gives staging folders and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on
- * the caller's worker. State is touched only on the executor; the steps read a snapshot.
+ * the caller's worker, one at a time per unit: a commit waits while a roll forward of its unit runs (recovery's may
+ * outlast its 30 s at startup on a slow share). State is touched only on the executor; the steps read a snapshot.
  * shared/fixtures/engine/library-service.cases.json. */
 #pragma once
 
@@ -59,10 +60,16 @@ void bro_library_service_check (BroLibraryService *self, BroLibraryDone done, gp
 void bro_library_service_attach (BroLibraryService *self, const char *library_id, const char *path, const char *name, BroLibraryDtoDone done,
                                  gpointer data, GDestroyNotify destroy);
 
-/* Finishes an interrupted commit (§15.8): the marker checked, then what is left moved (a file already at its
- * destination counts when its SHA-256 is the item's), SHA256SUMS merged, the folders synced and the unit committed, its
- * files read from the destination's SHA256SUMS. On a worker, never the executor. NULL and @error set on failure. */
+/* Finishes an interrupted commit (§15.8): once no other commit of the unit runs, the marker checked, then what is left
+ * of the unit's open intent (read again: @intent may be stale) moved (a file already at its destination counts when its
+ * SHA-256 is the item's), SHA256SUMS merged, the folders synced and the unit committed, its files read from the
+ * destination's SHA256SUMS. On a worker, never the executor. NULL and @error set on failure; NULL with @error unset when
+ * the intent is no longer open (the job's Commit finished it meanwhile). */
 BroCommitResult *bro_library_service_roll_forward (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **error);
+
+/* Commits and roll forwards waiting for another one of their unit to finish (a test or scenario runner counts them as
+ * parked when it settles). Any thread. */
+int bro_library_service_waiting (BroLibraryService *self);
 
 /* The folders in the library's .bromelia/staging (one per job, named by its id), in ordinal order (char *, the caller
  * frees the array), once the marker checks out (from the configuration itself, so it works before start). On a

@@ -124,7 +124,10 @@ public final class JobService {
     /// The same job's steps from there are stored pending (their checkpoints kept), its plan cut back after Plan when Plan
     /// runs again, and its record queued again (no outcome, by hand, no media generation; acquisition up to Release, else
     /// processing) with job.retried {step} in its log, then it runs like a new one. job.notFound; job.notRetryable for any
-    /// other job (read errors and failed post steps get retries of their own).
+    /// other job (read errors and failed post steps get retries of their own). While the job has an open commit intent
+    /// (its files are partly in the library), only a retry from Commit is taken, which finishes it: any other is
+    /// job.commitOpen (a step before Commit would change staging under the intent; a new job would archive the disc again
+    /// beside it).
     public func retry(_ jobId: Id, fromStep: StepKind? = nil) async throws(BroError) -> JobDto {
         let record = try await load(jobId)
         let notRetryable = BroError(MessageCode.wire(.jobNotRetryable), [("jobId", .string(jobId.value))])
@@ -133,6 +136,7 @@ public final class JobService {
             var request = record.request
             request.automatic = false
             request.mediaGeneration = nil
+            try await notCommitting(jobId)
             return try await create(request)
         }
         guard [.failed, .cancelled, .interrupted].contains(outcome) else { throw notRetryable }
@@ -152,6 +156,7 @@ public final class JobService {
         }
         let release = steps.firstIndex(of: .release)
         if release == nil || seq <= release! { seq = 0 }
+        if let commit = steps.firstIndex(of: .commit), seq < commit { try await notCommitting(jobId) }
         for row in rows where row.seq >= seq {
             var pending = row
             pending.state = .pending
@@ -364,6 +369,15 @@ public final class JobService {
             throw BroError(MessageCode.wire(.jobNotFound), [("jobId", .string(jobId.value))])
         }
         return record
+    }
+
+    /// job.commitOpen while the job has an open commit intent.
+    private func notCommitting(_ jobId: Id) async throws(BroError) {
+        let store = store
+        let intents = try await executor.worker { () async throws(BroError) -> [CommitIntent] in try await store.units().openIntents() }
+        if intents.contains(where: { $0.jobId == jobId }) {
+            throw BroError(MessageCode.wire(.jobCommitOpen), [("jobId", .string(jobId.value))])
+        }
     }
 
     /// Fails unless the job waits to start a step (queued, waiting for resources, blocked).

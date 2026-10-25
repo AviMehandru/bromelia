@@ -460,7 +460,7 @@ roll_forward_all (BroRecoveryService *self, const char *library_id)
           log_line (self, &intent->job_id, line, NULL);
           remove_leftovers (self->fs, intent->destination, FALSE);
         }
-      else
+      else if (e) /* no result and no error: the job's Commit finished it meanwhile */
         {
           /* The intent stays: the job's Commit step rolls it forward when it runs again. */
           BroMessageCode code = BRO_MSG_INTERNAL_UNEXPECTED;

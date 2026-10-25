@@ -4,8 +4,9 @@ using Bromelia.Ports;
 
 namespace Bromelia.Engine.Tests;
 
-/// <summary>Jobs and steps in memory (the rest of the store isn't needed by these tests). Thread-safe.</summary>
-internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
+/// <summary>Jobs and steps in memory, and the open commit intents (the rest of the store isn't needed by these tests).
+/// Thread-safe.</summary>
+internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository, IUnitRepository
 {
     readonly object _lock = new();
     readonly Dictionary<Id, JobRecord> _jobs = new();
@@ -13,7 +14,7 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
 
     public IJobRepository Jobs() => this;
     public IStepRepository Steps() => this;
-    public IUnitRepository Units() => throw new NotSupportedException();
+    public IUnitRepository Units() => this;
     public ICatalogRepository Catalog() => throw new NotSupportedException();
     public ICheckRepository Checks() => throw new NotSupportedException();
     public IReplicaRepository Replicas() => throw new NotSupportedException();
@@ -158,6 +159,29 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository
     {
         lock (_lock) return Task.FromResult<IReadOnlyList<StepRecord>>(_steps.Values.Where(s => s.JobId == jobId).OrderBy(s => s.Seq).ToList());
     }
+
+    readonly List<CommitIntent> _intents = new();
+
+    /// <summary>An open commit intent of the job (its unit is half moved into a library).</summary>
+    public void OpenIntent(Id jobId)
+    {
+        lock (_lock)
+            _intents.Add(new CommitIntent(new Id("unit-" + jobId.Value), jobId, "/lib/.bromelia/staging/" + jobId.Value, "/lib/Unit", false, false,
+                new Instant(0), new List<CommitItem>()));
+    }
+
+    Task<IReadOnlyList<CommitIntent>> IUnitRepository.OpenIntents()
+    {
+        lock (_lock) return Task.FromResult<IReadOnlyList<CommitIntent>>(_intents.ToList());
+    }
+
+    Task IUnitRepository.BeginCommit(UnitRecord unit, CommitIntent intent) => throw new NotSupportedException();
+    Task IUnitRepository.MarkMoved(Id unitId, int seq) => throw new NotSupportedException();
+    Task IUnitRepository.FinishCommit(CommitIntent intent, UnitRecord record, IReadOnlyList<UnitFile> files) => throw new NotSupportedException();
+    Task<UnitRecord?> IUnitRepository.Get(Id unitId) => throw new NotSupportedException();
+    Task<IReadOnlyList<UnitRecord>> IUnitRepository.Query(UnitQuery query) => throw new NotSupportedException();
+    Task<IReadOnlyList<UnitRecord>> IUnitRepository.LeastRecentlyVerified(int limit) => throw new NotSupportedException();
+    Task IUnitRepository.MarkMissing(Id unitId) => throw new NotSupportedException();
 
     public JobRecord? Job(Id id)
     {

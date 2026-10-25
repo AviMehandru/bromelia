@@ -586,6 +586,25 @@ steps_of (const BroJobRecord *record)
   return record->plan ? g_array_copy (record->plan->steps) : bro_job_planner_initial (record->request);
 }
 
+/* job.commitOpen while the job has an open commit intent (on a worker): its files are partly in the library, and only a
+ * retry from Commit finishes that move. */
+static gboolean
+not_committing (Call *c, BroBroError **error)
+{
+  g_autoptr (GPtrArray) intents = bro_unit_repository_open_intents (bro_store_units (c->self->store), error);
+  if (!intents)
+    return FALSE;
+  for (guint i = 0; i < intents->len; i++)
+    if (strcmp (((BroCommitIntent *) intents->pdata[i])->job_id.value, c->job_id.value) == 0)
+      {
+        BroJsonValue *params = bro_json_value_new_object ();
+        bro_json_value_set (params, "jobId", bro_json_value_new_string (c->job_id.value));
+        *error = bro_bro_error_new (bro_message_code_wire (BRO_MSG_JOB_COMMIT_OPEN), params, NULL);
+        return FALSE;
+      }
+  return TRUE;
+}
+
 /* The steps from c->seq on are stored pending (outputs and errors cleared, checkpoints kept), unless a step before the
  * one asked for isn't done (c->bad_request). */
 static gboolean
@@ -606,6 +625,8 @@ reset_work (gpointer data, BroBroError **error)
     }
   if (release < 0 || c->seq <= release)
     c->seq = 0;
+  if (c->seq < index_of (steps, BRO_STEP_KIND_COMMIT) && !not_committing (c, error))
+    return FALSE;
   for (guint i = 0; i < rows->len; i++)
     {
       BroStepRecord *row = rows->pdata[i];
@@ -726,11 +747,39 @@ reset_done (gpointer data, const BroBroError *error)
   }
 }
 
+static gboolean
+again_work (gpointer data, BroBroError **error)
+{
+  return not_committing (data, error);
+}
+
+/* A new job with the same request, started by hand. */
+static void
+again_done (gpointer data, const BroBroError *error)
+{
+  Call *c = data;
+  g_autoptr (BroJobRequest) request = NULL;
+  Call *to;
+  if (error)
+    {
+      fail (c, error);
+      return;
+    }
+  request = bro_job_request_copy (c->record->request);
+  request->automatic = FALSE;
+  request->has_media_generation = FALSE;
+  request->media_generation = 0;
+  to = call_hand_off (c);
+  bro_job_service_create (c->self, request, to->job_done, to->data, to->destroy);
+  to->job_done = NULL;
+  to->data = NULL;
+  to->destroy = NULL;
+  call_free (to);
+}
+
 static void
 retry_loaded (Call *c)
 {
-  g_autoptr (BroJobRequest) request = NULL;
-  Call *to;
   BroOutcome outcome = c->record->outcome;
   if (c->record->state != BRO_JOB_STATE_FINISHED || !c->record->has_outcome || g_hash_table_contains (c->self->active, c->job_id.value)
       || (c->has_from_step && !(outcome == BRO_OUTCOME_FAILED || outcome == BRO_OUTCOME_CANCELLED || outcome == BRO_OUTCOME_INTERRUPTED))
@@ -758,17 +807,7 @@ retry_loaded (Call *c)
       bro_engine_executor_worker (c->self->executor, reset_work, reset_done, c, call_free);
       return;
     }
-  request = bro_job_request_copy (c->record->request);
-  request->automatic = FALSE;
-  request->has_media_generation = FALSE;
-  request->media_generation = 0;
-  to = call_hand_off (c);
-  bro_job_service_create (c->self, request, to->job_done, to->data, to->destroy);
-  to->job_done = NULL;
-  to->data = NULL;
-  to->destroy = NULL;
-  call_free (to);
-  call_free (c);
+  bro_engine_executor_worker (c->self->executor, again_work, again_done, c, call_free);
 }
 
 void

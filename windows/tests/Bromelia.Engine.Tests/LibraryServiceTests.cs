@@ -4,6 +4,7 @@ using Bromelia.Foundation;
 using Bromelia.Ports;
 using Xunit;
 using static Bromelia.Tests.Fixtures;
+using CancellationSource = Bromelia.Foundation.CancellationSource;
 using FileInfo = Bromelia.Ports.FileInfo;
 
 namespace Bromelia.Engine.Tests;
@@ -431,7 +432,7 @@ public sealed class LibraryServiceTests
                 var checkedIt = new ManualResetEventSlim();
                 w.Executor.Post(() =>
                 {
-                    ok = w.Executor.Activity == Volatile.Read(ref tree.Held);
+                    ok = w.Executor.Activity == Volatile.Read(ref tree.Held) + service.Waiting;
                     checkedIt.Set();
                 });
                 if (!checkedIt.Wait(Patience)) throw new TimeoutException("the executor didn't run the check");
@@ -451,6 +452,8 @@ public sealed class LibraryServiceTests
             var ops = given["ops"]!.AsArray!;
             var results = new JsonValue?[ops.Count];
             var done = new List<ManualResetEventSlim>();
+            var doneOf = new Dictionary<int, ManualResetEventSlim>();
+            var cancels = new Dictionary<int, CancellationSource>();
             void Wait(ManualResetEventSlim d)
             {
                 if (!d.Wait(Patience)) throw new TimeoutException("an op didn't finish");
@@ -485,6 +488,10 @@ public sealed class LibraryServiceTests
             {
                 var d = new ManualResetEventSlim();
                 done.Add(d);
+                doneOf[i] = d;
+                // An op that doesn't wait has entered the service once one more call is held or waits for its unit (the
+                // executor doesn't count it before it reaches a worker).
+                var before = Volatile.Read(ref tree.Held) + service.Waiting;
                 var task = Task.Run(async () =>
                 {
                     results[i] = await CatchingAsync(op);
@@ -494,7 +501,7 @@ public sealed class LibraryServiceTests
                 else
                 {
                     var until = DateTime.UtcNow + Patience;
-                    while (Volatile.Read(ref tree.Held) == 0 && !d.IsSet)
+                    while (Volatile.Read(ref tree.Held) + service.Waiting <= before && !d.IsSet)
                     {
                         if (DateTime.UtcNow > until) throw new TimeoutException("the op never reached its held call");
                         Thread.Sleep(1);
@@ -607,10 +614,25 @@ public sealed class LibraryServiceTests
                                 x.AsArray![3].AsBool!.Value, false)).ToList());
                         var files = fileRows.Select(f => new UnitFile(f.AsArray![0].AsString!, f.AsArray![1].AsInteger!.Value, f.AsArray![2].AsString!, f.AsArray![3].AsString!)).ToList();
                         var tag = arg["tag"]?.AsString;
-                        OffExecutor(i, arg, async () => ResultJson(tag == null ? await service.Commit(unit, intent, files)
-                            : await service.Quarantine(unit, intent, files, tag)));
+                        var cancel = cancels[i] = new CancellationSource();
+                        OffExecutor(i, arg, async () => ResultJson(tag == null ? await service.Commit(unit, intent, files, cancel.Token)
+                            : await service.Quarantine(unit, intent, files, tag, cancel.Token)));
                         break;
                     }
+                    case "cancel":
+                    {
+                        // Cancels the commit of op <arg> and waits for it to end.
+                        var at = (int)arg.AsInteger!.Value;
+                        cancels[at].Cancel();
+                        Wait(doneOf[at]);
+                        Settle();
+                        results[i] = JsonValue.Of("ok");
+                        break;
+                    }
+                    case "waiting":
+                        Settle();
+                        results[i] = JsonValue.Of((long)service.Waiting);
+                        break;
                     case "restart":
                         w.OnExecutor(() => service.Stop());
                         Settle();
@@ -623,7 +645,7 @@ public sealed class LibraryServiceTests
                             var list = new List<JsonValue>();
                             foreach (var intent in await db.OpenIntents())
                             {
-                                try { list.Add(ResultJson(await service.RollForward(intent))); }
+                                try { list.Add(await service.RollForward(intent) is { } r ? ResultJson(r) : JsonValue.Null.Instance); }
                                 catch (BroFailure f) { list.Add(ErrorJson(f.Error)); }
                             }
                             return JsonValue.Of(list);

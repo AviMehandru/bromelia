@@ -882,9 +882,12 @@ typedef struct {
   GCond cond;
   BroJsonValue **results;
   gboolean *done;
+  BroCancellationSource **cancels; /* each commit op's own */
   guint n_ops;
   const char *crash_at;
   gboolean crashed;
+  GPtrArray *failures;
+  const char *id;
 } LibraryHarness;
 
 static BroJsonValue *
@@ -939,7 +942,8 @@ settle_check_action (gpointer data)
 {
   SettleCheck *c = data;
   /* Posted alone (no barrier after it), so the executor's activity counts only the engine's own work. */
-  gboolean ok = bro_engine_executor_activity (c->h->executor) == tree_held (c->h->tree);
+  int waiting = c->h->service ? bro_library_service_waiting (c->h->service) : 0; /* the recovery harness has its own service */
+  gboolean ok = bro_engine_executor_activity (c->h->executor) == tree_held (c->h->tree) + waiting;
   g_mutex_lock (&c->h->lock);
   c->ok = ok;
   c->checked = TRUE;
@@ -968,7 +972,10 @@ library_settle (gpointer data)
       if (ok)
         return;
       if (g_get_monotonic_time () > until)
-        g_error ("%s: the service didn't settle", library_case_id);
+        {
+          bro_test_fail (h->failures, h->id, "the service didn't settle");
+          return;
+        }
       g_usleep (1000);
     }
 }
@@ -1031,6 +1038,7 @@ typedef struct {
   BroCommitIntent *intent;
   GPtrArray *files;
   char *tag;
+  BroCancellationToken *cancel;
   BroJsonValue *result;
 } LibraryOp;
 
@@ -1043,6 +1051,7 @@ library_op_free (gpointer data)
   if (o->files)
     g_ptr_array_unref (o->files);
   g_free (o->tag);
+  g_clear_pointer (&o->cancel, bro_cancellation_token_unref);
   if (o->result)
     bro_json_value_unref (o->result);
   g_free (o);
@@ -1112,9 +1121,9 @@ commit_work (gpointer data, BroBroError **unused)
   g_autoptr (BroBroError) error = NULL;
   g_autoptr (BroCommitResult) r = NULL;
   if (o->tag)
-    r = bro_library_port_quarantine (BRO_LIBRARY_PORT (o->h->service), o->unit, o->intent, o->files, o->tag, &error);
+    r = bro_library_port_quarantine (BRO_LIBRARY_PORT (o->h->service), o->unit, o->intent, o->files, o->tag, o->cancel, &error);
   else
-    r = bro_library_port_commit (BRO_LIBRARY_PORT (o->h->service), o->unit, o->intent, o->files, &error);
+    r = bro_library_port_commit (BRO_LIBRARY_PORT (o->h->service), o->unit, o->intent, o->files, o->cancel, &error);
   o->result = r ? result_json (r) : library_error_json (error);
   return TRUE;
 }
@@ -1129,7 +1138,8 @@ roll_forward_work (gpointer data, BroBroError **unused)
     {
       g_autoptr (BroBroError) error = NULL;
       g_autoptr (BroCommitResult) r = bro_library_service_roll_forward (o->h->service, open->pdata[i], &error);
-      bro_json_value_append (o->result, r ? result_json (r) : library_error_json (error));
+      /* null: the intent was no longer open */
+      bro_json_value_append (o->result, r ? result_json (r) : error ? library_error_json (error) : bro_json_value_new_null ());
     }
   return TRUE;
 }
@@ -1328,21 +1338,34 @@ run_library_op (LibraryHarness *h, guint i, BroJsonValue *op, GPtrArray *async)
             }
           if (strcmp (name, "quarantine") == 0)
             o->tag = g_strdup (bro_json_value_get_string (bro_json_value_member (arg, "tag"), ""));
+          h->cancels[i] = bro_cancellation_source_new ();
+          o->cancel = bro_cancellation_token_ref (bro_cancellation_source_token (h->cancels[i]));
         }
-      bro_engine_executor_post (h->executor, worker_op_action, o, NULL);
-      if (wait)
-        library_wait_for (h, i);
-      else
-        {
-          gint64 until = g_get_monotonic_time () + 10 * G_TIME_SPAN_SECOND;
-          g_ptr_array_add (async, GUINT_TO_POINTER (i));
-          while (tree_held (h->tree) == 0)
-            {
-              if (g_get_monotonic_time () > until)
-                g_error ("%s: the op never reached its held call", library_case_id);
-              g_usleep (1000);
-            }
-        }
+      {
+        /* An op that doesn't wait has entered the service once one more call is held or waits for its unit (the
+         * executor doesn't count it before it reaches a worker). */
+        int before = tree_held (h->tree) + bro_library_service_waiting (h->service);
+        bro_engine_executor_post (h->executor, worker_op_action, o, NULL);
+        if (wait)
+          library_wait_for (h, i);
+        else
+          {
+            gint64 until = g_get_monotonic_time () + 10 * G_TIME_SPAN_SECOND;
+            g_ptr_array_add (async, GUINT_TO_POINTER (i));
+            for (;;)
+              {
+                gboolean ended;
+                g_mutex_lock (&h->lock);
+                ended = h->done[i];
+                g_mutex_unlock (&h->lock);
+                if (ended || tree_held (h->tree) + bro_library_service_waiting (h->service) > before)
+                  break;
+                if (g_get_monotonic_time () > until)
+                  g_error ("%s: the op never reached its held call", library_case_id);
+                g_usleep (1000);
+              }
+          }
+      }
       library_settle (h);
       return;
     }
@@ -1451,6 +1474,22 @@ run_library_op (LibraryHarness *h, guint i, BroJsonValue *op, GPtrArray *async)
     }
   else if (strcmp (name, "dump") == 0)
     library_record (h, i, intents_json (h->db));
+  else if (strcmp (name, "cancel") == 0)
+    {
+      /* Cancels the commit of op <arg> and waits for it to end. */
+      guint at = (guint) bro_json_value_get_integer (arg, -1);
+      if (at >= h->n_ops || !h->cancels[at])
+        g_error ("%s: no commit op %u", library_case_id, at);
+      bro_cancellation_source_cancel (h->cancels[at]);
+      library_wait_for (h, at);
+      library_settle (h);
+      library_record (h, i, bro_json_value_new_string ("ok"));
+    }
+  else if (strcmp (name, "waiting") == 0)
+    {
+      library_settle (h);
+      library_record (h, i, bro_json_value_new_integer (bro_library_service_waiting (h->service)));
+    }
   else
     g_error ("unknown op %s", name);
   g_free (o);
@@ -1614,6 +1653,9 @@ library_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
   h.n_ops = bro_json_value_length (ops);
   h.results = g_new0 (BroJsonValue *, h.n_ops + 1);
   h.done = g_new0 (gboolean, h.n_ops + 1);
+  h.cancels = g_new0 (BroCancellationSource *, h.n_ops + 1);
+  h.failures = failures;
+  h.id = id;
   h.crash_at = bro_json_value_get_string (bro_json_value_member (given, "crashAt"), NULL);
   bro_json_value_set (h.config->document, "version", bro_json_value_new_integer (3));
   list = bro_json_value_member (given, "config");
@@ -1744,6 +1786,10 @@ library_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
       bro_json_value_unref (h.results[i]);
   g_free (h.results);
   g_free (h.done);
+  for (guint i = 0; i < h.n_ops; i++)
+    if (h.cancels[i])
+      bro_cancellation_source_free (h.cancels[i]);
+  g_free (h.cancels);
   g_mutex_clear (&h.lock);
   g_cond_clear (&h.cond);
   return TRUE;

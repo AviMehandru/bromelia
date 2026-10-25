@@ -65,6 +65,7 @@ private final class RecoveryWorld {
     var recovered = false
     var subscription: Subscription?
     var service: RecoveryService!
+    var library: LibraryService!
     var problems: ProblemService!
 }
 
@@ -174,6 +175,7 @@ struct RecoveryServiceTests {
             let scheduler = Scheduler(executor: world.executor, bus: bus, limits: SchedulerLimits())
             let library = LibraryService(executor: world.executor, bus: bus, problems: problems, scheduler: scheduler, config: config,
                                          clock: world.engineClock, fs: tree, libraries: db, units: db)
+            state.library = library
             state.service = RecoveryService(executor: world.executor, bus: bus, problems: problems, store: store, registry: registry, library: library,
                                       config: config, clock: world.engineClock, fs: tree, isolation: isolation, renderer: Renderer(), dataDirectory: "/data")
             state.subscription = bus.subscribe(types: [.jobChanged, .jobFinished, .problemRaised]) { state.events.append($0) }
@@ -226,6 +228,32 @@ struct RecoveryServiceTests {
                 }
                 try await settle()
                 await world.onExecutor { state.results[i] = .string("ok") }
+            case "startLibraries":
+                let started = Task { @EngineActor () -> JsonValue in
+                    do throws(BroError) {
+                        try await state.library.start()
+                        return .string("ok")
+                    } catch {
+                        return .object([("error", errorJson(error)!)])
+                    }
+                }
+                let result = await started.value
+                try await settle()
+                await world.onExecutor { state.results[i] = result }
+            case "commit":
+                // As a step calls the port: off the executor, the stored unit with its stored open intent.
+                let unitId = Id(arg.string!)
+                let unit = db.units[unitId.value]!
+                let intent = db.open().first { $0.unitId == unitId }!
+                let library = await world.onExecutorValue { state.library! }
+                let result: JsonValue
+                do throws(BroError) {
+                    result = .string(try await library.commit(unit, intent: intent, files: [], cancel: CancellationSource().token).destination)
+                } catch {
+                    result = .object([("error", errorJson(error)!)])
+                }
+                try await settle()
+                await world.onExecutor { state.results[i] = result }
             default:
                 throw FixtureError("unknown op \(name)")
             }

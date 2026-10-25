@@ -200,6 +200,66 @@ recovered_action (gpointer data)
   library_record (&h->lib, o->index, bro_json_value_new_bool (done));
 }
 
+static void
+libraries_started (const BroBroError *error, gpointer data)
+{
+  RecoveryOp *o = data;
+  library_record (&o->h->lib, o->index, error ? library_error_json (error) : bro_json_value_new_string ("ok"));
+}
+
+static void
+start_libraries_action (gpointer data)
+{
+  RecoveryOp *o = data;
+  bro_library_service_start (o->h->library, libraries_started, o, g_free);
+}
+
+typedef struct {
+  RecoveryHarness *h;
+  guint index;
+  const char *unit_id;
+  BroJsonValue *result;
+} RecoveryCommit;
+
+/* As a step calls the port: on a worker, the stored unit with its stored open intent, no files and a token of its own. */
+static gboolean
+recovery_commit_work (gpointer data, BroBroError **unused)
+{
+  RecoveryCommit *o = data;
+  BroId id = { { 0 } };
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (BroUnitRecord) unit = NULL;
+  g_autoptr (GPtrArray) open = bro_unit_repository_open_intents (BRO_UNIT_REPOSITORY (o->h->lib.db), NULL);
+  g_autoptr (GPtrArray) files = g_ptr_array_new ();
+  g_autoptr (BroCancellationSource) cancel = bro_cancellation_source_new ();
+  g_autoptr (BroCommitResult) r = NULL;
+  const BroCommitIntent *intent = NULL;
+  g_strlcpy (id.value, o->unit_id, sizeof id.value);
+  unit = bro_unit_repository_get (BRO_UNIT_REPOSITORY (o->h->lib.db), id, NULL);
+  for (guint i = 0; open && i < open->len && !intent; i++)
+    if (strcmp (((BroCommitIntent *) open->pdata[i])->unit_id.value, o->unit_id) == 0)
+      intent = open->pdata[i];
+  g_assert_nonnull (unit);
+  g_assert_nonnull (intent);
+  r = bro_library_port_commit (BRO_LIBRARY_PORT (o->h->library), unit, intent, files, bro_cancellation_source_token (cancel), &error);
+  o->result = r ? bro_json_value_new_string (r->destination) : library_error_json (error);
+  return TRUE;
+}
+
+static void
+recovery_commit_done (gpointer data, const BroBroError *error)
+{
+  RecoveryCommit *o = data;
+  library_record (&o->h->lib, o->index, g_steal_pointer (&o->result));
+}
+
+static void
+recovery_commit_action (gpointer data)
+{
+  RecoveryCommit *o = data;
+  bro_engine_executor_worker (o->h->lib.executor, recovery_commit_work, recovery_commit_done, o, g_free);
+}
+
 /* 'jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'. */
 static void
 recovery_gather_action (gpointer data)
@@ -462,6 +522,8 @@ recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   h.lib.n_ops = bro_json_value_length (ops);
   h.lib.results = g_new0 (BroJsonValue *, h.lib.n_ops + 1);
   h.lib.done = g_new0 (gboolean, h.lib.n_ops + 1);
+  h.lib.failures = failures;
+  h.lib.id = id;
   h.store = g_object_new (TEST_TYPE_MEMORY_STORE, NULL);
   h.store->units = g_object_ref (BRO_UNIT_REPOSITORY (h.lib.db));
   h.store->libraries = g_object_ref (BRO_LIBRARY_REPOSITORY (h.lib.db));
@@ -555,6 +617,25 @@ recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
             }
           library_settle (&h.lib);
           library_record (&h.lib, i, bro_json_value_new_string ("ok"));
+        }
+      else if (strcmp (name, "startLibraries") == 0)
+        {
+          RecoveryOp *o = g_new0 (RecoveryOp, 1);
+          o->h = &h;
+          o->index = i;
+          bro_engine_executor_post (h.lib.executor, start_libraries_action, o, NULL);
+          library_wait_for (&h.lib, i);
+          library_settle (&h.lib);
+        }
+      else if (strcmp (name, "commit") == 0)
+        {
+          RecoveryCommit *o = g_new0 (RecoveryCommit, 1);
+          o->h = &h;
+          o->index = i;
+          o->unit_id = bro_json_value_get_string (arg, "");
+          bro_engine_executor_post (h.lib.executor, recovery_commit_action, o, NULL);
+          library_wait_for (&h.lib, i);
+          library_settle (&h.lib);
         }
       else
         g_error ("%s: unknown op %s", id, name);

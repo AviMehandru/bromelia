@@ -106,8 +106,8 @@ private final class StepFakes: Makemkv, Matroska, DriveControl, DriveLookup, Mak
         fs.putFolder(path)
         return path
     }
-    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile]) async throws(BroError) -> CommitResult { fatalError("not used") }
-    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String) async throws(BroError) -> CommitResult {
+    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], cancel: CancellationToken) async throws(BroError) -> CommitResult { fatalError("not used") }
+    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String, cancel: CancellationToken) async throws(BroError) -> CommitResult {
         fatalError("not used")
     }
 

@@ -61,8 +61,8 @@ private final class NameFakes: ProgressReporter, JobLogger, LibraryPort, Clock, 
         return path
     }
 
-    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile]) async throws(BroError) -> CommitResult { throw unused() }
-    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String) async throws(BroError) -> CommitResult { throw unused() }
+    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], cancel: CancellationToken) async throws(BroError) -> CommitResult { throw unused() }
+    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String, cancel: CancellationToken) async throws(BroError) -> CommitResult { throw unused() }
 
     func now() -> Instant { Instant.parse(given["now"]?.string ?? "") ?? Instant(unixMilliseconds: 0) }
     func monotonic() -> Duration { fatalError("not used") }

@@ -15,6 +15,15 @@
 #define INCOMPLETE_NOTE "INCOMPLETE.txt"
 #define CHECK_EVERY_SECONDS 30
 #define SUMS "SHA256SUMS"
+/* The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore files (owner,
+ * 2026-10-22). */
+#define BACKUP_FOLDER "Backup"
+
+/* .plexignore for Plex, .ignore for Jellyfin and Emby, as today's apps wrote them. */
+static const struct {
+  const char *name;
+  const char *text;
+} ignore_files[] = { { ".plexignore", "*\n" }, { ".ignore", "" } };
 
 static const BroMessageCode reason_codes[] = { BRO_MSG_LIBRARY_OFFLINE, BRO_MSG_LIBRARY_NOT_ATTACHED, BRO_MSG_LIBRARY_MARKER_MISMATCH };
 
@@ -81,7 +90,9 @@ struct _BroLibraryService {
   BroSubscription *subscription;
   GMutex lock;
   GHashTable *snapshot;   /* id → Snap * */
-  GHashTable *committing; /* unit id → itself */
+  GHashTable *committing; /* unit id → itself: the units a commit or roll forward is writing */
+  GCond freed;            /* broadcast when a unit is freed, or a waiting commit is cancelled */
+  int waiting;            /* commits and roll forwards waiting for their unit */
 };
 
 static void library_port_iface_init (BroLibraryPortInterface *iface);
@@ -298,6 +309,7 @@ bro_library_service_finalize (GObject *object)
   g_ptr_array_unref (self->entries);
   g_hash_table_unref (self->snapshot);
   g_hash_table_unref (self->committing);
+  g_cond_clear (&self->freed);
   g_mutex_clear (&self->lock);
   g_object_unref (self->executor);
   g_object_unref (self->bus);
@@ -324,6 +336,7 @@ bro_library_service_init (BroLibraryService *self)
   self->snapshot = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, snap_free);
   self->committing = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_mutex_init (&self->lock);
+  g_cond_init (&self->freed);
 }
 
 BroLibraryService *
@@ -1089,16 +1102,47 @@ crash_point (BroLibraryService *self, const char *point, BroBroError **error)
   return !self->crash || self->crash (point, self->crash_data, error);
 }
 
-static gboolean
-claim (BroLibraryService *self, BroId unit_id, BroBroError **error)
+/* A cancel heard while a commit waits for its unit: the waiters look again. */
+static void
+wake_waiters (gpointer data, gpointer token)
 {
-  gboolean claimed;
+  BroLibraryService *self = data;
+  (void) token;
   g_mutex_lock (&self->lock);
-  claimed = !g_hash_table_contains (self->committing, unit_id.value);
-  if (claimed)
-    g_hash_table_add (self->committing, g_strdup (unit_id.value));
+  g_cond_broadcast (&self->freed);
   g_mutex_unlock (&self->lock);
-  return claimed ? TRUE : fail (error, message (BRO_MSG_COMMIT_IN_PROGRESS, BRO_SEVERITY_ERROR, "unit", unit_id.value, NULL, NULL, NULL, NULL));
+}
+
+/* Holds the unit for one commit or roll forward, first waiting while another one has it; job.cancelled when @cancel
+ * (may be NULL) fires while it waits (once held, a commit runs to its end or its intent stays). The wait is on the
+ * caller's worker, which the executor counts. */
+static gboolean
+claim (BroLibraryService *self, BroId unit_id, BroCancellationToken *cancel, BroBroError **error)
+{
+  /* Registered outside the lock: a token cancelled already runs the handler at once. */
+  guint listening = cancel ? bro_cancellation_token_on_cancel (cancel, wake_waiters, self, NULL) : 0;
+  gboolean cancelled = FALSE;
+  g_mutex_lock (&self->lock);
+  while (TRUE)
+    {
+      if (cancel && bro_cancellation_token_is_cancelled (cancel))
+        {
+          cancelled = TRUE;
+          break;
+        }
+      if (!g_hash_table_contains (self->committing, unit_id.value))
+        {
+          g_hash_table_add (self->committing, g_strdup (unit_id.value));
+          break;
+        }
+      self->waiting++;
+      g_cond_wait (&self->freed, &self->lock);
+      self->waiting--;
+    }
+  g_mutex_unlock (&self->lock);
+  if (listening)
+    bro_cancellation_token_disconnect (cancel, listening);
+  return cancelled ? fail (error, bro_bro_message_new (BRO_MSG_JOB_CANCELLED, NULL, BRO_SEVERITY_ERROR)) : TRUE;
 }
 
 static void
@@ -1106,7 +1150,32 @@ unclaim (BroLibraryService *self, BroId unit_id)
 {
   g_mutex_lock (&self->lock);
   g_hash_table_remove (self->committing, unit_id.value);
+  g_cond_broadcast (&self->freed);
   g_mutex_unlock (&self->lock);
+}
+
+int
+bro_library_service_waiting (BroLibraryService *self)
+{
+  int n;
+  g_mutex_lock (&self->lock);
+  n = self->waiting;
+  g_mutex_unlock (&self->lock);
+  return n;
+}
+
+/* The unit's open intent (a copy, yours to free) in @out, NULL when it has none; FALSE with @error when the store fails. */
+static gboolean
+open_intent (BroLibraryService *self, BroId unit_id, BroCommitIntent **out, BroBroError **error)
+{
+  g_autoptr (GPtrArray) open = bro_unit_repository_open_intents (self->units, error);
+  *out = NULL;
+  if (!open)
+    return FALSE;
+  for (guint i = 0; i < open->len && !*out; i++)
+    if (strcmp (((BroCommitIntent *) open->pdata[i])->unit_id.value, unit_id.value) == 0)
+      *out = bro_commit_intent_copy (open->pdata[i]);
+  return TRUE;
 }
 
 /* Makes the folders from below the library's root down to @folder; never the root. */
@@ -1266,6 +1335,34 @@ move_item (BroLibraryService *self, const char *root, const BroCommitIntent *int
   if (there)
     return fail_path (error, BRO_MSG_FS_ALREADY_EXISTS, to);
   return fail_path (error, BRO_MSG_FS_NOT_FOUND, from);
+}
+
+/* A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing (owner,
+ * 2026-10-22): outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from the intent
+ * alone (an item under Backup/ of a shared folder), so a roll forward writes them too. */
+static gboolean
+ignored (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **error)
+{
+  g_autofree char *folder = NULL;
+  gboolean backup = FALSE;
+  for (guint i = 0; i < intent->items->len && !backup; i++)
+    backup = g_str_has_prefix (((BroCommitItem *) intent->items->pdata[i])->to_path, BACKUP_FOLDER "/");
+  if (!backup)
+    return TRUE;
+  folder = g_strconcat (intent->destination, "/" BACKUP_FOLDER, NULL);
+  if (!is_folder (self, folder))
+    return TRUE;
+  for (guint i = 0; i < G_N_ELEMENTS (ignore_files); i++)
+    {
+      g_autofree char *path = g_strconcat (folder, "/", ignore_files[i].name, NULL);
+      g_autoptr (GBytes) bytes = NULL;
+      if (bro_file_system_exists (self->fs, path))
+        continue;
+      bytes = g_bytes_new_static (ignore_files[i].text, strlen (ignore_files[i].text));
+      if (!bro_file_system_write_atomically (self->fs, path, bytes, FILE_MODE, error))
+        return FALSE;
+    }
+  return TRUE;
 }
 
 /* The unit's lines of the destination's SHA256SUMS (a roll forward has no file list of its own). */
@@ -1450,6 +1547,8 @@ complete (BroLibraryService *self, const char *root, const BroCommitIntent *inte
       else if (!bro_file_system_rename (self->fs, staging_sums, sums, error))
         return NULL;
     }
+  if (intent->merge && !ignored (self, intent, error))
+    return NULL;
   if (!remove_empty (self, intent->staging, error))
     return NULL;
   unit_files = files ? copy_files (files) : from_sums (self, intent, error);
@@ -1480,13 +1579,14 @@ complete (BroLibraryService *self, const char *root, const BroCommitIntent *inte
 
 static BroCommitResult *
 run (BroLibraryService *self, const BroUnitRecord *given_unit, const BroCommitIntent *given_intent, GPtrArray *files, const char *tag,
-     BroBroError **error)
+     BroCancellationToken *cancel, BroBroError **error)
 {
   g_autofree char *name = NULL;
   g_autofree char *root = NULL;
   g_autoptr (BroUnitRecord) unit = NULL;
+  g_autoptr (BroUnitRecord) done = NULL;
   g_autoptr (BroCommitIntent) intent = NULL;
-  g_autoptr (GPtrArray) open = NULL;
+  g_autoptr (BroCommitIntent) open = NULL;
   BroCommitResult *result = NULL;
   if (!online (self, given_unit->library_id, &name, &root, error))
     return NULL;
@@ -1495,17 +1595,44 @@ run (BroLibraryService *self, const BroUnitRecord *given_unit, const BroCommitIn
       fail (error, bro_bro_message_new (BRO_MSG_LIBRARY_NOT_FOUND, NULL, BRO_SEVERITY_ERROR));
       return NULL;
     }
-  if (!check_marker (self, given_unit->library_id, name, root, error) || !claim (self, given_unit->id, error))
+  if (!claim (self, given_unit->id, cancel, error))
     return NULL;
-  open = bro_unit_repository_open_intents (self->units, error);
-  if (!open)
+  if (!check_marker (self, given_unit->library_id, name, root, error) || !open_intent (self, given_unit->id, &open, error))
     goto out;
-  for (guint i = 0; i < open->len; i++)
-    if (strcmp (((BroCommitIntent *) open->pdata[i])->unit_id.value, given_unit->id.value) == 0)
+  if (open)
+    {
+      result = complete (self, root, open, files, error);
+      goto out;
+    }
+  /* Committed already (a roll forward finished it, or the engine stopped before the step's result was stored). Staging
+   * then holds none of its items; one that does was made again (a job retried after its commit) and is never passed off
+   * as the unit in the library. */
+  {
+    g_autoptr (BroBroError) e = NULL;
+    done = bro_unit_repository_get (self->units, given_unit->id, &e);
+    if (e)
       {
-        result = complete (self, root, open->pdata[i], files, error);
+        *error = g_steal_pointer (&e);
         goto out;
       }
+  }
+  if (done && (done->state == BRO_UNIT_STATE_COMMITTED || done->state == BRO_UNIT_STATE_QUARANTINED))
+    {
+      g_autofree char *destination = g_strconcat (root, "/", done->path, NULL);
+      for (guint i = 0; i < given_intent->items->len; i++)
+        {
+          g_autofree char *from = g_strconcat (given_intent->staging, "/", ((BroCommitItem *) given_intent->items->pdata[i])->from_path, NULL);
+          if (bro_file_system_exists (self->fs, from))
+            {
+              fail_path (error, BRO_MSG_FS_ALREADY_EXISTS, destination);
+              goto out;
+            }
+        }
+      if (remove_empty (self, given_intent->staging, error))
+        result = bro_commit_result_new (given_unit->id, destination, copy_files (files),
+                                        done->state == BRO_UNIT_STATE_COMMITTED && given_intent->merge);
+      goto out;
+    }
   unit = bro_unit_record_copy (given_unit);
   intent = bro_commit_intent_copy (given_intent);
   if (tag)
@@ -1542,16 +1669,17 @@ out:
 }
 
 static BroCommitResult *
-port_commit (BroLibraryPort *port, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, BroBroError **error)
+port_commit (BroLibraryPort *port, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, BroCancellationToken *cancel,
+             BroBroError **error)
 {
-  return run (BRO_LIBRARY_SERVICE (port), unit, intent, files, NULL, error);
+  return run (BRO_LIBRARY_SERVICE (port), unit, intent, files, NULL, cancel, error);
 }
 
 static BroCommitResult *
 port_quarantine (BroLibraryPort *port, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files, const char *tag,
-                 BroBroError **error)
+                 BroCancellationToken *cancel, BroBroError **error)
 {
-  return run (BRO_LIBRARY_SERVICE (port), unit, intent, files, tag, error);
+  return run (BRO_LIBRARY_SERVICE (port), unit, intent, files, tag, cancel, error);
 }
 
 static void
@@ -1631,7 +1759,8 @@ bro_library_service_roll_forward (BroLibraryService *self, const BroCommitIntent
   g_autoptr (BroUnitRecord) unit = bro_unit_repository_get (self->units, intent->unit_id, &e);
   g_autofree char *name = NULL;
   g_autofree char *root = NULL;
-  BroCommitResult *result;
+  g_autoptr (BroCommitIntent) open = NULL;
+  BroCommitResult *result = NULL;
   if (!unit)
     {
       if (e)
@@ -1640,10 +1769,12 @@ bro_library_service_roll_forward (BroLibraryService *self, const BroCommitIntent
         fail (error, bro_bro_message_new (BRO_MSG_UNIT_NOT_FOUND, NULL, BRO_SEVERITY_ERROR));
       return NULL;
     }
-  if (!configured (self, unit->library_id, &name, &root, error) || !check_marker (self, unit->library_id, name, root, error)
-      || !claim (self, intent->unit_id, error))
+  if (!configured (self, unit->library_id, &name, &root, error) || !claim (self, intent->unit_id, NULL, error))
     return NULL;
-  result = complete (self, root, intent, NULL, error);
+  /* The intent read again once the unit is held: the job's Commit may have finished it (NULL, @error unset), and its
+   * moved flags may have changed. */
+  if (check_marker (self, unit->library_id, name, root, error) && open_intent (self, intent->unit_id, &open, error) && open)
+    result = complete (self, root, open, NULL, error);
   unclaim (self, intent->unit_id);
   return result;
 }

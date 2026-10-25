@@ -224,6 +224,7 @@ final class PipelineHarness {
                                                 checkpoint: d["checkpoint"]))
                 seq += 1
             }
+            if j["intent"]?.bool == true { store.openIntent(id) }
             if let log = j["log"] {
                 let lines = FakeStep.strings(log).enumerated().map { n, c in
                     LogLineDto(seq: Int64(n + 1), t: world.clock.now(), severity: .info, code: MessageCode(rawValue: c)!, params: [])

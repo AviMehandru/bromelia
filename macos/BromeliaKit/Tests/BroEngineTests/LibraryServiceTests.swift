@@ -19,14 +19,32 @@ private func errorJson(_ e: BroError) -> JsonValue {
 
 private func fsError(_ code: MessageCode, _ path: String) -> BroError { BroMessage(code, [("path", .string(path))], severity: .error).toError() }
 
+// Paths split and compared at the byte '/', as the real file systems do (not at Swift's grapheme '/').
+
+private let slash = UInt8(ascii: "/")
+
 private func parent(_ p: String) -> String {
-    let i = p.lastIndex(of: "/")!
-    return i == p.startIndex ? "/" : String(p[..<i])
+    let i = p.utf8.lastIndex(of: slash)!
+    return i == p.utf8.startIndex ? "/" : String(decoding: p.utf8[..<i], as: UTF8.self)
 }
 
-private func lastName(_ p: String) -> String { String(p[p.index(after: p.lastIndex(of: "/")!)...]) }
+private func lastName(_ p: String) -> String { String(decoding: p.utf8[p.utf8.index(after: p.utf8.lastIndex(of: slash)!)...], as: UTF8.self) }
+
+/// `p` is `folder` or below it.
+private func within(_ p: String, _ folder: String) -> Bool { p.utf8.elementsEqual(folder.utf8) || p.utf8.starts(with: (folder + "/").utf8) }
+
+/// `p` (within `from`) moved to `to`.
+private func rebased(_ p: String, _ from: String, _ to: String) -> String { to + String(decoding: p.utf8.dropFirst(from.utf8.count), as: UTF8.self) }
 
 func ordinal(_ a: String, _ b: String) -> Bool { a.utf8.lexicographicallyPrecedes(b.utf8) }
+
+/// Set once, from any thread.
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
+}
 
 /// Files and folders in memory, with the platform adapters' rules; calls can be made to fail or wait.
 final class Tree: FileSystem, @unchecked Sendable {
@@ -83,14 +101,14 @@ final class Tree: FileSystem, @unchecked Sendable {
 
     private func move(_ from: String, _ to: String) {
         lock.withLock {
-            for f in files.keys where f == from || f.hasPrefix(from + "/") {
-                let dst = to + f.dropFirst(from.count)
+            for f in files.keys where within(f, from) {
+                let dst = rebased(f, from, to)
                 files[dst] = files.removeValue(forKey: f)
                 if let mode = modes.removeValue(forKey: f) { modes[dst] = mode }
             }
-            for d in dirs where d == from || d.hasPrefix(from + "/") {
+            for d in dirs where within(d, from) {
                 dirs.remove(d)
-                dirs.insert(to + d.dropFirst(from.count))
+                dirs.insert(rebased(d, from, to))
             }
         }
     }
@@ -185,8 +203,8 @@ final class Tree: FileSystem, @unchecked Sendable {
             if !e.isDirectory {
                 moved(MovedItem(from: src, to: dst))
             } else {
-                for f in lock.withLock({ files.keys.filter { $0.hasPrefix(dst + "/") } }).sorted(by: ordinal) {
-                    moved(MovedItem(from: src + f.dropFirst(dst.count), to: f))
+                for f in lock.withLock({ files.keys.filter { within($0, dst) } }).sorted(by: ordinal) {
+                    moved(MovedItem(from: rebased(f, dst, src), to: f))
                 }
             }
         }
@@ -197,7 +215,8 @@ final class Tree: FileSystem, @unchecked Sendable {
         let result: Int = lock.withLock {
             if files.removeValue(forKey: path) != nil { return 0 }
             if !dirs.contains(path) { return 1 }
-            if files.keys.contains(where: { $0.hasPrefix(path + "/") }) || dirs.contains(where: { $0.hasPrefix(path + "/") }) { return 2 }
+            let under = { (p: String) in p.utf8.starts(with: (path + "/").utf8) }
+            if files.keys.contains(where: under) || dirs.contains(where: under) { return 2 }
             dirs.remove(path)
             return 0
         }
@@ -398,7 +417,7 @@ struct LibraryServiceTests {
         @Sendable func settled() async -> Bool {
             await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
                 // Posted alone (no barrier after it), so the executor's activity counts only the engine's own work.
-                if !world.executor.post({ done.resume(returning: world.executor.activity == tree.held) }) { done.resume(returning: true) }
+                if !world.executor.post({ done.resume(returning: world.executor.activity == tree.held + state.service.waiting()) }) { done.resume(returning: true) }
             }
         }
         @Sendable func settle() async throws {
@@ -415,17 +434,28 @@ struct LibraryServiceTests {
 
         let ops = given["ops"]!.array!
         var pending: [Task<Void, Never>] = []
+        var tasks: [Int: Task<Void, Never>] = [:]
+        var cancels: [Int: CancellationSource] = [:]
         func onExecutor(_ i: Int, _ arg: JsonValue, _ body: @escaping @EngineActor @Sendable () async throws(BroError) -> JsonValue) async throws {
             let task = Task { @EngineActor in await store(i, await outcome { () async throws(BroError) in try await body() }) }
             if arg["wait"]?.bool == false { pending.append(task) } else { await task.value }
             try await settle()
         }
         func offExecutor(_ i: Int, _ arg: JsonValue, _ body: @escaping @Sendable () async throws(BroError) -> JsonValue) async throws {
-            let task = Task.detached { await store(i, await outcome { () async throws(BroError) in try await body() }) }
+            // An op that doesn't wait has entered the service once one more call is held or waits for its unit (the
+            // executor doesn't count it before it reaches a worker).
+            let service = await state.service!
+            let before = tree.held + service.waiting()
+            let ended = Flag()
+            let task = Task.detached {
+                await store(i, await outcome { () async throws(BroError) in try await body() })
+                ended.set()
+            }
+            tasks[i] = task
             if arg["wait"]?.bool == false {
                 pending.append(task)
                 let until = Date().addingTimeInterval(10)
-                while tree.held == 0 {
+                while tree.held + service.waiting() <= before && !ended.isSet {
                     if Date() > until { throw FixtureError("the op never reached its held call") }
                     try await Task.sleep(nanoseconds: 1_000_000)
                 }
@@ -533,10 +563,23 @@ struct LibraryServiceTests {
                 }
                 let tag = arg["tag"]?.string
                 let service = await state.service!
+                let cancel = CancellationSource()
+                cancels[i] = cancel
                 try await offExecutor(i, arg) { () async throws(BroError) in
-                    if let tag { return resultJson(try await service.quarantine(unit, intent: intent, files: files, tag: tag)) }
-                    return resultJson(try await service.commit(unit, intent: intent, files: files))
+                    if let tag { return resultJson(try await service.quarantine(unit, intent: intent, files: files, tag: tag, cancel: cancel.token)) }
+                    return resultJson(try await service.commit(unit, intent: intent, files: files, cancel: cancel.token))
                 }
+            case "cancel":
+                // Cancels the commit of op <arg> and waits for it to end.
+                guard let at = arg.int.map({ Int($0) }), let cancel = cancels[at], let task = tasks[at] else { throw FixtureError("no commit op \(arg)") }
+                cancel.cancel()
+                await task.value
+                try await settle()
+                await store(i, .string("ok"))
+            case "waiting":
+                try await settle()
+                let service = await state.service!
+                await store(i, .integer(Int64(service.waiting())))
             case "restart":
                 await world.onExecutor { state.service.stop() }
                 try await settle()
@@ -547,7 +590,7 @@ struct LibraryServiceTests {
                 try await offExecutor(i, arg) { () async throws(BroError) in
                     var list: [JsonValue] = []
                     for intent in db.open() {
-                        do throws(BroError) { list.append(resultJson(try await service.rollForward(intent))) } catch { list.append(errorJson(error)) }
+                        do throws(BroError) { list.append(try await service.rollForward(intent).map(resultJson) ?? .null) } catch { list.append(errorJson(error)) }
                     }
                     return .array(list)
                 }

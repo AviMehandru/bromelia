@@ -8,14 +8,22 @@ import Foundation
 /// (mount events), each on its own worker; an offline library is blocked in the scheduler and raised as a problem. A
 /// check that hasn't come back by the next tick (a share that froze, review L3-9) counts as offline and isn't started
 /// again until it comes back. As the `LibraryPort` of the steps it gives staging folders and runs the commit protocol
-/// (§22.3 steps 4–6) and its roll forward (§15.8) on workers. State is touched only on the executor; the steps read a
-/// snapshot. shared/fixtures/engine/library-service.cases.json.
+/// (§22.3 steps 4–6) and its roll forward (§15.8) on workers, one at a time per unit: a commit waits while a roll forward
+/// of its unit runs (recovery's may outlast its 30 s at startup on a slow share). State is touched only on the executor;
+/// the steps read a snapshot. Paths are compared and split by their UTF-8 bytes, as a disk names them.
+/// shared/fixtures/engine/library-service.cases.json.
 @EngineActor
 public final class LibraryService: LibraryPort {
     private nonisolated static let fileMode = 0o644
     private nonisolated static let staging = ".bromelia"
     private nonisolated static let quarantineFolder = "_Quarantine"
     private nonisolated static let incompleteNote = "INCOMPLETE.txt"
+    /// The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore files (owner,
+    /// 2026-10-22).
+    private nonisolated static let backupFolder = "Backup"
+    /// .plexignore for Plex, .ignore for Jellyfin and Emby, as today's apps wrote them.
+    private nonisolated static let ignoreFiles: [(name: String, text: String)] = [(".plexignore", "*\n"), (".ignore", "")]
+    private nonisolated static let slash = UInt8(ascii: "/")
     private nonisolated static let reasonCodes: [MessageCode] = [.libraryOffline, .libraryNotAttached, .libraryMarkerMismatch]
 
     private nonisolated let executor: EngineExecutor
@@ -63,11 +71,14 @@ public final class LibraryService: LibraryPort {
         var waiters: [Resumption<Void>] = []
     }
 
-    /// The snapshot the steps read, and the units being committed.
+    /// The snapshot the steps read, and the units a commit or roll forward is writing, each with the ones waiting for it
+    /// (woken when it is done, or one by its cancel).
     private final class Shared: @unchecked Sendable {
         let lock = NSLock()
         var snapshot: [String: (name: String, path: String, reason: BroMessage?)] = [:]
-        var committing: Set<Id> = []
+        var committing: [Id: [(id: Int, wake: CheckedContinuation<Void, Never>)]] = [:]
+        var waiting = 0
+        var nextWaiter = 0
     }
 
     private var entries: [Entry] = []
@@ -176,28 +187,35 @@ public final class LibraryService: LibraryPort {
         return dir
     }
 
-    public nonisolated func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile]) async throws(BroError) -> CommitResult {
-        try await run(unit, intent, files, tag: nil)
+    public nonisolated func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], cancel: CancellationToken) async throws(BroError) -> CommitResult {
+        try await run(unit, intent, files, tag: nil, cancel: cancel)
     }
 
-    public nonisolated func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String) async throws(BroError) -> CommitResult {
-        try await run(unit, intent, files, tag: tag)
+    public nonisolated func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String, cancel: CancellationToken) async throws(BroError) -> CommitResult {
+        try await run(unit, intent, files, tag: tag, cancel: cancel)
     }
 
-    /// Finishes an interrupted commit (§15.8): the marker checked, then what is left moved (a file already at its
-    /// destination counts when its SHA-256 is the item's), SHA256SUMS merged, the folders synced and the unit committed,
-    /// its files read from the destination's SHA256SUMS. Off the executor.
-    public nonisolated func rollForward(_ intent: CommitIntent) async throws(BroError) -> CommitResult {
+    /// Finishes an interrupted commit (§15.8): once no other commit of the unit runs, the marker checked, then what is left
+    /// of the unit's open intent (read again: `intent` may be stale) moved (a file already at its destination counts when
+    /// its SHA-256 is the item's), SHA256SUMS merged, the folders synced and the unit committed, its files read from the
+    /// destination's SHA256SUMS. Nil when the intent is no longer open (the job's Commit finished it meanwhile). Off the
+    /// executor.
+    public nonisolated func rollForward(_ intent: CommitIntent) async throws(BroError) -> CommitResult? {
         let units = self.units
         guard let unit = try await units.get(intent.unitId) else { throw Self.message(.unitNotFound).toError() }
         let lib = try await configured(unit.libraryId)
-        return try await executor.worker { [self] () async throws(BroError) -> CommitResult in
-            try await checkMarker(lib)
-            try claim(intent.unitId)
+        return try await executor.worker { [self] () async throws(BroError) -> CommitResult? in
+            try await claim(intent.unitId, cancel: nil)
             defer { unclaim(intent.unitId) }
-            return try await complete(lib.path, intent, nil)
+            try await checkMarker(lib)
+            guard let open = try await openIntent(intent.unitId) else { return nil }
+            return try await complete(lib.path, open, nil)
         }
     }
+
+    /// Commits and roll forwards waiting for another one of their unit to finish (a test or scenario runner counts them as
+    /// parked when it settles: each is inside a worker the executor counts). Any thread.
+    public nonisolated func waiting() -> Int { shared.lock.withLock { shared.waiting } }
 
     /// The folders in the library's .bromelia/staging (one per job, named by its id), in ordinal order, once the marker
     /// checks out (from the configuration itself, so it works before `start()`). Any thread but the executor.
@@ -417,16 +435,23 @@ public final class LibraryService: LibraryPort {
 
     // ---- the commit (workers) -------------------------------------------------------------------------------------
 
-    private nonisolated func run(_ unit: UnitRecord, _ intent: CommitIntent, _ files: [UnitFile], tag: String?) async throws(BroError) -> CommitResult {
+    private nonisolated func run(_ unit: UnitRecord, _ intent: CommitIntent, _ files: [UnitFile], tag: String?,
+                                 cancel: CancellationToken) async throws(BroError) -> CommitResult {
         try await executor.worker { [self] () async throws(BroError) -> CommitResult in
             var (unit, intent) = (unit, intent)
             let lib = try online(unit.libraryId)
             if tag == nil && !Self.inside(lib.path, intent.destination) { throw Self.message(.libraryNotFound).toError() }
-            try await checkMarker(lib)
-            try claim(unit.id)
+            try await claim(unit.id, cancel: cancel)
             defer { unclaim(unit.id) }
-            if let open = try await units.openIntents().first(where: { $0.unitId == unit.id }) {
-                return try await complete(lib.path, open, files)
+            try await checkMarker(lib)
+            if let open = try await openIntent(unit.id) { return try await complete(lib.path, open, files) }
+            // Committed already (a roll forward finished it, or the engine stopped before the step's result was stored).
+            // Staging then holds none of its items; one that does was made again (a job retried after its commit) and is
+            // never passed off as the unit in the library.
+            if let done = try await units.get(unit.id), done.state == .committed || done.state == .quarantined {
+                if intent.items.contains(where: { fs.exists(intent.staging + "/" + $0.fromPath) }) { throw Self.alreadyExists(lib.path + "/" + done.path) }
+                try removeEmpty(intent.staging)
+                return CommitResult(unitId: unit.id, destination: lib.path + "/" + done.path, files: files, merged: done.state == .committed && intent.merge)
             }
             if let tag {
                 let folder = lib.path + "/" + Self.quarantineFolder
@@ -493,6 +518,7 @@ public final class LibraryService: LibraryPort {
                 try fs.rename(stagingSums, to: sums)
             }
         }
+        if intent.merge { try ignored(intent) }
         try removeEmpty(intent.staging)
         var unitFiles = files ?? []
         if files == nil { unitFiles = try fromSums(intent) }
@@ -532,11 +558,23 @@ public final class LibraryService: LibraryPort {
         }
     }
 
+    /// A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing (owner,
+    /// 2026-10-22): outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from the intent
+    /// alone (an item under Backup/ of a shared folder), so a roll forward writes them too.
+    private nonisolated func ignored(_ intent: CommitIntent) throws(BroError) {
+        guard intent.items.contains(where: { Self.starts($0.toPath, Self.backupFolder + "/") }) else { return }
+        let folder = intent.destination + "/" + Self.backupFolder
+        guard try isFolder(folder) else { return }
+        for (name, text) in Self.ignoreFiles where !fs.exists(folder + "/" + name) {
+            try fs.writeAtomically(folder + "/" + name, bytes: Array(text.utf8), mode: Self.fileMode)
+        }
+    }
+
     /// The unit's lines of the destination's SHA256SUMS (a roll forward has no file list of its own).
     private nonisolated func fromSums(_ intent: CommitIntent) throws(BroError) -> [UnitFile] {
         let sums = Sha256Sums.parse(String(decoding: try fs.read(intent.destination + "/" + Sha256Sums.fileName), as: UTF8.self))
         var files: [UnitFile] = []
-        for s in sums where intent.items.contains(where: { $0.isDir ? s.path.hasPrefix($0.toPath + "/") : s.path == $0.toPath }) {
+        for s in sums where intent.items.contains(where: { $0.isDir ? Self.starts(s.path, $0.toPath + "/") : Self.same(s.path, $0.toPath) }) {
             files.append(UnitFile(path: s.path, size: try fs.stat(intent.destination + "/" + s.path).size, sha256: s.sha256, role: "title"))
         }
         return files
@@ -544,25 +582,24 @@ public final class LibraryService: LibraryPort {
 
     /// Every folder from the library's root down to each committed file, and the staging folder's parent.
     private nonisolated static func synced(_ root: String, _ intent: CommitIntent, _ files: [UnitFile]) -> [String] {
-        var folders: Set<String> = [parent(intent.staging)]
+        var folders: Set<[UInt8]> = [Array(parent(intent.staging).utf8)]
         for f in files {
             var folder = root
-            folders.insert(folder)
-            let parts = String((intent.destination + "/" + f.path).dropFirst(root.count + 1)).split(separator: "/", omittingEmptySubsequences: false)
-            for part in parts.dropLast() {
+            folders.insert(Array(folder.utf8))
+            for part in below(root, intent.destination + "/" + f.path).dropLast() {
                 folder += "/" + part
-                folders.insert(folder)
+                folders.insert(Array(folder.utf8))
             }
         }
-        return folders.sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+        return folders.sorted { $0.lexicographicallyPrecedes($1) }.map { String(decoding: $0, as: UTF8.self) }
     }
 
     /// Makes the folders from below the library's root down to `folder`; never the root.
     private nonisolated func ensureFolders(_ root: String, _ folder: String) throws(BroError) {
-        if folder == root { return }
+        if Self.same(folder, root) { return }
         guard Self.inside(root, folder) else { throw Self.message(.libraryNotFound).toError() }
         var current = root
-        for part in String(folder.dropFirst(root.count + 1)).split(separator: "/", omittingEmptySubsequences: false) {
+        for part in Self.below(root, folder) {
             current += "/" + part
             if !fs.exists(current) { try fs.createDirectory(current, parentsMustExist: true) }
         }
@@ -597,24 +634,82 @@ public final class LibraryService: LibraryPort {
 
     private nonisolated func isFolder(_ path: String) throws(BroError) -> Bool { fs.exists(path) ? try fs.stat(path).isDirectory : false }
 
-    private nonisolated func claim(_ unitId: Id) throws(BroError) {
-        let claimed = shared.lock.withLock { shared.committing.insert(unitId).inserted }
-        if !claimed { throw Self.message(.commitInProgress, [("unit", .string(unitId.value))]).toError() }
+    private nonisolated func openIntent(_ unitId: Id) async throws(BroError) -> CommitIntent? {
+        try await units.openIntents().first { $0.unitId == unitId }
     }
 
-    private nonisolated func unclaim(_ unitId: Id) { _ = shared.lock.withLock { shared.committing.remove(unitId) } }
+    /// Holds the unit for one commit or roll forward, first waiting while another one has it; job.cancelled when `cancel`
+    /// fires while it waits (once held, a commit runs to its end or its intent stays). The wait is inside a worker, so the
+    /// executor's activity counts it.
+    private nonisolated func claim(_ unitId: Id, cancel: CancellationToken?) async throws(BroError) {
+        while true {
+            // 0: held; -1: cancelled; else the waiter's number.
+            let waiter: Int = shared.lock.withLock {
+                if cancel?.isCancelled == true { return -1 }
+                if shared.committing[unitId] == nil {
+                    shared.committing[unitId] = []
+                    return 0
+                }
+                shared.waiting += 1
+                shared.nextWaiter += 1
+                return shared.nextWaiter
+            }
+            if waiter < 0 { throw BroError(MessageCode.wire(.jobCancelled)) }
+            if waiter == 0 { return }
+            var stopListening: (@Sendable () -> Void)?
+            await withCheckedContinuation { (wake: CheckedContinuation<Void, Never>) in
+                let queued = shared.lock.withLock { () -> Bool in
+                    guard shared.committing[unitId] != nil else { return false } // freed meanwhile: try again
+                    shared.committing[unitId]!.append((waiter, wake))
+                    return true
+                }
+                if !queued { wake.resume(); return }
+                stopListening = cancel?.onCancel { [self] in self.wake(unitId, waiter) }
+            }
+            stopListening?()
+            shared.lock.withLock { shared.waiting -= 1 }
+        }
+    }
+
+    /// Wakes one waiter of the unit (its cancel), unless the holder's end woke it already.
+    private nonisolated func wake(_ unitId: Id, _ waiter: Int) {
+        let found = shared.lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            guard let i = shared.committing[unitId]?.firstIndex(where: { $0.id == waiter }) else { return nil }
+            return shared.committing[unitId]!.remove(at: i).wake
+        }
+        found?.resume()
+    }
+
+    private nonisolated func unclaim(_ unitId: Id) {
+        let waiters = shared.lock.withLock { shared.committing.removeValue(forKey: unitId) ?? [] }
+        for w in waiters { w.wake.resume() }
+    }
 
     /// Strictly below the root, and not in its .bromelia folder.
     private nonisolated static func inside(_ root: String, _ path: String) -> Bool {
-        path.hasPrefix(root + "/") && path != root + "/" + staging && !path.hasPrefix(root + "/" + staging + "/")
+        starts(path, root + "/") && !same(path, root + "/" + staging) && !starts(path, root + "/" + staging + "/")
     }
 
-    private nonisolated static func parent(_ path: String) -> String { String(path[..<path.lastIndex(of: "/")!]) }
+    // Paths by their bytes: Swift's String compares and splits by grapheme, so a '/' a combining mark follows wouldn't
+    // split a path, and canonically equal names would be one.
+
+    private nonisolated static func starts(_ path: String, _ prefix: String) -> Bool { path.utf8.starts(with: prefix.utf8) }
+
+    private nonisolated static func same(_ a: String, _ b: String) -> Bool { a.utf8.elementsEqual(b.utf8) }
+
+    /// The parts of `path` below `root` (`path` is inside it), split at each '/'.
+    private nonisolated static func below(_ root: String, _ path: String) -> [String] {
+        path.utf8.dropFirst(root.utf8.count + 1).split(separator: slash, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    private nonisolated static func parent(_ path: String) -> String {
+        String(decoding: path.utf8[..<path.utf8.lastIndex(of: slash)!], as: UTF8.self)
+    }
 
     private nonisolated static func lastPart(_ path: String) -> String {
-        var p = path
-        while p.hasSuffix("/") { p.removeLast() }
-        return p.lastIndex(of: "/").map { String(p[p.index(after: $0)...]) } ?? p
+        var p = Array(path.utf8)
+        while p.last == slash { p.removeLast() }
+        return String(decoding: p.lastIndex(of: slash).map { p[($0 + 1)...] } ?? p[...], as: UTF8.self)
     }
 
     private nonisolated static func offline(_ name: String, _ path: String) -> BroMessage {

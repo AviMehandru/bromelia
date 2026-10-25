@@ -223,6 +223,35 @@ public sealed class RecoveryServiceTests
                         results[i] = JsonValue.Of("ok");
                         break;
                     }
+                    case "startLibraries":
+                    {
+                        var d = new ManualResetEventSlim();
+                        w.Executor.Post(async () =>
+                        {
+                            await library.Start();
+                            d.Set();
+                        });
+                        if (!d.Wait(Patience)) throw new TimeoutException("the libraries didn't start");
+                        Settle();
+                        results[i] = JsonValue.Of("ok");
+                        break;
+                    }
+                    case "commit":
+                    {
+                        // As a step calls the port: off the executor, the stored unit with its stored open intent.
+                        var unitId = new Id(arg.AsString!);
+                        var unit = db.Units[unitId.Value];
+                        var intent = db.OpenIntents().Result.Single(x => x.UnitId == unitId);
+                        var commit = Task.Run(async () =>
+                        {
+                            try { return JsonValue.Of((await library.Commit(unit, intent, Array.Empty<UnitFile>(), new CancellationSource().Token)).Destination); }
+                            catch (BroFailure f) { return JsonValue.Of(("error", Error(f.Error)!)); }
+                        });
+                        if (!commit.Wait(Patience)) throw new TimeoutException("the commit didn't finish");
+                        Settle();
+                        results[i] = commit.Result;
+                        break;
+                    }
                     default:
                         throw new InvalidOperationException("unknown op " + name);
                 }

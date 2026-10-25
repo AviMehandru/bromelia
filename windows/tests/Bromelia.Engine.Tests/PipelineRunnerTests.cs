@@ -188,6 +188,7 @@ public sealed class PipelineRunnerTests
                     ((IStepRepository)Store).Save(new StepRecord(id, seq++, k, state, 1, W.Clock.Now(), W.Clock.Now(),
                         new StepOutput(k, d["output"] ?? EmptyObject, null, (int)(d["readErrors"]?.AsInteger ?? 0)), null, d["checkpoint"])).Wait();
                 }
+                if (j["intent"]?.AsBool == true) Store.OpenIntent(id);
                 if (j["log"] is { } log)
                 {
                     long line = 0;

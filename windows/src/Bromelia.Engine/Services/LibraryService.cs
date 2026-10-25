@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Bromelia.Domain;
 using Bromelia.Foundation;
 using Bromelia.Ports;
+using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Engine;
 
@@ -15,8 +16,9 @@ namespace Bromelia.Engine;
 /// <see cref="Check"/> (mount events), each on its own worker; an offline library is blocked in the scheduler and raised
 /// as a problem. A check that hasn't come back by the next tick (a share that froze, review L3-9) counts as offline
 /// and isn't started again until it comes back. As the <see cref="ILibraryPort"/> of the steps it gives staging folders
-/// and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on workers. State is touched only on
-/// the executor; the steps read a snapshot. shared/fixtures/engine/library-service.cases.json.
+/// and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on workers, one at a time per unit: a
+/// commit waits while a roll forward of its unit runs (recovery's may outlast its 30 s at startup on a slow share). State
+/// is touched only on the executor; the steps read a snapshot. shared/fixtures/engine/library-service.cases.json.
 /// </summary>
 public sealed class LibraryService : ILibraryPort
 {
@@ -24,6 +26,11 @@ public sealed class LibraryService : ILibraryPort
     const string Staging = ".bromelia";
     const string QuarantineFolder = "_Quarantine";
     const string IncompleteNote = "INCOMPLETE.txt";
+    /// <summary>The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore
+    /// files (owner, 2026-10-22).</summary>
+    const string BackupFolder = "Backup";
+    /// <summary>.plexignore for Plex, .ignore for Jellyfin and Emby, as today's apps wrote them.</summary>
+    static readonly (string Name, string Text)[] IgnoreFiles = { (".plexignore", "*\n"), (".ignore", "") };
     static readonly Duration CheckEvery = new(30);
     static readonly MessageCode[] ReasonCodes = { MessageCode.LibraryOffline, MessageCode.LibraryNotAttached, MessageCode.LibraryMarkerMismatch };
 
@@ -69,7 +76,9 @@ public sealed class LibraryService : ILibraryPort
 
     readonly object _lock = new();
     Dictionary<string, (string Name, string Path, BroMessage? Reason)> _snapshot = new();
-    readonly HashSet<Id> _committing = new();
+    /// <summary>The units a commit or roll forward is writing; each completes when that one is done.</summary>
+    readonly Dictionary<Id, TaskCompletionSource> _committing = new();
+    int _waiting;
 
     /// <param name="crash">Called at each crash point of the commit (commit.afterIntent, commit.afterMove:&lt;n&gt;,
     /// commit.beforeDone); the test root throws there to stop the commit as a killed engine would. Null in a real
@@ -175,30 +184,44 @@ public sealed class LibraryService : ILibraryPort
         return dir;
     }
 
-    public Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files) => Run(unit, intent, files, null);
+    public Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, CancellationToken cancel) =>
+        Run(unit, intent, files, null, cancel);
 
-    public Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag) =>
-        Run(unit, intent, files, tag);
+    public Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag, CancellationToken cancel) =>
+        Run(unit, intent, files, tag, cancel);
 
-    /// <summary>Finishes an interrupted commit (§15.8): the marker checked, then what is left moved (a file already at its
-    /// destination counts when its SHA-256 is the item's), SHA256SUMS merged, the folders synced and the unit committed,
-    /// its files read from the destination's SHA256SUMS. Any thread but the executor.</summary>
-    public Task<CommitResult> RollForward(CommitIntent intent) => _executor.Worker(async () =>
+    /// <summary>Finishes an interrupted commit (§15.8): once no other commit of the unit runs, the marker checked, then
+    /// what is left of the unit's open intent (read again: <paramref name="intent"/> may be stale) moved (a file already
+    /// at its destination counts when its SHA-256 is the item's), SHA256SUMS merged, the folders synced and the unit
+    /// committed, its files read from the destination's SHA256SUMS. Null when the intent is no longer open (the job's
+    /// Commit finished it meanwhile). Any thread but the executor.</summary>
+    public Task<CommitResult?> RollForward(CommitIntent intent) => _executor.Worker(async () =>
     {
         var unit = await _units.Get(intent.UnitId).ConfigureAwait(false)
             ?? throw new BroFailure(Message(MessageCode.UnitNotFound).ToError());
         var lib = await Configured(unit.LibraryId).ConfigureAwait(false);
-        await CheckMarker(lib).ConfigureAwait(false);
-        Claim(intent.UnitId);
+        await Claim(intent.UnitId, null).ConfigureAwait(false);
         try
         {
-            return await Complete(lib.Path, intent, null).ConfigureAwait(false);
+            await CheckMarker(lib).ConfigureAwait(false);
+            var open = await OpenIntent(intent.UnitId).ConfigureAwait(false);
+            return open == null ? null : await Complete(lib.Path, open, null).ConfigureAwait(false);
         }
         finally
         {
             Unclaim(intent.UnitId);
         }
     });
+
+    /// <summary>Commits and roll forwards waiting for another one of their unit to finish (a test or scenario runner
+    /// counts them as parked when it settles). Any thread.</summary>
+    public int Waiting
+    {
+        get
+        {
+            lock (_lock) return _waiting;
+        }
+    }
 
     /// <summary>The folders in the library's .bromelia/staging (one per job, named by its id), in ordinal order,
     /// once the marker checks out (from the configuration itself, so it works before <see cref="Start"/>). Any thread
@@ -448,16 +471,26 @@ public sealed class LibraryService : ILibraryPort
 
     // ---- the commit (workers) -------------------------------------------------------------------------------------
 
-    Task<CommitResult> Run(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string? tag) => _executor.Worker(async () =>
+    Task<CommitResult> Run(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string? tag, CancellationToken cancel) =>
+        _executor.Worker(async () =>
     {
         var lib = Online(unit.LibraryId);
         if (tag == null && !Inside(lib.Path, intent.Destination)) throw new BroFailure(Message(MessageCode.LibraryNotFound).ToError());
-        await CheckMarker(lib).ConfigureAwait(false);
-        Claim(unit.Id);
+        await Claim(unit.Id, cancel).ConfigureAwait(false);
         try
         {
-            var open = (await _units.OpenIntents().ConfigureAwait(false)).FirstOrDefault(i => i.UnitId == unit.Id);
+            await CheckMarker(lib).ConfigureAwait(false);
+            var open = await OpenIntent(unit.Id).ConfigureAwait(false);
             if (open != null) return await Complete(lib.Path, open, files).ConfigureAwait(false);
+            // Committed already (a roll forward finished it, or the engine stopped before the step's result was stored).
+            // Staging then holds none of its items; one that does was made again (a job retried after its commit) and
+            // is never passed off as the unit in the library.
+            if (await _units.Get(unit.Id).ConfigureAwait(false) is { State: UnitState.Committed or UnitState.Quarantined } done)
+            {
+                if (intent.Items.Any(i => _fs.Exists(intent.Staging + "/" + i.FromPath))) throw AlreadyExists(lib.Path + "/" + done.Path);
+                RemoveEmpty(intent.Staging);
+                return new CommitResult(unit.Id, lib.Path + "/" + done.Path, files, done.State == UnitState.Committed && intent.Merge);
+            }
             if (tag != null)
             {
                 var folder = lib.Path + "/" + QuarantineFolder;
@@ -535,6 +568,7 @@ public sealed class LibraryService : ILibraryPort
                 _fs.Rename(stagingSums, sums);
             }
         }
+        if (intent.Merge) Ignored(intent);
         RemoveEmpty(intent.Staging);
         var unitFiles = files ?? FromSums(intent);
         foreach (var folder in Synced(root, intent, unitFiles)) _fs.SyncDirectory(folder);
@@ -573,6 +607,18 @@ public sealed class LibraryService : ILibraryPort
         }
         else if (there) throw AlreadyExists(to);
         else throw NotFound(from);
+    }
+
+    /// <summary>A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing
+    /// (owner, 2026-10-22): outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from
+    /// the intent alone (an item under Backup/ of a shared folder), so a roll forward writes them too.</summary>
+    void Ignored(CommitIntent intent)
+    {
+        if (!intent.Items.Any(i => i.ToPath.StartsWith(BackupFolder + "/", StringComparison.Ordinal))) return;
+        var folder = intent.Destination + "/" + BackupFolder;
+        if (!IsFolder(folder)) return;
+        foreach (var (name, text) in IgnoreFiles)
+            if (!_fs.Exists(folder + "/" + name)) _fs.WriteAtomically(folder + "/" + name, Encoding.UTF8.GetBytes(text), FileMode);
     }
 
     /// <summary>The unit's lines of the destination's SHA256SUMS (a roll forward has no file list of its own).</summary>
@@ -646,16 +692,38 @@ public sealed class LibraryService : ILibraryPort
 
     bool IsFolder(string path) => _fs.Exists(path) && _fs.Stat(path).IsDirectory;
 
-    void Claim(Id unitId)
+    async Task<CommitIntent?> OpenIntent(Id unitId) => (await _units.OpenIntents().ConfigureAwait(false)).FirstOrDefault(i => i.UnitId == unitId);
+
+    /// <summary>Holds the unit for one commit or roll forward, first waiting while another one has it; job.cancelled when
+    /// <paramref name="cancel"/> fires while it waits (once held, a commit runs to its end or its intent stays).</summary>
+    async Task Claim(Id unitId, CancellationToken? cancel)
     {
-        lock (_lock)
-            if (!_committing.Add(unitId))
-                throw new BroFailure(Message(MessageCode.CommitInProgress, ("unit", JsonValue.Of(unitId.Value))).ToError());
+        while (true)
+        {
+            Task busy;
+            lock (_lock)
+            {
+                if (cancel?.IsCancelled == true) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
+                if (!_committing.TryGetValue(unitId, out var holder))
+                {
+                    _committing[unitId] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    return;
+                }
+                busy = holder.Task;
+                _waiting++;
+            }
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (cancel?.OnCancel(() => cancelled.TrySetResult()))
+                await Task.WhenAny(busy, cancelled.Task).ConfigureAwait(false);
+            lock (_lock) _waiting--;
+        }
     }
 
     void Unclaim(Id unitId)
     {
-        lock (_lock) _committing.Remove(unitId);
+        TaskCompletionSource? holder;
+        lock (_lock) _committing.Remove(unitId, out holder);
+        holder?.SetResult();
     }
 
     /// <summary>Strictly below the root, and not in its .bromelia folder.</summary>

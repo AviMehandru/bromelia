@@ -203,7 +203,7 @@ public sealed class RecoveryService
             if (unit?.LibraryId != libraryId) continue;
             try
             {
-                await _library.RollForward(intent);
+                if (await _library.RollForward(intent) == null) continue; // the job's Commit finished it meanwhile
                 await Log(intent.JobId, new BroMessage(MessageCode.CommitRolledForward, Severity.Warning, ("unit", JsonValue.Of(intent.UnitId.Value))));
                 await RemoveLeftovers(intent.Destination, recursive: false);
             }

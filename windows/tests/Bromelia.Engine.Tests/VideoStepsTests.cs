@@ -126,9 +126,9 @@ public sealed class VideoStepsTests
             return path;
         }
 
-        public Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files) => throw new NotSupportedException();
+        public Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, CancellationToken cancel) => throw new NotSupportedException();
 
-        public Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag) =>
+        public Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag, CancellationToken cancel) =>
             throw new NotSupportedException();
 
         public Task<IReadOnlyList<UnitRecord>> ArchivedBefore(string fingerprint)

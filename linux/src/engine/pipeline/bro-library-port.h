@@ -2,6 +2,7 @@
 #pragma once
 
 #include "bro-bro-error.h"
+#include "bro-cancellation-token.h"
 #include "bro-commit-intent.h"
 #include "bro-commit-result.h"
 #include "bro-id.h"
@@ -21,9 +22,9 @@ struct _BroLibraryPortInterface {
   BroLibraryHandle *(*require) (BroLibraryPort *self, const char *library_id, BroBroError **error);
   char *(*staging_directory) (BroLibraryPort *self, const char *library_id, const BroId *job_id, BroBroError **error);
   BroCommitResult *(*commit) (BroLibraryPort *self, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files,
-                              BroBroError **error);
+                              BroCancellationToken *cancel, BroBroError **error);
   BroCommitResult *(*quarantine) (BroLibraryPort *self, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files,
-                                  const char *tag, BroBroError **error);
+                                  const char *tag, BroCancellationToken *cancel, BroBroError **error);
 };
 
 /* library.notFound, or the reason it is offline (library.offline when its marker is missing). */
@@ -34,13 +35,16 @@ BroLibraryHandle *bro_library_port_require (BroLibraryPort *self, const char *li
 char *bro_library_port_staging_directory (BroLibraryPort *self, const char *library_id, const BroId *job_id, BroBroError **error);
 
 /* Plan §22.3 steps 4–6 (Seal did 1–3): the intent, the move (a new folder renamed whole; a shared one item by item,
- * SHA256SUMS merged), the folders synced, then the unit committed with its files (BroUnitFile *, copied). On a worker,
- * never the executor. NULL and @error set on failure. */
+ * SHA256SUMS merged), the folders synced, then the unit committed with its files (BroUnitFile *, copied). It first waits
+ * while another commit or roll forward of the unit runs; @cancel ends only that wait (job.cancelled). An open intent of
+ * the unit is finished instead, and a unit committed already gives its result again. On a worker, never the executor.
+ * NULL and @error set on failure. */
 BroCommitResult *bro_library_port_commit (BroLibraryPort *self, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files,
-                                          BroBroError **error);
+                                          BroCancellationToken *cancel, BroBroError **error);
 
-/* bro_library_port_commit into <library>/_Quarantine/<name> [<tag>] (a free name), the unit quarantined. */
+/* bro_library_port_commit into <library>/_Quarantine/<name> [<tag>] (a free name; name: the last part of the intent's
+ * destination), not merged, the unit quarantined. */
 BroCommitResult *bro_library_port_quarantine (BroLibraryPort *self, const BroUnitRecord *unit, const BroCommitIntent *intent, GPtrArray *files,
-                                              const char *tag, BroBroError **error);
+                                              const char *tag, BroCancellationToken *cancel, BroBroError **error);
 
 G_END_DECLS

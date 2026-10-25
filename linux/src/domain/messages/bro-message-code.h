@@ -19,6 +19,7 @@ typedef enum {
   BRO_MSG_JOB_NOT_QUEUED, /* job.notQueued */
   BRO_MSG_JOB_NOT_INTERRUPTED, /* job.notInterrupted */
   BRO_MSG_JOB_UNKNOWN_STEP, /* job.unknownStep */
+  BRO_MSG_JOB_COMMIT_OPEN, /* job.commitOpen */
   BRO_MSG_JOB_OP_STARTING, /* job.op.starting */
   BRO_MSG_JOB_OP_CANCELLING, /* job.op.cancelling */
   BRO_MSG_JOB_OP_AUTOMATIC, /* job.op.automatic */
@@ -308,7 +309,6 @@ typedef enum {
   BRO_MSG_COMMIT_ROLLED_FORWARD, /* commit.rolledForward */
   BRO_MSG_COMMIT_MERGED, /* commit.merged */
   BRO_MSG_COMMIT_QUARANTINED, /* commit.quarantined */
-  BRO_MSG_COMMIT_IN_PROGRESS, /* commit.inProgress */
   BRO_MSG_LIBRARY_OFFLINE, /* library.offline */
   BRO_MSG_LIBRARY_NONE, /* library.none */
   BRO_MSG_LIBRARY_BACK, /* library.back */

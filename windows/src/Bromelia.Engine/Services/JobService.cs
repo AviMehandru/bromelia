@@ -132,13 +132,19 @@ public sealed class JobService
     /// The same job's steps from there are stored pending (their checkpoints kept), its plan cut back after Plan when Plan
     /// runs again, and its record queued again (no outcome, by hand, no media generation; acquisition up to Release, else
     /// processing) with job.retried {step} in its log, then it runs like a new one. job.notFound; job.notRetryable for any
-    /// other job (read errors and failed post steps get retries of their own).</summary>
+    /// other job (read errors and failed post steps get retries of their own). While the job has an open commit intent
+    /// (its files are partly in the library), only a retry from Commit is taken, which finishes it: any other is
+    /// job.commitOpen (a step before Commit would change staging under the intent; a new job would archive the disc again
+    /// beside it).</summary>
     public async Task<JobDto> Retry(Id jobId, StepKind? fromStep = null)
     {
         var record = await Load(jobId);
         if (record.State != JobState.Finished || _active.ContainsKey(jobId)) throw NotRetryable(jobId);
         if (fromStep == null && record.Outcome is Outcome.Failed or Outcome.Cancelled or Outcome.Skipped)
+        {
+            await NotCommitting(jobId);
             return await Create(record.Request with { Automatic = false, MediaGeneration = null });
+        }
         if (record.Outcome is not (Outcome.Failed or Outcome.Cancelled or Outcome.Interrupted)) throw NotRetryable(jobId);
 
         var steps = (record.Plan?.Steps ?? JobPlanner.Initial(record.Request)).ToList();
@@ -149,6 +155,7 @@ public sealed class JobService
         if (seq > JobPlanner.Done(rows).Count) throw BadRequest("fromStep " + EnumWire.Name(fromStep!.Value) + ": a step before it isn't done");
         int release = steps.IndexOf(StepKind.Release);
         if (release < 0 || seq <= release) seq = 0;
+        if (seq < steps.IndexOf(StepKind.Commit)) await NotCommitting(jobId);
         foreach (var row in rows.Where(r => r.Seq >= seq))
         {
             var pending = row with { State = StepState.Pending, StartedAt = null, FinishedAt = null, Output = null, Error = null };
@@ -344,6 +351,13 @@ public sealed class JobService
     async Task<JobRecord> Load(Id jobId) =>
         await _executor.Worker(() => _store.Jobs().Load(jobId))
         ?? throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobNotFound), ("jobId", JsonValue.Of(jobId.Value))));
+
+    /// <summary>job.commitOpen while the job has an open commit intent.</summary>
+    async Task NotCommitting(Id jobId)
+    {
+        if ((await _executor.Worker(() => _store.Units().OpenIntents())).Any(i => i.JobId == jobId))
+            throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCommitOpen), ("jobId", JsonValue.Of(jobId.Value))));
+    }
 
     /// <summary>Fails unless the job waits to start a step (queued, waiting for resources, blocked).</summary>
     async Task Waiting(Id jobId)

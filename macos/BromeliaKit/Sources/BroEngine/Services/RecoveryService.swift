@@ -233,7 +233,7 @@ public final class RecoveryService {
             let unit = try? await executor.worker { () async throws(BroError) -> UnitRecord? in try await store.units().get(unitId) }
             guard unit?.libraryId == libraryId else { continue }
             do throws(BroError) {
-                _ = try await library.rollForward(intent)
+                if try await library.rollForward(intent) == nil { continue } // the job's Commit finished it meanwhile
                 try? await log(intent.jobId, BroMessage(.commitRolledForward, [("unit", .string(intent.unitId.value))], severity: .warning))
                 await removeLeftovers(intent.destination, recursive: false)
             } catch {

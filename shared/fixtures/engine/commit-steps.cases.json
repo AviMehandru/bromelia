@@ -1,0 +1,5377 @@
+{
+  "description": "CommitStep (plan §20.1 step 14, §15.4; §22.3 steps 4-6 through the LibraryPort) and NotifyStep (step 18). Commit is skipped unless Plan and Seal ran; without Name's output it fails with name.noFolder; library.require(plan.libraryId) (an offline library fails with its reason); job.cancelled when the job is cancelled already; library.stagingDirectory. The unit's row (UnitRecord): Seal's unitId, the plan's library, no physical disc, the job, its path (Name's folder, or _Quarantine/<Name's name>), Seal's record file, version 3, committing, Seal's status, the identity (Name's when it corrected it, else Plan's: name, kind, format, formatCode, encrypted, its label's season, part, volume, disc), Probe's fingerprint, the label (the listing's name, else the source's: StepSources.label), Probe's MakeMKV version (else ''), the bytes and count of Seal's files, 1 attempt, created now. The intent: Seal's unitId, the job, staging, <library>/<that path>, merge (Name's, never for a quarantine), not quarantine, created now, items: Name's files in order, each in place (from = to = its path, without a final '/'; a folder when Seal has no file of that path, else a file with Seal's SHA-256), then Seal's record, logs and note (no SHA-256). The files: Seal's. Seal's tag set: library.quarantine(unit, intent, files, tag, the job's cancel token), log commit.quarantined{path: the destination} (warning), StepReport.quarantined; else library.commit(..., cancel), log archive.moved{count: the items, path: the destination}. Before the call, progress archive.moving at 0. Data: CommitOutput {unitId, library, path: the destination relative to the library, merged (the result's), quarantined}. Resources: libraryWrites [plan.libraryId]; resumability idempotent (plan §20.1's 'rolls forward': LibraryService finishes an open intent). Notify: data {}, no resources, idempotent, nothing else. The harness runs CommitStep (or NotifyStep) alone with fakes; nothing touches a file system. The fake LibraryPort: require(lib) gives {id, path} from given.libraries, throws the library's 'offline' error, or library.notFound; stagingDirectory(lib, job) requires the library, then gives <path>/.bromelia/staging/<job> (and counts the call); commit(unit, intent, files, cancel) and quarantine(unit, intent, files, tag, cancel) record the call, then (cancelAt commit) cancel the job and fail with job.cancelled when the token they were given is cancelled (LibraryService's wait does so), then fail with port.error when given, else give CommitResult{unit.id, destination: port.destination, else quarantine: <the intent destination's parent>/<its last part> [<tag>], commit: the intent's destination; the files given; merged: port.merged, else commit: the intent's merge, quarantine: false}. A fixed clock (now). given: step \"commit\" (default) | \"notify\" request, outputs ([{kind, data, readErrors?}]), now libraries {lib: {path, offline?: {code, params}}} port {error?: {code, params}, destination?: path, merged?: bool} cancelAt {op: \"start\"}: the job is cancelled before the step runs; {op: \"commit\"}: when the port's commit or quarantine is called expect: error {code, params}, skipped, quarantined (StepReport.quarantined; default false), data (exactly), log (exactly: code, params, severity), progress (exactly: [fraction, code]), calls (exactly: the port's commit / quarantine calls), stagingAsked (how many times stagingDirectory was called), resources {libraryWrites}, resumes {resumability} A call: {op: commit|quarantine, tag (quarantine only), unit, intent, files}. unit {id, libraryId, physicalDiscId, jobId, path, recordFile, recordVersion, state, status, name, kind, format, formatCode, encrypted, fingerprint, label, season, part, volume, disc, makemkvVersion, bytes, fileCount, attempts, createdAt, committedAt} (UnitRecord, in its order; enums by their wire names, instants formatted) intent {unitId, jobId, staging, destination, merge, quarantine, createdAt, items: [[seq, from, to, sha256, isDir, moved]]} files [[path, size, sha256, role, title]]",
+  "cases": [
+    {
+      "id": "commit-holds-the-library-write-and-rolls-forward",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "resources": {
+          "libraryWrites": [
+            "lib"
+          ]
+        },
+        "resumes": {
+          "resumability": "idempotent"
+        },
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "Sample Movie",
+          "merged": false,
+          "quarantined": false
+        },
+        "stagingAsked": 1
+      }
+    },
+    {
+      "id": "commit-a-movie-moves-into-a-new-folder-by-name-s-names",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ],
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "Sample Movie",
+          "merged": false,
+          "quarantined": false
+        },
+        "log": [
+          {
+            "code": "archive.moved",
+            "params": {
+              "count": 6,
+              "path": "/lib/Sample Movie"
+            },
+            "severity": "info"
+          }
+        ],
+        "progress": [
+          [
+            0,
+            "archive.moving"
+          ]
+        ],
+        "stagingAsked": 1
+      }
+    },
+    {
+      "id": "commit-a-unit-without-copied-logs-moves-only-its-record-with-it",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ],
+        "log": [
+          {
+            "code": "archive.moved",
+            "params": {
+              "count": 4,
+              "path": "/lib/Sample Movie"
+            },
+            "severity": "info"
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-a-media-server-unit-merges-into-its-shared-folder-a-backup-as-a-folder",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Movies/Sample Movie (2010)",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 32,
+              "fileCount": 4,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Movies/Sample Movie (2010)",
+              "merge": true,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Backup/Sample Movie - Backup - BR",
+                  "Backup/Sample Movie - Backup - BR",
+                  null,
+                  true,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                6,
+                "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                "backup",
+                null
+              ],
+              [
+                "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                8,
+                "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                "backup",
+                null
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ],
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "Movies/Sample Movie (2010)",
+          "merged": true,
+          "quarantined": false
+        },
+        "log": [
+          {
+            "code": "archive.moved",
+            "params": {
+              "count": 6,
+              "path": "/lib/Movies/Sample Movie (2010)"
+            },
+            "severity": "info"
+          }
+        ],
+        "progress": [
+          [
+            0,
+            "archive.moving"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "commit-a-folder-name-gives-with-a-final-slash-is-the-same-item",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Movies/Sample Movie (2010)",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 32,
+              "fileCount": 4,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Movies/Sample Movie (2010)",
+              "merge": true,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Backup/Sample Movie - Backup - BR",
+                  "Backup/Sample Movie - Backup - BR",
+                  null,
+                  true,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                6,
+                "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                "backup",
+                null
+              ],
+              [
+                "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                8,
+                "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                "backup",
+                null
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-the-data-says-what-the-library-did",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "port": {
+          "merged": false
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "Movies/Sample Movie (2010)",
+          "merged": false,
+          "quarantined": false
+        },
+        "log": [
+          {
+            "code": "archive.moved",
+            "params": {
+              "count": 6,
+              "path": "/lib/Movies/Sample Movie (2010)"
+            },
+            "severity": "info"
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-logs-and-records-where-the-library-says-the-unit-is",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "port": {
+          "destination": "/lib/Movies/Sample Movie (2010) (2)"
+        }
+      },
+      "expect": {
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "Movies/Sample Movie (2010) (2)",
+          "merged": true,
+          "quarantined": false
+        },
+        "log": [
+          {
+            "code": "archive.moved",
+            "params": {
+              "count": 6,
+              "path": "/lib/Movies/Sample Movie (2010) (2)"
+            },
+            "severity": "info"
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-a-backup-image-is-a-file-with-its-hash",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR.iso",
+                  "role": "backup"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR.iso",
+                  "size": 8,
+                  "sha256": "a5df3fde7b200c3fa2791144c7e05c5c2bced4c6ad863d3a4cf76c972c1712f9",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Movies/Sample Movie (2010)",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 24,
+              "fileCount": 2,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Movies/Sample Movie (2010)",
+              "merge": true,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Backup/Sample Movie - Backup - BR.iso",
+                  "Backup/Sample Movie - Backup - BR.iso",
+                  "a5df3fde7b200c3fa2791144c7e05c5c2bced4c6ad863d3a4cf76c972c1712f9",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Backup/Sample Movie - Backup - BR.iso",
+                8,
+                "a5df3fde7b200c3fa2791144c7e05c5c2bced4c6ad863d3a4cf76c972c1712f9",
+                "backup",
+                null
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-read-errors-quarantine-the-unit-by-name-s-name",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "errors",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": "READ ERRORS.txt",
+              "tag": "READ ERRORS"
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "quarantine",
+            "tag": "READ ERRORS",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "_Quarantine/Sample Movie (2010)",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "errors",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 32,
+              "fileCount": 4,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/_Quarantine/Sample Movie (2010)",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Backup/Sample Movie - Backup - BR",
+                  "Backup/Sample Movie - Backup - BR",
+                  null,
+                  true,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  6,
+                  "READ ERRORS.txt",
+                  "READ ERRORS.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                6,
+                "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                "backup",
+                null
+              ],
+              [
+                "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                8,
+                "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                "backup",
+                null
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ],
+        "quarantined": true,
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "_Quarantine/Sample Movie (2010) [READ ERRORS]",
+          "merged": false,
+          "quarantined": true
+        },
+        "log": [
+          {
+            "code": "commit.quarantined",
+            "params": {
+              "path": "/lib/_Quarantine/Sample Movie (2010) [READ ERRORS]"
+            },
+            "severity": "warning"
+          }
+        ],
+        "progress": [
+          [
+            0,
+            "archive.moving"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "commit-a-quarantine-takes-the-free-name-the-library-gives",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "errors",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": "READ ERRORS.txt",
+              "tag": "READ ERRORS"
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "port": {
+          "destination": "/lib/_Quarantine/Sample Movie (2010) [READ ERRORS] (2)"
+        }
+      },
+      "expect": {
+        "quarantined": true,
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "lib",
+          "path": "_Quarantine/Sample Movie (2010) [READ ERRORS] (2)",
+          "merged": false,
+          "quarantined": true
+        },
+        "log": [
+          {
+            "code": "commit.quarantined",
+            "params": {
+              "path": "/lib/_Quarantine/Sample Movie (2010) [READ ERRORS] (2)"
+            },
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-a-tv-disc-s-row-holds-its-set-and-the-source-s-label",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "",
+                "volumeName": "SOME_SHOW_S2_D4",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": null
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Some Show",
+                "kind": "tv",
+                "format": "dvd",
+                "formatCode": "DVD",
+                "encrypted": true,
+                "label": {
+                  "title": "Some Show",
+                  "season": 2,
+                  "part": 1,
+                  "volume": 3,
+                  "disc": 4,
+                  "set": "Season 2 Disc 4",
+                  "looksLikeSeries": true
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "TV Shows/Some Show/Season 02",
+              "name": "Season 02",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Season 02/Some Show - S02E01.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Season 02/Some Show - S02E02.mkv",
+                  "role": "title",
+                  "title": 1
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Season 02/Some Show - S02E01.mkv",
+                  "size": 11,
+                  "sha256": "788ad4a6058e1919ca30c07943576340c6f9025e7bcb8bfd6ed272ef0c6d0482",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Season 02/Some Show - S02E02.mkv",
+                  "size": 11,
+                  "sha256": "d77351e3925db7b5e95a377347405beae1f5eabe57c4177881ec2cb8d45d55a2",
+                  "role": "title",
+                  "title": 1
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "TV Shows/Some Show/Season 02",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Some Show",
+              "kind": "tv",
+              "format": "dvd",
+              "formatCode": "DVD",
+              "encrypted": true,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "sample-movie",
+              "season": 2,
+              "part": 1,
+              "volume": 3,
+              "disc": 4,
+              "makemkvVersion": "",
+              "bytes": 22,
+              "fileCount": 2,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/TV Shows/Some Show/Season 02",
+              "merge": true,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Season 02/Some Show - S02E01.mkv",
+                  "Season 02/Some Show - S02E01.mkv",
+                  "788ad4a6058e1919ca30c07943576340c6f9025e7bcb8bfd6ed272ef0c6d0482",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Season 02/Some Show - S02E02.mkv",
+                  "Season 02/Some Show - S02E02.mkv",
+                  "d77351e3925db7b5e95a377347405beae1f5eabe57c4177881ec2cb8d45d55a2",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Season 02/Some Show - S02E01.mkv",
+                11,
+                "788ad4a6058e1919ca30c07943576340c6f9025e7bcb8bfd6ed272ef0c6d0482",
+                "title",
+                0
+              ],
+              [
+                "Season 02/Some Show - S02E02.mkv",
+                11,
+                "d77351e3925db7b5e95a377347405beae1f5eabe57c4177881ec2cb8d45d55a2",
+                "title",
+                1
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-the-row-holds-the-identity-name-corrected",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ],
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "uhd",
+                "formatCode": "UHD",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "uhd",
+              "formatCode": "UHD",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-a-unit-without-a-listing-has-no-fingerprint-and-the-drive-s-label",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "driveId": "drv-0123456789abcdef",
+          "details": {
+            "source": {
+              "drive": "drv-0123456789abcdef"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": null,
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": null,
+              "label": "",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-a-unit-without-probe-s-output-has-the-source-s-label",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": null,
+              "label": "sample-movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "commit-is-skipped-before-seal",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "skipped": true,
+        "calls": [],
+        "log": [],
+        "stagingAsked": 0
+      }
+    },
+    {
+      "id": "commit-is-skipped-without-a-plan",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "skipped": true,
+        "calls": [],
+        "stagingAsked": 0
+      }
+    },
+    {
+      "id": "commit-without-name-s-output-fails",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "name.noFolder"
+        },
+        "calls": [],
+        "stagingAsked": 0
+      }
+    },
+    {
+      "id": "commit-with-the-library-offline-fails-before-anything",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib",
+            "offline": {
+              "code": "library.offline",
+              "params": {
+                "library": "Library",
+                "path": "/lib"
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "library.offline",
+          "params": {
+            "library": "Library",
+            "path": "/lib"
+          }
+        },
+        "calls": [],
+        "log": [],
+        "progress": [],
+        "stagingAsked": 0
+      }
+    },
+    {
+      "id": "commit-with-another-library-commits-into-it",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "nas",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          },
+          "nas": {
+            "path": "/nas"
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "nas",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/nas/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/nas/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ],
+        "data": {
+          "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+          "library": "nas",
+          "path": "Sample Movie",
+          "merged": false,
+          "quarantined": false
+        },
+        "resources": {
+          "libraryWrites": [
+            "nas"
+          ]
+        }
+      }
+    },
+    {
+      "id": "commit-cancelled-before-it-starts-touches-nothing",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "cancelAt": {
+          "op": "start"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "job.cancelled"
+        },
+        "calls": [],
+        "log": [],
+        "progress": [],
+        "stagingAsked": 0
+      }
+    },
+    {
+      "id": "commit-cancelled-while-the-library-waits-for-the-unit-ends-the-step",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "cancelAt": {
+          "op": "commit"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "job.cancelled"
+        },
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ],
+        "log": [],
+        "progress": [
+          [
+            0,
+            "archive.moving"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "commit-cancelled-while-a-quarantine-waits-ends-the-step",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "errors",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": "READ ERRORS.txt",
+              "tag": "READ ERRORS"
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "cancelAt": {
+          "op": "commit"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "job.cancelled"
+        },
+        "quarantined": false,
+        "log": []
+      }
+    },
+    {
+      "id": "commit-a-commit-the-library-refuses-fails-the-step-with-its-error",
+      "given": {
+        "step": "commit",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "port": {
+          "error": {
+            "code": "library.folderExists",
+            "params": {
+              "path": "/lib/Sample Movie"
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "library.folderExists",
+          "params": {
+            "path": "/lib/Sample Movie"
+          }
+        },
+        "calls": [
+          {
+            "op": "commit",
+            "unit": {
+              "id": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "libraryId": "lib",
+              "physicalDiscId": null,
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "path": "Sample Movie",
+              "recordFile": "bromelia-36201adf.json",
+              "recordVersion": 3,
+              "state": "committing",
+              "status": "success",
+              "name": "Sample Movie",
+              "kind": "movie",
+              "format": "bluray",
+              "formatCode": "BR",
+              "encrypted": false,
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "label": "Sample Movie",
+              "season": null,
+              "part": null,
+              "volume": null,
+              "disc": null,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
+              "bytes": 27,
+              "fileCount": 3,
+              "attempts": 1,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "committedAt": null
+            },
+            "intent": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "jobId": "00000000-0000-4000-8000-000000000001",
+              "staging": "/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001",
+              "destination": "/lib/Sample Movie",
+              "merge": false,
+              "quarantine": false,
+              "createdAt": "2026-10-23T10:00:00.000Z",
+              "items": [
+                [
+                  0,
+                  "Sample Movie.mkv",
+                  "Sample Movie.mkv",
+                  "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  false,
+                  false
+                ],
+                [
+                  1,
+                  "Sample Movie - Extra.mkv",
+                  "Sample Movie - Extra.mkv",
+                  "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  false,
+                  false
+                ],
+                [
+                  2,
+                  "disc-info.json",
+                  "disc-info.json",
+                  "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  false,
+                  false
+                ],
+                [
+                  3,
+                  "bromelia-36201adf.json",
+                  "bromelia-36201adf.json",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  4,
+                  "bromelia-36201adf-log.txt",
+                  "bromelia-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ],
+                [
+                  5,
+                  "makemkv-36201adf-log.txt",
+                  "makemkv-36201adf-log.txt",
+                  null,
+                  false,
+                  false
+                ]
+              ]
+            },
+            "files": [
+              [
+                "Sample Movie - Extra.mkv",
+                9,
+                "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                "title",
+                1
+              ],
+              [
+                "Sample Movie.mkv",
+                16,
+                "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                "title",
+                0
+              ],
+              [
+                "disc-info.json",
+                2,
+                "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "discInfo",
+                null
+              ]
+            ]
+          }
+        ],
+        "log": []
+      }
+    },
+    {
+      "id": "notify-only-reports-success",
+      "given": {
+        "step": "notify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Sample Movie",
+              "name": "Sample Movie",
+              "merge": false,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "success",
+              "files": [
+                {
+                  "path": "Sample Movie - Extra.mkv",
+                  "size": 9,
+                  "sha256": "baeb87ce0f334bc954dcfd6d7505f93e61c1d3f774c6805b76afc6fb0c2fdcdb",
+                  "role": "title",
+                  "title": 1
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": null,
+              "tag": null
+            }
+          },
+          {
+            "kind": "commit",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "library": "lib",
+              "path": "Sample Movie",
+              "merged": false,
+              "quarantined": false
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "data": {},
+        "log": [],
+        "progress": [],
+        "calls": [],
+        "stagingAsked": 0,
+        "resources": {
+          "libraryWrites": []
+        },
+        "resumes": {
+          "resumability": "idempotent"
+        }
+      }
+    },
+    {
+      "id": "notify-reports-success-after-a-quarantine-too",
+      "given": {
+        "step": "notify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 2,
+                "titles": []
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "backupThenMkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default"
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          },
+          {
+            "kind": "acquire",
+            "data": {
+              "titles": [],
+              "others": [],
+              "backup": null,
+              "discInfo": null,
+              "readErrors": []
+            }
+          },
+          {
+            "kind": "name",
+            "data": {
+              "folder": "Movies/Sample Movie (2010)",
+              "name": "Sample Movie (2010)",
+              "merge": true,
+              "files": [
+                {
+                  "path": "Sample Movie.mkv",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR",
+                  "role": "backup"
+                },
+                {
+                  "path": "disc-info.json",
+                  "role": "discInfo"
+                }
+              ]
+            }
+          },
+          {
+            "kind": "seal",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "status": "errors",
+              "files": [
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/STREAM/00001.m2ts",
+                  "size": 6,
+                  "sha256": "dca83e717b1f64eb141057a7415a330ad1361f51703efa2e4776f40047898a04",
+                  "role": "backup"
+                },
+                {
+                  "path": "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv",
+                  "size": 8,
+                  "sha256": "50f0ac2239013e68c22c0af4ae3854dd9fc70f8b0dd009bf6a5d31aae268331f",
+                  "role": "backup"
+                },
+                {
+                  "path": "Sample Movie.mkv",
+                  "size": 16,
+                  "sha256": "a5bdc03a37755cc4598d742a28f765aa840c1fb6908362d187001f3d981f095f",
+                  "role": "title",
+                  "title": 0
+                },
+                {
+                  "path": "disc-info.json",
+                  "size": 2,
+                  "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "role": "discInfo"
+                }
+              ],
+              "record": "bromelia-36201adf.json",
+              "logs": [
+                "bromelia-36201adf-log.txt",
+                "makemkv-36201adf-log.txt"
+              ],
+              "note": "READ ERRORS.txt",
+              "tag": "READ ERRORS"
+            }
+          },
+          {
+            "kind": "commit",
+            "data": {
+              "unitId": "36201adf-6273-8342-bb9b-410e87adc4e5",
+              "library": "lib",
+              "path": "_Quarantine/Sample Movie (2010) [READ ERRORS]",
+              "merged": false,
+              "quarantined": true
+            }
+          }
+        ],
+        "now": "2026-10-23T10:00:00.000Z",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        }
+      },
+      "expect": {
+        "data": {},
+        "log": [],
+        "skipped": false
+      }
+    }
+  ]
+}

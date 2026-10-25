@@ -6,7 +6,7 @@
 #include "bro-message-renderer.h"
 #include "bro-pipeline-runner.h"
 
-/* ---- jobs and steps in memory ---------------------------------------------------------------------------------- */
+/* ---- jobs and steps in memory, and the open commit intents ----------------------------------------------------- */
 
 #define TEST_TYPE_MEMORY_STORE (test_memory_store_get_type ())
 G_DECLARE_FINAL_TYPE (TestMemoryStore, test_memory_store, TEST, MEMORY_STORE, GObject)
@@ -17,7 +17,8 @@ struct _TestMemoryStore {
   GHashTable *jobs;  /* id → BroJobRecord */
   GPtrArray *order;  /* job ids in the order they were inserted */
   GHashTable *steps; /* "id/seq" → BroStepRecord */
-  BroUnitRepository *units;         /* nullable: a test that needs units sets it */
+  BroUnitRepository *units;         /* nullable: a test that needs units sets it; else the store's own open intents */
+  GPtrArray *intents;               /* BroCommitIntent *: the open intents of the store's own units */
   BroLibraryRepository *libraries;  /* nullable */
   GCond released;
   gboolean holding; /* job inserts wait until released (a test's way to act while one is written) */
@@ -29,14 +30,16 @@ struct _TestMemoryStore {
 static void store_iface_init (BroStoreInterface *iface);
 static void store_jobs_iface_init (BroJobRepositoryInterface *iface);
 static void store_steps_iface_init (BroStepRepositoryInterface *iface);
+static void store_units_iface_init (BroUnitRepositoryInterface *iface);
 G_DEFINE_FINAL_TYPE_WITH_CODE (TestMemoryStore, test_memory_store, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_STORE, store_iface_init)
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_JOB_REPOSITORY, store_jobs_iface_init)
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_STEP_REPOSITORY, store_steps_iface_init))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_STEP_REPOSITORY, store_steps_iface_init)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_UNIT_REPOSITORY, store_units_iface_init))
 
 static BroJobRepository *store_jobs (BroStore *s) { return BRO_JOB_REPOSITORY (s); }
 static BroStepRepository *store_steps (BroStore *s) { return BRO_STEP_REPOSITORY (s); }
-static BroUnitRepository *store_units (BroStore *s) { return TEST_MEMORY_STORE (s)->units; }
+static BroUnitRepository *store_units (BroStore *s) { return TEST_MEMORY_STORE (s)->units ? TEST_MEMORY_STORE (s)->units : BRO_UNIT_REPOSITORY (s); }
 static BroLibraryRepository *store_libraries (BroStore *s) { return TEST_MEMORY_STORE (s)->libraries; }
 
 static gboolean
@@ -316,6 +319,39 @@ store_steps_iface_init (BroStepRepositoryInterface *iface)
   iface->load = step_load;
 }
 
+/* An open commit intent of the job (its unit is half moved into a library). */
+static void
+store_open_intent (TestMemoryStore *self, const BroId *job_id)
+{
+  BroCommitIntent *intent = bro_commit_intent_new ();
+  g_snprintf (intent->unit_id.value, sizeof intent->unit_id.value, "unit-%s", job_id->value);
+  intent->job_id = *job_id;
+  intent->staging = g_strconcat ("/lib/.bromelia/staging/", job_id->value, NULL);
+  intent->destination = g_strdup ("/lib/Unit");
+  g_mutex_lock (&self->lock);
+  g_ptr_array_add (self->intents, intent);
+  g_mutex_unlock (&self->lock);
+}
+
+static GPtrArray *
+units_open_intents (BroUnitRepository *repo, BroBroError **error)
+{
+  TestMemoryStore *self = TEST_MEMORY_STORE (repo);
+  GPtrArray *copy = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_commit_intent_free);
+  g_mutex_lock (&self->lock);
+  for (guint i = 0; i < self->intents->len; i++)
+    g_ptr_array_add (copy, bro_commit_intent_copy (self->intents->pdata[i]));
+  g_mutex_unlock (&self->lock);
+  return copy;
+}
+
+/* Only the open intents: JobService.retry asks for them. */
+static void
+store_units_iface_init (BroUnitRepositoryInterface *iface)
+{
+  iface->open_intents = units_open_intents;
+}
+
 static void
 test_memory_store_finalize (GObject *object)
 {
@@ -324,6 +360,7 @@ test_memory_store_finalize (GObject *object)
   g_ptr_array_unref (self->order);
   g_hash_table_unref (self->steps);
   g_hash_table_unref (self->hold_loads);
+  g_ptr_array_unref (self->intents);
   g_clear_object (&self->units);
   g_clear_object (&self->libraries);
   g_mutex_clear (&self->lock);
@@ -346,6 +383,7 @@ test_memory_store_init (TestMemoryStore *self)
   self->order = g_ptr_array_new_with_free_func (g_free);
   self->steps = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_step_record_free);
   self->hold_loads = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->intents = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_commit_intent_free);
 }
 
 /* ---- files and folders in memory ------------------------------------------------------------------------------- */
@@ -1647,6 +1685,8 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
             s->checkpoint = bro_json_value_ref (bro_json_value_member (d, "checkpoint"));
           bro_step_repository_save (BRO_STEP_REPOSITORY (h.store), s, NULL);
         }
+      if (bro_json_value_get_bool (bro_json_value_member (j, "intent"), FALSE))
+        store_open_intent (h.store, jid);
       if ((done = bro_json_value_member (j, "log")))
         {
           g_autoptr (GPtrArray) lines = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);

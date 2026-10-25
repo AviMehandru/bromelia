@@ -4,16 +4,18 @@ import BroFoundation
 import BroPorts
 import Foundation
 
-/// Jobs and steps in memory (the rest of the store isn't needed by these tests). Thread-safe.
-final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendable {
+/// Jobs and steps in memory, and the open commit intents (the rest of the store isn't needed by these tests).
+/// Thread-safe.
+final class MemoryStore: Store, JobRepository, StepRepository, UnitRepository, @unchecked Sendable {
     private let lock = NSLock()
     private var jobsById: [Id: JobRecord] = [:]
     private var order: [Id] = [] // jobs in the order they were inserted
     private var stepsByKey: [String: StepRecord] = [:]
+    private var intents: [CommitIntent] = []
 
     func jobs() -> any JobRepository { self }
     func steps() -> any StepRepository { self }
-    func units() -> any UnitRepository { fatalError("not used") }
+    func units() -> any UnitRepository { self }
     func catalog() -> any CatalogRepository { fatalError("not used") }
     func checks() -> any CheckRepository { fatalError("not used") }
     func replicas() -> any ReplicaRepository { fatalError("not used") }
@@ -126,6 +128,23 @@ final class MemoryStore: Store, JobRepository, StepRepository, @unchecked Sendab
     func load(_ jobId: Id) async throws(BroError) -> [StepRecord] {
         lock.withLock { stepsByKey.values.filter { $0.jobId == jobId }.sorted { $0.seq < $1.seq } }
     }
+
+    /// An open commit intent of the job (its unit is half moved into a library).
+    func openIntent(_ jobId: Id) {
+        lock.withLock {
+            intents.append(CommitIntent(unitId: Id("unit-" + jobId.value), jobId: jobId, staging: "/lib/.bromelia/staging/" + jobId.value,
+                                        destination: "/lib/Unit", merge: false, quarantine: false, createdAt: Instant(unixMilliseconds: 0), items: []))
+        }
+    }
+
+    func openIntents() async throws(BroError) -> [CommitIntent] { lock.withLock { intents } }
+    func beginCommit(_ unit: UnitRecord, intent: CommitIntent) async throws(BroError) { fatalError("not used") }
+    func markMoved(_ unitId: Id, seq: Int) async throws(BroError) { fatalError("not used") }
+    func finishCommit(_ intent: CommitIntent, record: UnitRecord, files: [UnitFile]) async throws(BroError) { fatalError("not used") }
+    func get(_ unitId: Id) async throws(BroError) -> UnitRecord? { fatalError("not used") }
+    func query(_ query: UnitQuery) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
+    func leastRecentlyVerified(_ limit: Int) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
+    func markMissing(_ unitId: Id) async throws(BroError) { fatalError("not used") }
 
     func job(_ id: Id) -> JobRecord? { lock.withLock { jobsById[id] } }
     func stepsOf(_ id: Id) -> [StepRecord] { lock.withLock { stepsByKey.values.filter { $0.jobId == id }.sorted { $0.seq < $1.seq } } }
@@ -404,8 +423,8 @@ struct UnusedTools: Makemkv, Matroska, DriveControl, LibraryPort, CatalogQueries
     func openRaw(_ device: String) throws(BroError) -> any SectorReader { fatalError("not used") }
     func require(_ libraryId: String) throws(BroError) -> LibraryHandle { fatalError("not used") }
     func stagingDirectory(_ libraryId: String, jobId: Id) throws(BroError) -> String { fatalError("not used") }
-    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile]) async throws(BroError) -> CommitResult { fatalError("not used") }
-    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String) async throws(BroError) -> CommitResult {
+    func commit(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], cancel: CancellationToken) async throws(BroError) -> CommitResult { fatalError("not used") }
+    func quarantine(_ unit: UnitRecord, intent: CommitIntent, files: [UnitFile], tag: String, cancel: CancellationToken) async throws(BroError) -> CommitResult {
         fatalError("not used")
     }
     func archivedBefore(_ fingerprint: String) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
