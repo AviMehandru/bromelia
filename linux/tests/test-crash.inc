@@ -27,7 +27,7 @@ test_crash_data_imager (void)
     GDir *d;
     const char *name;
     guint parts = 0, others = 0;
-    remove_tree (where);
+    bro_test_remove_tree (where);
     g_mkdir_with_parents (where, 0755);
     g_setenv ("BROMELIA_CRASH_DIR", where, TRUE);
     g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_DEFAULT);
@@ -44,7 +44,7 @@ test_crash_data_imager (void)
     g_dir_close (d);
     g_assert_cmpuint (parts, ==, 1);
     g_assert_cmpuint (others, ==, 0);
-    remove_tree (where);
+    bro_test_remove_tree (where);
   }
 }
 
@@ -86,7 +86,7 @@ test_crash_move_merging (void)
       g_autofree char *report = g_build_filename (where, "report.txt", NULL), *text = NULL;
       g_auto (GStrv) lines = NULL;
       guint reported = 0, moved = 0;
-      remove_tree (where);
+      bro_test_remove_tree (where);
       g_mkdir_with_parents (from, 0755);
       g_mkdir_with_parents (to, 0755);
       for (int i = 0; i < 8; i++)
@@ -115,7 +115,7 @@ test_crash_move_merging (void)
         }
       g_assert_cmpuint (reported, ==, when == 0 ? 2 : 3);
       g_assert_cmpuint (moved, ==, 3); /* killed before its report, the third item has moved all the same */
-      remove_tree (where);
+      bro_test_remove_tree (where);
     }
 }
 
@@ -141,7 +141,7 @@ test_read_only_destination (void)
       g_test_skip ("root ignores the folder's permissions");
       return;
     }
-  remove_tree (dir);
+  bro_test_remove_tree (dir);
   g_mkdir_with_parents (dir, 0755);
   g_assert_cmpint (chmod (dir, 0555), ==, 0);
   imager = bro_data_imager_new (BRO_DRIVE_CONTROL (drives), BRO_FILE_SYSTEM (fs));
@@ -156,7 +156,7 @@ test_read_only_destination (void)
   g_assert_null (g_dir_read_name (d));
   g_dir_close (d);
   chmod (dir, 0755);
-  remove_tree (dir);
+  bro_test_remove_tree (dir);
 }
 
 static gboolean
@@ -209,7 +209,7 @@ test_crash_tool_with_engine (void)
     g_autofree char *where = g_build_filename (scratch, "crash-tool", NULL);
     GPid tool, child;
     gint64 deadline;
-    remove_tree (where);
+    bro_test_remove_tree (where);
     g_mkdir_with_parents (where, 0755);
     g_setenv ("BROMELIA_CRASH_DIR", where, TRUE);
     g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_DEFAULT);
@@ -227,7 +227,7 @@ test_crash_tool_with_engine (void)
         kill (tool, SIGKILL);
         g_error ("the tool (%d) or its child (%d) outlived the killed engine", (int) tool, (int) child);
       }
-    remove_tree (where);
+    bro_test_remove_tree (where);
   }
 }
 
@@ -246,7 +246,7 @@ test_crash_after_tool_exited (void)
     g_autofree char *pattern = NULL, *out = NULL;
     GPid tool, child;
     int status = 0;
-    remove_tree (where);
+    bro_test_remove_tree (where);
     g_mkdir_with_parents (where, 0755);
     g_setenv ("BROMELIA_CRASH_DIR", where, TRUE);
     g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_DEFAULT);
@@ -260,6 +260,6 @@ test_crash_after_tool_exited (void)
     g_assert_true (pid_alive (child));
     kill (child, SIGKILL);
     g_assert_cmpstr (out, ==, ""); /* no watcher left */
-    remove_tree (where);
+    bro_test_remove_tree (where);
   }
 }

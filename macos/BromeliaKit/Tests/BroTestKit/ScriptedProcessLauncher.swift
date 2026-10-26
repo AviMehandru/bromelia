@@ -1,4 +1,3 @@
-import BroAdapters
 import BroDomain
 import BroFoundation
 import BroPorts
@@ -7,28 +6,30 @@ import Foundation
 /// A launcher that plays a script instead of running anything (plan §17's test kit): the lines, one at a time as they
 /// are asked for; then the exit status, after creating a file in the destination. A stop ends it at once with status
 /// -1 and signal 15. It records every spec it was given.
-final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
+public final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
     private let lock = NSLock()
-    private(set) var started: [ProcessSpec] = []
-    private(set) var last: Script?
-    var lines: [String] = []
+    public private(set) var started: [ProcessSpec] = []
+    public private(set) var last: Script?
+    public var lines: [String] = []
     /// The indexes of the lines that come on stderr (the others on stdout).
-    var stderr: Set<Int> = []
-    var exitCode = 0
-    var writeFileIn: String?
+    public var stderr: Set<Int> = []
+    public var exitCode = 0
+    public var writeFileIn: String?
     /// The files written in writeFileIn: a name with / makes its folders; "" writes writeFileIn itself as a file.
-    var writeFileNames = ["title_t00.mkv"]
+    public var writeFileNames = ["title_t00.mkv"]
     /// After the lines: end as stopped for silence (status -1, signal 15, stalled for the spec's timeout).
-    var stalls = false
-    var afterLine: (@Sendable (Int) -> Void)?
+    public var stalls = false
+    public var afterLine: (@Sendable (Int) -> Void)?
     /// When it ends normally: create this many parts from the -o argument's %03d pattern (mkvmerge --split).
-    var splitParts = 0
+    public var splitParts = 0
     /// When it ends normally: write this text to the file named by argument index (mkvextract's output).
-    var writeArgument: (index: Int, text: String)?
+    public var writeArgument: (index: Int, text: String)?
     /// The process reports process.noTranscript for the spec's transcript.
-    var transcriptFails = false
+    public var transcriptFails = false
 
-    func start(_ spec: ProcessSpec) throws(BroError) -> any RunningProcess {
+    public init() {}
+
+    public func start(_ spec: ProcessSpec) throws(BroError) -> any RunningProcess {
         var effects: [@Sendable () -> Void] = []
         if splitParts > 0, let o = spec.arguments.firstIndex(of: "-o") {
             let pattern = spec.arguments[o + 1], count = splitParts
@@ -53,7 +54,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         return script
     }
 
-    final class Script: RunningProcess, @unchecked Sendable {
+    public final class Script: RunningProcess, @unchecked Sendable {
         private let lock = NSLock()
         private let script: [String]
         private let stderr: Set<Int>
@@ -62,14 +63,14 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         private let afterLine: (@Sendable (Int) -> Void)?
         private let effects: [@Sendable () -> Void]
         private var stoppedBy: StopReason?
-        var writeFileNames = ["title_t00.mkv"]
-        var stalledFor: Duration?
-        var transcriptFailsAt: String?
+        public var writeFileNames = ["title_t00.mkv"]
+        public var stalledFor: Duration?
+        public var transcriptFailsAt: String?
         private var handed = 0
         private var result: ProcessExit?
         private var waiters: [CheckedContinuation<ProcessExit, Never>] = []
 
-        init(lines: [String], stderr: Set<Int> = [], exitCode: Int, writeFileIn: String?, afterLine: (@Sendable (Int) -> Void)?, effects: [@Sendable () -> Void] = []) {
+        public init(lines: [String], stderr: Set<Int> = [], exitCode: Int, writeFileIn: String?, afterLine: (@Sendable (Int) -> Void)?, effects: [@Sendable () -> Void] = []) {
             script = lines
             self.stderr = stderr
             self.effects = effects
@@ -78,14 +79,14 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             self.afterLine = afterLine
         }
 
-        var stopReason: StopReason? { lock.withLock { stoppedBy } }
+        public var stopReason: StopReason? { lock.withLock { stoppedBy } }
 
-        func transcriptProblem() -> BroMessage? {
+        public func transcriptProblem() -> BroMessage? {
             transcriptFailsAt.map { BroMessage(.processNoTranscript, [("path", .string($0)), ("reason", .string("No space left on device"))], severity: .warning) }
         }
-        var linesHanded: Int { lock.withLock { handed } }
+        public var linesHanded: Int { lock.withLock { handed } }
 
-        func lines() -> AsyncStream<OutputLine> {
+        public func lines() -> AsyncStream<OutputLine> {
             AsyncStream(unfolding: { [self] in next() })
         }
 
@@ -124,7 +125,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             return nil
         }
 
-        func wait() async -> ProcessExit {
+        public func wait() async -> ProcessExit {
             await withCheckedContinuation { c in
                 lock.lock()
                 if let result {
@@ -138,7 +139,7 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
         }
 
         /// As a real process: it ends when stopped, whether or not anyone reads the rest of its lines.
-        func stop(_ reason: StopReason) {
+        public func stop(_ reason: StopReason) {
             lock.lock()
             if stoppedBy == nil { stoppedBy = reason }
             let exit = ProcessExit(status: -1, signal: 15, cancelled: stoppedBy == .cancelled || stoppedBy == .shutdown)
@@ -151,55 +152,4 @@ final class ScriptedProcessLauncher: ProcessLauncher, @unchecked Sendable {
             for c in resume { c.resume(returning: exit) }
         }
     }
-}
-
-/// An isolation that records what happens to its leases.
-final class RecordingIsolation: SettingsIsolation, @unchecked Sendable {
-    private let lock = NSLock()
-    private var entries: [String] = []
-    var log: [String] { lock.withLock { entries } }
-    func add(_ s: String) { lock.withLock { entries.append(s) } }
-    /// What release reports.
-    var releaseProblem: BroMessage?
-    /// The leases' warning.
-    var warning: BroMessage?
-
-    func prepare(_ settings: MakemkvRunSettings) throws(BroError) -> any IsolationLease {
-        add("prepare")
-        return Lease(owner: self, settings: settings)
-    }
-
-    func recover(_ workDirectories: [String]) -> [BroMessage] {
-        add((["recover"] + workDirectories).joined(separator: " "))
-        return []
-    }
-
-    struct Lease: IsolationLease {
-        let owner: RecordingIsolation
-        let settings: MakemkvRunSettings
-        func environment() -> [String: String] { ["HOME": settings.workDirectory] }
-        func profilePath() -> String? { settings.profileXml == nil ? nil : settings.workDirectory + "/profile.mmcp.xml" }
-        func warning() -> BroMessage? { owner.warning }
-        func firstOutput() { owner.add("firstOutput") }
-        @discardableResult
-        func release() -> BroMessage? {
-            owner.add("release")
-            return owner.releaseProblem
-        }
-    }
-}
-
-struct FixedLocator: ToolLocator {
-    let makemkvcon: String?
-    func locate(_ tool: ToolKind) -> ToolInfo {
-        if tool == .makemkvcon, let makemkvcon { return ToolInfo(tool: tool, path: makemkvcon, capabilities: []) }
-        return ToolInfo(tool: tool, capabilities: [], why: BroMessage(.toolMissing, [("tool", .string(tool.rawValue))], severity: .warning))
-    }
-}
-
-final class CountingSink: RunSink, @unchecked Sendable {
-    private let lock = NSLock()
-    private var n = 0
-    var events: Int { lock.withLock { n } }
-    func event(_ event: RobotEvent) { lock.withLock { n += 1 } }
 }

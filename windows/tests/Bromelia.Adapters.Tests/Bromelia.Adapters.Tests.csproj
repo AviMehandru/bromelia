@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Bromelia.Adapters\Bromelia.Adapters.csproj" />
+    <ProjectReference Include="..\Bromelia.TestKit\Bromelia.TestKit.csproj" />
   </ItemGroup>
 
 </Project>

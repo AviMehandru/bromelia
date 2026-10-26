@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The shared test kit (rearchitecture plan §17): fakes of the ports that the adapter tests and the test
+       composition root use. Test code, not shipped; no xunit. -->
+  <PropertyGroup>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bromelia.TestKit</RootNamespace>
+    <AssemblyName>Bromelia.TestKit</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Bromelia.Foundation\Bromelia.Foundation.csproj" />
+    <ProjectReference Include="..\..\src\Bromelia.Domain\Bromelia.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Bromelia.Ports\Bromelia.Ports.csproj" />
+  </ItemGroup>
+
+</Project>

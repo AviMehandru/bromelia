@@ -93,7 +93,7 @@ keystore_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
     }
   for (guint i = 0; i < bro_json_value_length (steps); i++)
     bro_keystore_remove (BRO_KEYSTORE (keystore), bro_json_value_get_string (bro_json_value_member (bro_json_value_at (steps, i), "name"), ""), NULL);
-  remove_tree (dir);
+  bro_test_remove_tree (dir);
   return TRUE;
 }
 
@@ -118,7 +118,7 @@ test_keystore_without_secret_service (void)
       g_assert_true (g_file_test (file, G_FILE_TEST_IS_REGULAR));
       got = bro_platform_keystore_get (keystore, "metadata.tmdb", &error);
       g_assert_cmpstr (got, ==, "abc123");
-      remove_tree (dir);
+      bro_test_remove_tree (dir);
       return;
     }
   g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_DEFAULT);
@@ -146,7 +146,7 @@ test_keystore_files (void)
       g_assert_false (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
       g_assert_cmpstr (error->code, ==, "fs.notPrivate");
       g_assert_false (g_file_test (file, G_FILE_TEST_EXISTS));
-      remove_tree (dir);
+      bro_test_remove_tree (dir);
       return;
     }
   g_assert_true (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
@@ -161,7 +161,7 @@ test_keystore_files (void)
   g_assert_cmpint (st.st_mode & 0777, ==, 0600);
   g_assert_cmpint (stat (dir, &st), ==, 0);
   g_assert_cmpint (st.st_mode & 0777, ==, 0700);
-  remove_tree (dir);
+  bro_test_remove_tree (dir);
 }
 
 /* A fallback folder that already exists with looser permissions is made 0700 again before a secret goes in. */
@@ -182,7 +182,7 @@ test_keystore_loose_folder (void)
   g_assert_true (bro_platform_keystore_set (keystore, "metadata.tmdb", "abc123", &error));
   g_assert_cmpint (stat (dir, &st), ==, 0);
   g_assert_cmpint (st.st_mode & 0777, ==, 0700);
-  remove_tree (dir);
+  bro_test_remove_tree (dir);
 }
 
 #ifdef BRO_HAVE_LIBSECRET

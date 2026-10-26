@@ -58,7 +58,7 @@ cd_ripper_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
   BroJsonValue *want_error = bro_json_value_member (expect, "error"), *located = bro_json_value_member (given, "located"), *v;
   const char *saves = bro_json_value_get_string (bro_json_value_member (given, "saves"), NULL);
   int count = 0;
-  remove_tree (fs_root);
+  bro_test_remove_tree (fs_root);
   g_mkdir_with_parents (dest, 0755);
   launcher->stderr_at = g_array_new (FALSE, FALSE, sizeof (int));
   for (guint i = 0; i < bro_json_value_length (bro_json_value_member (given, "lines")); i++)

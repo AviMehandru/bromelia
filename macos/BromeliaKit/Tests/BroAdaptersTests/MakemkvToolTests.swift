@@ -3,6 +3,7 @@ import BroDomain
 import BroFoundation
 import BroPorts
 import BroTestEnglish
+import BroTestKit
 import BroTestSupport
 import Foundation
 import Testing

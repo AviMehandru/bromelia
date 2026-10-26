@@ -29,7 +29,7 @@ menu_ocr_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   g_autofree char *dir = g_build_filename (fs_root, "ocr", NULL);
   BroJsonValue *want_error = bro_json_value_member (expect, "error"), *located = bro_json_value_member (given, "located"), *v;
   BroJsonValue *write = bro_json_value_member (given, "writeArgument");
-  remove_tree (fs_root);
+  bro_test_remove_tree (fs_root);
   g_mkdir_with_parents (dir, 0755);
   for (guint i = 0; i < bro_json_value_length (bro_json_value_member (given, "lines")); i++)
     g_strv_builder_add (lines, bro_json_value_get_string (bro_json_value_at (bro_json_value_member (given, "lines"), i), ""));
@@ -216,6 +216,6 @@ test_menu_ocr_real (void)
   g_assert_cmpuint (numbers->len, ==, 2);
   g_assert_cmpint (g_array_index (numbers, int, 0), ==, 12);
   g_assert_cmpint (g_array_index (numbers, int, 1), ==, 13);
-  remove_tree (disc);
-  remove_tree (work);
+  bro_test_remove_tree (disc);
+  bro_test_remove_tree (work);
 }

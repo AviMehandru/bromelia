@@ -2,12 +2,12 @@ using Bromelia.Domain;
 using Bromelia.Foundation;
 using Bromelia.Ports;
 
-namespace Bromelia.Adapters.Tests;
+namespace Bromelia.TestKit;
 
 /// <summary>A launcher that plays a script instead of running anything (plan §17's test kit): the lines, one at a time
 /// as they are asked for; then the exit status, after creating files in the destination. A stop ends it at once with
 /// status -1 and signal 15. It records every spec it was given.</summary>
-internal sealed class ScriptedProcessLauncher : IProcessLauncher
+public sealed class ScriptedProcessLauncher : IProcessLauncher
 {
     public readonly List<ProcessSpec> Started = new();
     public IReadOnlyList<string> Lines = Array.Empty<string>();
@@ -36,7 +36,7 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
         return Last;
     }
 
-    internal sealed class Script : IRunningProcess
+    public sealed class Script : IRunningProcess
     {
         readonly ScriptedProcessLauncher _owner;
         readonly ProcessSpec _spec;
@@ -100,58 +100,4 @@ internal sealed class ScriptedProcessLauncher : IProcessLauncher
             _exit.TrySetResult(new ProcessExit(-1, 15, null, false, _stopped is StopReason.Cancelled or StopReason.Shutdown));
         }
     }
-}
-
-/// <summary>An isolation that records what happens to its leases.</summary>
-internal sealed class RecordingIsolation : ISettingsIsolation
-{
-    public readonly List<string> Log = new();
-    /// <summary>What release reports.</summary>
-    public BroMessage? ReleaseProblem;
-    /// <summary>The leases' warning.</summary>
-    public BroMessage? Warning;
-
-    public IIsolationLease Prepare(MakemkvRunSettings settings)
-    {
-        Log.Add("prepare");
-        return new Lease(this, settings);
-    }
-
-    public IReadOnlyList<BroMessage> Recover(IReadOnlyList<string> workDirectories)
-    {
-        Log.Add("recover " + string.Join(" ", workDirectories));
-        return Array.Empty<BroMessage>();
-    }
-
-    sealed class Lease : IIsolationLease
-    {
-        readonly RecordingIsolation _owner;
-        readonly MakemkvRunSettings _settings;
-        public Lease(RecordingIsolation owner, MakemkvRunSettings settings) { _owner = owner; _settings = settings; }
-        public IReadOnlyDictionary<string, string> Environment() => new Dictionary<string, string> { ["HOME"] = _settings.WorkDirectory };
-        public string? ProfilePath() => _settings.ProfileXml is null ? null : _settings.WorkDirectory + "/profile.mmcp.xml";
-        public BroMessage? Warning() => _owner.Warning;
-        public void FirstOutput() => _owner.Log.Add("firstOutput");
-        public BroMessage? Release()
-        {
-            _owner.Log.Add("release");
-            return _owner.ReleaseProblem;
-        }
-    }
-}
-
-internal sealed class FixedLocator : IToolLocator
-{
-    readonly string? _makemkvcon;
-    public FixedLocator(string? makemkvcon) { _makemkvcon = makemkvcon; }
-
-    public ToolInfo Locate(ToolKind tool) => tool == ToolKind.Makemkvcon && _makemkvcon is { } p
-        ? new ToolInfo(tool, p, null, new List<string>())
-        : new ToolInfo(tool, null, null, new List<string>(), new BroMessage(MessageCode.ToolMissing, Severity.Warning, ("tool", JsonValue.Of(EnumWire.Name(tool)))));
-}
-
-internal sealed class CountingSink : IRunSink
-{
-    public int Events;
-    public void Event(RobotEvent @event) => Events++;
 }

@@ -147,7 +147,7 @@ handbrake_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
   BroJsonValue *want_error = bro_json_value_member (expect, "error"), *v;
   const char *file = bro_json_value_get_string (bro_json_value_member (given, "linesFile"), NULL);
   int count = 0;
-  remove_tree (fs_root);
+  bro_test_remove_tree (fs_root);
   g_mkdir_with_parents (fs_root, 0755);
   launcher->stderr_at = g_array_new (FALSE, FALSE, sizeof (int));
   for (guint i = 0; i < bro_json_value_length (bro_json_value_member (given, "files")); i++)
@@ -371,5 +371,5 @@ test_handbrake_real (void)
     g_assert_cmpint (run.exit.status, !=, 0);
     g_assert_cmpfloat (since (t0), <, 20);
   }
-  remove_tree (dir);
+  bro_test_remove_tree (dir);
 }

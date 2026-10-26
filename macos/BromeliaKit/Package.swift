@@ -23,13 +23,15 @@ let package = Package(
         .target(name: "BroTestSupport", dependencies: ["BroFoundation"], path: "Tests/BroTestSupport"),
         // Renders messages in English with the host's MessageTextRenderer, for the tests that check a text.
         .target(name: "BroTestEnglish", dependencies: ["BroFoundation", "BroAdapters"], path: "Tests/BroTestEnglish"),
+        // The test kit (plan §17): fakes of the ports for the adapter tests and the test composition root.
+        .target(name: "BroTestKit", dependencies: ["BroFoundation", "BroDomain", "BroPorts"], path: "Tests/BroTestKit"),
         .testTarget(name: "BroFoundationTests", dependencies: ["BroFoundation", "BroTestSupport"]),
         .testTarget(name: "BroDomainTests", dependencies: ["BroDomain", "BroTestSupport", "BroTestEnglish"]),
         .testTarget(name: "BroPortsTests", dependencies: ["BroPorts", "BroTestSupport"]),
         // Started by BroAdaptersTests (CrashTests): kills itself at a chosen point. Not shipped.
         .executableTarget(name: "BroTestProbe", dependencies: ["BroFoundation", "BroDomain", "BroPorts", "BroAdapters"],
                           path: "Tests/BroTestProbe"),
-        .testTarget(name: "BroAdaptersTests", dependencies: ["BroAdapters", "BroTestSupport", "BroTestEnglish", "BroTestProbe"]),
+        .testTarget(name: "BroAdaptersTests", dependencies: ["BroAdapters", "BroTestSupport", "BroTestEnglish", "BroTestKit", "BroTestProbe"]),
         .testTarget(name: "BroEngineTests", dependencies: ["BroEngine", "BroTestSupport"]),
     ],
     swiftLanguageModes: [.v6]

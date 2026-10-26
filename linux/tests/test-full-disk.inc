@@ -194,7 +194,7 @@ test_full_disk_store (void)
   g_assert_cmpstr ((const char *) sqlite3_column_text (stmt, 0), ==, "ok");
   sqlite3_finalize (stmt);
   sqlite3_close (db);
-  remove_tree (dir);
+  bro_test_remove_tree (dir);
   g_mkdir_with_parents (dir, 0755);
 }
 

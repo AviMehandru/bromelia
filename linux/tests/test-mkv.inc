@@ -53,7 +53,7 @@ mkv_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *
   BroJsonValue *v;
   const char *what = bro_json_value_get_string (bro_json_value_at (call, 0), "");
   BroProcessSpec *spec;
-  remove_tree (fs_root);
+  bro_test_remove_tree (fs_root);
   g_mkdir_with_parents (fs_root, 0755);
   launcher->lines = case_lines (given);
   launcher->exit_code = (int) bro_json_value_get_integer (bro_json_value_member (given, "exitCode"), 0);

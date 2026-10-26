@@ -192,7 +192,7 @@ data_imager_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
   g_autofree char *dir = g_build_filename (fs_root, "image", NULL), *dest = NULL;
   BroJsonValue *want_error = bro_json_value_member (expect, "error"), *v;
   g_autoptr (BroDataImageCopy) copy = NULL;
-  remove_tree (fs_root);
+  bro_test_remove_tree (fs_root);
   g_mkdir_with_parents (dir, 0755);
   dest = g_build_filename (dir, "disc.iso", NULL);
   if (bro_json_value_get_bool (bro_json_value_member (given, "existing"), FALSE))
