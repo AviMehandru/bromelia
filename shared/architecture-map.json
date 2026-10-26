@@ -16715,7 +16715,7 @@
             "jobId"
           ],
           "returns": "JobDto",
-          "doc": "Doesn't continue an interrupted, failed or cancelled job (owner, 2026-10-25): the same job again with a keepApart step (checkpoint KeepApartStep.kept of its outcome and error) in place of the step it stopped at and what follows, in the processing queue; it ends cancelled. job.notFound, job.notInterrupted (any other job, or one kept apart already), job.commitOpen, job.alreadyCommitted.",
+          "doc": "Doesn't continue an interrupted, failed or cancelled job (owner, 2026-10-25): the same job again with a keepApart step (checkpoint KeepApartStep.kept of its outcome and error) in place of the step it stopped at and what follows, in the processing queue; it ends cancelled. job.notFound, job.notInterrupted (any other job, or one kept apart already), job.processAbandoned (its MakeMKV was left behind in this engine run: after a restart), job.commitOpen, job.alreadyCommitted.",
           "throws": true,
           "async": true,
           "cNames": [

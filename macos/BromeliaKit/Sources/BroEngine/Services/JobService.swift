@@ -46,6 +46,10 @@ public final class JobService {
     /// The positions last asked of the store.
     private var asked: [Id: Int] = [:]
     private var queues: Subscription?
+    /// Jobs that logged process.abandoned {tool} in this engine run, with the tool: a process left behind may still be
+    /// writing to the job's staging until the engine starts again.
+    private var abandoned: [Id: String] = [:]
+    private var logs: Subscription?
 
     /// `dataDirectory`: the engine's data folder; a job's log is <data>/jobs/<id>/log.jsonl.
     public init(executor: EngineExecutor, bus: EventBus, store: any Store, scheduler: Scheduler, runner: PipelineRunner, clock: EngineClock,
@@ -230,13 +234,18 @@ public final class JobService {
     /// back to the steps before it plus keepApart, and the record queued again in the processing queue (no outcome; the
     /// request as it was); jobChanged, then it runs. job.notFound; job.notInterrupted for a job that isn't finished
     /// interrupted, failed or cancelled, that was kept apart already (retry its keepApart step instead), that this service
-    /// runs, or whose Plan step didn't succeed; job.commitOpen while it has an open commit intent (retry it from Commit);
-    /// job.alreadyCommitted once its unit is in a library.
+    /// runs, or whose Plan step didn't succeed; job.processAbandoned {tool} for a job that logged process.abandoned in this
+    /// engine run (the tool may still be writing to its staging; after a restart it is kept apart as any other: owner,
+    /// 2026-10-25); job.commitOpen while it has an open commit intent (retry it from Commit); job.alreadyCommitted once its
+    /// unit is in a library.
     public func keepApart(_ jobId: Id) async throws(BroError) -> JobDto {
         let record = try await load(jobId)
         guard record.state == .finished, let outcome = record.outcome, [.interrupted, .failed, .cancelled].contains(outcome),
               record.plan?.steps.contains(.keepApart) != true, active[jobId] == nil, !restarting.contains(jobId) else {
             throw Self.notInterrupted(jobId)
+        }
+        if let tool = abandoned[jobId] {
+            throw BroError(MessageCode.wire(.jobProcessAbandoned), [("tool", .string(tool)), ("jobId", .string(jobId.value))])
         }
         restarting.insert(jobId)
         defer { restarting.remove(jobId) }
@@ -365,6 +374,7 @@ public final class JobService {
     /// Starts the job's run, or finishes it as cancelled when a cancel came first. The run starts as a task of its own
     /// (later, on the actor): a cancel until then is seen there; from its start the runner has the job live.
     private func launch(_ record: JobRecord) {
+        if logs == nil { logs = bus.subscribe(types: [.jobLog]) { [unowned self] e in onJobLog(e) } }
         guard let a = active[record.id] else { return }
         executor.spawn { [self] in
             if a.cancelRequested {
@@ -479,6 +489,15 @@ public final class JobService {
         }
         let state = runner.job(jobId)?.state ?? .queued
         guard [.queued, .waitingForResources, .blocked].contains(state), scheduler.position(jobId) != nil else { throw JobService.notQueued(jobId) }
+    }
+
+    /// Notes the jobs whose step logged process.abandoned {tool} (AcquireStep, for a run whose process didn't exit after its
+    /// kill).
+    private func onJobLog(_ e: EngineEvent) {
+        guard let id = e.data["jobId"]?.string else { return }
+        for line in e.data["lines"]?.array ?? [] where line["code"]?.string == MessageCode.processAbandoned.rawValue {
+            abandoned[Id(id)] = line["params"]?["tool"]?.string ?? ""
+        }
     }
 
     private static func notInterrupted(_ jobId: Id) -> BroError {

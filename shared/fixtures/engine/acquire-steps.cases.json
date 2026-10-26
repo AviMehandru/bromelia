@@ -3384,11 +3384,19 @@
         "error": {
           "code": "job.cancelled"
         },
-        "log": [],
         "tree": [
           "title_t00.mkv"
         ],
-        "fs": []
+        "fs": [],
+        "log": [
+          {
+            "code": "process.abandoned",
+            "params": {
+              "tool": "makemkvcon"
+            },
+            "severity": "error"
+          }
+        ]
       }
     },
     {

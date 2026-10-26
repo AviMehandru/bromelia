@@ -116,6 +116,17 @@
       "http": 409,
       "today": "new: JobService.retry (session D's open item, F5): only the Commit step finishes an open commit intent"
     },
+    "job.processAbandoned": {
+      "kind": "error",
+      "params": {
+        "tool": "string"
+      },
+      "data": {
+        "jobId": "string"
+      },
+      "http": 409,
+      "today": "new: JobService.keepApart (F9, owner 2026-10-25): a job whose tool was abandoned in this engine run is kept apart after a restart"
+    },
     "job.alreadyCommitted": {
       "kind": "error",
       "data": {

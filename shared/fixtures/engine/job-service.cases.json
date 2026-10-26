@@ -1,5 +1,5 @@
 {
-  "description": "JobService (plan §11.1, §13.1; owner 2026-10-17): creates jobs, runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones. create(request): a new id from the IdGenerator; the job goes into its queue (JobPlanner.queue(kind)) at once, in the order jobs are created, at the end of it; its record is stored (state queued, its place in the queue as position, the request, the planner's steps as its plan when there are any, createdAt now) before jobChanged announces it (with its position), then it runs. start() runs the jobs the store has unfinished (what RecoveryService left queued), in the store's order (queue, position, createdAt). Every active job's place in its queue is stored when it changes (a transaction that changes only the position). cancel(job): a job it runs is cancelled through the runner (one cancelled before its run starts runs no step); one nothing runs is finished at once as cancelled (job.cancelledByUser, jobFinished); a finished one stays as it is; job.notFound. retry(job, fromStep?): without a step, a finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by hand (not automatic, no media generation), and an interrupted one is continued: the same job again from its first step. With a step (owner 2026-10-18), a finished job that failed, was cancelled or was interrupted runs again, the same job, from that step (job.unknownStep {step} when its plan has none; server.badRequest when a step before it isn't done); a step up to Release starts it from its first step instead, since the disc is read again. Its steps from there are stored pending (outputs and errors cleared, checkpoints kept: Acquire keeps what an earlier attempt finished), a plan cut back after Plan when Plan runs again, the record queued again (no outcome, by hand, no media generation; acquisition up to Release, else processing), job.retried {step} in its log, jobChanged, then it runs. job.notRetryable for any other job; job.notFound. While the job has an open commit intent (its unit half moved into a library), only a retry from Commit is taken: any other, a new job or continuing an interrupted one included, is job.commitOpen {jobId} (F5). Once the job's unit is in a library (the store holds ArchiveFiles.unitId(job) committed, quarantined or missing), a retry from a step before Commit, or continuing an interrupted job, is job.alreadyCommitted {jobId}; from Commit or later, or as a new job, it is taken (F9, owner 2026-10-25). A cancel after a Commit step that succeeded only stops the steps after it: the job ends succeeded (succeededWithReadErrors with read errors), JobOutcome.decide. decide(job, decisionId, answer): job.notAwaitingDecision unless the job waits for that question, server.badRequest for an answer it doesn't offer, job.notFound. move(job, by) and startNow(job): a job that waits to start a step (queued, waitingForResources, blocked) moves in its queue (stopping at the ends) or goes first and past the acquisitions cap; job.notQueued for one that runs a step, waits for an answer or has finished; job.notFound. query(q): newest first (createdAt, then id), a page of limit (1-500, default 50) from cursor (an offset as text), next (null on the last page) and total; running jobs as the runner sees them, waiting ones with their position; the states are the stored ones; server.badRequest for a bad limit or cursor. log(job, after): the lines after seq, including a running step's lines not yet written; job.notFound. The harness is pipeline-runner's (real executor, Scheduler, EventBus and PipelineRunner, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, the same fake steps) with a JobService over it and an IdGenerator that counts on from the given jobs (00000000-0000-4000-8000-000000000001, ...); a name it doesn't know (nosuch) is the id 00000000-0000-4000-8000-0000000000ff. Given: limits (SchedulerLimits: acquisitions), and per job also state (queued), outcome, position (0), automatic, mediaGeneration, created (an instant; default the clock's), intent (true: the store has an open commit intent of the job), unit (committed | quarantined | missing | committing: the store holds the job's unit, ArchiveFiles.unitId, in that state), error (its stored error). Ops: start; create {as, kind (videoDisc), title (its name), driveId, automatic, mediaGeneration}; cancel <job> or {job, expectError}; retry {job, as, fromStep, expectError} (as: a new job's name); decide {job, decisionId, answer, expectError}; move {job, by, expectError}; startNow <job> or {job, expectError}; open <gate>; steps {kind: behaviour} (from then on); query {states, outcomes, kind, queue, driveId, cursor, limit, expectError} and log {job, after, expectError} (their results, in order, are expect.queries and expect.logs); holdInserts / releaseInserts (the store's job inserts wait from then on until released; a held insert counts as parked); holdLoads <job> / releaseLoads (the store's loads of that job's record wait from then on until released, counted as parked: a run that is slow to load). After each op the harness settles as pipeline-runner's does; an op's error is checked once the case's ops are done. Always: no jobChanged comes before the job's record is stored. Expect: outcomes, lines (pipeline-runner's, and 'changed queued - position <n>' for create's), queueLines, steps, outputs as pipeline-runner's; records {job: {state, outcome, queue, position, automatic, mediaGeneration, title, driveId, plan}} (only the members given; null: absent); queries [{items ['<job> <state>[ <outcome>][ position <n>][ step <progress.step>]'], next, total} or {error}]; logs [['<seq> <code>'] or {error}]. keepApart {job, expectError} (F8; owner 2026-10-25; any op may give maybeError instead: that error or none, for two ops that race, the expectations then show which ran): a finished job that was interrupted, failed or was cancelled (F9), whose Plan step succeeded, that wasn't kept apart already (its plan holds no keepApart) and that the service doesn't run, runs again as the same job: the row at the first step not done is stored as keepApart pending (no output or error; the checkpoint {kind: outcome, outcome: the job's, error: the job's when it has one}), the plan cut to the steps before it plus keepApart, the record queued in the processing queue with no outcome (the request unchanged), jobChanged, then it runs; a succeeded keepApart step ends the job cancelled (job.cancelledByUser). job.notInterrupted for any other job (and while it runs), job.commitOpen while it has an open commit intent, job.alreadyCommitted once its unit is in a library, job.notFound. A kept-apart job is retried from its keepApart step only (in the processing queue) or as a new job; from any other step job.notRetryable.",
+  "description": "JobService (plan §11.1, §13.1; owner 2026-10-17): creates jobs, runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones. create(request): a new id from the IdGenerator; the job goes into its queue (JobPlanner.queue(kind)) at once, in the order jobs are created, at the end of it; its record is stored (state queued, its place in the queue as position, the request, the planner's steps as its plan when there are any, createdAt now) before jobChanged announces it (with its position), then it runs. start() runs the jobs the store has unfinished (what RecoveryService left queued), in the store's order (queue, position, createdAt). Every active job's place in its queue is stored when it changes (a transaction that changes only the position). cancel(job): a job it runs is cancelled through the runner (one cancelled before its run starts runs no step); one nothing runs is finished at once as cancelled (job.cancelledByUser, jobFinished); a finished one stays as it is; job.notFound. retry(job, fromStep?): without a step, a finished job that failed, was cancelled or was skipped runs again as a new job with the same request, started by hand (not automatic, no media generation), and an interrupted one is continued: the same job again from its first step. With a step (owner 2026-10-18), a finished job that failed, was cancelled or was interrupted runs again, the same job, from that step (job.unknownStep {step} when its plan has none; server.badRequest when a step before it isn't done); a step up to Release starts it from its first step instead, since the disc is read again. Its steps from there are stored pending (outputs and errors cleared, checkpoints kept: Acquire keeps what an earlier attempt finished), a plan cut back after Plan when Plan runs again, the record queued again (no outcome, by hand, no media generation; acquisition up to Release, else processing), job.retried {step} in its log, jobChanged, then it runs. job.notRetryable for any other job; job.notFound. While the job has an open commit intent (its unit half moved into a library), only a retry from Commit is taken: any other, a new job or continuing an interrupted one included, is job.commitOpen {jobId} (F5). Once the job's unit is in a library (the store holds ArchiveFiles.unitId(job) committed, quarantined or missing), a retry from a step before Commit, or continuing an interrupted job, is job.alreadyCommitted {jobId}; from Commit or later, or as a new job, it is taken (F9, owner 2026-10-25). A cancel after a Commit step that succeeded only stops the steps after it: the job ends succeeded (succeededWithReadErrors with read errors), JobOutcome.decide. decide(job, decisionId, answer): job.notAwaitingDecision unless the job waits for that question, server.badRequest for an answer it doesn't offer, job.notFound. move(job, by) and startNow(job): a job that waits to start a step (queued, waitingForResources, blocked) moves in its queue (stopping at the ends) or goes first and past the acquisitions cap; job.notQueued for one that runs a step, waits for an answer or has finished; job.notFound. query(q): newest first (createdAt, then id), a page of limit (1-500, default 50) from cursor (an offset as text), next (null on the last page) and total; running jobs as the runner sees them, waiting ones with their position; the states are the stored ones; server.badRequest for a bad limit or cursor. log(job, after): the lines after seq, including a running step's lines not yet written; job.notFound. The harness is pipeline-runner's (real executor, Scheduler, EventBus and PipelineRunner, a manual clock at 2026-10-02T20:00:00.000Z, an in-memory store and file system, data folder /data, the same fake steps) with a JobService over it and an IdGenerator that counts on from the given jobs (00000000-0000-4000-8000-000000000001, ...); a name it doesn't know (nosuch) is the id 00000000-0000-4000-8000-0000000000ff. Given: limits (SchedulerLimits: acquisitions), and per job also state (queued), outcome, position (0), automatic, mediaGeneration, created (an instant; default the clock's), intent (true: the store has an open commit intent of the job), unit (committed | quarantined | missing | committing: the store holds the job's unit, ArchiveFiles.unitId, in that state), error (its stored error). Ops: start; create {as, kind (videoDisc), title (its name), driveId, automatic, mediaGeneration}; cancel <job> or {job, expectError}; retry {job, as, fromStep, expectError} (as: a new job's name); decide {job, decisionId, answer, expectError}; move {job, by, expectError}; startNow <job> or {job, expectError}; open <gate>; steps {kind: behaviour} (from then on); query {states, outcomes, kind, queue, driveId, cursor, limit, expectError} and log {job, after, expectError} (their results, in order, are expect.queries and expect.logs); holdInserts / releaseInserts (the store's job inserts wait from then on until released; a held insert counts as parked); holdLoads <job> / releaseLoads (the store's loads of that job's record wait from then on until released, counted as parked: a run that is slow to load). After each op the harness settles as pipeline-runner's does; an op's error is checked once the case's ops are done. Always: no jobChanged comes before the job's record is stored. Expect: outcomes, lines (pipeline-runner's, and 'changed queued - position <n>' for create's), queueLines, steps, outputs as pipeline-runner's; records {job: {state, outcome, queue, position, automatic, mediaGeneration, title, driveId, plan}} (only the members given; null: absent); queries [{items ['<job> <state>[ <outcome>][ position <n>][ step <progress.step>]'], next, total} or {error}]; logs [['<seq> <code>'] or {error}]. keepApart {job, expectError} (F8; owner 2026-10-25; any op may give maybeError instead: that error or none, for two ops that race, the expectations then show which ran): a finished job that was interrupted, failed or was cancelled (F9), whose Plan step succeeded, that wasn't kept apart already (its plan holds no keepApart) and that the service doesn't run, runs again as the same job: the row at the first step not done is stored as keepApart pending (no output or error; the checkpoint {kind: outcome, outcome: the job's, error: the job's when it has one}), the plan cut to the steps before it plus keepApart, the record queued in the processing queue with no outcome (the request unchanged), jobChanged, then it runs; a succeeded keepApart step ends the job cancelled (job.cancelledByUser). job.notInterrupted for any other job (and while it runs), job.commitOpen while it has an open commit intent, job.alreadyCommitted once its unit is in a library, job.processAbandoned {tool, jobId} for a job that logged process.abandoned while this service ran (its tool may still be writing; a job whose log has the line from before, i.e. from before a restart, is taken), job.notFound. A kept-apart job is retried from its keepApart step only (in the processing queue) or as a new job; from any other step job.notRetryable.",
   "functions": [
     "JobService.start",
     "JobService.create",
@@ -4639,6 +4639,287 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "id": "keep-apart-of-a-job-whose-makemkv-was-left-behind-in-this-run-waits-for-a-restart",
+      "given": {
+        "jobs": [
+          {
+            "name": "q",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release"
+            ]
+          }
+        ],
+        "steps": {
+          "acquire": {
+            "log": [
+              "process.abandoned"
+            ],
+            "fail": {
+              "code": "makemkv.stalled",
+              "params": {
+                "minutes": 5,
+                "abandoned": true
+              }
+            }
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "keepApart": {
+              "job": "q",
+              "expectError": "job.processAbandoned"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "q": {
+            "outcome": "failed",
+            "error": {
+              "code": "makemkv.stalled",
+              "params": {
+                "minutes": 5,
+                "abandoned": true
+              }
+            }
+          }
+        },
+        "steps": {
+          "q": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire failed"
+          ]
+        },
+        "records": {
+          "q": {
+            "state": "finished",
+            "outcome": "failed",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "keep-apart-of-a-cancelled-job-whose-makemkv-was-left-behind-waits-for-a-restart",
+      "given": {
+        "jobs": [
+          {
+            "name": "c",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release"
+            ]
+          }
+        ],
+        "steps": {
+          "acquire": {
+            "log": [
+              "process.abandoned"
+            ],
+            "gate": "g"
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "cancel": "c"
+          },
+          {
+            "keepApart": {
+              "job": "c",
+              "expectError": "job.processAbandoned"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "c": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "steps": {
+          "c": [
+            "probe succeeded",
+            "plan succeeded",
+            "acquire cancelled"
+          ]
+        },
+        "records": {
+          "c": {
+            "state": "finished",
+            "outcome": "cancelled",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "keep-apart-after-a-restart-takes-a-job-whose-makemkv-was-left-behind-before",
+      "given": {
+        "jobs": [
+          {
+            "name": "f",
+            "state": "finished",
+            "outcome": "failed",
+            "error": {
+              "code": "makemkv.stalled",
+              "params": {
+                "minutes": 5,
+                "abandoned": true
+              }
+            },
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release",
+              "seal"
+            ],
+            "log": [
+              "process.abandoned"
+            ],
+            "done": [
+              {
+                "kind": "probe"
+              },
+              {
+                "kind": "plan"
+              },
+              {
+                "kind": "acquire",
+                "state": "failed",
+                "error": {
+                  "code": "makemkv.stalled",
+                  "params": {
+                    "minutes": 5,
+                    "abandoned": true
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "keepApart": {
+              "job": "f"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "f": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "steps": {
+          "f": [
+            "probe succeeded",
+            "plan succeeded",
+            "keepApart succeeded"
+          ]
+        }
+      }
+    },
+    {
+      "id": "keep-apart-of-a-job-that-failed-in-this-run-with-no-tool-left-behind-runs",
+      "given": {
+        "jobs": [
+          {
+            "name": "q",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire",
+              "release"
+            ]
+          }
+        ],
+        "steps": {
+          "acquire": {
+            "fail": {
+              "code": "process.savedNothing",
+              "params": {
+                "tool": "makemkvcon"
+              }
+            }
+          }
+        },
+        "ops": [
+          {
+            "start": true
+          },
+          {
+            "keepApart": {
+              "job": "q"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "outcomes": {
+          "q": {
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "steps": {
+          "q": [
+            "probe succeeded",
+            "plan succeeded",
+            "keepApart succeeded"
+          ]
+        },
+        "records": {
+          "q": {
+            "state": "finished",
+            "outcome": "cancelled",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "plan",
+              "keepApart"
+            ]
           }
         }
       }

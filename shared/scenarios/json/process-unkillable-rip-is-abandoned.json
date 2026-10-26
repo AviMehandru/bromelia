@@ -1,8 +1,9 @@
 {
-  "title": "A makemkvcon that doesn't end even after SIGKILL is abandoned 30 s later, so the job can end",
+  "title": "A makemkvcon that doesn't end even after SIGKILL is abandoned 30 s later, so the job can end; its files are kept apart only after a restart",
   "from": [
     "docs/architecture.md#stopping-processes",
-    "docs/configuration.md#output-folder-read-errors-and-checks"
+    "docs/configuration.md#output-folder-read-errors-and-checks",
+    "owner decision 2026-10-25 (a job whose MakeMKV was left behind is kept apart only after a restart)"
   ],
   "given": {
     "disc": "sample-movie-one-title",
@@ -39,6 +40,47 @@
               "abandoned": true
             }
           }
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "process.abandoned"
+          ]
+        }
+      }
+    },
+    {
+      "api": {
+        "method": "POST",
+        "path": "/v1/jobs/{jobId:job}/keep-apart",
+        "headers": {
+          "X-Bromelia": "1"
+        },
+        "as": "early"
+      }
+    },
+    {
+      "expect": {
+        "response": {
+          "as": "early",
+          "status": 409,
+          "error": {
+            "code": "job.processAbandoned"
+          }
+        }
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "keepApart": "job"
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "cancelled"
         }
       }
     }

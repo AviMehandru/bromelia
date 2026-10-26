@@ -27,6 +27,9 @@ struct _BroJobService {
   GMutex lock;           /* guards positions: the store's workers read it */
   GHashTable *positions; /* job id → GINT_TO_POINTER (position + 1): where each active job should be stored */
   BroSubscription *queues;
+  GHashTable *abandoned; /* job id → tool: jobs that logged process.abandoned in this engine run (a process left behind may
+                          * still be writing to their staging until the engine starts again) */
+  BroSubscription *logs;
 };
 
 G_DEFINE_FINAL_TYPE (BroJobService, bro_job_service, G_TYPE_OBJECT)
@@ -227,6 +230,23 @@ save_position (BroJobService *self, const BroId *job_id)
   bro_engine_executor_worker (self->executor, position_work, nothing_done, c, call_free);
 }
 
+/* Notes the jobs whose step logged process.abandoned {tool} (AcquireStep, for a run whose process didn't exit after its
+ * kill). */
+static void
+on_job_log (BroEngineEvent *event, gpointer data)
+{
+  BroJobService *self = data;
+  const char *id = bro_json_value_get_string (bro_json_value_member (event->data, "jobId"), NULL);
+  BroJsonValue *lines = bro_json_value_member (event->data, "lines");
+  for (guint i = 0; id && i < bro_json_value_length (lines); i++)
+    {
+      BroJsonValue *line = bro_json_value_at (lines, i);
+      if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (line, "code"), NULL), bro_message_code_wire (BRO_MSG_PROCESS_ABANDONED)) == 0)
+        g_hash_table_replace (self->abandoned, g_strdup (id),
+                              g_strdup (bro_json_value_get_string (bro_json_value_member (bro_json_value_member (line, "params"), "tool"), "")));
+    }
+}
+
 /* Stores the place of every active job whose place in its queue changed. */
 static void
 on_queue_changed (BroEngineEvent *event, gpointer data)
@@ -358,6 +378,11 @@ launch (BroJobService *self, const BroJobRecord *record)
 {
   Active *a = g_hash_table_lookup (self->active, record->id.value);
   Track *t;
+  if (!self->logs)
+    {
+      BroEngineEventType types[] = { BRO_ENGINE_EVENT_TYPE_JOB_LOG };
+      self->logs = bro_event_bus_subscribe (self->bus, types, 1, on_job_log, self, NULL);
+    }
   if (a->cancel_requested)
     {
       finish_cancelled (call_new (self, NULL, NULL), record, TRUE);
@@ -942,12 +967,24 @@ static void
 keep_apart_loaded (Call *c)
 {
   BroOutcome outcome = c->record->outcome;
+  const char *tool;
   if (c->record->state != BRO_JOB_STATE_FINISHED || !c->record->has_outcome
       || !(outcome == BRO_OUTCOME_INTERRUPTED || outcome == BRO_OUTCOME_FAILED || outcome == BRO_OUTCOME_CANCELLED)
       || (c->record->plan && index_of (c->record->plan->steps, BRO_STEP_KIND_KEEP_APART) >= 0)
       || g_hash_table_contains (c->self->active, c->job_id.value) || g_hash_table_contains (c->self->restarting, c->job_id.value))
     {
       fail_with (c, BRO_MSG_JOB_NOT_INTERRUPTED, &c->job_id);
+      call_free (c);
+      return;
+    }
+  if ((tool = g_hash_table_lookup (c->self->abandoned, c->job_id.value)))
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      g_autoptr (BroBroError) left = NULL;
+      bro_json_value_set (params, "tool", bro_json_value_new_string (tool));
+      bro_json_value_set (params, "jobId", bro_json_value_new_string (c->job_id.value));
+      left = bro_bro_error_new (bro_message_code_wire (BRO_MSG_JOB_PROCESS_ABANDONED), params, NULL);
+      fail (c, left);
       call_free (c);
       return;
     }
@@ -1227,6 +1264,12 @@ bro_job_service_finalize (GObject *object)
       bro_subscription_cancel (self->queues);
       g_object_unref (self->queues);
     }
+  if (self->logs)
+    {
+      bro_subscription_cancel (self->logs);
+      g_object_unref (self->logs);
+    }
+  g_hash_table_unref (self->abandoned);
   g_hash_table_unref (self->active);
   g_hash_table_unref (self->restarting);
   g_hash_table_unref (self->asked);
@@ -1255,6 +1298,7 @@ bro_job_service_init (BroJobService *self)
 {
   self->active = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   self->restarting = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->abandoned = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   self->asked = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->positions = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_mutex_init (&self->lock);

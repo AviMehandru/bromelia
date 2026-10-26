@@ -20,7 +20,8 @@ import BroPorts
 ///
 /// Read errors are counted per title (title by title) or per run (StepReport.readErrors); Release and Commit act on them.
 /// A cancel removes what the stopped run wrote (rip.partialRemoved: makemkvcon leaves an unreadable file, P2-14) unless the
-/// process was abandoned after KILL. After each title (its files synced) and after a checked backup, a checkpoint holds the
+/// process was abandoned after KILL (process.abandoned {tool} is logged for any run whose process was: it may still be
+/// writing, and JobService keeps the job's files where they are until a restart). After each title (its files synced) and after a checked backup, a checkpoint holds the
 /// disc's fingerprint and what is finished: "backup" once a backup-then-MKV job has its backup (recovery resumes from it by
 /// itself, plan §15.8: recovery.resumedFromBackup), else "titles". A later attempt of the step (a retry or a continue)
 /// with the same disc keeps those titles (rip.continued) and removes anything else in staging (rip.leftoverRemoved; owner
@@ -363,6 +364,7 @@ private final class Acquisition {
             problem.severity = .warning
             c.log.log(problem)
         }
+        if run.outcome.abandoned { c.log.log(BroMessage(.processAbandoned, [("tool", .string("makemkvcon"))], severity: .error)) }
     }
 
     private func report(_ error: BroError?) -> StepReport {

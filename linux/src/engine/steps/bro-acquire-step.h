@@ -16,7 +16,8 @@
  *   from Probe's listing to the backup's), and the backup removed unless backup.keepAfterMkv (backup.removed).
  * Read errors are counted per title (title by title) or per run (report read_errors); Release and Commit act on them. A
  * cancel removes what the stopped run wrote (rip.partialRemoved: makemkvcon leaves an unreadable file, P2-14) unless the
- * process was abandoned after KILL. After each title (its files synced) and after a checked backup, a checkpoint holds
+ * process was abandoned after KILL (process.abandoned {tool} is logged for any run whose process was: it may still be
+ * writing, and JobService keeps the job's files where they are until a restart). After each title (its files synced) and after a checked backup, a checkpoint holds
  * the disc's fingerprint and what is finished: "backup" once a backup-then-MKV job has its backup (recovery resumes from
  * it by itself, plan §15.8: recovery.resumedFromBackup), else "titles". A later attempt of the step (a retry or a
  * continue) with the same disc keeps those titles (rip.continued) and removes anything else in staging

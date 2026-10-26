@@ -81,8 +81,9 @@ void bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroS
  * the steps before it plus keepApart, and the record queued again in the processing queue (no outcome; the request as it
  * was); jobChanged, then it runs. job.notFound; job.notInterrupted for a job that isn't finished interrupted, failed or
  * cancelled, that was kept apart already (retry its keepApart step instead), that this service runs, or whose Plan step
- * didn't succeed; job.commitOpen while it has an open commit intent (retry it from Commit); job.alreadyCommitted once its
- * unit is in a library. */
+ * didn't succeed; job.processAbandoned {tool} for a job that logged process.abandoned in this engine run (the tool may
+ * still be writing to its staging; after a restart it is kept apart as any other: owner, 2026-10-25); job.commitOpen
+ * while it has an open commit intent (retry it from Commit); job.alreadyCommitted once its unit is in a library. */
 void bro_job_service_keep_apart (BroJobService *self, const BroId *job_id, BroJobDtoDone done, gpointer data, GDestroyNotify destroy);
 
 /* Answers the job's question @decision_id. job.notFound; job.notAwaitingDecision when the job isn't waiting for that

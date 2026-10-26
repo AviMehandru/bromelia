@@ -15,6 +15,7 @@ static const char *const texts[][2] = {
   { "job.notInterrupted", "Only an interrupted, failed or cancelled job's files can be kept apart, and only once" },
   { "job.unknownStep", "This job has no step “{step}”" },
   { "job.commitOpen", "Bromelia has started moving this job's files into the library: retry it from Commit, which finishes that move" },
+  { "job.processAbandoned", "{tool} didn't exit when this job was stopped and may still be writing to its files: they can be kept apart once Bromelia has restarted" },
   { "job.alreadyCommitted", "This job's files are in the library already: retry it from Commit or a later step, or as a new job" },
   { "job.op.starting", "Starting" },
   { "job.op.cancelling", "Cancelling…" },

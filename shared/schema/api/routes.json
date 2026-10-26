@@ -309,6 +309,7 @@
       "errors": [
         "job.notFound",
         "job.notInterrupted",
+        "job.processAbandoned",
         "job.commitOpen",
         "job.alreadyCommitted",
         "library.offline"

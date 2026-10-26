@@ -46,7 +46,11 @@ public sealed class JobService
     readonly Dictionary<Id, int> _positions = new();
     /// <summary>The positions last asked of the store, on the executor.</summary>
     readonly Dictionary<Id, int> _asked = new();
+    /// <summary>Jobs that logged process.abandoned {tool} in this engine run, with the tool: a process left behind may
+    /// still be writing to the job's staging until the engine (and the machine's view of it) starts again.</summary>
+    readonly Dictionary<Id, string> _abandoned = new();
     Subscription? _queues;
+    Subscription? _logs;
 
     /// <param name="dataDirectory">The engine's data folder: a job's log is &lt;data&gt;/jobs/&lt;id&gt;/log.jsonl.</param>
     public JobService(EngineExecutor executor, EventBus bus, IStore store, Scheduler scheduler, PipelineRunner runner, EngineClock clock,
@@ -226,14 +230,20 @@ public sealed class JobService
     /// cut back to the steps before it plus keepApart, and the record queued again in the processing queue (no outcome; the
     /// request as it was); jobChanged, then it runs. job.notFound; job.notInterrupted for a job that isn't finished
     /// interrupted, failed or cancelled, that was kept apart already (retry its keepApart step instead), that this service
-    /// runs, or whose Plan step didn't succeed; job.commitOpen while it has an open commit intent (retry it from Commit);
-    /// job.alreadyCommitted once its unit is in a library.</summary>
+    /// runs, or whose Plan step didn't succeed; job.processAbandoned {tool} for a job that logged process.abandoned in this
+    /// engine run (the tool may still be writing to its staging; after a restart it is kept apart as any other: owner,
+    /// 2026-10-25); job.commitOpen while it has an open commit intent (retry it from Commit); job.alreadyCommitted once its
+    /// unit is in a library.</summary>
     public async Task<JobDto> KeepApart(Id jobId)
     {
         var record = await Load(jobId);
         if (record.State != JobState.Finished || record.Outcome is not (Outcome.Interrupted or Outcome.Failed or Outcome.Cancelled)
-            || record.Plan?.Steps.Contains(StepKind.KeepApart) == true || _active.ContainsKey(jobId) || !_restarting.Add(jobId))
+            || record.Plan?.Steps.Contains(StepKind.KeepApart) == true || _active.ContainsKey(jobId) || _restarting.Contains(jobId))
             throw NotInterrupted(jobId);
+        if (_abandoned.TryGetValue(jobId, out var tool))
+            throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobProcessAbandoned), ("tool", JsonValue.Of(tool)),
+                ("jobId", JsonValue.Of(jobId.Value))));
+        _restarting.Add(jobId);
         try
         {
             return await KeptApart(record);
@@ -359,6 +369,7 @@ public sealed class JobService
     /// cancelled when a cancel came first.</summary>
     async Task Launch(JobRecord record)
     {
+        _logs ??= _bus.Subscribe(new[] { EngineEventType.JobLog }, OnJobLog);
         if (_active[record.Id].CancelRequested)
         {
             try { await FinishCancelled(record); }
@@ -432,6 +443,16 @@ public sealed class JobService
     }
 
     // ---- helpers ----
+
+    /// <summary>Notes the jobs whose step logged process.abandoned {tool} (AcquireStep, for a run whose process didn't exit
+    /// after its kill).</summary>
+    void OnJobLog(EngineEvent e)
+    {
+        if (e.Data["jobId"]?.AsString is not { } id) return;
+        foreach (var line in e.Data["lines"]?.AsArray ?? new List<JsonValue>())
+            if (line["code"]?.AsString == MessageCode.Wire(MessageCode.ProcessAbandoned))
+                _abandoned[new Id(id)] = line["params"]?["tool"]?.AsString ?? "";
+    }
 
     /// <summary>The stored job; job.notFound when there is none.</summary>
     async Task<JobRecord> Load(Id jobId) =>

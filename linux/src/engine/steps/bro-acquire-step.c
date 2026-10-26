@@ -338,6 +338,8 @@ log_run (Run *r, const BroMakemkvRun *run)
         warning->severity = BRO_SEVERITY_WARNING;
         bro_job_logger_log (r->c->log, warning);
       }
+  if (run->outcome->abandoned)
+    _bro_step_log (r->c, BRO_MSG_PROCESS_ABANDONED, _bro_param ("tool", bro_json_value_new_string ("makemkvcon")), BRO_SEVERITY_ERROR);
 }
 
 static void
