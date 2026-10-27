@@ -10,10 +10,10 @@ import Foundation
 /// again until it comes back. As the `LibraryPort` of the steps it gives staging folders and runs the commit protocol
 /// (§22.3 steps 4–6) and its roll forward (§15.8) on workers, one at a time per unit: a commit waits while a roll forward
 /// of its unit runs (recovery's may outlast its 30 s at startup on a slow share). State is touched only on the executor;
-/// the steps read a snapshot. Paths are compared and split by their UTF-8 bytes, as a disk names them.
-/// shared/fixtures/engine/library-service.cases.json.
+/// the steps read a snapshot. As the `CatalogQueries` of the steps it asks the catalogue on a worker. Paths are compared
+/// and split by their UTF-8 bytes, as a disk names them. shared/fixtures/engine/library-service.cases.json.
 @EngineActor
-public final class LibraryService: LibraryPort {
+public final class LibraryService: LibraryPort, CatalogQueries {
     private nonisolated static let fileMode = 0o644
     private nonisolated static let staging = ".bromelia"
     private nonisolated static let quarantineFolder = "_Quarantine"
@@ -35,6 +35,7 @@ public final class LibraryService: LibraryPort {
     private nonisolated let fs: any FileSystem
     private nonisolated let rows: any LibraryRepository
     private nonisolated let units: any UnitRepository
+    private nonisolated let catalog: any CatalogRepository
     private nonisolated let crash: (@Sendable (String) throws(BroError) -> Void)?
 
     @EngineActor
@@ -91,7 +92,7 @@ public final class LibraryService: LibraryPort {
     /// the test root throws there to stop the commit as a killed engine would. Nil in a real engine.
     public init(executor: EngineExecutor, bus: EventBus, problems: ProblemService, scheduler: Scheduler, config: any ConfigSource,
                 clock: EngineClock, fs: any FileSystem, libraries: any LibraryRepository, units: any UnitRepository,
-                crash: (@Sendable (String) throws(BroError) -> Void)? = nil) {
+                catalog: any CatalogRepository, crash: (@Sendable (String) throws(BroError) -> Void)? = nil) {
         self.executor = executor
         self.bus = bus
         self.problems = problems
@@ -101,6 +102,7 @@ public final class LibraryService: LibraryPort {
         self.fs = fs
         self.rows = libraries
         self.units = units
+        self.catalog = catalog
         self.crash = crash
     }
 
@@ -162,6 +164,26 @@ public final class LibraryService: LibraryPort {
         }
         apply(e, Found(reason: nil, free: free, seen: now))
         return Self.dto(e)
+    }
+
+    /// Takes back an `attach` whose configuration save failed (LocalEngine's attachLibrary, decision 166): the marker in
+    /// the stored library's folder is removed while it is still the one the row names (another marker stays), and the
+    /// library is forgotten unless the configuration lists it. Nothing when there is no stored row.
+    public func removeMarker(_ libraryId: String) async throws(BroError) {
+        let (fs, repository) = (self.fs, self.rows)
+        try await executor.worker { () async throws(BroError) in
+            guard let row = try await repository.get(libraryId) else { return }
+            let markerPath = row.path + "/" + LibraryMarker.fileName
+            guard fs.exists(markerPath), Self.decode(fs, markerPath)?.id == row.markerId else { return }
+            try fs.remove(markerPath)
+        }
+        sync()
+    }
+
+    /// The catalogue's committed units of the disc (CatalogQueries), asked on a worker. Any thread.
+    public nonisolated func archivedBefore(_ fingerprint: String) async throws(BroError) -> [UnitRecord] {
+        let catalog = self.catalog
+        return try await executor.worker { () async throws(BroError) -> [UnitRecord] in try await catalog.archivedBefore(fingerprint) }
     }
 
     // ---- the port (any thread) ----------------------------------------------------------------------------------

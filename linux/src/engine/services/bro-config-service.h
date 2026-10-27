@@ -4,8 +4,9 @@
  * clients set them through bro_config_service_set_secret and only ever see whether one is set. A secret comes from the
  * system keystore, then BROMELIA_SECRET_<NAME>, then the secrets folder (plan §24); when two of them disagree, config
  * secrets.prefer / secrets.bySecret pick one, and the disagreement is a problem: secret.conflict (an error) without a
- * preference that settles it, secret.conflictPreferred (a warning) with one (owner, 2026-10-12). File, keystore and
- * store work runs on workers. Implements BroConfigSource. shared/fixtures/engine/config-service.cases.json. */
+ * preference that settles it, secret.conflictPreferred (a warning) with one (owner, 2026-10-12). A source that fails is
+ * the problem secret.unreadable until it reads again (owner, G3 2026-10-26). File, keystore and store work runs on
+ * workers. Implements BroConfigSource. shared/fixtures/engine/config-service.cases.json. */
 #pragma once
 
 #include "bro-config-envelope.h"

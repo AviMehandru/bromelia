@@ -458,6 +458,26 @@ fs_read (BroFileSystem *fs, const char *path, BroBroError **error)
   return b;
 }
 
+static BroFileInfo *
+fs_stat (BroFileSystem *fs, const char *path, BroBroError **error)
+{
+  TestMemoryFs *self = TEST_MEMORY_FS (fs);
+  BroFileInfo *info = NULL;
+  GBytes *b;
+  g_mutex_lock (&self->lock);
+  b = g_hash_table_lookup (self->files, path);
+  if (b || g_hash_table_contains (self->folders, path))
+    {
+      info = bro_file_info_new ();
+      info->size = b ? (gint64) g_bytes_get_size (b) : 0;
+      info->is_directory = !b;
+    }
+  g_mutex_unlock (&self->lock);
+  if (!info)
+    bro_bro_error_set (error, "fs.notFound", NULL);
+  return info;
+}
+
 static gboolean
 fs_create_directory (BroFileSystem *fs, const char *path, gboolean parents_must_exist, BroBroError **error)
 {
@@ -497,6 +517,7 @@ memory_fs_iface_init (BroFileSystemInterface *iface)
 {
   iface->exists = fs_exists;
   iface->read = fs_read;
+  iface->stat = fs_stat;
   iface->create_directory = fs_create_directory;
   iface->write_atomically = fs_write_atomically;
 }
@@ -1018,6 +1039,8 @@ typedef struct {
   GPtrArray *calls;     /* SvcCall: the JobService ops, checked when the case's ops are done */
   GPtrArray *queries;   /* BroJsonValue */
   GPtrArray *logs;      /* BroJsonValue */
+  GPtrArray *details;   /* BroJsonValue */
+  gboolean stopped;     /* after a stop op: the jobs' last states no longer say whether they settled */
   GPtrArray *unstored;  /* ids announced (jobChanged) before their record was stored */
   GPtrArray *steps;     /* TestFakeStep (borrowed) */
 } PipeHarness;
@@ -1262,6 +1285,37 @@ svc_lines_done (GPtrArray *lines, const BroBroError *error, gpointer data)
   svc_ended (c, error);
 }
 
+static void
+svc_detail_done (const BroJobDetailDto *detail, const BroBroError *error, gpointer data)
+{
+  SvcCall *c = data;
+  BroJsonValue *got = bro_json_value_new_object ();
+  if (detail)
+    {
+      g_autoptr (BroJsonValue) json = bro_job_detail_dto_json (detail);
+      GString *text = g_string_new (NULL);
+      BroJsonValue *v;
+      g_string_printf (text, "%s %s", pipe_name (c->h, bro_json_value_get_string (bro_json_value_member (json, "id"), "")),
+                       bro_json_value_get_string (bro_json_value_member (json, "state"), ""));
+      if ((v = bro_json_value_member (json, "outcome")))
+        g_string_append_printf (text, " %s", v->string);
+      if ((v = bro_json_value_member (json, "position")))
+        g_string_append_printf (text, " position %" G_GINT64_FORMAT, v->integer);
+      if ((v = bro_json_value_member (bro_json_value_member (json, "progress"), "step")))
+        g_string_append_printf (text, " step %s", v->string);
+      bro_json_value_set (got, "job", bro_json_value_new_string (text->str));
+      g_string_free (text, TRUE);
+      bro_json_value_set (got, "steps", bro_json_value_ref (bro_json_value_member (json, "steps")));
+      bro_json_value_set (got, "files", bro_json_value_ref (bro_json_value_member (json, "files")));
+      bro_json_value_set (got, "commands", bro_json_value_ref (bro_json_value_member (json, "commands")));
+      bro_json_value_set (got, "logBytes", bro_json_value_ref (bro_json_value_member (json, "logBytes")));
+    }
+  else
+    bro_json_value_set (got, "error", bro_json_value_new_string (error->code));
+  g_ptr_array_add (c->h->details, got);
+  svc_ended (c, error);
+}
+
 /* The op's job: a name the case gave, else (nosuch) an id no job has. */
 static BroId
 svc_job (PipeHarness *h, BroJsonValue *arg)
@@ -1355,6 +1409,10 @@ svc_action (gpointer data)
     }
   else if (strcmp (name, "log") == 0)
     bro_job_service_log (js, &job, bro_json_value_get_integer (bro_json_value_member (arg, "after"), 0), svc_lines_done, c, NULL);
+  else if (strcmp (name, "detail") == 0)
+    bro_job_service_job (js, &job, svc_detail_done, c, NULL);
+  else if (strcmp (name, "stop") == 0)
+    bro_job_service_stop (js, svc_done, c, NULL);
   else
     g_error ("unknown op %s", name);
 }
@@ -1393,7 +1451,7 @@ pipe_check (gpointer data)
       BroId *id = g_hash_table_lookup (h->jobs, name);
       const char *state = NULL;
       gboolean at_gate;
-      if (!g_hash_table_contains (h->started, name) || g_hash_table_contains (h->outcomes, name))
+      if (h->stopped || !g_hash_table_contains (h->started, name) || g_hash_table_contains (h->outcomes, name))
         continue;
       for (guint k = h->events->len; k > 0 && !state; k--)
         {
@@ -1504,6 +1562,14 @@ pipe_run_op (PipeHarness *h, BroJsonValue *op)
           BroId job = svc_job (h, arg);
           g_mutex_lock (&h->gates.lock);
           g_hash_table_add (h->gates.cancelled, g_strdup (job.value));
+          g_mutex_unlock (&h->gates.lock);
+        }
+      if (strcmp (name, "stop") == 0)
+        {
+          h->stopped = TRUE;
+          g_mutex_lock (&h->gates.lock);
+          for (guint i = 0; i < h->names->len; i++) /* the shutdown cancels every live job's token */
+            g_hash_table_add (h->gates.cancelled, g_strdup (((BroId *) g_hash_table_lookup (h->jobs, h->names->pdata[i]))->value));
           g_mutex_unlock (&h->gates.lock);
         }
       g_ptr_array_add (h->calls, c);
@@ -1636,6 +1702,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
   h.calls = g_ptr_array_new_with_free_func (svc_call_free);
   h.queries = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_json_value_unref);
   h.logs = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_json_value_unref);
+  h.details = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_json_value_unref);
   h.unstored = g_ptr_array_new_with_free_func (g_free);
   h.names = g_ptr_array_new_with_free_func (g_free);
   h.jobs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
@@ -1719,11 +1786,38 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
           if (bro_json_value_member (d, "state"))
             g_assert_true (bro_step_state_from_wire (bro_json_value_get_string (bro_json_value_member (d, "state"), ""), &s->state));
           s->attempt = 1;
-          s->output = bro_step_output_new (sk, out ? bro_json_value_ref (out) : bro_json_value_new_object (), NULL);
+          s->has_started_at = s->has_finished_at = TRUE;
+          s->started_at.unix_milliseconds = s->finished_at.unix_milliseconds = START_MS;
+          {
+            BroJsonValue *summary = bro_json_value_member (d, "summary"), *e = bro_json_value_member (d, "error");
+            BroBroMessage *message = NULL;
+            if (summary)
+              {
+                BroMessageCode code;
+                BroJsonValue *params = bro_json_value_member (summary, "params");
+                g_assert_true (bro_message_code_parse (bro_json_value_get_string (bro_json_value_member (summary, "code"), ""), &code));
+                message = bro_bro_message_new (code, params ? bro_json_value_ref (params) : NULL, BRO_SEVERITY_INFO);
+              }
+            if (e)
+              {
+                BroJsonValue *params = bro_json_value_member (e, "params");
+                s->error = bro_bro_error_new (bro_json_value_get_string (bro_json_value_member (e, "code"), ""),
+                                              params ? bro_json_value_ref (params) : bro_json_value_new_object (), NULL);
+              }
+            s->output = bro_step_output_new (sk, out ? bro_json_value_ref (out) : bro_json_value_new_object (), message);
+          }
           s->output->read_errors = (int) bro_json_value_get_integer (bro_json_value_member (d, "readErrors"), 0);
           if (bro_json_value_member (d, "checkpoint"))
             s->checkpoint = bro_json_value_ref (bro_json_value_member (d, "checkpoint"));
           bro_step_repository_save (BRO_STEP_REPOSITORY (h.store), s, NULL);
+        }
+      if ((v = bro_json_value_member (j, "logText")))
+        {
+          g_autofree char *directory = g_strconcat ("/data/jobs/", jid->value, NULL);
+          g_autofree char *path = g_strconcat (directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+          g_autoptr (GBytes) bytes = g_bytes_new (v->string, strlen (v->string));
+          bro_file_system_create_directory (BRO_FILE_SYSTEM (h.fs), directory, FALSE, NULL);
+          bro_file_system_write_atomically (BRO_FILE_SYSTEM (h.fs), path, bytes, 0600, NULL);
         }
       if (bro_json_value_get_bool (bro_json_value_member (j, "intent"), FALSE))
         store_open_intent (h.store, jid);
@@ -1790,6 +1884,13 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
           for (guint i = 0; i < h.logs->len; i++)
             bro_json_value_append (got, bro_json_value_ref (g_ptr_array_index (h.logs, i)));
           bro_test_same_json (failures, id, "logs", v, got);
+        }
+      if ((v = bro_json_value_member (expect, "details")))
+        {
+          g_autoptr (BroJsonValue) got = bro_json_value_new_array ();
+          for (guint i = 0; i < h.details->len; i++)
+            bro_json_value_append (got, bro_json_value_ref (g_ptr_array_index (h.details, i)));
+          bro_test_same_json (failures, id, "details", v, got);
         }
     }
 
@@ -1992,6 +2093,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
   g_ptr_array_unref (h.calls);
   g_ptr_array_unref (h.queries);
   g_ptr_array_unref (h.logs);
+  g_ptr_array_unref (h.details);
   g_ptr_array_unref (h.unstored);
   g_object_unref (h.runner);
   g_object_unref (h.scheduler);

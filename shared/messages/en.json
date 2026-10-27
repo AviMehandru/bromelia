@@ -286,6 +286,7 @@
   "keystore.failed": "Couldn't use the secret “{name}”: {reason}",
   "secret.conflict": "The secret “{name}” has different values in {sources}. Bromelia is using {using} until you choose which to rely on in Settings → Secrets.",
   "secret.conflictPreferred": "The secret “{name}” still has different values in {sources}; {using} is used, as you chose in Settings → Secrets.",
+  "secret.unreadable": "Couldn't read the secret “{name}” from one of its sources: {reason}",
   "secret.source.keystore": "the system keystore",
   "secret.source.environment": "the environment variable",
   "secret.source.file": "the secrets folder",

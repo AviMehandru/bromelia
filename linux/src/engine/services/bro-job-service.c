@@ -1,5 +1,6 @@
 /* bro-job-service.c */
 #include "bro-job-service.h"
+#include "bro-acquire-output.h"
 #include "bro-archive-files.h"
 
 #include "bro-job-log.h"
@@ -8,6 +9,7 @@
 #include "bro-keep-apart-step.h"
 #include "bro-log-line-dto.h"
 #include "bro-message-code.h"
+#include "bro-seal-output.h"
 #include <string.h>
 
 struct _BroJobService {
@@ -30,6 +32,7 @@ struct _BroJobService {
   GHashTable *abandoned; /* job id → tool: jobs that logged process.abandoned in this engine run (a process left behind may
                           * still be writing to their staging until the engine starts again) */
   BroSubscription *logs;
+  gboolean stopped;      /* after stop: the commands answer server.stopping */
 };
 
 G_DEFINE_FINAL_TYPE (BroJobService, bro_job_service, G_TYPE_OBJECT)
@@ -64,10 +67,13 @@ typedef struct {
   gboolean holding;       /* retry, keep-apart: holds job_id in restarting until the call is freed */
   gboolean not_interrupted; /* keep-apart: its Plan step didn't succeed */
   char *bad_request;      /* retry: why the step can't be the start */
+  GPtrArray *rows;        /* job: BroStepRecord */
+  gint64 log_bytes;       /* job */
   BroJobServiceDone done;
   BroJobDtoDone job_done;
   BroJobPageDone page_done;
   BroLogLinesDone lines_done;
+  BroJobDetailDone detail_done;
   gpointer data;
   GDestroyNotify destroy;
 } Call;
@@ -99,6 +105,7 @@ call_free (gpointer data)
   g_free (c->decision_id);
   g_free (c->answer);
   g_free (c->bad_request);
+  g_clear_pointer (&c->rows, g_ptr_array_unref);
   g_free (c);
 }
 
@@ -111,6 +118,8 @@ call_hand_off (Call *from)
   to->job_done = from->job_done;
   to->page_done = from->page_done;
   to->lines_done = from->lines_done;
+  to->detail_done = from->detail_done;
+  from->detail_done = NULL;
   from->done = NULL;
   from->job_done = NULL;
   from->page_done = NULL;
@@ -132,6 +141,9 @@ fail (Call *c, const BroBroError *error)
     c->page_done (NULL, error, c->data);
   if (c->lines_done)
     c->lines_done (NULL, error, c->data);
+  if (c->detail_done)
+    c->detail_done (NULL, error, c->data);
+  c->detail_done = NULL;
   c->done = NULL;
   c->job_done = NULL;
   c->page_done = NULL;
@@ -156,6 +168,19 @@ bad_request (Call *c, const char *detail)
   bro_json_value_set (params, "detail", bro_json_value_new_string (detail));
   error = bro_bro_error_new (bro_message_code_wire (BRO_MSG_SERVER_BAD_REQUEST), params, NULL);
   fail (c, error);
+}
+
+/* After stop: answers @c with server.stopping and frees it; TRUE when it did. */
+static gboolean
+refused (Call *c)
+{
+  g_autoptr (BroBroError) error = NULL;
+  if (!c->self->stopped)
+    return FALSE;
+  error = bro_bro_error_new (bro_message_code_wire (BRO_MSG_SERVER_STOPPING), NULL, NULL);
+  fail (c, error);
+  call_free (c);
+  return TRUE;
 }
 
 static void
@@ -496,6 +521,8 @@ bro_job_service_start (BroJobService *self, BroJobServiceDone done, gpointer dat
 {
   Call *c = call_new (self, data, destroy);
   c->done = done;
+  if (refused (c))
+    return;
   bro_engine_executor_worker (self->executor, active_work, start_done, c, call_free);
 }
 
@@ -541,10 +568,14 @@ void
 bro_job_service_create (BroJobService *self, const BroJobRequest *request, BroJobDtoDone done, gpointer data, GDestroyNotify destroy)
 {
   Call *c = call_new (self, data, destroy);
-  BroJobRecord *r = bro_job_record_new ();
+  BroJobRecord *r;
   BroQueue queue = bro_job_planner_queue (request->kind);
-  g_autoptr (GArray) steps = bro_job_planner_initial (request);
+  g_autoptr (GArray) steps = NULL;
   c->job_done = done;
+  if (refused (c))
+    return;
+  steps = bro_job_planner_initial (request);
+  r = bro_job_record_new ();
   r->id = bro_id_generator_next (self->ids);
   c->position = admit (self, &r->id, queue);
   r->kind = request->kind;
@@ -592,6 +623,8 @@ bro_job_service_cancel (BroJobService *self, const BroId *job_id, BroJobServiceD
   Active *a = g_hash_table_lookup (self->active, job_id->value);
   c->done = done;
   c->job_id = *job_id;
+  if (refused (c))
+    return;
   if (a)
     {
       a->cancel_requested = TRUE;
@@ -883,6 +916,8 @@ bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroStepKi
   c->job_id = *job_id;
   c->has_from_step = from_step != NULL;
   c->from_step = from_step ? *from_step : BRO_STEP_KIND_AWAIT_MEDIA;
+  if (refused (c))
+    return;
   load_then (c, retry_loaded);
 }
 
@@ -999,6 +1034,8 @@ bro_job_service_keep_apart (BroJobService *self, const BroId *job_id, BroJobDtoD
   Call *c = call_new (self, data, destroy);
   c->job_done = done;
   c->job_id = *job_id;
+  if (refused (c))
+    return;
   load_then (c, keep_apart_loaded);
 }
 
@@ -1025,6 +1062,8 @@ bro_job_service_decide (BroJobService *self, const BroId *job_id, const char *de
   c->job_id = *job_id;
   c->decision_id = g_strdup (decision_id);
   c->answer = g_strdup (answer);
+  if (refused (c))
+    return;
   if (g_hash_table_contains (self->active, job_id->value))
     decide_now (c);
   else
@@ -1066,6 +1105,8 @@ reorder_command (BroJobService *self, const BroId *job_id, Op op, int by, BroJob
   c->job_id = *job_id;
   c->op = op;
   c->by = by;
+  if (refused (c))
+    return;
   if (g_hash_table_contains (self->active, job_id->value))
     reorder (c);
   else
@@ -1234,6 +1275,179 @@ bro_job_service_log (BroJobService *self, const BroId *job_id, gint64 after, Bro
   c->must_load = !g_hash_table_contains (self->active, job_id->value);
   c->log_path = g_strconcat (self->data, "/jobs/", job_id->value, "/" BRO_JOB_LOG_FILE_NAME, NULL);
   bro_engine_executor_worker (self->executor, log_work, log_done, c, call_free);
+}
+
+/* The stored rows and the log's size, with the record. */
+static gboolean
+detail_work (gpointer data, BroBroError **error)
+{
+  Call *c = data;
+  if (!load_work (c, error))
+    return FALSE;
+  if (!c->record)
+    return TRUE;
+  if (!(c->rows = bro_step_repository_load (bro_store_steps (c->self->store), c->job_id, error)))
+    return FALSE;
+  if (bro_file_system_exists (c->self->fs, c->log_path))
+    {
+      g_autoptr (BroFileInfo) info = bro_file_system_stat (c->self->fs, c->log_path, error);
+      if (!info)
+        return FALSE;
+      c->log_bytes = info->size;
+    }
+  return TRUE;
+}
+
+/* The row of @seq when it is of @kind (borrowed); NULL otherwise. */
+static BroStepRecord *
+row_of (GPtrArray *rows, int seq, BroStepKind kind)
+{
+  for (guint i = 0; i < rows->len; i++)
+    {
+      BroStepRecord *row = g_ptr_array_index (rows, i);
+      if (row->seq == seq && row->kind == kind)
+        return row;
+    }
+  return NULL;
+}
+
+/* The Seal row's files (path in the unit folder, size, SHA-256, role), else the Acquire row's produced files (names in
+ * staging), else none. @matched: the plan's rows (BroStepRecord, borrowed; NULL for a step without one). */
+static void
+add_files (GPtrArray *files, GPtrArray *matched)
+{
+  for (guint i = 0; i < matched->len; i++)
+    {
+      BroStepRecord *row = g_ptr_array_index (matched, i);
+      if (row && row->kind == BRO_STEP_KIND_SEAL && row->output && bro_json_value_member (row->output->data, "files"))
+        {
+          g_autoptr (BroSealOutput) seal = bro_seal_output_decode (row->output->data);
+          for (guint j = 0; j < seal->files->len; j++)
+            {
+              BroUnitFile *f = g_ptr_array_index (seal->files, j);
+              BroJobFileDto *file = bro_job_file_dto_new (f->path);
+              file->has_size = TRUE;
+              file->size = f->size;
+              file->sha256 = g_strdup (f->sha256);
+              file->role = f->role && f->role[0] ? g_strdup (f->role) : NULL;
+              g_ptr_array_add (files, file);
+            }
+          return;
+        }
+    }
+  for (guint i = 0; i < matched->len; i++)
+    {
+      BroStepRecord *row = g_ptr_array_index (matched, i);
+      if (row && row->kind == BRO_STEP_KIND_ACQUIRE && row->output && bro_json_value_member (row->output->data, "titles"))
+        {
+          g_autoptr (BroAcquireOutput) acquire = bro_acquire_output_decode (row->output->data);
+          g_autoptr (GPtrArray) produced = bro_acquire_output_produced (acquire);
+          for (guint j = 0; j < produced->len; j++)
+            g_ptr_array_add (files, bro_job_file_dto_new (g_ptr_array_index (produced, j)));
+          return;
+        }
+    }
+}
+
+static void
+detail_done (gpointer data, const BroBroError *error)
+{
+  Call *c = data;
+  BroJobService *self = c->self;
+  BroJobDto *job;
+  g_autoptr (BroJobDetailDto) detail = NULL;
+  g_autoptr (GArray) plan = NULL;
+  g_autoptr (GPtrArray) matched = g_ptr_array_new ();
+  if (error)
+    {
+      fail (c, error);
+      return;
+    }
+  if (!c->record)
+    {
+      fail_with (c, BRO_MSG_JOB_NOT_FOUND, &c->job_id);
+      return;
+    }
+  job = bro_pipeline_runner_job (self->runner, &c->job_id);
+  if (!job)
+    job = bro_job_dto_of (c->record);
+  if (job->state == BRO_JOB_STATE_QUEUED || job->state == BRO_JOB_STATE_WAITING_FOR_RESOURCES || job->state == BRO_JOB_STATE_BLOCKED)
+    {
+      int position = bro_scheduler_position (self->scheduler, &c->job_id);
+      job->has_position = position >= 0;
+      job->position = MAX (position, 0);
+    }
+  detail = bro_job_detail_dto_new (job);
+  plan = c->record->plan ? g_array_copy (c->record->plan->steps) : bro_job_planner_initial (c->record->request);
+  for (guint seq = 0; seq < plan->len; seq++)
+    {
+      BroStepKind kind = g_array_index (plan, BroStepKind, seq);
+      BroStepRecord *row = row_of (c->rows, (int) seq, kind);
+      BroJobStepDto *step = bro_job_step_dto_new ((int) seq, kind, row ? row->state : BRO_STEP_STATE_PENDING);
+      g_ptr_array_add (matched, row);
+      if (row)
+        {
+          step->has_started_at = row->has_started_at;
+          step->started_at = row->started_at;
+          step->has_finished_at = row->has_finished_at;
+          step->finished_at = row->finished_at;
+          step->error = bro_bro_error_copy (row->error);
+          step->summary = row->output && row->output->summary ? bro_bro_message_copy (row->output->summary) : NULL;
+        }
+      g_ptr_array_add (detail->steps, step);
+    }
+  add_files (detail->files, matched);
+  detail->log_bytes = c->log_bytes;
+  c->detail_done (detail, NULL, c->data);
+  c->detail_done = NULL;
+}
+
+void
+bro_job_service_job (BroJobService *self, const BroId *job_id, BroJobDetailDone done, gpointer data, GDestroyNotify destroy)
+{
+  Call *c = call_new (self, data, destroy);
+  c->detail_done = done;
+  c->job_id = *job_id;
+  c->log_path = g_strconcat (self->data, "/jobs/", job_id->value, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+  bro_engine_executor_worker (self->executor, detail_work, detail_done, c, call_free);
+}
+
+typedef struct {
+  BroJobServiceDone done;
+  gpointer data;
+  GDestroyNotify destroy;
+} Stopping;
+
+static void
+stop_idle (gpointer data)
+{
+  Stopping *s = data;
+  s->done (NULL, s->data);
+}
+
+static void
+stopping_free (gpointer data)
+{
+  Stopping *s = data;
+  if (s->destroy)
+    s->destroy (s->data);
+  g_free (s);
+}
+
+void
+bro_job_service_stop (BroJobService *self, BroJobServiceDone done, gpointer data, GDestroyNotify destroy)
+{
+  Stopping *s = g_new0 (Stopping, 1);
+  s->done = done;
+  s->data = data;
+  s->destroy = destroy;
+  self->stopped = TRUE;
+  if (self->queues)
+    {
+      bro_subscription_cancel (self->queues);
+      g_clear_object (&self->queues);
+    }
+  bro_pipeline_runner_shutdown (self->runner, stop_idle, s, stopping_free);
 }
 
 /* ---- the object ---- */

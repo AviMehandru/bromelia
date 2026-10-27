@@ -267,7 +267,7 @@ public sealed class LibraryServiceTests
     }
 
     /// <summary>The libraries table and the unit tables in memory; a unit's library must be stored (the foreign key).</summary>
-    internal sealed class Db : ILibraryRepository, IUnitRepository
+    internal sealed class Db : ILibraryRepository, IUnitRepository, ICatalogRepository
     {
         readonly object _lock = new();
         public readonly SortedDictionary<string, LibraryRecord> Libraries = new(StringComparer.Ordinal);
@@ -346,6 +346,19 @@ public sealed class LibraryServiceTests
         public Task<IReadOnlyList<UnitRecord>> Query(UnitQuery query) => throw new NotSupportedException();
         public Task<IReadOnlyList<UnitRecord>> LeastRecentlyVerified(int limit) => throw new NotSupportedException();
         public Task MarkMissing(Id unitId) => throw new NotSupportedException();
+
+        /// <summary>As SqliteStore's: committed units of the disc, newest committedAt first.</summary>
+        public Task<IReadOnlyList<UnitRecord>> ArchivedBefore(string fingerprint)
+        {
+            lock (_lock)
+                return Task.FromResult<IReadOnlyList<UnitRecord>>(Units.Values.Where(u => u.Fingerprint == fingerprint && u.State == UnitState.Committed)
+                    .OrderByDescending(u => u.CommittedAt?.UnixMilliseconds).ThenBy(u => u.Id.Value, StringComparer.Ordinal).ToList());
+        }
+
+        public Task<ArchivedDisc?> PreviousDisc(ContinuationQuery query) => throw new NotSupportedException();
+        public Task<int?> HighestEpisode(ContinuationQuery query) => throw new NotSupportedException();
+        public Task<IReadOnlyList<WorkRecord>> Works(string query) => throw new NotSupportedException();
+        public Task<DiscSetRecord?> Set(Id setId) => throw new NotSupportedException();
     }
 
     internal sealed class ConfigBox : IConfigSource
@@ -420,7 +433,7 @@ public sealed class LibraryServiceTests
                 bus = new EventBus(w.Clock);
                 problems = new ProblemService(bus, w.Clock);
                 scheduler = new Scheduler(w.Executor, bus, new SchedulerLimits());
-                service = new LibraryService(w.Executor, bus, problems, scheduler, config, w.EngineClock, tree, db, db, CrashPoint);
+                service = new LibraryService(w.Executor, bus, problems, scheduler, config, w.EngineClock, tree, db, db, db, CrashPoint);
                 w.OnExecutor(() => bus.Subscribe(new[] { EngineEventType.LibraryChanged, EngineEventType.ProblemRaised, EngineEventType.ProblemCleared,
                     EngineEventType.ConfigChanged }, events.Add));
             }
@@ -512,6 +525,12 @@ public sealed class LibraryServiceTests
             UnitRecord Unit(JsonValue u, int files) => new(new Id(u["id"]!.AsString!), "lib", null, new Id("00000000-0000-4000-8000-000000000001"),
                 u["path"]!.AsString!, "bromelia-00000000.json", 3, UnitState.Committing, UnitStatus.Success, u["name"]!.AsString!, MediaKind.Movie,
                 "bluray", "BD", false, null, "", null, null, null, null, "", 0, files, 1, w.Clock.Now());
+            foreach (var u in given["units"]?.AsArray ?? new List<JsonValue>())
+                db.Units[u["id"]!.AsString!] = Unit(u, 0) with
+                {
+                    State = EnumWire.Parse<UnitState>(u["state"]!.AsString)!.Value, Fingerprint = u["fingerprint"]?.AsString,
+                    CommittedAt = u["committedAt"]?.AsString is { } at ? Instant.Parse(at) : null,
+                };
 
             Settle();
             for (int i = 0; i < ops.Count; i++)
@@ -562,6 +581,12 @@ public sealed class LibraryServiceTests
                     }
                     case "attach":
                         OnExecutor(i, arg, async () => LibraryDto.Json(await service.Attach(arg["id"]!.AsString!, arg["path"]!.AsString!, arg["name"]!.AsString!)));
+                        break;
+                    case "removeMarker":
+                        OnExecutor(i, arg, async () => { await service.RemoveMarker(arg.AsString!); return JsonValue.Of("ok"); });
+                        break;
+                    case "archivedBefore":
+                        OffExecutor(i, arg, async () => JsonValue.Of((await service.ArchivedBefore(arg.AsString!)).Select(u => JsonValue.Of(u.Id.Value))));
                         break;
                     case "configure":
                         w.OnExecutor(() =>

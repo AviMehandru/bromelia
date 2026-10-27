@@ -12,6 +12,7 @@ import Foundation
 /// - Each job's place in its queue is stored, so the order survives a restart (written in a transaction that changes only
 ///   the position: the runner owns the rest of the record).
 /// - The continue offer comes with AutomationService (owner, 2026-10-17/18).
+/// - `stop()` leaves the running jobs as a killed engine would (decision 170): the next start's recovery takes them up.
 @EngineActor
 public final class JobService {
     /// A job this service runs, until its run ends.
@@ -50,6 +51,7 @@ public final class JobService {
     /// writing to the job's staging until the engine starts again.
     private var abandoned: [Id: String] = [:]
     private var logs: Subscription?
+    private var stopped = false
 
     /// `dataDirectory`: the engine's data folder; a job's log is <data>/jobs/<id>/log.jsonl.
     public init(executor: EngineExecutor, bus: EventBus, store: any Store, scheduler: Scheduler, runner: PipelineRunner, clock: EngineClock,
@@ -70,6 +72,7 @@ public final class JobService {
     /// Runs the jobs the store has unfinished (what RecoveryService left queued), in their queues' order. Call it once,
     /// after recover().
     public func start() async throws(BroError) {
+        try notStopped()
         if queues == nil { queues = bus.subscribe(types: [.queueChanged]) { [unowned self] _ in onQueueChanged() } }
         let store = store
         for job in try await executor.worker({ () async throws(BroError) -> [JobRecord] in try await store.jobs().active() }) {
@@ -83,6 +86,7 @@ public final class JobService {
 
     /// A new job for the request: queued, stored, announced (jobChanged), then run.
     public func create(_ request: JobRequest) async throws(BroError) -> JobDto {
+        try notStopped()
         let id = ids.next()
         let queue = JobPlanner.queue(request.kind)
         let steps = JobPlanner.initial(request)
@@ -110,6 +114,7 @@ public final class JobService {
     /// Cancels the job: a waiting or running one ends cancelled (job.cancelledByUser); one nothing runs is finished as
     /// cancelled at once; a finished one stays as it is. job.notFound when there is none.
     public func cancel(_ jobId: Id) async throws(BroError) {
+        try notStopped()
         if let a = active[jobId] {
             a.cancelRequested = true
             runner.cancel(jobId)
@@ -139,6 +144,7 @@ public final class JobService {
     /// was kept apart is retried from its keepApart step only (that step again, in the processing queue), or as a new job;
     /// any other step is job.notRetryable.
     public func retry(_ jobId: Id, fromStep: StepKind? = nil) async throws(BroError) -> JobDto {
+        try notStopped()
         let record = try await load(jobId)
         let notRetryable = BroError(MessageCode.wire(.jobNotRetryable), [("jobId", .string(jobId.value))])
         guard record.state == .finished, active[jobId] == nil, let outcome = record.outcome else { throw notRetryable }
@@ -239,6 +245,7 @@ public final class JobService {
     /// 2026-10-25); job.commitOpen while it has an open commit intent (retry it from Commit); job.alreadyCommitted once its
     /// unit is in a library.
     public func keepApart(_ jobId: Id) async throws(BroError) -> JobDto {
+        try notStopped()
         let record = try await load(jobId)
         guard record.state == .finished, let outcome = record.outcome, [.interrupted, .failed, .cancelled].contains(outcome),
               record.plan?.steps.contains(.keepApart) != true, active[jobId] == nil, !restarting.contains(jobId) else {
@@ -298,6 +305,7 @@ public final class JobService {
     /// Answers the job's question `decisionId`. job.notFound; job.notAwaitingDecision when the job isn't waiting for that
     /// question; server.badRequest for an answer it doesn't offer.
     public func decide(_ jobId: Id, decisionId: String, answer: String) async throws(BroError) {
+        try notStopped()
         if active[jobId] == nil { _ = try await load(jobId) }
         guard runner.job(jobId)?.decision?.id == decisionId else {
             throw BroError(MessageCode.wire(.jobNotAwaitingDecision), [("jobId", .string(jobId.value))])
@@ -308,6 +316,7 @@ public final class JobService {
     /// Moves a job that waits to start a step `by` places in its queue (negative: earlier), stopping at the ends.
     /// job.notFound; job.notQueued for a job that runs a step, waits for an answer or has finished.
     public func move(_ jobId: Id, by: Int) async throws(BroError) {
+        try notStopped()
         try await waiting(jobId)
         try scheduler.move(jobId, by: by)
     }
@@ -315,6 +324,7 @@ public final class JobService {
     /// Puts a job that waits to start a step first in its queue; the acquisitions cap no longer holds it back.
     /// job.notFound; job.notQueued as for `move`.
     public func startNow(_ jobId: Id) async throws(BroError) {
+        try notStopped()
         try await waiting(jobId)
         try scheduler.startNow(jobId)
     }
@@ -356,6 +366,52 @@ public final class JobService {
             lines = try await executor.worker { () throws(BroError) -> [LogLineDto] in fs.exists(path) ? JobLog.decode(try fs.read(path)) : [] }
         }
         return lines!.filter { $0.seq > after }
+    }
+
+    /// The job with its steps, files and commands (dtos.json JobDetail; decision 171). job: as `query` gives it. steps:
+    /// one per step of its plan (the stored plan, else the planner's steps), each with the stored row of that seq when it
+    /// is of that kind, else pending; rows past the plan's end (decision 158: a keepApart cut the plan back) are left out.
+    /// files: the Seal row's files, else the Acquire row's produced files (names in staging), else none. commands: none
+    /// yet (nothing logs process.command). logBytes: the size of its log.jsonl. job.notFound.
+    public func job(_ jobId: Id) async throws(BroError) -> JobDetailDto {
+        let record = try await load(jobId)
+        let path = data + "/jobs/" + jobId.value + "/" + JobLog.fileName
+        let store = store, fs = fs
+        let (rows, logBytes) = try await executor.worker { () async throws(BroError) -> ([StepRecord], Int64) in
+            (try await store.steps().load(jobId), fs.exists(path) ? try fs.stat(path).size : 0)
+        }
+        var job = runner.job(jobId) ?? JobDto.of(record)
+        if [.queued, .waitingForResources, .blocked].contains(job.state) { job.position = scheduler.position(jobId) }
+        let plan = record.plan?.steps ?? JobPlanner.initial(record.request)
+        let matched = plan.enumerated().map { seq, kind in rows.first { $0.seq == seq && $0.kind == kind } }
+        let steps = plan.enumerated().map { seq, kind -> JobStepDto in
+            guard let row = matched[seq] else { return JobStepDto(seq: seq, kind: kind, state: .pending) }
+            return JobStepDto(seq: seq, kind: kind, state: row.state, startedAt: row.startedAt, finishedAt: row.finishedAt, error: row.error,
+                              summary: row.output?.summary)
+        }
+        return JobDetailDto(job: job, steps: steps, files: Self.files(matched), commands: [], logBytes: logBytes)
+    }
+
+    /// The Seal row's files (path in the unit folder, size, SHA-256, role), else the Acquire row's produced files (names in
+    /// staging), else none.
+    private static func files(_ rows: [StepRecord?]) -> [JobFileDto] {
+        if let seal = rows.first(where: { $0?.kind == .seal && $0?.output?.data["files"] != nil }), let data = seal?.output?.data {
+            return SealOutput.decode(data).files.map { JobFileDto(path: $0.path, size: $0.size, sha256: $0.sha256, role: $0.role.isEmpty ? nil : $0.role) }
+        }
+        if let acquire = rows.first(where: { $0?.kind == .acquire && $0?.output?.data["titles"] != nil }), let data = acquire?.output?.data {
+            return AcquireOutput.produced(AcquireOutput.decode(data)).map { JobFileDto(path: $0) }
+        }
+        return []
+    }
+
+    /// At engine stop (decision 170, owner 2026-10-26): the runner shuts every live job down without storing anything
+    /// more for it (`PipelineRunner.shutdown()`) and no queue place is stored any more; returns once no job is live. The
+    /// commands answer server.stopping from now on.
+    public func stop() async {
+        stopped = true
+        queues?.cancel()
+        queues = nil
+        await runner.shutdown()
     }
 
     // MARK: Running
@@ -502,6 +558,10 @@ public final class JobService {
 
     private static func notInterrupted(_ jobId: Id) -> BroError {
         BroError(MessageCode.wire(.jobNotInterrupted), [("jobId", .string(jobId.value))])
+    }
+
+    private func notStopped() throws(BroError) {
+        if stopped { throw BroError(MessageCode.wire(.serverStopping)) }
     }
 
     private static func notQueued(_ jobId: Id) -> BroError { BroError(MessageCode.wire(.jobNotQueued), [("jobId", .string(jobId.value))]) }

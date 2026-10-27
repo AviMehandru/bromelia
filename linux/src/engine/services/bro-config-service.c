@@ -199,7 +199,8 @@ source_label (BroSecretSource source)
   return bro_bro_message_to_json (label);
 }
 
-/* Raises, updates or clears a secret's problem (on the executor). */
+/* Raises, updates or clears a secret's problems (on the executor): secret.unreadable{name, reason} while a source fails
+ * (a warning when another source has the secret, an error when none has), then its conflict. */
 static void
 report (BroConfigService *self, const char *name, const Resolution *r)
 {
@@ -208,6 +209,19 @@ report (BroConfigService *self, const char *name, const Resolution *r)
   BroJsonValue *params, *sources;
   g_autoptr (BroBroMessage) message = NULL;
   g_autoptr (BroProblemDto) raised = NULL;
+  if (r->failure)
+    {
+      BroJsonValue *reason = bro_json_value_member (r->failure->params, "reason");
+      g_autoptr (BroBroMessage) unreadable = NULL;
+      g_autoptr (BroProblemDto) shown = NULL;
+      params = bro_json_value_new_object ();
+      bro_json_value_set (params, "name", bro_json_value_new_string (name));
+      bro_json_value_set (params, "reason", bro_json_value_new_string (bro_json_value_get_string (reason, r->failure->code)));
+      unreadable = bro_bro_message_new (BRO_MSG_SECRET_UNREADABLE, params, r->value ? BRO_SEVERITY_WARNING : BRO_SEVERITY_ERROR);
+      shown = bro_problem_service_raise (self->problems, unreadable, scope, &open_settings, 1);
+    }
+  else
+    bro_problem_service_clear (self->problems, BRO_MSG_SECRET_UNREADABLE, scope);
   if (!r->conflict || !r->value)
     {
       bro_problem_service_clear (self->problems, BRO_MSG_SECRET_CONFLICT, scope);

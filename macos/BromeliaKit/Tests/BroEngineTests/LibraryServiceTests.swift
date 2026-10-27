@@ -259,7 +259,7 @@ final class Tree: FileSystem, @unchecked Sendable {
 }
 
 /// The libraries table and the unit tables in memory; a unit's library must be stored (the foreign key).
-final class Db: LibraryRepository, UnitRepository, @unchecked Sendable {
+final class Db: LibraryRepository, UnitRepository, CatalogRepository, @unchecked Sendable {
     private let lock = NSLock()
     var libraries: [String: LibraryRecord] = [:]
     var units: [String: UnitRecord] = [:]
@@ -315,6 +315,20 @@ final class Db: LibraryRepository, UnitRepository, @unchecked Sendable {
     func query(_ query: UnitQuery) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func leastRecentlyVerified(_ limit: Int) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func markMissing(_ unitId: Id) async throws(BroError) { fatalError("not used") }
+
+    /// As SqliteStore's: committed units of the disc, newest committedAt first.
+    func archivedBefore(_ fingerprint: String) async throws(BroError) -> [UnitRecord] {
+        lock.withLock {
+            units.values.filter { $0.fingerprint == fingerprint && $0.state == .committed }.sorted {
+                ($0.committedAt?.unixMilliseconds ?? 0, $1.id.value) > ($1.committedAt?.unixMilliseconds ?? 0, $0.id.value)
+            }
+        }
+    }
+
+    func previousDisc(_ query: ContinuationQuery) async throws(BroError) -> ArchivedDisc? { fatalError("not used") }
+    func highestEpisode(_ query: ContinuationQuery) async throws(BroError) -> Int? { fatalError("not used") }
+    func works(_ query: String) async throws(BroError) -> [WorkRecord] { fatalError("not used") }
+    func set(_ setId: Id) async throws(BroError) -> DiscSetRecord? { fatalError("not used") }
 }
 
 @EngineActor
@@ -384,6 +398,15 @@ struct LibraryServiceTests {
                                                            markerId: l["markerId"]!.string!, attachedAt: Instant.parse(l["attachedAt"]!.string!)!,
                                                            online: l["online"]!.bool!, lastSeenAt: l["lastSeenAt"]?.string.flatMap(Instant.parse))
         }
+        for u in given["units"]?.array ?? [] {
+            var unit = UnitRecord(id: Id(u["id"]!.string!), libraryId: "lib", jobId: Id("00000000-0000-4000-8000-000000000001"), path: u["path"]!.string!,
+                                  recordFile: "bromelia-00000000.json", recordVersion: 3, state: UnitState(rawValue: u["state"]!.string!)!, status: .success,
+                                  name: u["name"]!.string!, kind: .movie, format: "bluray", formatCode: "BD", encrypted: false, label: "", makemkvVersion: "",
+                                  bytes: 0, fileCount: 0, attempts: 1, createdAt: Instant.parse("2026-10-02T20:00:00.000Z")!)
+            unit.fingerprint = u["fingerprint"]?.string
+            unit.committedAt = u["committedAt"]?.string.flatMap(Instant.parse)
+            db.units[unit.id.value] = unit
+        }
         let config = await CaseConfig()
         let libraries = given["config"] ?? .array([])
         await world.onExecutor { config.document = .object([("version", .integer(3)), ("libraries", libraries)]) }
@@ -406,7 +429,8 @@ struct LibraryServiceTests {
                 state.problems = ProblemService(bus: state.bus, clock: world.clock)
                 state.scheduler = Scheduler(executor: world.executor, bus: state.bus, limits: SchedulerLimits())
                 state.service = LibraryService(executor: world.executor, bus: state.bus, problems: state.problems, scheduler: state.scheduler,
-                                               config: config, clock: world.engineClock, fs: tree, libraries: db, units: db, crash: crash)
+                                               config: config, clock: world.engineClock, fs: tree, libraries: db, units: db, catalog: db,
+                                               crash: crash)
                 state.subscription = state.bus.subscribe(types: [.libraryChanged, .problemRaised, .problemCleared, .configChanged]) {
                     state.events.append($0)
                 }
@@ -516,6 +540,13 @@ struct LibraryServiceTests {
             case "attach":
                 try await onExecutor(i, arg) { () async throws(BroError) in
                     LibraryDto.json(try await state.service.attach(arg["id"]!.string!, path: arg["path"]!.string!, name: arg["name"]!.string!))
+                }
+            case "removeMarker":
+                try await onExecutor(i, arg) { () async throws(BroError) in try await state.service.removeMarker(arg.string!); return .string("ok") }
+            case "archivedBefore":
+                let service = await state.service!
+                try await offExecutor(i, arg) { () async throws(BroError) in
+                    .array(try await service.archivedBefore(arg.string!).map { .string($0.id.value) })
                 }
             case "configure":
                 await world.onExecutor {

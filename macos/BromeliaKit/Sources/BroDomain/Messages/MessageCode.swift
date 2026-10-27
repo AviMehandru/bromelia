@@ -289,6 +289,7 @@ public enum MessageCode: String, Sendable, CaseIterable {
     case keystoreFailed = "keystore.failed"
     case secretConflict = "secret.conflict"
     case secretConflictPreferred = "secret.conflictPreferred"
+    case secretUnreadable = "secret.unreadable"
     case secretSourceKeystore = "secret.source.keystore"
     case secretSourceEnvironment = "secret.source.environment"
     case secretSourceFile = "secret.source.file"

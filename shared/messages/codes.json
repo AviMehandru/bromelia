@@ -1966,6 +1966,14 @@
       },
       "today": "new: ConfigService (owner, 2026-10-12): the sources still disagree; the preferred one is used"
     },
+    "secret.unreadable": {
+      "kind": "problem",
+      "params": {
+        "name": "string",
+        "reason": "string"
+      },
+      "today": "new: ConfigService (owner, G3 2026-10-26): a source of a secret fails (the keystore, the secrets folder); reason is the failure's reason (the system's text), else its code"
+    },
     "secret.source.keystore": {
       "kind": "label",
       "today": "new"

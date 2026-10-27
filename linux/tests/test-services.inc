@@ -641,6 +641,22 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
           record (&h, i, error ? error_json (error) : value ? bro_json_value_new_string (value) : bro_json_value_new_null ());
           bro_engine_executor_barrier (w.executor);
         }
+      else if (strcmp (name, "stopFailing") == 0)
+        {
+          const char *secret = ((BroJsonValue *) op->items->pdata[0])->string;
+          TestConfigFakes *stores[] = { f, folder };
+          for (guint k = 0; k < G_N_ELEMENTS (stores); k++)
+            {
+              BroJsonValue *kept = bro_json_value_new_object ();
+              for (guint m = 0; m < stores[k]->keystore_fails->keys->len; m++)
+                if (strcmp (stores[k]->keystore_fails->keys->pdata[m], secret) != 0)
+                  bro_json_value_set (kept, stores[k]->keystore_fails->keys->pdata[m], bro_json_value_ref (stores[k]->keystore_fails->items->pdata[m]));
+              g_mutex_lock (&stores[k]->lock);
+              bro_json_value_unref (stores[k]->keystore_fails);
+              stores[k]->keystore_fails = kept;
+              g_mutex_unlock (&stores[k]->lock);
+            }
+        }
       else if (strcmp (name, "changeOutside") == 0)
         {
           BroJsonValue *arg = op->items->pdata[0];
@@ -686,7 +702,7 @@ config_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArra
       BroJsonValue *want = bro_json_value_at (want_results, r);
       g_autoptr (BroJsonValue) normalized = NULL;
       g_autofree char *what = NULL;
-      if (strcmp (name, "releaseWrites") == 0 || strcmp (name, "changeOutside") == 0)
+      if (strcmp (name, "releaseWrites") == 0 || strcmp (name, "changeOutside") == 0 || strcmp (name, "stopFailing") == 0)
         continue;
       r++;
       if (want && !bro_json_value_member (want, "error"))

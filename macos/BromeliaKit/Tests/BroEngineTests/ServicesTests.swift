@@ -81,8 +81,17 @@ final class ConfigFiles: FileSystem, @unchecked Sendable {
 final class FakeKeystore: Keystore, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [String: String] = [:]
-    var fails: [String: JsonValue] = [:]
+    private var failing: [String: JsonValue] = [:]
     let systemStore: Bool
+
+    /// Every call for a name in it fails so.
+    var fails: [String: JsonValue] {
+        get { lock.withLock { failing } }
+        set { lock.withLock { failing = newValue } }
+    }
+
+    /// The name's calls don't fail any more.
+    func heal(_ name: String) { lock.withLock { _ = failing.removeValue(forKey: name) } }
 
     var values: [String: String] { lock.withLock { stored } }
 
@@ -271,6 +280,9 @@ struct ServicesTests {
                 await world.executor.barrier()
             case "changeOutside":
                 (arg["store"]?.string == "keystore" ? keystore : secretFiles).change(arg["name"]!.string!, to: arg["value"]?.string)
+            case "stopFailing":
+                keystore.heal(arg.string!)
+                secretFiles.heal(arg.string!)
             case "releaseWrites":
                 files.hold!.signal()
                 for t in pending { await t.value }
@@ -284,7 +296,7 @@ struct ServicesTests {
         let results = await recorder.results
         let wantResults = expect["results"]!.array!
         var r = 0
-        for (i, op) in ops.enumerated() where op.string != "releaseWrites" && op["changeOutside"] == nil {
+        for (i, op) in ops.enumerated() where op.string != "releaseWrites" && op["changeOutside"] == nil && op["stopFailing"] == nil {
             var want = wantResults[r]
             r += 1
             let name = op.string ?? op.members![0].key

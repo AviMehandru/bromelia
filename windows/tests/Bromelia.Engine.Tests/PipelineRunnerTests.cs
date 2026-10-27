@@ -186,7 +186,8 @@ public sealed class PipelineRunnerTests
                     var k = EnumWire.Parse<StepKind>(d["kind"]!.AsString)!.Value;
                     var state = EnumWire.Parse<StepState>(d["state"]?.AsString ?? "succeeded")!.Value;
                     ((IStepRepository)Store).Save(new StepRecord(id, seq++, k, state, 1, W.Clock.Now(), W.Clock.Now(),
-                        new StepOutput(k, d["output"] ?? EmptyObject, null, (int)(d["readErrors"]?.AsInteger ?? 0)), null, d["checkpoint"])).Wait();
+                        new StepOutput(k, d["output"] ?? EmptyObject, d["summary"] is { } summary ? Message(summary) : null, (int)(d["readErrors"]?.AsInteger ?? 0)),
+                        d["error"] is { } stepError ? Error(stepError) : null, d["checkpoint"])).Wait();
                 }
                 if (j["intent"]?.AsBool == true) Store.OpenIntent(id);
                 if (j["unit"]?.AsString is { } unit) Store.StoreUnit(id, EnumWire.Parse<UnitState>(unit)!.Value);
@@ -198,6 +199,11 @@ public sealed class PipelineRunnerTests
                     Fs.CreateDirectory($"/data/jobs/{id.Value}", parentsMustExist: false);
                     Fs.WriteAtomically($"/data/jobs/{id.Value}/log.jsonl", JobLog.Encode(lines), 0x180);
                 }
+                if (j["logText"]?.AsString is { } logText)
+                {
+                    Fs.CreateDirectory($"/data/jobs/{id.Value}", parentsMustExist: false);
+                    Fs.WriteAtomically($"/data/jobs/{id.Value}/log.jsonl", Encoding.UTF8.GetBytes(logText), 0x180);
+                }
             }
         }
 
@@ -205,6 +211,9 @@ public sealed class PipelineRunnerTests
         public readonly CountingIds Ids;
         public readonly List<JsonValue> Queries = new();
         public readonly List<JsonValue> Logs = new();
+        public readonly List<JsonValue> Details = new();
+        /// <summary>After a stop op: the jobs' last states no longer say whether they settled.</summary>
+        bool _stopped;
         public readonly List<string> AnnouncedUnstored = new();
         readonly Dictionary<StepKind, JsonValue> _behaviour = new();
 
@@ -290,7 +299,7 @@ public sealed class PipelineRunnerTests
                             }
                 foreach (var (name, id) in Jobs)
                 {
-                    if (!_started.Contains(name) || Outcomes.ContainsKey(name)) continue;
+                    if (_stopped || !_started.Contains(name) || Outcomes.ContainsKey(name)) continue;
                     var last = Events.LastOrDefault(e => e.Type is EngineEventType.JobChanged or EngineEventType.JobFinished
                                                          && e.Data["job"]!["id"]!.AsString == id.Value);
                     var state = last?.Data["job"]!["state"]!.AsString;
@@ -446,6 +455,28 @@ public sealed class PipelineRunnerTests
                     var id = IdOf(job!);
                     return () => Service.StartNow(id);
                 }
+                case "stop":
+                    _stopped = true;
+                    lock (_gateLock) _cancelled.UnionWith(Jobs.Values); // the shutdown cancels every live job's token
+                    return () => Service.Stop();
+                case "detail":
+                {
+                    var id = IdOf(job!);
+                    return async () =>
+                    {
+                        try
+                        {
+                            var json = JobDetailDto.Json(await Service.Job(id));
+                            Details.Add(JsonValue.Of(("job", JsonValue.Of(DetailText(json))), ("steps", json["steps"]!), ("files", json["files"]!),
+                                ("commands", json["commands"]!), ("logBytes", json["logBytes"]!)));
+                        }
+                        catch (BroFailure f)
+                        {
+                            Details.Add(JsonValue.Of(("error", JsonValue.Of(f.Error.Code))));
+                            throw;
+                        }
+                    };
+                }
                 case "steps":
                     lock (_behaviour)
                         foreach (var (kind, behaviour) in arg.AsObject!) _behaviour[EnumWire.Parse<StepKind>(kind)!.Value] = behaviour;
@@ -506,6 +537,16 @@ public sealed class PipelineRunnerTests
             if (j.Outcome is { } o) text += " " + EnumWire.Name(o);
             if (j.Position is { } p) text += " position " + p;
             if (j.Progress is { } progress) text += " step " + EnumWire.Name(progress.Step);
+            return text;
+        }
+
+        /// <summary>A JobDetail's job as the case writes it, read from its JSON.</summary>
+        string DetailText(JsonValue j)
+        {
+            var text = $"{NameOf(j["id"]!.AsString!)} {j["state"]!.AsString}";
+            if (j["outcome"]?.AsString is { } o) text += " " + o;
+            if (j["position"]?.AsInteger is { } p) text += " position " + p;
+            if (j["progress"]?["step"]?.AsString is { } step) text += " step " + step;
             return text;
         }
 
@@ -595,6 +636,7 @@ public sealed class PipelineRunnerTests
             Same("", string.Join(" ", h.AnnouncedUnstored), "jobs announced before they were stored");
             if (expect["queries"] is { } queries) Same(queries, JsonValue.Of(h.Queries), "queries");
             if (expect["logs"] is { } logs) Same(logs, JsonValue.Of(h.Logs), "logs");
+            if (expect["details"] is { } details) Same(details, JsonValue.Of(h.Details), "details");
             return true;
         });
     }

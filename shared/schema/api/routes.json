@@ -311,8 +311,7 @@
         "job.notInterrupted",
         "job.processAbandoned",
         "job.commitOpen",
-        "job.alreadyCommitted",
-        "library.offline"
+        "job.alreadyCommitted"
       ],
       "note": "Don't continue an interrupted, failed or cancelled job: its staged files move to _Quarantine/<name> [INCOMPLETE] with a note, and the job can't be continued any more (owner, 2026-10-03 and 2026-10-25)."
     },

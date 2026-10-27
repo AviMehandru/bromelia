@@ -45,6 +45,10 @@ public final class PipelineRunner {
     private let clock: EngineClock
     private var coalescer: Coalescer?
     private var live: [Id: Live] = [:]
+    /// Set by `shutdown()`: nothing more is stored for any job.
+    private var stopping = false
+    /// Who waits in `shutdown()` for no job to be live.
+    private var idle: [Resumption<Void>] = []
 
     public init(executor: EngineExecutor, bus: EventBus, scheduler: Scheduler, store: any Store, registry: StepRegistry,
                 environment: StepEnvironment, clock: EngineClock) {
@@ -61,7 +65,8 @@ public final class PipelineRunner {
     // MARK: Commands
 
     /// Runs the job to its end, or until it is cancelled; returns how it ended. The job is live (cancel reaches it) as soon
-    /// as this is called, before its record is loaded. job.notFound when there is no such job.
+    /// as this is called, before its record is loaded. job.notFound when there is no such job; server.stopping once
+    /// `shutdown()` was called (the run then ends wherever it is, storing nothing more).
     public func run(_ jobId: Id) async throws(BroError) -> Decided {
         let l = Live()
         live[jobId] = l
@@ -72,8 +77,7 @@ public final class PipelineRunner {
             }
             l.loaded = record
         } catch {
-            live.removeValue(forKey: jobId)
-            l.cancel.close()
+            gone(jobId, l)
             throw error
         }
         var decided: Decided
@@ -82,11 +86,36 @@ public final class PipelineRunner {
         } catch {
             decided = Decided(outcome: .failed, error: error)
         }
-        await releaseAtEnd(l, decided)
+        if !stopping { await releaseAtEnd(l, decided) }
+        if stopping {
+            coalescer?.drop(jobId.value)
+            gone(jobId, l)
+            throw Self.stoppingError()
+        }
         await finish(l, decided)
+        gone(jobId, l)
+        return decided
+    }
+
+    /// At engine stop (decision 170): every live job's waiting request and question are dropped and its running step's
+    /// token cancelled, and from now on the runner stores nothing more for any job (no step row, plan, outcome or
+    /// jobFinished), so what is stored is what a killed engine leaves and the next start's recovery takes each job up.
+    /// Returns once no job is live.
+    public func shutdown() async {
+        stopping = true
+        for jobId in Array(live.keys) { cancel(jobId) }
+        if live.isEmpty { return }
+        await executor.suspend { (r: Resumption<Void>) in idle.append(r) }
+    }
+
+    private func gone(_ jobId: Id, _ l: Live) {
         live.removeValue(forKey: jobId)
         l.cancel.close()
-        return decided
+        if live.isEmpty {
+            let waiting = idle
+            idle = []
+            for r in waiting { r.resume(returning: ()) }
+        }
     }
 
     /// Cancels a running job: a waiting request or a decision ends at once, a running step sees its token.
@@ -129,6 +158,7 @@ public final class PipelineRunner {
     // MARK: The loop
 
     private func runSteps(_ l: Live) async throws(BroError) -> Decided {
+        if stopping { throw Self.stoppingError() } // loaded after the shutdown: nothing is stored, not even the plan
         let jobId = l.record.id
         let store = store
         var plan: JobPlan
@@ -183,6 +213,7 @@ public final class PipelineRunner {
                 }
                 throw error
             }
+            if stopping { throw Self.stoppingError() } // granted after the shutdown (its cancel was still on its way): nothing is stored
             l.blockedBy = nil
             let started = clock.now()
             var running = l.record
@@ -202,6 +233,7 @@ public final class PipelineRunner {
             } catch {
                 thrown = error
             }
+            if stopping { throw Self.stoppingError() } // the step ended after the shutdown: its row stays running, as a kill leaves it
             scheduler.release(lease)
             coalescer?.flush(jobId.value)
 
@@ -379,6 +411,8 @@ public final class PipelineRunner {
                     space: Space(runner: self, live: l, executor: executor), checkpoint: checkpoint, jobDirectory: jobDirectory(l.record.id),
                     messages: environment.messages, appVersion: environment.appVersion)
     }
+
+    static func stoppingError() -> BroError { BroError(MessageCode.wire(.serverStopping)) }
 
     static func unexpected(_ detail: String) -> BroError {
         BroError(MessageCode.wire(.internalUnexpected), [("detail", .string(detail))])

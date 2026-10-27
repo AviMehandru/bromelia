@@ -243,6 +243,10 @@ public sealed class ConfigServiceTests
                         else store.Values.Remove(secret);
                         break;
                     }
+                    case "stopFailing":
+                        keystore.Fails.Remove(arg.AsString!);
+                        secretFiles.Fails.Remove(arg.AsString!);
+                        break;
                     case "releaseWrites":
                         files.Hold!.Set();
                         foreach (var d in done) Wait(d);
@@ -258,7 +262,7 @@ public sealed class ConfigServiceTests
             var r = 0;
             for (int i = 0; i < ops.Count; i++)
             {
-                if (ops[i].AsString == "releaseWrites" || ops[i]["changeOutside"] != null) continue;
+                if (ops[i].AsString == "releaseWrites" || ops[i]["changeOutside"] != null || ops[i]["stopFailing"] != null) continue;
                 var want = expectedResults[r++];
                 var name = ops[i].AsString ?? ops[i].AsObject!.Single().Key;
                 if (want["error"] == null)

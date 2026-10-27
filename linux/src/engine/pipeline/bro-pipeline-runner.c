@@ -77,6 +77,12 @@ cancelled_error (void)
 }
 
 static BroBroError *
+stopping_error (void)
+{
+  return bro_bro_error_new (bro_message_code_wire (BRO_MSG_SERVER_STOPPING), NULL, NULL);
+}
+
+static BroBroError *
 unexpected (const char *detail)
 {
   BroJsonValue *params = bro_json_value_new_object ();
@@ -97,11 +103,32 @@ struct _BroPipelineRunner {
   BroEngineClock *clock;
   BroCoalescer *coalescer;
   GHashTable *live; /* job id → Live (a reference) */
+  gboolean stopping; /* set by shutdown: nothing more is stored for any job */
+  GPtrArray *idle;   /* Idle: who waits in shutdown for no job to be live */
 };
+
+typedef struct {
+  BroRunnerIdle done;
+  gpointer data;
+  GDestroyNotify destroy;
+} Idle;
+
+static void
+idle_free (gpointer data)
+{
+  Idle *i = data;
+  if (i->destroy)
+    i->destroy (i->data);
+  g_free (i);
+}
 
 G_DEFINE_FINAL_TYPE (BroPipelineRunner, bro_pipeline_runner, G_TYPE_OBJECT)
 
-typedef struct {
+typedef struct _Live Live;
+static void gone (Live *l);
+static void stopped (Live *l);
+
+struct _Live {
   gatomicrefcount refs;
   BroPipelineRunner *runner; /* a reference */
   BroId id;
@@ -133,7 +160,7 @@ typedef struct {
   BroRunDone done;
   gpointer done_data;
   GDestroyNotify done_destroy;
-} Live;
+};
 
 static Live *
 live_ref (Live *l)
@@ -753,6 +780,11 @@ step_done (gpointer data, const BroBroError *error)
   const BroBroError *failed;
   BroStepState state;
   Work *end;
+  if (self->stopping) /* the step ended after the shutdown: its row stays running, as a kill leaves it */
+    {
+      stopped (l);
+      return;
+    }
   bro_step_report_free (l->report);
   l->report = g_steal_pointer (&w->report);
   g_clear_pointer (&l->thrown, bro_bro_error_free);
@@ -831,6 +863,12 @@ acquired (BroLease *lease, const BroBroError *error, gpointer data)
   Live *l = data;
   BroPipelineRunner *self = l->runner;
   Work *w;
+  if (lease && self->stopping) /* granted after the shutdown (its cancel was still on its way): nothing is stored */
+    {
+      l->lease = lease;
+      stopped (l);
+      return;
+    }
   if (!lease)
     {
       if (strcmp (error->code, bro_message_code_wire (BRO_MSG_JOB_CANCELLED)) == 0)
@@ -1000,10 +1038,15 @@ load_done (gpointer data, const BroBroError *error)
       bro_json_value_set (params, "jobId", bro_json_value_new_string (l->id.value));
       missing = bro_bro_error_new (bro_message_code_wire (BRO_MSG_JOB_NOT_FOUND), params, NULL);
       l->done (NULL, error ? error : missing, l->done_data);
-      g_hash_table_remove (l->runner->live, l->id.value);
+      gone (l);
       return;
     }
   l->record = g_steal_pointer (&w->record);
+  if (l->runner->stopping) /* loaded after the shutdown: nothing is stored, not even the plan */
+    {
+      stopped (l);
+      return;
+    }
   if (!l->record->plan)
     {
       g_autoptr (GArray) initial = bro_job_planner_initial (l->record->request);
@@ -1060,7 +1103,7 @@ finish_done (gpointer data, const BroBroError *error)
     BroDecided d = { l->record->outcome, l->record->error };
     l->done (&d, NULL, l->done_data);
   }
-  g_hash_table_remove (self->live, l->id.value);
+  gone (l);
 }
 
 static gboolean
@@ -1170,6 +1213,12 @@ static void
 conclude (Live *l, BroBroError *fatal)
 {
   BroDecided *decided;
+  if (l->runner->stopping)
+    {
+      bro_bro_error_free (fatal);
+      stopped (l);
+      return;
+    }
   if (fatal)
     {
       decided = g_new0 (BroDecided, 1);
@@ -1191,6 +1240,11 @@ record_end (Live *l)
   BroPipelineRunner *self = l->runner;
   const BroDecided *decided = l->decided;
   Work *w;
+  if (self->stopping) /* the Release at the end ran across the shutdown */
+    {
+      stopped (l);
+      return;
+    }
   g_clear_pointer (&l->progress, bro_progress_dto_free);
   g_clear_pointer (&l->pending, bro_progress_dto_free);
   g_clear_pointer (&l->blocked_by, bro_bro_message_free);
@@ -1207,7 +1261,67 @@ record_end (Live *l)
   bro_engine_executor_worker (self->executor, finish_work, finish_done, w, work_free);
 }
 
+/* The job leaves the runner; the last one out after a shutdown lets it return. */
+static void
+gone (Live *l)
+{
+  BroPipelineRunner *self = l->runner;
+  g_hash_table_remove (self->live, l->id.value);
+  if (self->stopping && g_hash_table_size (self->live) == 0)
+    {
+      g_autoptr (GPtrArray) waiting = g_steal_pointer (&self->idle);
+      self->idle = g_ptr_array_new_with_free_func (idle_free);
+      for (guint i = 0; i < waiting->len; i++)
+        {
+          Idle *idle = g_ptr_array_index (waiting, i);
+          idle->done (idle->data);
+        }
+    }
+}
+
+/* After the shutdown: nothing is stored or announced; the run ends with server.stopping. */
+static void
+stopped (Live *l)
+{
+  g_autoptr (BroBroError) error = stopping_error ();
+  bro_coalescer_drop (l->runner->coalescer, l->id.value);
+  l->done (NULL, error, l->done_data);
+  gone (l);
+}
+
 /* ---- commands ---- */
+
+void
+bro_pipeline_runner_shutdown (BroPipelineRunner *self, BroRunnerIdle done, gpointer data, GDestroyNotify destroy)
+{
+  g_autoptr (GPtrArray) ids = g_ptr_array_new_with_free_func (g_free);
+  GHashTableIter iter;
+  gpointer key;
+  self->stopping = TRUE;
+  g_hash_table_iter_init (&iter, self->live);
+  while (g_hash_table_iter_next (&iter, &key, NULL))
+    g_ptr_array_add (ids, g_strdup (key));
+  for (guint i = 0; i < ids->len; i++)
+    {
+      BroId id;
+      g_strlcpy (id.value, g_ptr_array_index (ids, i), sizeof id.value);
+      bro_pipeline_runner_cancel (self, &id);
+    }
+  if (g_hash_table_size (self->live) == 0)
+    {
+      done (data);
+      if (destroy)
+        destroy (data);
+      return;
+    }
+  {
+    Idle *idle = g_new0 (Idle, 1);
+    idle->done = done;
+    idle->data = data;
+    idle->destroy = destroy;
+    g_ptr_array_add (self->idle, idle);
+  }
+}
 
 void
 bro_pipeline_runner_cancel (BroPipelineRunner *self, const BroId *job_id)
@@ -1318,6 +1432,7 @@ bro_pipeline_runner_finalize (GObject *object)
 {
   BroPipelineRunner *self = BRO_PIPELINE_RUNNER (object);
   g_hash_table_unref (self->live);
+  g_ptr_array_unref (self->idle);
   g_object_unref (self->coalescer);
   g_object_unref (self->executor);
   g_object_unref (self->bus);
@@ -1339,4 +1454,5 @@ static void
 bro_pipeline_runner_init (BroPipelineRunner *self)
 {
   self->live = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, live_unref);
+  self->idle = g_ptr_array_new_with_free_func (idle_free);
 }

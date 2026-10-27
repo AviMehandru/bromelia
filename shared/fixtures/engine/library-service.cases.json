@@ -1,5 +1,5 @@
 {
-  "description": "LibraryService (plan §11.1, §15.4, §15.8, §22), on the engine executor with ProblemService and the Scheduler, over a file system and database in memory; the clock starts at 2026-10-02T20:00:00.000Z. Paths compare and split by their UTF-8 bytes (a '/' that a combining mark follows still separates two names). Libraries are the configuration's (id, name, path). A library is online when its folder exists and holds .bromelia-library (LibraryMarker.decode) whose id is the stored one; with no stored row the marker is adopted (row: the marker's id, attachedAt its created). Offline reasons, raised as a problem scoped to the library (id <code>:library:<id>): library.offline{library: name, path} (warning, action openSettings) when the folder is missing, the marker can't be read or decoded, a stored library lost its marker, or a check hasn't come back by the next 30 s tick; library.notAttached{path} (warning, action attachLibrary) when the folder exists, has no marker and was never stored; library.markerMismatch{path, found, expected} (error, openSettings) for another library's marker. Every check stores online and, when online, lastSeenAt (LibraryRepository.setSeen). A change of online or reason publishes libraryChanged{library: LibraryDto} (freeBytes from FileSystem.volume when online and it answers; lastSeenAt when known), then raises or clears the problems; the scheduler blocks LibraryWrite(id) with the reason while offline. start(): reads the stored rows (when each library was last seen), checks every library and completes when that round is applied; then every 30 s. A round's results are applied together, in configuration order, when all have come back, or by the next tick (those not back are offline and aren't checked again until they come back; a late result is applied alone). check(): a round now. configChanged: libraries added are checked, removed ones dropped (problems cleared, scheduler unblocked). attach(id, path, name): library.pathMissing{path} unless path is a folder (never created); library.alreadyAttached{path, library: the marker's name} when it has a marker; else writes LibraryMarker.make(id, path, name or the folder's name, now) (mode 0644), stores the row and the library is online. require(id): library.notFound (not configured), else the offline reason, else {id, path}. stagingDirectory(id, job): <path>/.bromelia/staging/<job>, each folder made with parentsMustExist. commit(unit, intent, files) (plan §22.3 steps 4–6, from a worker): library.notFound unless the destination is under the library; the library's reason unless online; it waits while another commit or roll forward of the unit runs (job.cancelled when the commit's cancel token fires while it waits; once it runs, cancelling does nothing); the marker is read again; an open intent for the unit is rolled forward instead (with the files given); a unit stored committed or quarantined (no open intent) gives {unitId, destination: <library>/<its path>, the files given, merged: committed and the intent's merge} again and its staging folder is removed if empty, unless an item of the intent is still in staging (a rerun that made the unit again): fs.alreadyExists{path: <library>/<its path>}, nothing touched; fs.notFound for a missing staging folder, staging SHA256SUMS or item; library.folderExists{path} for an existing destination unless merge; fs.alreadyExists{path} for a file item whose destination exists; then UnitRepository.beginCommit (state committing), crash point commit.afterIntent, the move: a destination that doesn't exist (not merge) gets the staging folder renamed whole (its parents made under the root first), otherwise each item in seq order (a file renamed, a folder moveMerging'd); markMoved after each, then crash point commit.afterMove:<n> (n counting items marked); then SHA256SUMS: merged into the destination's (Sha256Sums.merge, written atomically, 0644) and the staging copy removed when it is still in staging; a merge with an item whose destination path starts with Backup/ (a media server's backups) gets <destination>/Backup/.plexignore ('*\\n') and .ignore ('') written atomically (0644) when that folder exists and they are missing, never overwritten, not in SHA256SUMS (owner, 2026-10-22); empty staging folders removed; every folder from the library root down to each committed file and the staging folder's parent synced (any failure fails the commit, the intent stays); crash point commit.beforeDone; finishCommit with the unit committed (quarantined for quarantine) at now and the files given. quarantine(unit, intent, files, tag): the destination is <library>/_Quarantine/<ConflictNamer.next('<last part of the intent's destination> [<tag>]')>, not merged. rollForward(intent): it waits while a commit of the unit runs, the marker check, then the unit's open intent is read again (none: null, nothing done), then the same move: an item whose source is gone and whose destination exists counts as moved when its SHA-256 (read back through openForReading) is the item's (or it has none, or is a folder); a destination that differs is fs.alreadyExists{path}; neither is fs.notFound{path: source}; the files are the destination SHA256SUMS lines of the unit's items (size from stat, role title). Given: config (libraries), libraries (stored rows), files {path: text} and dirs (folders; parents implied), fail [{op, path, error, times}] (the fake file system's call fails so, every time or that many times), hold [{op, path}] (the call waits for release), crashAt (the crash point stops the operation, as a killed engine would). Ops: start (wait: false: its result comes when it finishes), check, libraries, {require: id}, {staging: {library, job}}, {blocked: id} (the scheduler's reason code for a LibraryWrite of it, or null when granted), {attach: {id, path, name}}, {configure: libraries} (a new configuration, configChanged published), {advance: s}, {fs: {put: {path: text}} | {moveAway: path}} (changes from outside), {held: op} (waits until that many calls are held), release, {commit|quarantine: {unit: {id, path, name}, intent: {staging, destination, merge, items: [[from, to, sha256, isDir]]}, files: [[path, size, sha256, role]], tag, wait}} (each with a cancel token of its own; wait: false: started off the test thread, then the harness waits until one more call is held or waiting, or the op has ended, and settles), {cancel: n} (cancels op n's token and waits for op n to end), waiting (LibraryService.waiting once settled: commits and roll forwards waiting for their unit; the harness is settled when the executor's activity is the held calls plus LibraryService.waiting), restart (a new service, bus, scheduler and problems on the same files and database), rollForward (every open intent, oldest first: a list of results, null for an intent no longer open; {rollForward: {wait: false}} as a commit's), {dump: intents} ([[unit, ['seq from to[ dir][ moved]']]]). Expect: results (ok, a value, {error}, {crashed: point}); events (libraryChanged, problemRaised, problemCleared and configChanged, in order, across restarts; seq as published, so the scheduler events of a blocked op leave gaps); problems; files (every file afterwards) and modes; dirs (every folder); synced (folders synced, sorted, unique); db {libraries, units [{id, path, state, committedAt}], intents (as dump), unitFiles {unit: [[path, size, sha256, role]]}}.",
+  "description": "LibraryService (plan §11.1, §15.4, §15.8, §22), on the engine executor with ProblemService and the Scheduler, over a file system and database in memory; the clock starts at 2026-10-02T20:00:00.000Z. Paths compare and split by their UTF-8 bytes (a '/' that a combining mark follows still separates two names). Libraries are the configuration's (id, name, path). A library is online when its folder exists and holds .bromelia-library (LibraryMarker.decode) whose id is the stored one; with no stored row the marker is adopted (row: the marker's id, attachedAt its created). Offline reasons, raised as a problem scoped to the library (id <code>:library:<id>): library.offline{library: name, path} (warning, action openSettings) when the folder is missing, the marker can't be read or decoded, a stored library lost its marker, or a check hasn't come back by the next 30 s tick; library.notAttached{path} (warning, action attachLibrary) when the folder exists, has no marker and was never stored; library.markerMismatch{path, found, expected} (error, openSettings) for another library's marker. Every check stores online and, when online, lastSeenAt (LibraryRepository.setSeen). A change of online or reason publishes libraryChanged{library: LibraryDto} (freeBytes from FileSystem.volume when online and it answers; lastSeenAt when known), then raises or clears the problems; the scheduler blocks LibraryWrite(id) with the reason while offline. start(): reads the stored rows (when each library was last seen), checks every library and completes when that round is applied; then every 30 s. A round's results are applied together, in configuration order, when all have come back, or by the next tick (those not back are offline and aren't checked again until they come back; a late result is applied alone). check(): a round now. configChanged: libraries added are checked, removed ones dropped (problems cleared, scheduler unblocked). attach(id, path, name): library.pathMissing{path} unless path is a folder (never created); library.alreadyAttached{path, library: the marker's name} when it has a marker; else writes LibraryMarker.make(id, path, name or the folder's name, now) (mode 0644), stores the row and the library is online. require(id): library.notFound (not configured), else the offline reason, else {id, path}. stagingDirectory(id, job): <path>/.bromelia/staging/<job>, each folder made with parentsMustExist. commit(unit, intent, files) (plan §22.3 steps 4–6, from a worker): library.notFound unless the destination is under the library; the library's reason unless online; it waits while another commit or roll forward of the unit runs (job.cancelled when the commit's cancel token fires while it waits; once it runs, cancelling does nothing); the marker is read again; an open intent for the unit is rolled forward instead (with the files given); a unit stored committed or quarantined (no open intent) gives {unitId, destination: <library>/<its path>, the files given, merged: committed and the intent's merge} again and its staging folder is removed if empty, unless an item of the intent is still in staging (a rerun that made the unit again): fs.alreadyExists{path: <library>/<its path>}, nothing touched; fs.notFound for a missing staging folder, staging SHA256SUMS or item; library.folderExists{path} for an existing destination unless merge; fs.alreadyExists{path} for a file item whose destination exists; then UnitRepository.beginCommit (state committing), crash point commit.afterIntent, the move: a destination that doesn't exist (not merge) gets the staging folder renamed whole (its parents made under the root first), otherwise each item in seq order (a file renamed, a folder moveMerging'd); markMoved after each, then crash point commit.afterMove:<n> (n counting items marked); then SHA256SUMS: merged into the destination's (Sha256Sums.merge, written atomically, 0644) and the staging copy removed when it is still in staging; a merge with an item whose destination path starts with Backup/ (a media server's backups) gets <destination>/Backup/.plexignore ('*\\n') and .ignore ('') written atomically (0644) when that folder exists and they are missing, never overwritten, not in SHA256SUMS (owner, 2026-10-22); empty staging folders removed; every folder from the library root down to each committed file and the staging folder's parent synced (any failure fails the commit, the intent stays); crash point commit.beforeDone; finishCommit with the unit committed (quarantined for quarantine) at now and the files given. quarantine(unit, intent, files, tag): the destination is <library>/_Quarantine/<ConflictNamer.next('<last part of the intent's destination> [<tag>]')>, not merged. rollForward(intent): it waits while a commit of the unit runs, the marker check, then the unit's open intent is read again (none: null, nothing done), then the same move: an item whose source is gone and whose destination exists counts as moved when its SHA-256 (read back through openForReading) is the item's (or it has none, or is a folder); a destination that differs is fs.alreadyExists{path}; neither is fs.notFound{path: source}; the files are the destination SHA256SUMS lines of the unit's items (size from stat, role title). removeMarker(id) (decision 166: attachLibrary's configuration save failed): with a stored row for the library, the marker in its folder is removed when its id is the row's marker id (another marker stays), and the library is forgotten (libraries(), require) unless the configuration lists it; nothing without a row. archivedBefore(fingerprint) (CatalogQueries, on a worker): the catalogue's committed units of the disc, as it gives them (the harness's: state committed, newest committedAt first). Given units [{id, path, name, state, fingerprint, committedAt}] (library lib); ops {removeMarker: id} (ok) and {archivedBefore: fingerprint} (the units' ids). Given: config (libraries), libraries (stored rows), files {path: text} and dirs (folders; parents implied), fail [{op, path, error, times}] (the fake file system's call fails so, every time or that many times), hold [{op, path}] (the call waits for release), crashAt (the crash point stops the operation, as a killed engine would). Ops: start (wait: false: its result comes when it finishes), check, libraries, {require: id}, {staging: {library, job}}, {blocked: id} (the scheduler's reason code for a LibraryWrite of it, or null when granted), {attach: {id, path, name}}, {configure: libraries} (a new configuration, configChanged published), {advance: s}, {fs: {put: {path: text}} | {moveAway: path}} (changes from outside), {held: op} (waits until that many calls are held), release, {commit|quarantine: {unit: {id, path, name}, intent: {staging, destination, merge, items: [[from, to, sha256, isDir]]}, files: [[path, size, sha256, role]], tag, wait}} (each with a cancel token of its own; wait: false: started off the test thread, then the harness waits until one more call is held or waiting, or the op has ended, and settles), {cancel: n} (cancels op n's token and waits for op n to end), waiting (LibraryService.waiting once settled: commits and roll forwards waiting for their unit; the harness is settled when the executor's activity is the held calls plus LibraryService.waiting), restart (a new service, bus, scheduler and problems on the same files and database), rollForward (every open intent, oldest first: a list of results, null for an intent no longer open; {rollForward: {wait: false}} as a commit's), {dump: intents} ([[unit, ['seq from to[ dir][ moved]']]]). Expect: results (ok, a value, {error}, {crashed: point}); events (libraryChanged, problemRaised, problemCleared and configChanged, in order, across restarts; seq as published, so the scheduler events of a blocked op leave gaps); problems; files (every file afterwards) and modes; dirs (every folder); synced (folders synced, sorted, unique); db {libraries, units [{id, path, state, committedAt}], intents (as dump), unitFiles {unit: [[path, size, sha256, role]]}}.",
   "cases": [
     {
       "id": "a-library-with-its-marker-is-online",
@@ -8413,6 +8413,191 @@
           ],
           "intents": []
         }
+      }
+    },
+    {
+      "id": "remove-marker-takes-back-an-attach",
+      "given": {
+        "config": [],
+        "dirs": [
+          "/Volumes/Archive"
+        ],
+        "ops": [
+          "start",
+          {
+            "attach": {
+              "id": "archive",
+              "path": "/Volumes/Archive",
+              "name": ""
+            }
+          },
+          {
+            "removeMarker": "archive"
+          },
+          "libraries",
+          {
+            "require": "archive"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "id": "archive",
+            "name": "Archive",
+            "path": "/Volumes/Archive",
+            "online": true,
+            "freeBytes": 5000000000,
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          },
+          "ok",
+          [],
+          {
+            "error": {
+              "code": "library.notFound"
+            }
+          }
+        ],
+        "files": {},
+        "problems": []
+      }
+    },
+    {
+      "id": "remove-marker-leaves-a-marker-it-did-not-write",
+      "given": {
+        "config": [],
+        "dirs": [
+          "/Volumes/Archive"
+        ],
+        "ops": [
+          "start",
+          {
+            "attach": {
+              "id": "archive",
+              "path": "/Volumes/Archive",
+              "name": ""
+            }
+          },
+          {
+            "fs": {
+              "put": {
+                "/Volumes/Archive/.bromelia-library": "{\n  \"id\": \"m-other\",\n  \"name\": \"Other\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+              }
+            }
+          },
+          {
+            "removeMarker": "archive"
+          },
+          "libraries"
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "id": "archive",
+            "name": "Archive",
+            "path": "/Volumes/Archive",
+            "online": true,
+            "freeBytes": 5000000000,
+            "lastSeenAt": "2026-10-02T20:00:00.000Z"
+          },
+          "ok",
+          "ok",
+          []
+        ],
+        "files": {
+          "/Volumes/Archive/.bromelia-library": "{\n  \"id\": \"m-other\",\n  \"name\": \"Other\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        }
+      }
+    },
+    {
+      "id": "remove-marker-of-a-library-never-stored-does-nothing",
+      "given": {
+        "config": [],
+        "files": {
+          "/Volumes/Archive/.bromelia-library": "{\n  \"id\": \"m-other\",\n  \"name\": \"Other\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "ops": [
+          "start",
+          {
+            "removeMarker": "archive"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok"
+        ],
+        "files": {
+          "/Volumes/Archive/.bromelia-library": "{\n  \"id\": \"m-other\",\n  \"name\": \"Other\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n"
+        },
+        "events": []
+      }
+    },
+    {
+      "id": "archived-before-gives-the-committed-units-of-the-disc",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "path": "Movies/Sample Movie 1",
+            "name": "Sample Movie",
+            "state": "committed",
+            "fingerprint": "fp-a",
+            "committedAt": "2026-10-01T10:00:00.000Z"
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000102",
+            "path": "Movies/Sample Movie 2",
+            "name": "Sample Movie",
+            "state": "committed",
+            "fingerprint": "fp-a",
+            "committedAt": "2026-10-02T09:00:00.000Z"
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000103",
+            "path": "Movies/Sample Movie 3",
+            "name": "Sample Movie",
+            "state": "quarantined",
+            "fingerprint": "fp-a",
+            "committedAt": "2026-10-02T10:00:00.000Z"
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000104",
+            "path": "Movies/Sample Movie 4",
+            "name": "Sample Movie",
+            "state": "committed",
+            "fingerprint": "fp-b",
+            "committedAt": "2026-10-02T11:00:00.000Z"
+          }
+        ],
+        "ops": [
+          {
+            "archivedBefore": "fp-a"
+          },
+          {
+            "archivedBefore": "fp-c"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          [
+            "00000000-0000-4000-8000-000000000102",
+            "00000000-0000-4000-8000-000000000101"
+          ],
+          []
+        ]
       }
     }
   ]

@@ -14,8 +14,8 @@ namespace Bromelia.Engine;
 /// <see cref="SetSecret"/> and only ever see whether one is set. A secret comes from the system keystore, then
 /// BROMELIA_SECRET_&lt;NAME&gt;, then the secrets folder (plan §24); when two of them disagree, config secrets.prefer /
 /// secrets.bySecret pick one, and the disagreement is a problem: secret.conflict (an error) without a preference that
-/// settles it, secret.conflictPreferred (a warning) with one (owner, 2026-10-12). File, keystore and store work runs
-/// on workers. shared/fixtures/engine/config-service.cases.json.
+/// settles it, secret.conflictPreferred (a warning) with one (owner, 2026-10-12). A source that fails is the problem
+/// secret.unreadable until it reads again (owner, G3 2026-10-26). File, keystore and store work runs on workers. shared/fixtures/engine/config-service.cases.json.
 /// </summary>
 public sealed class ConfigService : IConfigSource
 {
@@ -250,10 +250,15 @@ public sealed class ConfigService : IConfigSource
         _ => MessageCode.SecretSourceFile,
     });
 
-    /// <summary>Raises, updates or clears a secret's problem (on the executor).</summary>
+    /// <summary>Raises, updates or clears a secret's problems (on the executor): secret.unreadable{name, reason} while a
+    /// source fails (a warning when another source has the secret, an error when none has), then its conflict.</summary>
     void Report(string name, Resolution r)
     {
         var scope = new ProblemScope(ProblemScopeKind.Secret, name);
+        if (r.Failure is { } failure)
+            _problems.Raise(new BroMessage(MessageCode.SecretUnreadable, r.Value != null ? Severity.Warning : Severity.Error, ("name", JsonValue.Of(name)),
+                ("reason", JsonValue.Of(failure.Error.Params["reason"]?.AsString ?? failure.Error.Code))), scope, new[] { ProblemAction.OpenSettings });
+        else _problems.Clear(MessageCode.SecretUnreadable, scope);
         if (!r.Conflict)
         {
             _problems.Clear(MessageCode.SecretConflict, scope);

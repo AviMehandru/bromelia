@@ -291,6 +291,7 @@ static const char *const codes[BRO_MSG_COUNT_] = {
   "keystore.failed",
   "secret.conflict",
   "secret.conflictPreferred",
+  "secret.unreadable",
   "secret.source.keystore",
   "secret.source.environment",
   "secret.source.file",

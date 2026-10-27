@@ -5,10 +5,13 @@
  * share that froze, review L3-9) counts as offline and isn't started again until it comes back. As the BroLibraryPort
  * of the steps it gives staging folders and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on
  * the caller's worker, one at a time per unit: a commit waits while a roll forward of its unit runs (recovery's may
- * outlast its 30 s at startup on a slow share). State is touched only on the executor; the steps read a snapshot.
+ * outlast its 30 s at startup on a slow share). State is touched only on the executor; the steps read a snapshot. As
+ * the BroCatalogQueries of the steps it asks the catalogue on the caller's worker.
  * shared/fixtures/engine/library-service.cases.json. */
 #pragma once
 
+#include "bro-catalog-queries.h"
+#include "bro-catalog-repository.h"
 #include "bro-commit-intent.h"
 #include "bro-commit-result.h"
 #include "bro-config-source.h"
@@ -40,7 +43,8 @@ typedef void (*BroLibraryDtoDone) (BroLibraryDto *library, const BroBroError *er
 /* @crash (@crash_data) may be NULL. */
 BroLibraryService *bro_library_service_new (BroEngineExecutor *executor, BroEventBus *bus, BroProblemService *problems, BroScheduler *scheduler,
                                             BroConfigSource *config, BroEngineClock *clock, BroFileSystem *fs, BroLibraryRepository *libraries,
-                                            BroUnitRepository *units, BroCrashPointFunc crash, gpointer crash_data);
+                                            BroUnitRepository *units, BroCatalogRepository *catalog, BroCrashPointFunc crash,
+                                            gpointer crash_data);
 
 /* Reads when each library was last seen, checks every library, then every 30 s, and follows configChanged; @done runs
  * when the first round is applied. @destroy frees @data afterwards. */
@@ -60,6 +64,11 @@ void bro_library_service_check (BroLibraryService *self, BroLibraryDone done, gp
 void bro_library_service_attach (BroLibraryService *self, const char *library_id, const char *path, const char *name, BroLibraryDtoDone done,
                                  gpointer data, GDestroyNotify destroy);
 
+/* Takes back an attach whose configuration save failed (LocalEngine's attachLibrary, decision 166): the marker in the
+ * stored library's folder is removed while it is still the one the row names (another marker stays), and the library
+ * is forgotten unless the configuration lists it. Nothing when there is no stored row. @destroy frees @data afterwards. */
+void bro_library_service_remove_marker (BroLibraryService *self, const char *library_id, BroLibraryDone done, gpointer data,
+                                        GDestroyNotify destroy);
 /* Finishes an interrupted commit (§15.8): once no other commit of the unit runs, the marker checked, then what is left
  * of the unit's open intent (read again: @intent may be stale) moved (a file already at its destination counts when its
  * SHA-256 is the item's), SHA256SUMS merged, the folders synced and the unit committed, its files read from the

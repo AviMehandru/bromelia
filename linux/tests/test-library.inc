@@ -659,9 +659,11 @@ struct _TestLibraryDb {
 
 static void db_libraries_iface (BroLibraryRepositoryInterface *iface);
 static void db_units_iface (BroUnitRepositoryInterface *iface);
+static void db_catalog_iface (BroCatalogRepositoryInterface *iface);
 G_DEFINE_FINAL_TYPE_WITH_CODE (TestLibraryDb, test_library_db, G_TYPE_OBJECT,
                                G_IMPLEMENT_INTERFACE (BRO_TYPE_LIBRARY_REPOSITORY, db_libraries_iface)
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_UNIT_REPOSITORY, db_units_iface))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_UNIT_REPOSITORY, db_units_iface)
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CATALOG_REPOSITORY, db_catalog_iface))
 
 static void
 test_library_db_finalize (GObject *object)
@@ -863,6 +865,46 @@ db_units_iface (BroUnitRepositoryInterface *iface)
   iface->get = db_unit_get;
 }
 
+/* Newest committedAt first, then by id. */
+static gint
+unit_by_newest (gconstpointer a, gconstpointer b)
+{
+  const BroUnitRecord *x = *(BroUnitRecord *const *) a;
+  const BroUnitRecord *y = *(BroUnitRecord *const *) b;
+  gint64 tx = x->has_committed_at ? x->committed_at.unix_milliseconds : 0;
+  gint64 ty = y->has_committed_at ? y->committed_at.unix_milliseconds : 0;
+  if (tx != ty)
+    return tx > ty ? -1 : 1;
+  return strcmp (x->id.value, y->id.value);
+}
+
+/* As SqliteStore's: committed units of the disc, newest committedAt first. */
+static GPtrArray *
+db_archived_before (BroCatalogRepository *repo, const char *fingerprint, BroBroError **error)
+{
+  TestLibraryDb *db = TEST_LIBRARY_DB (repo);
+  GPtrArray *found = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_unit_record_free);
+  GHashTableIter it;
+  gpointer value;
+  g_mutex_lock (&db->lock);
+  g_hash_table_iter_init (&it, db->units);
+  while (g_hash_table_iter_next (&it, NULL, &value))
+    {
+      BroUnitRecord *u = value;
+      if (u->fingerprint && strcmp (u->fingerprint, fingerprint) == 0 && u->state == BRO_UNIT_STATE_COMMITTED)
+        g_ptr_array_add (found, bro_unit_record_copy (u));
+    }
+  g_mutex_unlock (&db->lock);
+  g_ptr_array_sort (found, unit_by_newest);
+  return found;
+}
+
+static void
+db_catalog_iface (BroCatalogRepositoryInterface *iface)
+{
+  iface->archived_before = db_archived_before;
+}
+
 /* ---- the harness ---- */
 
 typedef struct {
@@ -1025,7 +1067,8 @@ build_action (gpointer data)
   h->problems = bro_problem_service_new (h->bus, BRO_CLOCK (h->clock));
   h->scheduler = bro_scheduler_new (h->executor, h->bus, limits);
   h->service = bro_library_service_new (h->executor, h->bus, h->problems, h->scheduler, BRO_CONFIG_SOURCE (h->config), h->engine_clock,
-                                        BRO_FILE_SYSTEM (h->tree), BRO_LIBRARY_REPOSITORY (h->db), BRO_UNIT_REPOSITORY (h->db), crash_cb, h);
+                                        BRO_FILE_SYSTEM (h->tree), BRO_LIBRARY_REPOSITORY (h->db), BRO_UNIT_REPOSITORY (h->db),
+                                        BRO_CATALOG_REPOSITORY (h->db), crash_cb, h);
   h->subscription = bro_event_bus_subscribe (h->bus, types, G_N_ELEMENTS (types), library_event_seen, h->events, NULL);
 }
 
@@ -1038,6 +1081,7 @@ typedef struct {
   BroCommitIntent *intent;
   GPtrArray *files;
   char *tag;
+  char *fingerprint; /* archivedBefore */
   BroCancellationToken *cancel;
   BroJsonValue *result;
 } LibraryOp;
@@ -1051,6 +1095,7 @@ library_op_free (gpointer data)
   if (o->files)
     g_ptr_array_unref (o->files);
   g_free (o->tag);
+  g_free (o->fingerprint);
   g_clear_pointer (&o->cancel, bro_cancellation_token_unref);
   if (o->result)
     bro_json_value_unref (o->result);
@@ -1084,6 +1129,13 @@ check_op_action (gpointer data)
 {
   LibraryOp *o = data;
   bro_library_service_check (o->h->service, op_done, o, library_op_free);
+}
+
+static void
+remove_marker_action (gpointer data)
+{
+  LibraryOp *o = data;
+  bro_library_service_remove_marker (o->h->service, bro_json_value_get_string (o->arg, ""), op_done, o, library_op_free);
 }
 
 static void
@@ -1144,6 +1196,24 @@ roll_forward_work (gpointer data, BroBroError **unused)
   return TRUE;
 }
 
+/* A step's worker asking the catalogue through the service: the units' ids. */
+static gboolean
+archived_work (gpointer data, BroBroError **unused)
+{
+  LibraryOp *o = data;
+  g_autoptr (BroBroError) error = NULL;
+  g_autoptr (GPtrArray) units = bro_catalog_queries_archived_before (BRO_CATALOG_QUERIES (o->h->service), o->fingerprint, &error);
+  if (!units)
+    {
+      o->result = library_error_json (error);
+      return TRUE;
+    }
+  o->result = bro_json_value_new_array ();
+  for (guint i = 0; i < units->len; i++)
+    bro_json_value_append (o->result, bro_json_value_new_string (((BroUnitRecord *) units->pdata[i])->id.value));
+  return TRUE;
+}
+
 static void
 worker_op_done (gpointer data, const BroBroError *error)
 {
@@ -1155,7 +1225,8 @@ static void
 worker_op_action (gpointer data)
 {
   LibraryOp *o = data;
-  bro_engine_executor_worker (o->h->executor, o->unit ? commit_work : roll_forward_work, worker_op_done, o, library_op_free);
+  bro_engine_executor_worker (o->h->executor, o->fingerprint ? archived_work : o->unit ? commit_work : roll_forward_work, worker_op_done, o,
+                              library_op_free);
 }
 
 static BroJsonValue *
@@ -1270,9 +1341,10 @@ run_library_op (LibraryHarness *h, guint i, BroJsonValue *op, GPtrArray *async)
   o->h = h;
   o->index = i;
   o->arg = arg;
-  if (strcmp (name, "start") == 0 || strcmp (name, "check") == 0 || strcmp (name, "attach") == 0)
+  if (strcmp (name, "start") == 0 || strcmp (name, "check") == 0 || strcmp (name, "attach") == 0 || strcmp (name, "removeMarker") == 0)
     {
-      bro_engine_executor_post (h->executor, strcmp (name, "start") == 0 ? start_action : strcmp (name, "check") == 0 ? check_op_action : attach_action, o, NULL);
+      bro_engine_executor_post (h->executor, strcmp (name, "start") == 0 ? start_action : strcmp (name, "check") == 0 ? check_op_action
+                                             : strcmp (name, "attach") == 0 ? attach_action : remove_marker_action, o, NULL);
       if (wait)
         library_wait_for (h, i);
       else
@@ -1280,9 +1352,12 @@ run_library_op (LibraryHarness *h, guint i, BroJsonValue *op, GPtrArray *async)
       library_settle (h);
       return;
     }
-  if (strcmp (name, "commit") == 0 || strcmp (name, "quarantine") == 0 || strcmp (name, "rollForward") == 0)
+  if (strcmp (name, "commit") == 0 || strcmp (name, "quarantine") == 0 || strcmp (name, "rollForward") == 0
+      || strcmp (name, "archivedBefore") == 0)
     {
-      if (strcmp (name, "rollForward") != 0)
+      if (strcmp (name, "archivedBefore") == 0)
+        o->fingerprint = g_strdup (bro_json_value_get_string (arg, ""));
+      else if (strcmp (name, "rollForward") != 0)
         {
           BroJsonValue *u = bro_json_value_member (arg, "unit");
           BroJsonValue *it = bro_json_value_member (arg, "intent");
@@ -1698,6 +1773,29 @@ library_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
       r->online = bro_json_value_get_bool (bro_json_value_member (l, "online"), FALSE);
       r->has_last_seen_at = seen && bro_instant_parse (seen, &r->last_seen_at);
       g_hash_table_replace (h.db->libraries, g_strdup (r->id), r);
+    }
+  list = bro_json_value_member (given, "units");
+  for (guint i = 0; list && i < bro_json_value_length (list); i++)
+    {
+      BroJsonValue *x = bro_json_value_at (list, i);
+      BroUnitRecord *u = bro_unit_record_new ();
+      g_strlcpy (u->id.value, bro_json_value_get_string (bro_json_value_member (x, "id"), ""), sizeof u->id.value);
+      u->library_id = g_strdup ("lib");
+      u->path = g_strdup (bro_json_value_get_string (bro_json_value_member (x, "path"), ""));
+      u->record_file = g_strdup ("bromelia-00000000.json");
+      u->record_version = 3;
+      bro_unit_state_from_wire (bro_json_value_get_string (bro_json_value_member (x, "state"), ""), &u->state);
+      u->status = BRO_UNIT_STATUS_SUCCESS;
+      u->name = g_strdup (bro_json_value_get_string (bro_json_value_member (x, "name"), ""));
+      u->kind = BRO_MEDIA_KIND_MOVIE;
+      u->format = g_strdup ("bluray");
+      u->format_code = g_strdup ("BD");
+      u->fingerprint = g_strdup (bro_json_value_get_string (bro_json_value_member (x, "fingerprint"), NULL));
+      u->label = g_strdup ("");
+      u->makemkv_version = g_strdup ("");
+      u->attempts = 1;
+      u->has_committed_at = bro_instant_parse (bro_json_value_get_string (bro_json_value_member (x, "committedAt"), ""), &u->committed_at);
+      g_hash_table_replace (h.db->units, g_strdup (u->id.value), u);
     }
   bro_engine_executor_post (h.executor, build_action, &h, NULL);
   library_settle (&h);

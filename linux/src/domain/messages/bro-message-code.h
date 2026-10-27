@@ -294,6 +294,7 @@ typedef enum {
   BRO_MSG_KEYSTORE_FAILED, /* keystore.failed */
   BRO_MSG_SECRET_CONFLICT, /* secret.conflict */
   BRO_MSG_SECRET_CONFLICT_PREFERRED, /* secret.conflictPreferred */
+  BRO_MSG_SECRET_UNREADABLE, /* secret.unreadable */
   BRO_MSG_SECRET_SOURCE_KEYSTORE, /* secret.source.keystore */
   BRO_MSG_SECRET_SOURCE_ENVIRONMENT, /* secret.source.environment */
   BRO_MSG_SECRET_SOURCE_FILE, /* secret.source.file */

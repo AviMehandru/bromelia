@@ -153,7 +153,7 @@ public sealed class RecoveryServiceTests
             var bus = new EventBus(w.Clock);
             var problems = new ProblemService(bus, w.Clock);
             var scheduler = new Scheduler(w.Executor, bus, new SchedulerLimits());
-            var library = new LibraryService(w.Executor, bus, problems, scheduler, config, w.EngineClock, tree, db, db);
+            var library = new LibraryService(w.Executor, bus, problems, scheduler, config, w.EngineClock, tree, db, db, db);
             var service = new RecoveryService(w.Executor, bus, problems, store, registry, library, config, w.EngineClock, tree, isolation, new Renderer(), "/data");
             w.OnExecutor(() => bus.Subscribe(new[] { EngineEventType.JobChanged, EngineEventType.JobFinished, EngineEventType.ProblemRaised }, events.Add));
 

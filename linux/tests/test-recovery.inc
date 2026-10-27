@@ -165,7 +165,7 @@ recovery_build_action (gpointer data)
   h->lib.scheduler = bro_scheduler_new (h->lib.executor, h->lib.bus, limits);
   h->library = bro_library_service_new (h->lib.executor, h->lib.bus, h->lib.problems, h->lib.scheduler, BRO_CONFIG_SOURCE (h->lib.config),
                                         h->lib.engine_clock, BRO_FILE_SYSTEM (h->lib.tree), BRO_LIBRARY_REPOSITORY (h->lib.db),
-                                        BRO_UNIT_REPOSITORY (h->lib.db), NULL, NULL);
+                                        BRO_UNIT_REPOSITORY (h->lib.db), BRO_CATALOG_REPOSITORY (h->lib.db), NULL, NULL);
   h->recovery = bro_recovery_service_new (h->lib.executor, h->lib.bus, h->lib.problems, BRO_STORE (h->store), h->registry, h->library,
                                           BRO_CONFIG_SOURCE (h->lib.config), h->lib.engine_clock, BRO_FILE_SYSTEM (h->lib.tree),
                                           BRO_SETTINGS_ISOLATION (h->isolation), BRO_MESSAGE_RENDERER (h->renderer), "/data");

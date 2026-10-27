@@ -20,6 +20,8 @@ namespace Bromelia.Engine;
 /// <item>Each job's place in its queue is stored, so the order survives a restart (written in a transaction that
 /// changes only the position: the runner owns the rest of the record).</item>
 /// <item>The continue offer comes with AutomationService (owner, 2026-10-17/18).</item>
+/// <item><see cref="Stop"/> leaves the running jobs as a killed engine would (decision 170): the next start's recovery
+/// takes them up.</item>
 /// </list>
 /// </summary>
 public sealed class JobService
@@ -51,6 +53,7 @@ public sealed class JobService
     readonly Dictionary<Id, string> _abandoned = new();
     Subscription? _queues;
     Subscription? _logs;
+    bool _stopped;
 
     /// <param name="dataDirectory">The engine's data folder: a job's log is &lt;data&gt;/jobs/&lt;id&gt;/log.jsonl.</param>
     public JobService(EngineExecutor executor, EventBus bus, IStore store, Scheduler scheduler, PipelineRunner runner, EngineClock clock,
@@ -73,6 +76,7 @@ public sealed class JobService
     /// once, after recover().</summary>
     public async Task Start()
     {
+        NotStopped();
         _queues ??= _bus.Subscribe(new[] { EngineEventType.QueueChanged }, _ => OnQueueChanged());
         foreach (var job in await _executor.Worker(() => _store.Jobs().Active()))
         {
@@ -87,6 +91,7 @@ public sealed class JobService
     /// <summary>A new job for the request: queued, stored, announced (jobChanged), then run.</summary>
     public async Task<JobDto> Create(JobRequest request)
     {
+        NotStopped();
         var id = _ids.Next();
         var queue = JobPlanner.Queue(request.Kind);
         var steps = JobPlanner.Initial(request);
@@ -115,6 +120,7 @@ public sealed class JobService
     /// as cancelled at once; a finished one stays as it is. job.notFound when there is none.</summary>
     public async Task Cancel(Id jobId)
     {
+        NotStopped();
         if (_active.TryGetValue(jobId, out var active))
         {
             active.CancelRequested = true;
@@ -148,6 +154,7 @@ public sealed class JobService
     /// any other step is job.notRetryable.</summary>
     public async Task<JobDto> Retry(Id jobId, StepKind? fromStep = null)
     {
+        NotStopped();
         var record = await Load(jobId);
         if (record.State != JobState.Finished || _active.ContainsKey(jobId)) throw NotRetryable(jobId);
         if (fromStep == null && record.Outcome is Outcome.Failed or Outcome.Cancelled or Outcome.Skipped)
@@ -236,6 +243,7 @@ public sealed class JobService
     /// unit is in a library.</summary>
     public async Task<JobDto> KeepApart(Id jobId)
     {
+        NotStopped();
         var record = await Load(jobId);
         if (record.State != JobState.Finished || record.Outcome is not (Outcome.Interrupted or Outcome.Failed or Outcome.Cancelled)
             || record.Plan?.Steps.Contains(StepKind.KeepApart) == true || _active.ContainsKey(jobId) || _restarting.Contains(jobId))
@@ -294,6 +302,7 @@ public sealed class JobService
     /// isn't waiting for that question; server.badRequest for an answer it doesn't offer.</summary>
     public async Task Decide(Id jobId, string decisionId, string answer)
     {
+        NotStopped();
         if (!_active.ContainsKey(jobId)) await Load(jobId);
         if (_runner.Job(jobId)?.Decision?.Id != decisionId)
             throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobNotAwaitingDecision), ("jobId", JsonValue.Of(jobId.Value))));
@@ -305,6 +314,7 @@ public sealed class JobService
     /// finished.</summary>
     public async Task Move(Id jobId, int by)
     {
+        NotStopped();
         await Waiting(jobId);
         _scheduler.Move(jobId, by);
     }
@@ -313,6 +323,7 @@ public sealed class JobService
     /// job.notFound; job.notQueued as for <see cref="Move"/>.</summary>
     public async Task StartNow(Id jobId)
     {
+        NotStopped();
         await Waiting(jobId);
         _scheduler.StartNow(jobId);
     }
@@ -350,6 +361,48 @@ public sealed class JobService
             lines = await _executor.Worker(() => _fs.Exists(path) ? JobLog.Decode(_fs.Read(path)) : Array.Empty<LogLineDto>());
         }
         return lines.Where(l => l.Seq > after).ToList();
+    }
+
+    /// <summary>The job with its steps, files and commands (dtos.json JobDetail; decision 171). job: as <see cref="Query"/>
+    /// gives it. steps: one per step of its plan (the stored plan, else the planner's steps), each with the stored row of
+    /// that seq when it is of that kind, else pending; rows past the plan's end (decision 158: a keepApart cut the plan
+    /// back) are left out. files: the Seal row's files, else the Acquire row's produced files (names in staging), else
+    /// none. commands: none yet (nothing logs process.command). logBytes: the size of its log.jsonl. job.notFound.</summary>
+    public async Task<JobDetailDto> Job(Id jobId)
+    {
+        var record = await Load(jobId);
+        var path = _data + "/jobs/" + jobId.Value + "/" + JobLog.FileName;
+        var (rows, logBytes) = await _executor.Worker(async () => (await _store.Steps().Load(jobId), _fs.Exists(path) ? _fs.Stat(path).Size : 0));
+        var job = _runner.Job(jobId) ?? JobDto.Of(record);
+        if (job.State is JobState.Queued or JobState.WaitingForResources or JobState.Blocked) job = job with { Position = _scheduler.Position(jobId) };
+        var plan = record.Plan?.Steps ?? JobPlanner.Initial(record.Request);
+        var matched = plan.Select((kind, seq) => rows.FirstOrDefault(r => r.Seq == seq && r.Kind == kind)).ToList();
+        var steps = plan.Select((kind, seq) => matched[seq] is { } row
+            ? new JobStepDto(seq, kind, row.State, row.StartedAt, row.FinishedAt, row.Error, row.Output?.Summary)
+            : new JobStepDto(seq, kind, StepState.Pending, null, null, null, null)).ToList();
+        return new JobDetailDto(job, steps, Files(matched), Array.Empty<string>(), logBytes);
+    }
+
+    /// <summary>The Seal row's files (path in the unit folder, size, SHA-256, role), else the Acquire row's produced
+    /// files (names in staging), else none.</summary>
+    static IReadOnlyList<JobFileDto> Files(IReadOnlyList<StepRecord?> rows)
+    {
+        if (rows.FirstOrDefault(r => r?.Kind == StepKind.Seal && r.Output?.Data["files"] != null) is { } seal)
+            return SealOutput.Decode(seal.Output!.Data).Files.Select(f => new JobFileDto(f.Path, f.Size, f.Sha256, f.Role.Length > 0 ? f.Role : null)).ToList();
+        if (rows.FirstOrDefault(r => r?.Kind == StepKind.Acquire && r.Output?.Data["titles"] != null) is { } acquire)
+            return AcquireOutput.Produced(AcquireOutput.Decode(acquire.Output!.Data)).Select(f => new JobFileDto(f, null, null, null)).ToList();
+        return Array.Empty<JobFileDto>();
+    }
+
+    /// <summary>At engine stop (decision 170, owner 2026-10-26): the runner shuts every live job down without storing
+    /// anything more for it (<see cref="PipelineRunner.Shutdown"/>) and no queue place is stored any more; completes once
+    /// no job is live. The commands answer server.stopping from now on.</summary>
+    public Task Stop()
+    {
+        _stopped = true;
+        _queues?.Cancel();
+        _queues = null;
+        return _runner.Shutdown();
     }
 
     // ---- running ----
@@ -484,6 +537,11 @@ public sealed class JobService
         }
         var state = _runner.Job(jobId)?.State ?? JobState.Queued;
         if (state is not (JobState.Queued or JobState.WaitingForResources or JobState.Blocked) || _scheduler.Position(jobId) == null) throw NotQueued(jobId);
+    }
+
+    void NotStopped()
+    {
+        if (_stopped) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.ServerStopping)));
     }
 
     static BroFailure NotRetryable(Id jobId) => new(new BroError(MessageCode.Wire(MessageCode.JobNotRetryable), ("jobId", JsonValue.Of(jobId.Value))));

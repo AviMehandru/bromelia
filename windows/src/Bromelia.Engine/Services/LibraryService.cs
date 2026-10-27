@@ -18,9 +18,10 @@ namespace Bromelia.Engine;
 /// and isn't started again until it comes back. As the <see cref="ILibraryPort"/> of the steps it gives staging folders
 /// and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on workers, one at a time per unit: a
 /// commit waits while a roll forward of its unit runs (recovery's may outlast its 30 s at startup on a slow share). State
-/// is touched only on the executor; the steps read a snapshot. shared/fixtures/engine/library-service.cases.json.
+/// is touched only on the executor; the steps read a snapshot. As the <see cref="ICatalogQueries"/> of the steps it asks
+/// the catalogue on a worker. shared/fixtures/engine/library-service.cases.json.
 /// </summary>
-public sealed class LibraryService : ILibraryPort
+public sealed class LibraryService : ILibraryPort, ICatalogQueries
 {
     const int FileMode = 0x1A4; // 0644
     const string Staging = ".bromelia";
@@ -43,6 +44,7 @@ public sealed class LibraryService : ILibraryPort
     readonly IFileSystem _fs;
     readonly ILibraryRepository _libraries;
     readonly IUnitRepository _units;
+    readonly ICatalogRepository _catalog;
     readonly Action<string>? _crash;
 
     sealed class Entry
@@ -84,7 +86,7 @@ public sealed class LibraryService : ILibraryPort
     /// commit.beforeDone); the test root throws there to stop the commit as a killed engine would. Null in a real
     /// engine.</param>
     public LibraryService(EngineExecutor executor, EventBus bus, ProblemService problems, Scheduler scheduler, IConfigSource config,
-        EngineClock clock, IFileSystem fs, ILibraryRepository libraries, IUnitRepository units, Action<string>? crash = null)
+        EngineClock clock, IFileSystem fs, ILibraryRepository libraries, IUnitRepository units, ICatalogRepository catalog, Action<string>? crash = null)
     {
         _executor = executor;
         _bus = bus;
@@ -95,6 +97,7 @@ public sealed class LibraryService : ILibraryPort
         _fs = fs;
         _libraries = libraries;
         _units = units;
+        _catalog = catalog;
         _crash = crash;
     }
 
@@ -157,6 +160,26 @@ public sealed class LibraryService : ILibraryPort
         Apply(e, new Found(null, free, now));
         return Dto(e);
     }
+
+    /// <summary>Takes back an <see cref="Attach"/> whose configuration save failed (LocalEngine's attachLibrary, decision
+    /// 166): the marker in the stored library's folder is removed while it is still the one the row names (another
+    /// marker stays), and the library is forgotten unless the configuration lists it. Nothing when there is no stored
+    /// row.</summary>
+    public async Task RemoveMarker(string libraryId)
+    {
+        await _executor.Worker(async () =>
+        {
+            if (await _libraries.Get(libraryId).ConfigureAwait(false) is not { } row) return false;
+            var markerPath = row.Path + "/" + LibraryMarker.FileName;
+            if (!_fs.Exists(markerPath) || Decode(markerPath)?.Id != row.MarkerId) return false;
+            _fs.Remove(markerPath);
+            return true;
+        });
+        Sync();
+    }
+
+    /// <summary>The catalogue's committed units of the disc (CatalogQueries), asked on a worker. Any thread.</summary>
+    public Task<IReadOnlyList<UnitRecord>> ArchivedBefore(string fingerprint) => _executor.Worker(() => _catalog.ArchivedBefore(fingerprint));
 
     // ---- the port (any thread) ----------------------------------------------------------------------------------
 

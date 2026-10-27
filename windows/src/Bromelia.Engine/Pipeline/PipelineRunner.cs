@@ -24,6 +24,10 @@ public sealed class PipelineRunner
     readonly EngineClock _clock;
     readonly Coalescer _progress;
     readonly Dictionary<Id, Live> _live = new();
+    /// <summary>Set by <see cref="Shutdown"/>: nothing more is stored for any job.</summary>
+    bool _stopping;
+    /// <summary>Completes when no job is live once <see cref="Shutdown"/> has been called.</summary>
+    TaskCompletionSource<bool>? _idle;
 
     /// <summary>A job while it runs. Touched on the executor only.</summary>
     sealed class Live
@@ -66,7 +70,9 @@ public sealed class PipelineRunner
     // ---- commands ----
 
     /// <summary>Runs the job to its end, or until it is cancelled; returns how it ended. The job is live (cancel reaches
-    /// it) as soon as this is called, before its record is loaded. job.notFound when there is no such job.</summary>
+    /// it) as soon as this is called, before its record is loaded. job.notFound when there is no such job;
+    /// server.stopping once <see cref="Shutdown"/> was called (the run then ends wherever it is, storing nothing
+    /// more).</summary>
     public async Task<Decided> Run(Id jobId)
     {
         var live = new Live();
@@ -78,8 +84,7 @@ public sealed class PipelineRunner
         }
         catch (BroFailure)
         {
-            _live.Remove(jobId);
-            live.Cancel.Close();
+            Gone(jobId, live);
             throw;
         }
         Decided decided;
@@ -95,11 +100,36 @@ public sealed class PipelineRunner
         {
             decided = new Decided(Outcome.Failed, Unexpected(e.Message));
         }
-        await ReleaseAtEnd(live, decided);
+        if (!_stopping) await ReleaseAtEnd(live, decided);
+        if (_stopping)
+        {
+            _progress.Drop(jobId.Value);
+            Gone(jobId, live);
+            throw Stopping();
+        }
         await Finish(live, decided);
+        Gone(jobId, live);
+        return decided;
+    }
+
+    /// <summary>At engine stop (decision 170): every live job's waiting request and question are dropped and its running
+    /// step's token cancelled, and from now on the runner stores nothing more for any job (no step row, plan, outcome or
+    /// jobFinished), so what is stored is what a killed engine leaves and the next start's recovery takes each job up.
+    /// Completes once no job is live.</summary>
+    public Task Shutdown()
+    {
+        _stopping = true;
+        foreach (var jobId in _live.Keys.ToList()) Cancel(jobId);
+        if (_live.Count == 0) return Task.CompletedTask;
+        _idle ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        return _idle.Task;
+    }
+
+    void Gone(Id jobId, Live live)
+    {
         _live.Remove(jobId);
         live.Cancel.Close();
-        return decided;
+        if (_live.Count == 0) _idle?.TrySetResult(true);
     }
 
     /// <summary>Cancels a running job: a waiting request or a decision ends at once, a running step sees its token.</summary>
@@ -140,6 +170,7 @@ public sealed class PipelineRunner
 
     async Task<Decided> RunSteps(Live live)
     {
+        if (_stopping) throw Stopping(); // loaded after the shutdown: nothing is stored, not even the plan
         var jobId = live.Record.Id;
         var plan = live.Record.Plan;
         if (plan == null)
@@ -187,6 +218,7 @@ public sealed class PipelineRunner
                 cancelled = true;
                 break;
             }
+            if (_stopping) throw Stopping(); // granted after the shutdown (its cancel was still on its way): nothing is stored
             live.BlockedBy = null;
             var started = _clock.Now();
             await SaveRecord(live, live.Record with { State = JobState.Running, StartedAt = live.Record.StartedAt ?? started });
@@ -209,6 +241,7 @@ public sealed class PipelineRunner
             {
                 thrown = Unexpected(e.Message);
             }
+            if (_stopping) throw Stopping(); // the step ended after the shutdown: its row stays running, as a kill leaves it
             _scheduler.Release(lease);
             _progress.Flush(jobId.Value);
 
@@ -383,6 +416,8 @@ public sealed class PipelineRunner
         _env.Messages, _env.AppVersion);
 
     static readonly JsonValue Empty = JsonValue.Of(Array.Empty<(string, JsonValue)>());
+
+    static BroFailure Stopping() => new(new BroError(MessageCode.Wire(MessageCode.ServerStopping)));
 
     static BroError Unexpected(string detail) =>
         new(MessageCode.Wire(MessageCode.InternalUnexpected), ("detail", JsonValue.Of(detail)));

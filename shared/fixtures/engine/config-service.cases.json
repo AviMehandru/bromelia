@@ -1,5 +1,5 @@
 {
-  "description": "ConfigService (plan §11.1, §15.1, §15.7, §23, §24), on the engine executor, with ProblemService. load(): the version is the kv value config.version (0 when there is none); a missing config.json gives the defaults (decode of {\"version\": 3}) and writes nothing; a file that decodes and validates without errors (warnings are fine) is the configuration, and is kept in kv as config.lastGood; a file that doesn't (not JSON, or any error issue) leaves the file alone, uses config.lastGood (the defaults when there is none) and raises config.invalid{count} (error, action openSettings), count being the number of errors. update(doc, version): config.versionConflict{current} unless version is the current one, and also while another update is saving; config.rejected{count (of errors), issues (all of them)} when the document has errors (secrets written into it are config.secretInline errors), nothing saved; otherwise kv config.version = version + 1 first, then kv config.lastGood, then config.json (canonical, mode 0600, written atomically), so a crash or a failed write can only make a client reload, never let an old version through; config.invalid is cleared, configChanged{version} published, and the result is the envelope. A write that fails is config.saveFailed{reason: the failure's code}: the version (and config.lastGood, when it got that far) have moved on, the file and the configuration in use haven't. validate(doc): the issues, nothing saved. envelope(): {version, doc, issues (the current document's), secrets: every SecretRef name the document uses, in document order, with set = any source has it (a source that fails counts as not having it)}. secret(name, config) (not on the executor, with the configuration a job would have): the value of the first source that has it, in the order system keystore (only when the keystore is the system's store), BROMELIA_SECRET_<NAME> (upper case, '.' → '_'; an empty value counts as none), secrets folder; the source config secrets.bySecret[name] (else secrets.prefer, 'none' for no preference) names comes first when it has a value; null when none has it; the first failure when a source failed and none has it. Sources with different values are a problem scoped to the secret (id secret.<code>:secret:<name>, action openSettings, params {name, using: the label of the source used, sources: the labels of every source with a value, in order}): secret.conflict (error) unless the preferred source is the one used, then secret.conflictPreferred (warning); the other one is cleared first, and both are cleared when the sources agree. load, update and setSecret check every secret the configuration refers to (setSecret also the one it set) and clear the problems of secrets it no longer refers to; secret(name) checks that one. setSecret(name, value): stores it in the keystore ('' removes it), publishes configChanged{version} (the version doesn't change), then checks; a keystore failure is returned. export(): the export bundle (ConfigCodec.exportBundle). Given: file (config.json: a document, or {text} for raw text; absent: no file); kv {key: value}; systemStore (default true; false: there is no system store, so the keystore is the secrets folder); keystore {name: value} (the system store); keystoreFails {name: {code, params}} (every system store call for that name fails so); files {name: value} (the secrets folder); filesFail {name: {code, params}}; environment {BROMELIA_SECRET_<NAME>: value} (what the composition root passes); writeFails {code, params} (every config.json write fails so); holdWrites (every write, to the kv table or config.json, waits for a releaseWrites op). ops in order: load, {changeOutside: {store (keystore or files), name, value (absent: removed)}} (no result), {update: {doc, version, wait (default true; false: start it and go on, its result comes when it finishes)}}, {validate: doc}, envelope, {secret: name}, {setSecret: {name, value}}, export, current, version, releaseWrites (lets the held writes go and waits for the ops they held). Expect: results (one per op except releaseWrites, in op order: ok for load and setSecret, the envelope for update and envelope, issues for validate, the value (or null) for secret, the bundle for export, the document for current, the number for version; {error: {code, params}} for a failure); file (config.json afterwards: a document, {text}, or null for none; when written, its mode is 0600); kv, keystore, files (everything afterwards; files absent: none); events; problems. Every configuration document in expect (an envelope's doc, current, file, kv config.lastGood, export's config) is compared after ConfigCodec.decode, so it is written as short as the given ones.",
+  "description": "ConfigService (plan §11.1, §15.1, §15.7, §23, §24), on the engine executor, with ProblemService. load(): the version is the kv value config.version (0 when there is none); a missing config.json gives the defaults (decode of {\"version\": 3}) and writes nothing; a file that decodes and validates without errors (warnings are fine) is the configuration, and is kept in kv as config.lastGood; a file that doesn't (not JSON, or any error issue) leaves the file alone, uses config.lastGood (the defaults when there is none) and raises config.invalid{count} (error, action openSettings), count being the number of errors. update(doc, version): config.versionConflict{current} unless version is the current one, and also while another update is saving; config.rejected{count (of errors), issues (all of them)} when the document has errors (secrets written into it are config.secretInline errors), nothing saved; otherwise kv config.version = version + 1 first, then kv config.lastGood, then config.json (canonical, mode 0600, written atomically), so a crash or a failed write can only make a client reload, never let an old version through; config.invalid is cleared, configChanged{version} published, and the result is the envelope. A write that fails is config.saveFailed{reason: the failure's code}: the version (and config.lastGood, when it got that far) have moved on, the file and the configuration in use haven't. validate(doc): the issues, nothing saved. envelope(): {version, doc, issues (the current document's), secrets: every SecretRef name the document uses, in document order, with set = any source has it (a source that fails counts as not having it)}. secret(name, config) (not on the executor, with the configuration a job would have): the value of the first source that has it, in the order system keystore (only when the keystore is the system's store), BROMELIA_SECRET_<NAME> (upper case, '.' → '_'; an empty value counts as none), secrets folder; the source config secrets.bySecret[name] (else secrets.prefer, 'none' for no preference) names comes first when it has a value; null when none has it; the first failure when a source failed and none has it. Sources with different values are a problem scoped to the secret (id secret.<code>:secret:<name>, action openSettings, params {name, using: the label of the source used, sources: the labels of every source with a value, in order}): secret.conflict (error) unless the preferred source is the one used, then secret.conflictPreferred (warning); the other one is cleared first, and both are cleared when the sources agree. A source that fails (owner answer 7, G3) is a problem scoped to the secret, secret.unreadable{name, reason: the failure's reason param, else its code} (action openSettings): a warning when another source has the secret, an error when none has; raised before its conflict problems, and cleared whenever the secret is checked and every source reads (or the configuration no longer refers to it). Op {stopFailing: name}: neither store fails for that name from then on (no result). load, update and setSecret check every secret the configuration refers to (setSecret also the one it set) and clear the problems of secrets it no longer refers to; secret(name) checks that one. setSecret(name, value): stores it in the keystore ('' removes it), publishes configChanged{version} (the version doesn't change), then checks; a keystore failure is returned. export(): the export bundle (ConfigCodec.exportBundle). Given: file (config.json: a document, or {text} for raw text; absent: no file); kv {key: value}; systemStore (default true; false: there is no system store, so the keystore is the secrets folder); keystore {name: value} (the system store); keystoreFails {name: {code, params}} (every system store call for that name fails so); files {name: value} (the secrets folder); filesFail {name: {code, params}}; environment {BROMELIA_SECRET_<NAME>: value} (what the composition root passes); writeFails {code, params} (every config.json write fails so); holdWrites (every write, to the kv table or config.json, waits for a releaseWrites op). ops in order: load, {changeOutside: {store (keystore or files), name, value (absent: removed)}} (no result), {update: {doc, version, wait (default true; false: start it and go on, its result comes when it finishes)}}, {validate: doc}, envelope, {secret: name}, {setSecret: {name, value}}, export, current, version, releaseWrites (lets the held writes go and waits for the ops they held). Expect: results (one per op except releaseWrites, in op order: ok for load and setSecret, the envelope for update and envelope, issues for validate, the value (or null) for secret, the bundle for export, the document for current, the number for version; {error: {code, params}} for a failure); file (config.json afterwards: a document, {text}, or null for none; when written, its mode is 0600); kv, keystore, files (everything afterwards; files absent: none); events; problems. Every configuration document in expect (an envelope's doc, current, file, kv config.lastGood, export's config) is compared after ConfigCodec.decode, so it is written as short as the given ones.",
   "cases": [
     {
       "id": "a-missing-file-gives-the-defaults",
@@ -1151,8 +1151,92 @@
           }
         },
         "keystore": {},
-        "events": [],
-        "problems": []
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:makemkv.key",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "makemkv.key",
+                  "reason": "a network share"
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:metadata.tmdb",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "reason": "a network share"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.unreadable:secret:makemkv.key",
+            "code": "secret.unreadable",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "a network share"
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "secret",
+              "id": "makemkv.key"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          },
+          {
+            "id": "secret.unreadable:secret:metadata.tmdb",
+            "code": "secret.unreadable",
+            "params": {
+              "name": "metadata.tmdb",
+              "reason": "a network share"
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
       }
     },
     {
@@ -2922,8 +3006,92 @@
           }
         },
         "keystore": {},
-        "events": [],
-        "problems": []
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:makemkv.key",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "makemkv.key",
+                  "reason": "a network share"
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:metadata.tmdb",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "metadata.tmdb",
+                  "reason": "a network share"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "metadata.tmdb"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.unreadable:secret:makemkv.key",
+            "code": "secret.unreadable",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "a network share"
+            },
+            "severity": "error",
+            "scope": {
+              "kind": "secret",
+              "id": "makemkv.key"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          },
+          {
+            "id": "secret.unreadable:secret:metadata.tmdb",
+            "code": "secret.unreadable",
+            "params": {
+              "name": "metadata.tmdb",
+              "reason": "a network share"
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "secret",
+              "id": "metadata.tmdb"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ]
       }
     },
     {
@@ -2973,6 +3141,442 @@
         "keystore": {},
         "events": [],
         "problems": []
+      }
+    },
+    {
+      "id": "a-source-that-fails-is-a-problem-until-it-reads-again",
+      "given": {
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "keystoreFails": {
+          "makemkv.key": {
+            "code": "keystore.failed",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "The keychain is locked"
+            }
+          }
+        },
+        "files": {
+          "makemkv.key": "T-0123456789"
+        },
+        "ops": [
+          "load",
+          {
+            "stopFailing": "makemkv.key"
+          },
+          {
+            "secret": "makemkv.key"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "T-0123456789"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:makemkv.key",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "makemkv.key",
+                  "reason": "The keychain is locked"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "secret.unreadable:secret:makemkv.key",
+              "code": "secret.unreadable"
+            }
+          }
+        ],
+        "problems": [],
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "makemkv": {
+              "registrationKey": {
+                "secret": "makemkv.key"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "makemkv.key": "T-0123456789"
+        }
+      }
+    },
+    {
+      "id": "an-unreadable-secret-no-source-has-is-an-error",
+      "given": {
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "keystoreFails": {
+          "makemkv.key": {
+            "code": "keystore.failed",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "The keychain is locked"
+            }
+          }
+        },
+        "ops": [
+          "load",
+          {
+            "changeOutside": {
+              "store": "files",
+              "name": "makemkv.key",
+              "value": "T-0123456789"
+            }
+          },
+          {
+            "secret": "makemkv.key"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "T-0123456789"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:makemkv.key",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "makemkv.key",
+                  "reason": "The keychain is locked"
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:makemkv.key",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "makemkv.key",
+                  "reason": "The keychain is locked"
+                },
+                "severity": "warning",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          }
+        ],
+        "problems": [
+          {
+            "id": "secret.unreadable:secret:makemkv.key",
+            "code": "secret.unreadable",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "The keychain is locked"
+            },
+            "severity": "warning",
+            "scope": {
+              "kind": "secret",
+              "id": "makemkv.key"
+            },
+            "raisedAt": "2026-10-02T20:00:00.000Z",
+            "actions": [
+              "openSettings"
+            ]
+          }
+        ],
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "makemkv": {
+              "registrationKey": {
+                "secret": "makemkv.key"
+              }
+            }
+          }
+        },
+        "keystore": {},
+        "files": {
+          "makemkv.key": "T-0123456789"
+        }
+      }
+    },
+    {
+      "id": "an-unreadable-secret-the-configuration-drops-is-cleared",
+      "given": {
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "keystoreFails": {
+          "makemkv.key": {
+            "code": "keystore.failed",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "The keychain is locked"
+            }
+          }
+        },
+        "ops": [
+          "load",
+          {
+            "update": {
+              "doc": {
+                "version": 3
+              },
+              "version": 0
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          {
+            "version": 1,
+            "doc": {
+              "version": 3
+            },
+            "issues": [],
+            "secrets": []
+          }
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:makemkv.key",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "makemkv.key",
+                  "reason": "The keychain is locked"
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 1
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "secret.unreadable:secret:makemkv.key",
+              "code": "secret.unreadable"
+            }
+          }
+        ],
+        "problems": [],
+        "file": {
+          "version": 3
+        },
+        "kv": {
+          "config.version": 1,
+          "config.lastGood": {
+            "version": 3
+          }
+        },
+        "keystore": {}
+      }
+    },
+    {
+      "id": "set-secret-checks-the-secret-again",
+      "given": {
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "keystoreFails": {
+          "makemkv.key": {
+            "code": "keystore.failed",
+            "params": {
+              "name": "makemkv.key",
+              "reason": "The keychain is locked"
+            }
+          }
+        },
+        "systemStore": true,
+        "ops": [
+          "load",
+          {
+            "stopFailing": "makemkv.key"
+          },
+          {
+            "setSecret": {
+              "name": "makemkv.key",
+              "value": "T-0123456789"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          "ok",
+          "ok"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemRaised",
+            "data": {
+              "problem": {
+                "id": "secret.unreadable:secret:makemkv.key",
+                "code": "secret.unreadable",
+                "params": {
+                  "name": "makemkv.key",
+                  "reason": "The keychain is locked"
+                },
+                "severity": "error",
+                "scope": {
+                  "kind": "secret",
+                  "id": "makemkv.key"
+                },
+                "raisedAt": "2026-10-02T20:00:00.000Z",
+                "actions": [
+                  "openSettings"
+                ]
+              }
+            }
+          },
+          {
+            "seq": 2,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "configChanged",
+            "data": {
+              "version": 0
+            }
+          },
+          {
+            "seq": 3,
+            "at": "2026-10-02T20:00:00.000Z",
+            "type": "problemCleared",
+            "data": {
+              "problemId": "secret.unreadable:secret:makemkv.key",
+              "code": "secret.unreadable"
+            }
+          }
+        ],
+        "problems": [],
+        "file": {
+          "version": 3,
+          "makemkv": {
+            "registrationKey": {
+              "secret": "makemkv.key"
+            }
+          }
+        },
+        "kv": {
+          "config.lastGood": {
+            "version": 3,
+            "makemkv": {
+              "registrationKey": {
+                "secret": "makemkv.key"
+              }
+            }
+          }
+        },
+        "keystore": {
+          "makemkv.key": "T-0123456789"
+        }
       }
     }
   ]

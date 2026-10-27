@@ -82,6 +82,7 @@ struct _BroLibraryService {
   BroFileSystem *fs;
   BroLibraryRepository *rows;
   BroUnitRepository *units;
+  BroCatalogRepository *catalog;
   BroCrashPointFunc crash;
   gpointer crash_data;
   GPtrArray *entries; /* Entry * (references), in configuration order */
@@ -96,8 +97,10 @@ struct _BroLibraryService {
 };
 
 static void library_port_iface_init (BroLibraryPortInterface *iface);
+static void catalog_queries_iface_init (BroCatalogQueriesInterface *iface);
 G_DEFINE_FINAL_TYPE_WITH_CODE (BroLibraryService, bro_library_service, G_TYPE_OBJECT,
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_LIBRARY_PORT, library_port_iface_init))
+                               G_IMPLEMENT_INTERFACE (BRO_TYPE_LIBRARY_PORT, library_port_iface_init)
+                                 G_IMPLEMENT_INTERFACE (BRO_TYPE_CATALOG_QUERIES, catalog_queries_iface_init))
 
 /* ---- small values ---- */
 
@@ -320,6 +323,7 @@ bro_library_service_finalize (GObject *object)
   g_object_unref (self->fs);
   g_object_unref (self->rows);
   g_object_unref (self->units);
+  g_object_unref (self->catalog);
   G_OBJECT_CLASS (bro_library_service_parent_class)->finalize (object);
 }
 
@@ -341,8 +345,8 @@ bro_library_service_init (BroLibraryService *self)
 
 BroLibraryService *
 bro_library_service_new (BroEngineExecutor *executor, BroEventBus *bus, BroProblemService *problems, BroScheduler *scheduler, BroConfigSource *config,
-                         BroEngineClock *clock, BroFileSystem *fs, BroLibraryRepository *libraries, BroUnitRepository *units, BroCrashPointFunc crash,
-                         gpointer crash_data)
+                         BroEngineClock *clock, BroFileSystem *fs, BroLibraryRepository *libraries, BroUnitRepository *units,
+                         BroCatalogRepository *catalog, BroCrashPointFunc crash, gpointer crash_data)
 {
   BroLibraryService *self = g_object_new (BRO_TYPE_LIBRARY_SERVICE, NULL);
   self->executor = g_object_ref (executor);
@@ -354,6 +358,7 @@ bro_library_service_new (BroEngineExecutor *executor, BroEventBus *bus, BroProbl
   self->fs = g_object_ref (fs);
   self->rows = g_object_ref (libraries);
   self->units = g_object_ref (units);
+  self->catalog = g_object_ref (catalog);
   self->crash = crash;
   self->crash_data = crash_data;
   return self;
@@ -1058,6 +1063,65 @@ bro_library_service_attach (BroLibraryService *self, const char *library_id, con
   bro_engine_executor_worker (self->executor, attach_work, attach_done, a, attach_free);
 }
 
+/* ---- taking an attach back ---- */
+
+typedef struct {
+  BroLibraryService *self;
+  char *id;
+  BroLibraryDone done;
+  gpointer data;
+  GDestroyNotify destroy;
+} Unattach;
+
+static void
+unattach_free (gpointer data)
+{
+  Unattach *u = data;
+  if (u->destroy)
+    u->destroy (u->data);
+  g_object_unref (u->self);
+  g_free (u->id);
+  g_free (u);
+}
+
+static gboolean
+unattach_work (gpointer data, BroBroError **error)
+{
+  Unattach *u = data;
+  BroLibraryService *self = u->self;
+  g_autoptr (BroLibraryRecord) row = bro_library_repository_get (self->rows, u->id, error);
+  g_autofree char *marker_path = NULL;
+  g_autoptr (BroLibraryMarker) marker = NULL;
+  if (!row)
+    return *error == NULL;
+  marker_path = g_strconcat (row->path, "/" BRO_LIBRARY_MARKER_FILE_NAME, NULL);
+  if (!bro_file_system_exists (self->fs, marker_path) || !(marker = decode_marker (self, marker_path))
+      || strcmp (marker->id, row->marker_id) != 0)
+    return TRUE;
+  return bro_file_system_remove (self->fs, marker_path, error);
+}
+
+static void
+unattach_done (gpointer data, const BroBroError *error)
+{
+  Unattach *u = data;
+  if (!error)
+    sync_entries (u->self);
+  u->done (error, u->data);
+}
+
+void
+bro_library_service_remove_marker (BroLibraryService *self, const char *library_id, BroLibraryDone done, gpointer data, GDestroyNotify destroy)
+{
+  Unattach *u = g_new0 (Unattach, 1);
+  u->self = g_object_ref (self);
+  u->id = g_strdup (library_id);
+  u->done = done;
+  u->data = data;
+  u->destroy = destroy;
+  bro_engine_executor_worker (self->executor, unattach_work, unattach_done, u, unattach_free);
+}
+
 /* ---- the port (any thread) ---- */
 
 static BroLibraryHandle *
@@ -1689,6 +1753,19 @@ library_port_iface_init (BroLibraryPortInterface *iface)
   iface->staging_directory = port_staging_directory;
   iface->commit = port_commit;
   iface->quarantine = port_quarantine;
+}
+
+/* The catalogue's committed units of the disc, asked on the caller's worker. */
+static GPtrArray *
+catalog_archived_before (BroCatalogQueries *queries, const char *fingerprint, BroBroError **error)
+{
+  return bro_catalog_repository_archived_before (BRO_LIBRARY_SERVICE (queries)->catalog, fingerprint, error);
+}
+
+static void
+catalog_queries_iface_init (BroCatalogQueriesInterface *iface)
+{
+  iface->archived_before = catalog_archived_before;
 }
 
 /* ---- roll forward ---- */

@@ -8,7 +8,8 @@ import BroPorts
 /// only ever see whether one is set. A secret comes from the system keystore, then BROMELIA_SECRET_<NAME>, then the
 /// secrets folder (plan §24); when two of them disagree, config secrets.prefer / secrets.bySecret pick one, and the
 /// disagreement is a problem: secret.conflict (an error) without a preference that settles it, secret.conflictPreferred
-/// (a warning) with one (owner, 2026-10-12). File, keystore and store work runs on workers.
+/// (a warning) with one (owner, 2026-10-12). A source that fails is the problem secret.unreadable until it reads again
+/// (owner, G3 2026-10-26). File, keystore and store work runs on workers.
 /// shared/fixtures/engine/config-service.cases.json.
 @EngineActor
 public final class ConfigService: ConfigSource {
@@ -220,9 +221,16 @@ public final class ConfigService: ConfigSource {
         }
     }
 
-    /// Raises, updates or clears a secret's problem (on the executor).
+    /// Raises, updates or clears a secret's problems (on the executor): secret.unreadable{name, reason} while a source
+    /// fails (a warning when another source has the secret, an error when none has), then its conflict.
     private func report(_ name: String, _ r: Resolution) {
         let scope = ProblemScope(kind: .secret, id: name)
+        if let failure = r.failure {
+            problems.raise(BroMessage(.secretUnreadable, [("name", .string(name)), ("reason", .string(failure.params.first { $0.key == "reason" }?.value.string ?? failure.code))],
+                                      severity: r.value != nil ? .warning : .error), scope: scope, actions: [.openSettings])
+        } else {
+            problems.clear(.secretUnreadable, scope: scope)
+        }
         guard r.conflict, let using = r.using else {
             problems.clear(.secretConflict, scope: scope)
             problems.clear(.secretConflictPreferred, scope: scope)

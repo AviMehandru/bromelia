@@ -4,7 +4,8 @@
  * order the jobs were created, and in the store before jobChanged (queued) announces it; then it runs. start() runs the
  * jobs the last engine left unfinished (after recover()), in their queues' order. Each job's place in its queue is
  * stored when it changes (a transaction that changes only the position: the runner owns the rest of the record). The
- * continue offer comes with AutomationService (owner, 2026-10-17/18). shared/fixtures/engine/job-service.cases.json. */
+ * continue offer comes with AutomationService (owner, 2026-10-17/18). stop() leaves the running jobs as a killed engine
+ * would (decision 170): the next start's recovery takes them up. shared/fixtures/engine/job-service.cases.json. */
 #pragma once
 
 #include "bro-engine-clock.h"
@@ -12,6 +13,7 @@
 #include "bro-event-bus.h"
 #include "bro-file-system.h"
 #include "bro-id-generator.h"
+#include "bro-job-detail-dto.h"
 #include "bro-job-dto.h"
 #include "bro-job-page-dto.h"
 #include "bro-job-query-dto.h"
@@ -35,6 +37,8 @@ typedef void (*BroJobPageDone) (const BroJobPageDto *page, const BroBroError *er
 
 /* log: @lines (BroLogLineDto, borrowed), or @error. */
 typedef void (*BroLogLinesDone) (GPtrArray *lines, const BroBroError *error, gpointer data);
+/* job: @detail (borrowed), or @error. */
+typedef void (*BroJobDetailDone) (const BroJobDetailDto *detail, const BroBroError *error, gpointer data);
 
 /* Keeps references to what it is given. @data_directory: the engine's data folder; a job's log is
  * <data>/jobs/<id>/log.jsonl. */
@@ -106,5 +110,15 @@ void bro_job_service_query (BroJobService *self, const BroJobQueryDto *query, Br
 
 /* The job's log lines after seq @after (0: all), including a running step's lines not yet written. job.notFound. */
 void bro_job_service_log (BroJobService *self, const BroId *job_id, gint64 after, BroLogLinesDone done, gpointer data, GDestroyNotify destroy);
+/* The job with its steps, files and commands (dtos.json JobDetail; decision 171). job: as query gives it. steps: one per
+ * step of its plan (the stored plan, else the planner's steps), each with the stored row of that seq when it is of that
+ * kind, else pending; rows past the plan's end (decision 158: a keepApart cut the plan back) are left out. files: the
+ * Seal row's files, else the Acquire row's produced files (names in staging), else none. commands: none yet (nothing
+ * logs process.command). logBytes: the size of its log.jsonl. job.notFound. */
+void bro_job_service_job (BroJobService *self, const BroId *job_id, BroJobDetailDone done, gpointer data, GDestroyNotify destroy);
+/* At engine stop (decision 170, owner 2026-10-26): the runner shuts every live job down without storing anything more
+ * for it (bro_pipeline_runner_shutdown) and no queue place is stored any more; @done (no error) once no job is live.
+ * The commands answer server.stopping from now on. */
+void bro_job_service_stop (BroJobService *self, BroJobServiceDone done, gpointer data, GDestroyNotify destroy);
 
 G_END_DECLS

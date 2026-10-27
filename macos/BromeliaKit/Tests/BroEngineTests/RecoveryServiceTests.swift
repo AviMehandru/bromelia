@@ -177,7 +177,7 @@ struct RecoveryServiceTests {
             state.problems = problems
             let scheduler = Scheduler(executor: world.executor, bus: bus, limits: SchedulerLimits())
             let library = LibraryService(executor: world.executor, bus: bus, problems: problems, scheduler: scheduler, config: config,
-                                         clock: world.engineClock, fs: tree, libraries: db, units: db)
+                                         clock: world.engineClock, fs: tree, libraries: db, units: db, catalog: db)
             state.library = library
             state.service = RecoveryService(executor: world.executor, bus: bus, problems: problems, store: store, registry: registry, library: library,
                                       config: config, clock: world.engineClock, fs: tree, isolation: isolation, renderer: Renderer(), dataDirectory: "/data")

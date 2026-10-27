@@ -13858,6 +13858,82 @@
             "name": "BroJobPageDto",
             "file": "linux/src/engine/api/bro-job-page-dto.h"
           }
+        },
+        {
+          "name": "JobDetailDto",
+          "kind": "struct",
+          "fields": [
+            "job",
+            "steps",
+            "files",
+            "commands",
+            "logBytes"
+          ],
+          "doc": "A job with its steps, files and commands (dtos.json JobDetail; children are left out until JobQuery can ask for a parent).",
+          "phase": 3,
+          "swift": {
+            "name": "JobDetailDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/JobDetailDto.swift"
+          },
+          "cs": {
+            "name": "JobDetailDto",
+            "file": "windows/src/Bromelia.Engine/API/JobDetailDto.cs"
+          },
+          "c": {
+            "name": "BroJobDetailDto",
+            "file": "linux/src/engine/api/bro-job-detail-dto.h"
+          }
+        },
+        {
+          "name": "JobStepDto",
+          "kind": "struct",
+          "fields": [
+            "seq",
+            "kind",
+            "state",
+            "startedAt",
+            "finishedAt",
+            "error",
+            "summary"
+          ],
+          "doc": "One step of a job's plan as JobDetail lists it.",
+          "phase": 3,
+          "swift": {
+            "name": "JobStepDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/JobStepDto.swift"
+          },
+          "cs": {
+            "name": "JobStepDto",
+            "file": "windows/src/Bromelia.Engine/API/JobStepDto.cs"
+          },
+          "c": {
+            "name": "BroJobStepDto",
+            "file": "linux/src/engine/api/bro-job-step-dto.h"
+          }
+        },
+        {
+          "name": "JobFileDto",
+          "kind": "struct",
+          "fields": [
+            "path",
+            "size",
+            "sha256",
+            "role"
+          ],
+          "doc": "A file a job made, as JobDetail lists it: Seal's (path in the unit folder, size and SHA-256 from disk, role), else Acquire's (path in staging, size).",
+          "phase": 3,
+          "swift": {
+            "name": "JobFileDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/JobFileDto.swift"
+          },
+          "cs": {
+            "name": "JobFileDto",
+            "file": "windows/src/Bromelia.Engine/API/JobFileDto.cs"
+          },
+          "c": {
+            "name": "BroJobFileDto",
+            "file": "linux/src/engine/api/bro-job-file-dto.h"
+          }
         }
       ],
       "functions": [
@@ -13998,6 +14074,17 @@
           "swift": "JobPageDto.json(_:)",
           "cs": "JobPageDto.Json",
           "c": "bro_job_page_dto_json"
+        },
+        {
+          "name": "JobDetailDto.json",
+          "params": [
+            "detail"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "JobDetailDto.json(_:)",
+          "cs": "JobDetailDto.Json",
+          "c": "bro_job_detail_dto_json"
         }
       ]
     },
@@ -14184,23 +14271,6 @@
           "c": {
             "name": "BroJobPlanner",
             "file": "linux/src/engine/pipeline/bro-job-planner.h"
-          }
-        },
-        {
-          "name": "PipelineRunner",
-          "kind": "class",
-          "doc": "Runs jobs step by step (plan §12.3), on the executor.",
-          "swift": {
-            "name": "PipelineRunner",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/PipelineRunner.swift"
-          },
-          "cs": {
-            "name": "PipelineRunner",
-            "file": "windows/src/Bromelia.Engine/Pipeline/PipelineRunner.cs"
-          },
-          "c": {
-            "name": "BroPipelineRunner",
-            "file": "linux/src/engine/pipeline/bro-pipeline-runner.h"
           }
         },
         {
@@ -14454,6 +14524,23 @@
           "c": {
             "name": "BroStepContext",
             "file": "linux/src/engine/pipeline/bro-step-context.h"
+          }
+        },
+        {
+          "name": "PipelineRunner",
+          "kind": "class",
+          "doc": "Runs jobs step by step (plan §12.3), on the executor; shutdown() at engine stop stores nothing more for the live jobs.",
+          "swift": {
+            "name": "PipelineRunner",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/PipelineRunner.swift"
+          },
+          "cs": {
+            "name": "PipelineRunner",
+            "file": "windows/src/Bromelia.Engine/Pipeline/PipelineRunner.cs"
+          },
+          "c": {
+            "name": "BroPipelineRunner",
+            "file": "linux/src/engine/pipeline/bro-pipeline-runner.h"
           }
         }
       ],
@@ -14826,6 +14913,19 @@
           "swift": "LibraryPort.quarantine(_:intent:files:tag:cancel:)",
           "cs": "LibraryPort.Quarantine",
           "c": "bro_library_port_quarantine"
+        },
+        {
+          "name": "PipelineRunner.shutdown",
+          "params": [],
+          "doc": "Every live job's waiting request and question dropped and its running step's token cancelled; the runner stores no step result, outcome or jobFinished for them; completes when no job is live.",
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "PipelineRunner.shutdown()",
+          "cs": "PipelineRunner.Shutdown",
+          "c": "bro_pipeline_runner_shutdown"
         }
       ]
     },
@@ -16110,24 +16210,6 @@
           }
         },
         {
-          "name": "LibraryService",
-          "kind": "class",
-          "doc": "The libraries of the configuration (plan §11.1, §22): their markers checked at start, every 30 s and on check(), offline ones blocked in the scheduler and raised as problems; attach writes the marker; implements LibraryPort: staging folders and the commit protocol (§22.3) with its roll forward. shared/fixtures/engine/library-service.cases.json.",
-          "phase": 3,
-          "swift": {
-            "name": "LibraryService",
-            "file": "macos/BromeliaKit/Sources/BroEngine/Services/LibraryService.swift"
-          },
-          "cs": {
-            "name": "LibraryService",
-            "file": "windows/src/Bromelia.Engine/Services/LibraryService.cs"
-          },
-          "c": {
-            "name": "BroLibraryService",
-            "file": "linux/src/engine/services/bro-library-service.h"
-          }
-        },
-        {
           "name": "RecoveryService",
           "kind": "class",
           "doc": "Runs once at startup (plan §20.4, §15.8, review L3-3, L3-9): unfinished jobs requeued, resumed or finished by where each stopped and its step's resumability; open commit intents rolled forward; staging no job will continue set aside; temporary files removed. Library work takes at most 30 s of the startup.",
@@ -16181,9 +16263,27 @@
           }
         },
         {
+          "name": "LibraryService",
+          "kind": "class",
+          "doc": "The libraries of the configuration (plan §11.1, §22): their markers checked at start, every 30 s and on check(), offline ones blocked in the scheduler and raised as problems; attach writes the marker (removeMarker takes it back when the configuration save fails); implements LibraryPort: staging folders and the commit protocol (§22.3) with its roll forward; implements CatalogQueries over the catalogue. shared/fixtures/engine/library-service.cases.json.",
+          "phase": 3,
+          "swift": {
+            "name": "LibraryService",
+            "file": "macos/BromeliaKit/Sources/BroEngine/Services/LibraryService.swift"
+          },
+          "cs": {
+            "name": "LibraryService",
+            "file": "windows/src/Bromelia.Engine/Services/LibraryService.cs"
+          },
+          "c": {
+            "name": "BroLibraryService",
+            "file": "linux/src/engine/services/bro-library-service.h"
+          }
+        },
+        {
           "name": "JobService",
           "kind": "class",
-          "doc": "The jobs (plan §11.1, §13.1): creates them (in their queue at once, stored before jobChanged announces them), runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones; cancel, retry (failed, cancelled or skipped jobs, as new jobs started by hand), decide, move, startNow, query, log; start() runs what recovery left queued; each job's place in its queue is stored when it changes. Retry from a step, continuing an interrupted job, the continue offer and keep-apart come in sessions D and F (owner, 2026-10-17). shared/fixtures/engine/job-service.cases.json.",
+          "doc": "The jobs (plan §11.1, §13.1): creates them (in their queue at once, stored before jobChanged announces them), runs them through the PipelineRunner and keeps the in-memory view of the unfinished ones; cancel, retry (as new jobs, or the same job from a step), keepApart, decide, move, startNow, query, log, job (JobDetail); start() runs what recovery left queued; stop() leaves running jobs as a killed engine would; each job's place in its queue is stored when it changes. shared/fixtures/engine/job-service.cases.json.",
           "phase": 3,
           "swift": {
             "name": "JobService",
@@ -16743,6 +16843,54 @@
           "swift": "LibraryService.setAside(_:folder:name:note:logs:)",
           "cs": "LibraryService.SetAside",
           "c": "bro_library_service_set_aside"
+        },
+        {
+          "name": "JobService.job",
+          "params": [
+            "jobId"
+          ],
+          "returns": "JobDetailDto",
+          "doc": "A job with its steps, files and commands (dtos.json JobDetail): the job as it runs (else as stored); one step per step of its plan (Plan's appended ones included; none past the plan's end, so rows a keepApart cut off are left out: decision 158), each with its stored row's state, times and error, pending without one; the files of its Seal output (else Acquire's produced files); the command lines its log holds (process.command); logBytes. job.notFound.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.job(_:)",
+          "cs": "JobService.Job",
+          "c": "bro_job_service_job"
+        },
+        {
+          "name": "JobService.stop",
+          "params": [],
+          "doc": "At engine stop (G1 owner question 2): the PipelineRunner shuts every live job down without storing anything more for it, then completes once none is live; what is stored is what a killed engine leaves, so the next start's recovery takes each job up (plan §20.4). Commands after it answer server.stopping.",
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "JobService.stop()",
+          "cs": "JobService.Stop",
+          "c": "bro_job_service_stop"
+        },
+        {
+          "name": "LibraryService.removeMarker",
+          "params": [
+            "libraryId"
+          ],
+          "doc": "Takes back an attach whose configuration save failed (LocalEngine's attachLibrary, decision 166): the marker is removed while the folder still holds the one the stored row names, and the library is forgotten unless the configuration lists it. Nothing when there is no stored row.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "library_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "LibraryService.removeMarker(_:)",
+          "cs": "LibraryService.RemoveMarker",
+          "c": "bro_library_service_remove_marker"
         }
       ]
     },

@@ -171,9 +171,14 @@ final class PipelineHarness {
     var jobService: JobService!
     var calls: [(op: JsonValue, task: Task<Void, Never>)] = []
     var callErrors: [Int: String] = [:]
+    /// The ops that have ended (an op that never does fails its case instead of hanging the run).
+    var callsEnded: Set<Int> = []
     var queries: [JsonValue] = []
     var logs: [JsonValue] = []
+    var details: [JsonValue] = []
     var announcedUnstored: [String] = []
+    /// After a stop op: the jobs' last states no longer say whether they settled.
+    var stopped = false
 
     /// `service`: job-service cases (cancel and decide go through the JobService).
     init(_ given: JsonValue, service: Bool = false) async throws {
@@ -221,7 +226,10 @@ final class PipelineHarness {
                 let k = StepKind(rawValue: d["kind"]!.string!)!
                 try await store.save(StepRecord(jobId: id, seq: seq, kind: k, state: StepState(rawValue: d["state"]?.string ?? "succeeded")!, attempt: 1,
                                                 startedAt: world.clock.now(), finishedAt: world.clock.now(),
-                                                output: StepOutput(kind: k, data: d["output"] ?? .object([]), readErrors: Int(d["readErrors"]?.int ?? 0)),
+                                                output: StepOutput(kind: k, data: d["output"] ?? .object([]),
+                                                                   summary: d["summary"].map { BroMessage(MessageCode(rawValue: $0["code"]!.string!)!, $0["params"]?.members ?? []) },
+                                                                   readErrors: Int(d["readErrors"]?.int ?? 0)),
+                                                error: d["error"].map { BroError($0["code"]!.string!, $0["params"]?.members ?? []) },
                                                 checkpoint: d["checkpoint"]))
                 seq += 1
             }
@@ -233,6 +241,10 @@ final class PipelineHarness {
                 }
                 try fs.createDirectory("/data/jobs/\(id.value)", parentsMustExist: false)
                 try fs.writeAtomically("/data/jobs/\(id.value)/log.jsonl", bytes: JobLog.encode(lines), mode: 0o600)
+            }
+            if let text = j["logText"]?.string {
+                try fs.createDirectory("/data/jobs/\(id.value)", parentsMustExist: false)
+                try fs.writeAtomically("/data/jobs/\(id.value)/log.jsonl", bytes: Array(text.utf8), mode: 0o600)
             }
         }
     }
@@ -258,7 +270,7 @@ final class PipelineHarness {
         let atGate = gates.parked()
         var parked = atGate.count
         var ok = true
-        for (name, id) in jobs where started.contains(name) && outcomes[name] == nil {
+        for (name, id) in jobs where !stopped && started.contains(name) && outcomes[name] == nil {
             let last = events.last { ($0.type == .jobChanged || $0.type == .jobFinished) && $0.data["job"]?["id"]?.string == id.value }
             let state = last?.data["job"]?["state"]?.string
             if state == nil && service { continue } // a created job not stored yet (its insert held): the activity tells
@@ -331,6 +343,7 @@ final class PipelineHarness {
             let index = calls.count
             let task = Task { @EngineActor in
                 do throws(BroError) { try await call() } catch { self.callErrors[index] = error.code }
+                self.callsEnded.insert(index)
             }
             calls.append((op, task))
         }
@@ -366,6 +379,21 @@ final class PipelineHarness {
             return { () async throws(BroError) in try await s.move(job!, by: by) }
         case "startNow":
             return { () async throws(BroError) in try await s.startNow(job!) }
+        case "stop":
+            stopped = true
+            for (_, i) in jobs { gates.cancelled(i) } // the shutdown cancels every live job's token
+            return { () async throws(BroError) in await s.stop() }
+        case "detail":
+            return { [unowned self] () async throws(BroError) in
+                do throws(BroError) {
+                    let json = JobDetailDto.json(try await s.job(job!))
+                    details.append(.object([("job", .string(detailText(json))), ("steps", json["steps"] ?? .null), ("files", json["files"] ?? .null),
+                                            ("commands", json["commands"] ?? .null), ("logBytes", json["logBytes"] ?? .null)]))
+                } catch {
+                    details.append(.object([("error", .string(error.code))]))
+                    throw error
+                }
+            }
         case "query":
             let q = JobQueryDto(states: FakeStep.strings(arg["states"]).map { JobState(rawValue: $0)! },
                                 outcomes: FakeStep.strings(arg["outcomes"]).map { Outcome(rawValue: $0)! },
@@ -402,6 +430,15 @@ final class PipelineHarness {
         started.insert(job)
     }
 
+    /// A JobDetail's job as the case writes it, read from its JSON.
+    func detailText(_ j: JsonValue) -> String {
+        var text = "\(name(j["id"]?.string ?? "")) \(j["state"]?.string ?? "-")"
+        if let o = j["outcome"]?.string { text += " " + o }
+        if let p = j["position"]?.int { text += " position \(p)" }
+        if let step = j["progress"]?["step"]?.string { text += " step " + step }
+        return text
+    }
+
     func itemText(_ j: JobDto) -> String {
         var text = "\(name(j.id.value)) \(j.state.rawValue)"
         if let o = j.outcome { text += " " + o.rawValue }
@@ -414,7 +451,11 @@ final class PipelineHarness {
     /// ops that race).
     func checkCalls() async throws {
         for (i, call) in calls.enumerated() {
-            await call.task.value
+            let until = Date().addingTimeInterval(10)
+            while !callsEnded.contains(i) {
+                if Date() > until { throw FixtureError("the op hasn't finished: \(call.op)") }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
             let arg = call.op.members!.first!.value
             if let maybe = arg["maybeError"]?.string, callErrors[i] == nil || callErrors[i] == maybe { continue }
             try Fixtures.same(arg["expectError"]?.string, callErrors[i], "error of \(call.op)")
@@ -488,6 +529,7 @@ struct PipelineRunnerTests {
             try Fixtures.same("", await h.announcedUnstored.joined(separator: " "), "jobs announced before they were stored")
             if let q = expect["queries"] { try Fixtures.same(q, JsonValue.array(await h.queries), "queries") }
             if let l = expect["logs"] { try Fixtures.same(l, JsonValue.array(await h.logs), "logs") }
+            if let d = expect["details"] { try Fixtures.same(d, JsonValue.array(await h.details), "details") }
         }
         let (outcomes, lines, queueLines, events) = await (h.outcomes, h.lines(), h.queueLines(), h.events.map(EngineEvent.json))
         for (name, want) in expect["outcomes"]?.members ?? [] {
