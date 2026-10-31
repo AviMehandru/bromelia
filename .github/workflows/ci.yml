@@ -47,6 +47,10 @@ jobs:
       - name: BromeliaKit tests
         working-directory: macos/BromeliaKit
         run: swift test
+      # The macOS host (macos/bromeliad, a package over ../BromeliaKit): the real composition root's smoke test.
+      - name: bromeliad tests
+        working-directory: macos/bromeliad
+        run: swift test
 
   windows:
     name: Windows (WinUI 3)
@@ -79,6 +83,12 @@ jobs:
       - name: Test rebuild Engine
         working-directory: windows
         run: dotnet test tests/Bromelia.Engine.Tests/Bromelia.Engine.Tests.csproj
+      - name: Test rebuild scenarios (LocalEngine over the test composition root)
+        working-directory: windows
+        run: dotnet test tests/Bromelia.Scenarios.Tests/Bromelia.Scenarios.Tests.csproj
+      - name: Test rebuild hosts (the real composition root)
+        working-directory: windows
+        run: dotnet test tests/Bromelia.Hosts.Tests/Bromelia.Hosts.Tests.csproj
       # The WinUI app is built with Visual Studio's MSBuild, not `dotnet build`: Windows App SDK 1.6
       # loads its PRI tasks (Microsoft.Build.Packaging.Pri.Tasks.dll) from Visual Studio's
       # MSBuild\Microsoft\VisualStudio\v<version>\AppxPackage folder, which the .NET SDK does not ship.

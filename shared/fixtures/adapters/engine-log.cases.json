@@ -1,0 +1,172 @@
+{
+  "functions": [
+    "FileEngineLog.log"
+  ],
+  "description": "FileEngineLog (the real EngineLog, plan §16; session G7): each EngineLog.log(message) appends one line to <data>/logs/engine.log, the same objects a job's log.jsonl holds: {t, severity, code, params} with t the adapter's clock at the call (ms since 1970, given.lines[].at) in Instant's format, params left out when empty, in the canonical encoding written on one line (keys in the order given, non-ASCII as it is, \\n inside strings escaped), each line ended by a line break. Paths are relative to an empty temporary folder; the log's path is data/logs/engine.log and data/ exists. given.before: what engine.log holds first. given.noLogsFolder: data/logs isn't there (log makes it). given.logIsAFolder: data/logs/engine.log is a folder, so writing fails; log never fails (nothing thrown) and the folder is left as it was. expect.file: engine.log's whole text afterwards. expect.mode: its POSIX permission bits (checked where the OS has them). Rotation and the redaction of secret values come with bromeliad (phase 4).",
+  "cases": [
+    {
+      "id": "a-line-is-the-time-severity-code-and-params",
+      "given": {
+        "lines": [
+          {
+            "at": 1793361600000,
+            "severity": "warning",
+            "code": "recovery.summary",
+            "params": {
+              "count": 2
+            }
+          }
+        ]
+      },
+      "expect": {
+        "file": "{\"t\": \"2026-10-30T12:00:00.000Z\",\"severity\": \"warning\",\"code\": \"recovery.summary\",\"params\": {\"count\": 2}}\n",
+        "mode": 384
+      }
+    },
+    {
+      "id": "params-are-left-out-when-empty",
+      "given": {
+        "lines": [
+          {
+            "at": 1793361600007,
+            "severity": "info",
+            "code": "recovery.requeued",
+            "params": {}
+          }
+        ]
+      },
+      "expect": {
+        "file": "{\"t\": \"2026-10-30T12:00:00.007Z\",\"severity\": \"info\",\"code\": \"recovery.requeued\"}\n"
+      }
+    },
+    {
+      "id": "lines-follow-each-other-in-the-order-logged",
+      "given": {
+        "lines": [
+          {
+            "at": 1793361600000,
+            "severity": "info",
+            "code": "recovery.requeued"
+          },
+          {
+            "at": 1793361601500,
+            "severity": "error",
+            "code": "internal.unexpected",
+            "params": {
+              "detail": "boom"
+            }
+          },
+          {
+            "at": 1793448000000,
+            "severity": "warning",
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ]
+      },
+      "expect": {
+        "file": "{\"t\": \"2026-10-30T12:00:00.000Z\",\"severity\": \"info\",\"code\": \"recovery.requeued\"}\n{\"t\": \"2026-10-30T12:00:01.500Z\",\"severity\": \"error\",\"code\": \"internal.unexpected\",\"params\": {\"detail\": \"boom\"}}\n{\"t\": \"2026-10-31T12:00:00.000Z\",\"severity\": \"warning\",\"code\": \"recovery.summary\",\"params\": {\"count\": 1}}\n"
+      }
+    },
+    {
+      "id": "a-line-goes-after-what-the-file-held",
+      "given": {
+        "before": "{\"t\": \"2026-10-30T11:59:00.000Z\",\"severity\": \"info\",\"code\": \"recovery.requeued\"}\n",
+        "lines": [
+          {
+            "at": 1793361600000,
+            "severity": "warning",
+            "code": "recovery.summary",
+            "params": {
+              "count": 3
+            }
+          }
+        ]
+      },
+      "expect": {
+        "file": "{\"t\": \"2026-10-30T11:59:00.000Z\",\"severity\": \"info\",\"code\": \"recovery.requeued\"}\n{\"t\": \"2026-10-30T12:00:00.000Z\",\"severity\": \"warning\",\"code\": \"recovery.summary\",\"params\": {\"count\": 3}}\n"
+      }
+    },
+    {
+      "id": "the-logs-folder-is-made-when-it-is-missing",
+      "given": {
+        "noLogsFolder": true,
+        "lines": [
+          {
+            "at": 1793361600000,
+            "severity": "info",
+            "code": "recovery.requeued"
+          }
+        ]
+      },
+      "expect": {
+        "file": "{\"t\": \"2026-10-30T12:00:00.000Z\",\"severity\": \"info\",\"code\": \"recovery.requeued\"}\n"
+      }
+    },
+    {
+      "id": "a-line-break-in-a-param-stays-on-one-line",
+      "given": {
+        "lines": [
+          {
+            "at": 1793361600000,
+            "severity": "error",
+            "code": "internal.unexpected",
+            "params": {
+              "detail": "first\nsecond \"quoted\" café\ttab"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "file": "{\"t\": \"2026-10-30T12:00:00.000Z\",\"severity\": \"error\",\"code\": \"internal.unexpected\",\"params\": {\"detail\": \"first\\nsecond \\\"quoted\\\" café\\ttab\"}}\n"
+      }
+    },
+    {
+      "id": "nested-params-keep-their-order",
+      "given": {
+        "lines": [
+          {
+            "at": 1793361600000,
+            "severity": "error",
+            "code": "internal.unexpected",
+            "params": {
+              "zeta": [
+                1,
+                "two",
+                {
+                  "b": true,
+                  "a": null
+                }
+              ],
+              "alpha": {}
+            }
+          }
+        ]
+      },
+      "expect": {
+        "file": "{\"t\": \"2026-10-30T12:00:00.000Z\",\"severity\": \"error\",\"code\": \"internal.unexpected\",\"params\": {\"zeta\": [1,\"two\",{\"b\": true,\"a\": null}],\"alpha\": {}}}\n"
+      }
+    },
+    {
+      "id": "a-line-that-cannot-be-written-is-dropped",
+      "given": {
+        "logIsAFolder": true,
+        "lines": [
+          {
+            "at": 1793361600000,
+            "severity": "warning",
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          }
+        ]
+      },
+      "expect": {
+        "logIsAFolder": true
+      }
+    }
+  ]
+}

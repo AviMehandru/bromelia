@@ -4,6 +4,7 @@ subdir('domain')
 subdir('ports')
 subdir('adapters')
 subdir('engine')
+subdir('daemon')
 
 # Today's app.
 core_sources = files(

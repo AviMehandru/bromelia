@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The hosts layer's tests: the real composition root's smoke test. Windows only (the root builds the Windows
+       adapters); run on the Windows VM or in CI. -->
+  <PropertyGroup>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bromelia.Hosts.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.Versioning.SupportedOSPlatformAttribute">
+      <_Parameter1>windows</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\bromeliad\bromeliad.csproj" />
+  </ItemGroup>
+
+</Project>

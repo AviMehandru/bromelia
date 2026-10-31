@@ -33,12 +33,22 @@ internal sealed class DiskFileSystem : IFileSystem
     public byte[] ReadRange(string path, long offset, int length) => throw new NotSupportedException();
     public void CreateDirectory(string path, bool parentsMustExist) => Directory.CreateDirectory(path);
 
+    /// <summary>As PlatformFileSystem: fs.failed when it can't be written (over a folder, no permission).</summary>
     public void WriteAtomically(string path, byte[] bytes, int mode)
     {
-        var temp = path + ".tmp";
-        File.WriteAllBytes(temp, bytes);
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, (UnixFileMode)mode);
-        File.Move(temp, path, overwrite: true);
+        try
+        {
+            var temp = path + ".tmp";
+            File.WriteAllBytes(temp, bytes);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, (UnixFileMode)mode);
+            File.Move(temp, path, overwrite: true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new Bromelia.Foundation.BroFailure(new Bromelia.Domain.BroMessage(Bromelia.Domain.MessageCode.FsFailed, Bromelia.Domain.Severity.Error,
+                ("operation", Bromelia.Foundation.JsonValue.Of("write")), ("path", Bromelia.Foundation.JsonValue.Of(path)),
+                ("reason", Bromelia.Foundation.JsonValue.Of(e.Message))).ToError());
+        }
     }
 
     public void Rename(string from, string to) => File.Move(from, to);

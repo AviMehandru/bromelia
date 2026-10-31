@@ -1607,6 +1607,7 @@ utc_local_time (BroClock *c, BroInstant instant)
 #include "test-launcher-abuse.inc"
 #include "test-drives.inc"
 #include "test-drive-control.inc"
+#include "test-engine-log.inc"
 
 /* ---- ids ----------------------------------------------------------------------------------------- */
 
@@ -1803,6 +1804,7 @@ main (int argc, char **argv)
   g_test_add_func ("/file-system/sync-unsupported-folder", test_fs_sync_unsupported_folder);
   g_test_add_func ("/file-system/volume", test_fs_volume);
   g_test_add_func ("/settings-isolation/home", test_home_isolation);
+  g_test_add_func ("/engine-log/cases", test_engine_log);
   g_test_add_func ("/tool-locator/cases", test_tool_locator);
   g_test_add_func ("/tool-locator/platform-paths", test_tool_paths);
   g_test_add_func ("/makemkv-tool/cases", test_makemkv_tool);

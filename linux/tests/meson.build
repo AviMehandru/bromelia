@@ -26,3 +26,5 @@ test('engine', executable('test-engine', 'test-engine.c', dependencies: [bro_tes
 # fakes); H adds the scenario runner.
 test('scenarios', executable('test-scenarios', 'test-scenarios.c', 'bro-test-composition-root.c',
   dependencies: [bro_test_support_dep, bro_test_kit_dep, bro_engine_dep, bro_adapters_dep]), env: test_env, timeout: 300)
+# The hosts layer: the real composition root's smoke test (no makemkvcon, no system keystore, a temporary data folder).
+test('hosts', executable('test-hosts', 'test-hosts.c', dependencies: [bro_test_kit_dep, bro_host_dep]), env: test_env, timeout: 120)

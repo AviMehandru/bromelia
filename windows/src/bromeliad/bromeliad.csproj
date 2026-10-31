@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- L5 Hosts (rearchitecture plan §4, §17; decision 167): the composition root, the one place that builds the real
+       graph. A class library in phase 3; phase 4 makes it the bromeliad executable (main, HostOptions, EngineLock).
+       <Version> is the app version the engine reports and writes into archive records. Windows only, as the
+       Windows adapters it builds. -->
+  <PropertyGroup>
+    <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>11</LangVersion>
+    <RootNamespace>Bromeliad</RootNamespace>
+    <AssemblyName>bromeliad</AssemblyName>
+    <Version>1.0.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.Versioning.SupportedOSPlatformAttribute">
+      <_Parameter1>windows</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- RegistrySwapIsolation manages every key of the settings catalogue. -->
+    <EmbeddedResource Include="..\..\..\shared\catalog\settings-catalog.json" Link="settings-catalog.json" LogicalName="Bromeliad.settings-catalog.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bromelia.Foundation\Bromelia.Foundation.csproj" />
+    <ProjectReference Include="..\Bromelia.Domain\Bromelia.Domain.csproj" />
+    <ProjectReference Include="..\Bromelia.Ports\Bromelia.Ports.csproj" />
+    <ProjectReference Include="..\Bromelia.Adapters\Bromelia.Adapters.csproj" />
+    <ProjectReference Include="..\Bromelia.Adapters.Windows\Bromelia.Adapters.Windows.csproj" />
+    <ProjectReference Include="..\Bromelia.Engine\Bromelia.Engine.csproj" />
+  </ItemGroup>
+
+</Project>

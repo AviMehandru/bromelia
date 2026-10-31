@@ -18471,6 +18471,108 @@
           "c": "bro_engine_log_log"
         }
       ]
+    },
+    "hosts/composition-root": {
+      "layer": "hosts",
+      "folder": "",
+      "cFolder": "",
+      "doc": "Builds the real object graph (plan §17): ports → adapters → services → LocalEngine; nothing else constructs adapters or services. Phase 3 has no Server; bromeliad's main and HostOptions come in phase 4.",
+      "phase": 3,
+      "types": [
+        {
+          "name": "CompositionRoot",
+          "kind": "namespace",
+          "doc": "The real graph's one builder.",
+          "swift": {
+            "name": "CompositionRoot",
+            "file": "macos/bromeliad/CompositionRoot.swift"
+          },
+          "cs": {
+            "name": "CompositionRoot",
+            "file": "windows/src/bromeliad/CompositionRoot.cs"
+          },
+          "c": {
+            "name": "BroCompositionRoot",
+            "file": "linux/src/daemon/bro-composition-root.h"
+          }
+        },
+        {
+          "name": "RootOptions",
+          "kind": "struct",
+          "fields": [
+            "dataDir",
+            "configPath",
+            "home",
+            "systemKeystore",
+            "systemTools",
+            "environment"
+          ],
+          "doc": "What the graph is built for: the data folder (required in phase 3: the platform default is today's app's folder), config.json (null: <data>/config.json), the user's home (MakeMKV's folder, ~ in paths), whether the system keystore is used (false in tests), whether the tools are looked for where they are usually installed and on PATH (false in tests: no tool is found, so nothing runs makemkvcon), the process's environment (the host passes it: ConfigService gets its BROMELIA_SECRET_* entries, the locator its PATH).",
+          "swift": {
+            "name": "RootOptions",
+            "file": "macos/bromeliad/RootOptions.swift"
+          },
+          "cs": {
+            "name": "RootOptions",
+            "file": "windows/src/bromeliad/RootOptions.cs"
+          },
+          "c": {
+            "name": "BroRootOptions",
+            "file": "linux/src/daemon/bro-root-options.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "CompositionRoot.build",
+          "params": [
+            "options"
+          ],
+          "returns": "LocalEngine",
+          "doc": "Opens and migrates the store, builds every adapter, service, the runner and LocalEngine (which closes the store once it has stopped). Nothing runs until LocalEngine.start.",
+          "throws": true,
+          "swift": "CompositionRoot.build(_:)",
+          "cs": "CompositionRoot.Build",
+          "c": "bro_composition_root_build"
+        }
+      ]
+    },
+    "adapters/file-engine-log": {
+      "layer": "adapters",
+      "folder": "Logs",
+      "cFolder": "logs",
+      "doc": "The real EngineLog: JSON lines like a job's log.jsonl ({t, severity, code, params}) appended to <data>/logs/engine.log. Rotation and redaction of the keystore's values come with bromeliad (phase 4).",
+      "phase": 3,
+      "types": [
+        {
+          "name": "FileEngineLog",
+          "kind": "class",
+          "doc": "Appends to <data>/logs/engine.log through the FileSystem port.",
+          "swift": {
+            "name": "FileEngineLog",
+            "file": "macos/BromeliaKit/Sources/BroAdapters/Logs/FileEngineLog.swift"
+          },
+          "cs": {
+            "name": "FileEngineLog",
+            "file": "windows/src/Bromelia.Adapters/Logs/FileEngineLog.cs"
+          },
+          "c": {
+            "name": "BroFileEngineLog",
+            "file": "linux/src/adapters/logs/bro-file-engine-log.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "FileEngineLog.log",
+          "params": [
+            "message"
+          ],
+          "swift": "FileEngineLog.log(_:)",
+          "cs": "FileEngineLog.Log",
+          "c": "bro_file_engine_log_log"
+        }
+      ]
     }
   }
 }
