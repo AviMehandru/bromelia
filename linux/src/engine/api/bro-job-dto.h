@@ -50,6 +50,7 @@ typedef struct {
 /* Everything zero; the owned members are set by the caller. */
 BroJobDto *bro_job_dto_new (void);
 void bro_job_dto_free (BroJobDto *job);
+BroJobDto *bro_job_dto_copy (const BroJobDto *job);
 
 /* Free with bro_json_value_unref. */
 BroJsonValue *bro_job_dto_json (const BroJobDto *job);

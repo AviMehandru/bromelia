@@ -3,7 +3,7 @@ using Bromelia.Foundation;
 using Bromelia.Ports;
 using CancellationToken = Bromelia.Foundation.CancellationToken;
 
-namespace Bromelia.Engine.Tests;
+namespace Bromelia.TestKit;
 
 /// <summary>
 /// A clock that moves only when told (the scenarios' fake clock): it starts at 2026-10-02T20:00:00.000Z, and
@@ -11,7 +11,7 @@ namespace Bromelia.Engine.Tests;
 /// its due time, then calls <see cref="Settle"/>. Its local time is UTC plus <see cref="UtcOffsetMinutes"/> (0 unless
 /// set; no daylight saving time). Safe to use from any thread.
 /// </summary>
-internal sealed class ManualClock : IClock
+public sealed class ManualClock : IClock
 {
     public const long StartMs = 1_790_971_200_000;
 
@@ -72,6 +72,12 @@ internal sealed class ManualClock : IClock
             _timers.Add(t);
             return t;
         }
+    }
+
+    /// <summary>The timers not cancelled yet.</summary>
+    public int Pending()
+    {
+        lock (_lock) return _timers.Count(t => !t.Cancelled);
     }
 
     public void Advance(long ms)

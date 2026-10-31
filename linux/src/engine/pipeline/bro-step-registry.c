@@ -1,5 +1,19 @@
 /* bro-step-registry.c */
 #include "bro-step-registry.h"
+#include "bro-acquire-step.h"
+#include "bro-await-media-step.h"
+#include "bro-commit-step.h"
+#include "bro-decide-step.h"
+#include "bro-identify-step.h"
+#include "bro-keep-apart-step.h"
+#include "bro-name-step.h"
+#include "bro-notify-step.h"
+#include "bro-plan-step.h"
+#include "bro-probe-step.h"
+#include "bro-reconcile-step.h"
+#include "bro-release-step.h"
+#include "bro-seal-step.h"
+#include "bro-verify-rips-step.h"
 
 struct _BroStepRegistry {
   GObject parent_instance;
@@ -18,6 +32,27 @@ bro_step_registry_new (GPtrArray *steps)
       g_hash_table_replace (self->steps, GINT_TO_POINTER (bro_step_kind (s)), g_object_ref (s));
     }
   return self;
+}
+
+BroStepRegistry *
+bro_step_registry_standard (void)
+{
+  g_autoptr (GPtrArray) steps = g_ptr_array_new_with_free_func (g_object_unref);
+  g_ptr_array_add (steps, bro_await_media_step_new ());
+  g_ptr_array_add (steps, bro_probe_step_new ());
+  g_ptr_array_add (steps, bro_reconcile_step_new ());
+  g_ptr_array_add (steps, bro_identify_step_new ());
+  g_ptr_array_add (steps, bro_plan_step_new ());
+  g_ptr_array_add (steps, bro_decide_step_new ());
+  g_ptr_array_add (steps, bro_acquire_step_new ());
+  g_ptr_array_add (steps, bro_release_step_new ());
+  g_ptr_array_add (steps, bro_verify_rips_step_new ());
+  g_ptr_array_add (steps, bro_name_step_new ());
+  g_ptr_array_add (steps, bro_seal_step_new ());
+  g_ptr_array_add (steps, bro_commit_step_new ());
+  g_ptr_array_add (steps, bro_notify_step_new ());
+  g_ptr_array_add (steps, bro_keep_apart_step_new ());
+  return bro_step_registry_new (steps);
 }
 
 BroStep *

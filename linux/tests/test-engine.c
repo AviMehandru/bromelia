@@ -1,5 +1,6 @@
 /* test-engine.c: the Engine layer's core, against the case files in shared/fixtures/engine. */
 #include "bro-test-fixtures.h"
+#include "bro-test-kit.h"
 
 #include "bro-coalescer.h"
 #include "bro-engine-clock.h"
@@ -8,247 +9,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-#define START_MS G_GINT64_CONSTANT (1790971200000) /* 2026-10-02T20:00:00.000Z */
-
-/* ---- a clock that moves only when told (the scenarios' fake clock) ------------------------------------------- */
-
-/* Its local time is UTC plus utc_offset_minutes (0 unless set; no daylight saving time). */
-
-typedef struct {
-  gatomicrefcount refs;
-  gint64 due_ms;
-  gint64 interval_ms;
-  guint64 order;
-  gboolean cancelled; /* under the clock's lock */
-  BroTimerFunc handler;
-  gpointer data;
-  GDestroyNotify destroy;
-} Pending;
-
-static Pending *
-pending_ref (Pending *p)
-{
-  g_atomic_ref_count_inc (&p->refs);
-  return p;
-}
-
-static void
-pending_unref (Pending *p)
-{
-  if (!g_atomic_ref_count_dec (&p->refs))
-    return;
-  if (p->destroy)
-    p->destroy (p->data);
-  g_free (p);
-}
-
-#define TEST_TYPE_MANUAL_CLOCK (test_manual_clock_get_type ())
-G_DECLARE_FINAL_TYPE (TestManualClock, test_manual_clock, TEST, MANUAL_CLOCK, GObject)
-
-struct _TestManualClock {
-  GObject parent_instance;
-  GMutex lock;
-  gint64 now_ms;
-  int utc_offset_minutes;
-  guint64 made;
-  GPtrArray *timers; /* of Pending, references */
-};
-
-#define TEST_TYPE_MANUAL_TIMER (test_manual_timer_get_type ())
-G_DECLARE_FINAL_TYPE (TestManualTimer, test_manual_timer, TEST, MANUAL_TIMER, GObject)
-
-struct _TestManualTimer {
-  GObject parent_instance;
-  TestManualClock *clock; /* a reference */
-  Pending *pending;       /* a reference */
-};
-
-static void test_manual_timer_iface_init (BroTimerHandleInterface *iface);
-G_DEFINE_FINAL_TYPE_WITH_CODE (TestManualTimer, test_manual_timer, G_TYPE_OBJECT,
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_TIMER_HANDLE, test_manual_timer_iface_init))
-
-static void
-manual_timer_cancel (BroTimerHandle *handle)
-{
-  TestManualTimer *t = TEST_MANUAL_TIMER (handle);
-  g_mutex_lock (&t->clock->lock);
-  t->pending->cancelled = TRUE;
-  g_mutex_unlock (&t->clock->lock);
-}
-
-static void
-test_manual_timer_iface_init (BroTimerHandleInterface *iface)
-{
-  iface->cancel = manual_timer_cancel;
-}
-
-static void
-test_manual_timer_finalize (GObject *object)
-{
-  TestManualTimer *t = TEST_MANUAL_TIMER (object);
-  pending_unref (t->pending);
-  g_object_unref (t->clock);
-  G_OBJECT_CLASS (test_manual_timer_parent_class)->finalize (object);
-}
-
-static void
-test_manual_timer_class_init (TestManualTimerClass *klass)
-{
-  G_OBJECT_CLASS (klass)->finalize = test_manual_timer_finalize;
-}
-
-static void
-test_manual_timer_init (TestManualTimer *self)
-{
-}
-
-static void test_manual_clock_iface_init (BroClockInterface *iface);
-G_DEFINE_FINAL_TYPE_WITH_CODE (TestManualClock, test_manual_clock, G_TYPE_OBJECT,
-                               G_IMPLEMENT_INTERFACE (BRO_TYPE_CLOCK, test_manual_clock_iface_init))
-
-static BroInstant
-manual_now (BroClock *clock)
-{
-  TestManualClock *self = TEST_MANUAL_CLOCK (clock);
-  BroInstant at;
-  g_mutex_lock (&self->lock);
-  at.unix_milliseconds = self->now_ms;
-  g_mutex_unlock (&self->lock);
-  return at;
-}
-
-static BroDuration
-manual_monotonic (BroClock *clock)
-{
-  TestManualClock *self = TEST_MANUAL_CLOCK (clock);
-  BroDuration d;
-  g_mutex_lock (&self->lock);
-  d.seconds = (double) (self->now_ms - START_MS) / 1000;
-  g_mutex_unlock (&self->lock);
-  return d;
-}
-
-static gboolean
-manual_sleep (BroClock *clock, BroDuration duration, BroCancellationToken *cancel, BroBroError **error)
-{
-  g_assert_not_reached ();
-}
-
-static BroTimerHandle *
-manual_timer (BroClock *clock, const BroTimerSchedule *schedule, BroTimerFunc handler, gpointer data, GDestroyNotify destroy)
-{
-  TestManualClock *self = TEST_MANUAL_CLOCK (clock);
-  TestManualTimer *t = g_object_new (TEST_TYPE_MANUAL_TIMER, NULL);
-  Pending *p = g_new0 (Pending, 1);
-  g_atomic_ref_count_init (&p->refs);
-  p->handler = handler;
-  p->data = data;
-  p->destroy = destroy;
-  g_mutex_lock (&self->lock);
-  p->order = self->made++;
-  if (schedule->kind == BRO_TIMER_SCHEDULE_AT)
-    p->due_ms = schedule->instant.unix_milliseconds;
-  else
-    {
-      p->interval_ms = MAX (1, (gint64) (schedule->interval.seconds * 1000 + 0.5));
-      p->due_ms = self->now_ms + p->interval_ms;
-    }
-  g_ptr_array_add (self->timers, pending_ref (p));
-  g_mutex_unlock (&self->lock);
-  t->clock = g_object_ref (self);
-  t->pending = p;
-  return BRO_TIMER_HANDLE (t);
-}
-
-static BroLocalTime
-manual_local_time (BroClock *clock, BroInstant instant)
-{
-  TestManualClock *self = TEST_MANUAL_CLOCK (clock);
-  gint64 seconds = instant.unix_milliseconds / 1000 - (instant.unix_milliseconds % 1000 < 0);
-  g_autoptr (GDateTime) t = NULL;
-  g_mutex_lock (&self->lock);
-  seconds += (gint64) self->utc_offset_minutes * 60;
-  g_mutex_unlock (&self->lock);
-  t = g_date_time_new_from_unix_utc (seconds);
-  return (BroLocalTime) { g_date_time_get_year (t), g_date_time_get_month (t), g_date_time_get_day_of_month (t),
-                          g_date_time_get_hour (t), g_date_time_get_minute (t), g_date_time_get_second (t) };
-}
-
-static void
-test_manual_clock_iface_init (BroClockInterface *iface)
-{
-  iface->now = manual_now;
-  iface->monotonic = manual_monotonic;
-  iface->sleep = manual_sleep;
-  iface->timer = manual_timer;
-  iface->local_time = manual_local_time;
-}
-
-static void
-test_manual_clock_finalize (GObject *object)
-{
-  TestManualClock *self = TEST_MANUAL_CLOCK (object);
-  g_ptr_array_unref (self->timers);
-  g_mutex_clear (&self->lock);
-  G_OBJECT_CLASS (test_manual_clock_parent_class)->finalize (object);
-}
-
-static void
-test_manual_clock_class_init (TestManualClockClass *klass)
-{
-  G_OBJECT_CLASS (klass)->finalize = test_manual_clock_finalize;
-}
-
-static void
-test_manual_clock_init (TestManualClock *self)
-{
-  g_mutex_init (&self->lock);
-  self->now_ms = START_MS;
-  self->timers = g_ptr_array_new_with_free_func ((GDestroyNotify) pending_unref);
-}
-
-/* Fires each due timer in due order (ties in the order they were made), with the time set to its due time, then
- * calls @settle. */
-static void
-manual_advance (TestManualClock *self, gint64 ms, void (*settle) (gpointer), gpointer settle_data)
-{
-  gint64 target;
-  g_mutex_lock (&self->lock);
-  target = self->now_ms + ms;
-  g_mutex_unlock (&self->lock);
-  for (;;)
-    {
-      Pending *next = NULL;
-      g_mutex_lock (&self->lock);
-      for (guint i = self->timers->len; i > 0; i--)
-        if (((Pending *) g_ptr_array_index (self->timers, i - 1))->cancelled)
-          g_ptr_array_remove_index (self->timers, i - 1);
-      for (guint i = 0; i < self->timers->len; i++)
-        {
-          Pending *p = g_ptr_array_index (self->timers, i);
-          if (p->due_ms <= target && (!next || p->due_ms < next->due_ms || (p->due_ms == next->due_ms && p->order < next->order)))
-            next = p;
-        }
-      if (!next)
-        {
-          self->now_ms = target;
-          g_mutex_unlock (&self->lock);
-          return;
-        }
-      pending_ref (next);
-      self->now_ms = MAX (self->now_ms, next->due_ms);
-      if (next->interval_ms > 0)
-        next->due_ms += next->interval_ms;
-      else
-        g_ptr_array_remove (self->timers, next);
-      g_mutex_unlock (&self->lock);
-      next->handler (next->data);
-      pending_unref (next);
-      if (settle)
-        settle (settle_data);
-    }
-}
 
 /* ---- helpers ------------------------------------------------------------------------------------------------- */
 
@@ -360,7 +120,7 @@ run_bus_ops (BusHarness *h, BroJsonValue *ops)
           g_ptr_array_add (h->published, bro_event_bus_publish (h->bus, t, data ? data : empty));
         }
       else if (strcmp (name, "advance") == 0)
-        manual_advance (h->clock, bro_json_value_get_integer (arg, 0), NULL, NULL);
+        test_manual_clock_advance (h->clock, bro_json_value_get_integer (arg, 0), NULL, NULL);
       else if (strcmp (name, "subscribe") == 0)
         {
           const char *as = bro_json_value_get_string (bro_json_value_member (arg, "as"), "");
@@ -635,7 +395,7 @@ run_clock_ops (World *w, BroJsonValue *ops)
       const char *name = op_name (op, &arg);
       gboolean here = bro_engine_executor_is_current (w->executor);
       if (strcmp (name, "advance") == 0)
-        manual_advance (w->clock, bro_json_value_get_integer (arg, 0), settle, w);
+        test_manual_clock_advance (w->clock, bro_json_value_get_integer (arg, 0), settle, w);
       else if (strcmp (name, "onExecutor") == 0)
         on_executor (w, arg);
       else if (strcmp (name, "utcOffsetMinutes") == 0)
@@ -670,7 +430,7 @@ run_clock_ops (World *w, BroJsonValue *ops)
           if (at)
             {
               schedule.kind = BRO_TIMER_SCHEDULE_AT;
-              schedule.instant.unix_milliseconds = START_MS + bro_json_value_get_integer (at, 0);
+              schedule.instant.unix_milliseconds = TEST_MANUAL_CLOCK_START_MS + bro_json_value_get_integer (at, 0);
             }
           else
             {
@@ -768,7 +528,7 @@ coalescer_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrA
       BroJsonValue *arg;
       const char *name = op_name (bro_json_value_at (ops, i), &arg);
       if (strcmp (name, "advance") == 0)
-        manual_advance (w.clock, bro_json_value_get_integer (arg, 0), settle, &w);
+        test_manual_clock_advance (w.clock, bro_json_value_get_integer (arg, 0), settle, &w);
       else
         coalescer_on_executor (&w, name, arg);
     }

@@ -9,8 +9,8 @@ namespace Bromelia.Engine;
 /// <summary>Step 6 (plan §20.1): decides what the job makes and appends the rest of its steps.
 /// <list type="bullet">
 /// <item>The profile: ProfileResolver.resolve with the identity's facts (name, label, format code, kind), the drive
-/// entry and whether the rip is automatic; a session's choices are its session layer (the chosen profile's fields,
-/// then the chosen library).</item>
+/// entry and whether the rip is automatic; the chosen profile and library are its session layer (the chosen profile's
+/// fields, then the chosen library): a session's choices, else the request's options.profile and options.library.</item>
 /// <item>The mode: the request's (options.mode); MKV when titles were chosen by hand; else ModeChooser by the disc's
 /// format.</item>
 /// <item>A mode that makes MKV files needs the listing (disc.noInformation) and titles: the session's ticked titles
@@ -47,8 +47,10 @@ public sealed class PlanStep : IStep
 
         var label = listing is { Name.Length: > 0 } l ? l.Name : StepSources.Label(request.Source, drive);
         var facts = new RuleFacts(identity.Name, label, identity.FormatCode.Text, EnumWire.Name(identity.Kind), Automatic: job.Request.Automatic);
-        var profile = ProfileResolver.Resolve(context.Config, configId, facts, SessionLayer(context.Config, choices));
-        var profileId = choices?.Profile ?? profile.Trace.LastOrDefault(t => t.Layer == ResolveLayer.DriveProfile)?.Id
+        var chosenProfile = choices?.Profile ?? job.Request.Options?["profile"]?.AsString;
+        var chosenLibrary = choices?.Library ?? job.Request.Options?["library"]?.AsString;
+        var profile = ProfileResolver.Resolve(context.Config, configId, facts, StepSources.Layer(context.Config, chosenProfile, chosenLibrary));
+        var profileId = chosenProfile ?? profile.Trace.LastOrDefault(t => t.Layer == ResolveLayer.DriveProfile)?.Id
             ?? profile.Trace.First(t => t.Layer == ResolveLayer.DefaultProfile).Id ?? "default";
         bool byHand = choices != null && choices.Titles.Any(t => t.Selected);
         var mode = EnumWire.Parse<RipMode>(job.Request.Options?["mode"]?.AsString)
@@ -135,22 +137,6 @@ public sealed class PlanStep : IStep
         if (mode != RipMode.InfoOnly && profile.Profile["archive"]?["verifyRips"]?.AsBool != false) steps.Add(StepKind.VerifyRips);
         steps.AddRange(new[] { StepKind.Name, StepKind.Seal, StepKind.Commit, StepKind.Notify });
         return new StepReport(PlanOutput.Encode(output), AppendSteps: steps, Plan: plan);
-    }
-
-    /// <summary>The session's choices as the resolver's session layer: the chosen profile's fields, then the chosen
-    /// library. Null without a session (or with nothing chosen).</summary>
-    static JsonValue? SessionLayer(Config config, SessionChoices? choices)
-    {
-        if (choices == null) return null;
-        var members = new List<KeyValuePair<string, JsonValue>>();
-        if (choices.Profile is { } id && Config.Profiles(config).FirstOrDefault(p => p.Id == id) is { Json: JsonValue.Object o })
-            members.AddRange(o.Members.Where(m => m.Key is not ("id" or "name")));
-        if (choices.Library is { } library)
-        {
-            members.RemoveAll(m => m.Key == "library");
-            members.Add(new("library", JsonValue.Of(library)));
-        }
-        return members.Count > 0 ? new JsonValue.Object(members) : null;
     }
 
     static string ProfileName(Config config, string profileId) =>

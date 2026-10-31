@@ -16,3 +16,16 @@ bro_scheduler_limits_free (BroSchedulerLimits *limits)
 {
   g_free (limits);
 }
+
+BroSchedulerLimits *
+bro_scheduler_limits_of (const BroConfig *config, int cores)
+{
+  BroJsonValue *limits = bro_json_value_member (config->document, "limits");
+  BroSchedulerLimits *l = g_new0 (BroSchedulerLimits, 1);
+  int cpu = (int) bro_json_value_get_integer (bro_json_value_member (limits, "cpu"), 0);
+  l->acquisitions = (int) bro_json_value_get_integer (bro_json_value_member (limits, "acquisitions"), 0);
+  l->processing = (int) bro_json_value_get_integer (bro_json_value_member (limits, "processing"), 1);
+  l->cpu = cpu > 0 ? cpu : MAX (1, cores / 2);
+  l->io_per_volume = (int) bro_json_value_get_integer (bro_json_value_member (limits, "ioPerVolume"), 2);
+  return l;
+}

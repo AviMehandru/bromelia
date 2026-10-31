@@ -1,8 +1,10 @@
 /* bro-step-sources.c */
 #include "bro-step-sources.h"
+#include "bro-config.h"
 #include "bro-message-code.h"
 #include "bro-profile-resolver.h"
 #include "bro-source-resolver.h"
+#include "bro-steps-private.h"
 
 #include <string.h>
 
@@ -64,7 +66,38 @@ BroEffectiveProfile *
 bro_step_sources_profile (const BroStepContext *context, const char *config_id)
 {
   BroRuleFacts facts = { "", "", "", NULL, NULL, NULL, context->job->request->automatic };
-  return bro_profile_resolver_resolve (context->config, config_id, &facts, NULL);
+  g_autoptr (BroJsonValue) layer = _bro_step_sources_layer (
+      context->config, bro_json_value_get_string (bro_json_value_member (context->job->request->options, "profile"), NULL), NULL);
+  return bro_profile_resolver_resolve (context->config, config_id, &facts, layer);
+}
+
+BroJsonValue *
+_bro_step_sources_layer (const BroConfig *config, const char *profile_id, const char *library_id)
+{
+  BroJsonValue *layer = bro_json_value_new_object ();
+  if (profile_id)
+    {
+      g_autoptr (GPtrArray) profiles = bro_config_profiles (config);
+      for (guint i = 0; i < profiles->len; i++)
+        {
+          const BroJsonValue *json = ((BroProfile *) g_ptr_array_index (profiles, i))->json;
+          if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (json, "id"), NULL), profile_id) != 0
+              || json->kind != BRO_JSON_VALUE_OBJECT)
+            continue;
+          for (guint k = 0; k < json->keys->len; k++)
+            {
+              const char *key = json->keys->pdata[k];
+              if (strcmp (key, "id") != 0 && strcmp (key, "name") != 0 && !(library_id && strcmp (key, "library") == 0))
+                bro_json_value_set (layer, key, bro_json_value_ref (json->items->pdata[k]));
+            }
+          break;
+        }
+    }
+  if (library_id)
+    bro_json_value_set (layer, "library", bro_json_value_new_string (library_id));
+  if (layer->keys->len == 0)
+    g_clear_pointer (&layer, bro_json_value_unref);
+  return layer;
 }
 
 BroRipMode

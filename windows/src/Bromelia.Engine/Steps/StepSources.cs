@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Bromelia.Domain;
 using Bromelia.Foundation;
 
@@ -28,9 +30,26 @@ public static class StepSources
         _ => throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.InternalUnexpected))),
     };
 
-    /// <summary>The profile before Plan: the drive entry's, with no facts yet but whether the rip is automatic.</summary>
+    /// <summary>The profile before Plan: the drive entry's, with no facts yet but whether the rip is automatic, and the
+    /// request's options.profile above it (as Plan has it).</summary>
     public static EffectiveProfile Profile(StepContext context, string? configId) =>
-        ProfileResolver.Resolve(context.Config, configId, new RuleFacts("", "", "", Automatic: context.Job.Request.Automatic), null);
+        ProfileResolver.Resolve(context.Config, configId, new RuleFacts("", "", "", Automatic: context.Job.Request.Automatic),
+            Layer(context.Config, context.Job.Request.Options?["profile"]?.AsString, null));
+
+    /// <summary>A chosen profile and library as the resolver's session layer: the profile's fields (an id that isn't
+    /// configured adds none), then the library. Null with nothing chosen.</summary>
+    internal static JsonValue? Layer(Config config, string? profileId, string? libraryId)
+    {
+        var members = new List<KeyValuePair<string, JsonValue>>();
+        if (profileId != null && Config.Profiles(config).FirstOrDefault(p => p.Id == profileId) is { Json: JsonValue.Object o })
+            members.AddRange(o.Members.Where(m => m.Key is not ("id" or "name")));
+        if (libraryId != null)
+        {
+            members.RemoveAll(m => m.Key == "library");
+            members.Add(new("library", JsonValue.Of(libraryId)));
+        }
+        return members.Count > 0 ? new JsonValue.Object(members) : null;
+    }
 
     /// <summary>The mode before Plan: the request's (options.mode), else the profile's mode.default.</summary>
     public static RipMode BaseMode(JobSnapshot job, EffectiveProfile profile) =>

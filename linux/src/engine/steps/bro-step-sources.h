@@ -22,7 +22,7 @@ BroDriveLocation *bro_step_sources_drive (BroDriveLookup *lookup, const char *dr
 BroMakemkvSource *bro_step_sources_makemkv (const BroDiscSource *source, BroDriveLookup *lookup, BroBroError **error);
 
 /* The profile before Plan: the drive entry's (@config_id nullable), with no facts yet but whether the rip is
- * automatic. */
+ * automatic, and the request's options.profile above it (as Plan has it). */
 BroEffectiveProfile *bro_step_sources_profile (const BroStepContext *context, const char *config_id);
 
 /* The mode before Plan: the request's (options.mode), else the profile's mode.default. */

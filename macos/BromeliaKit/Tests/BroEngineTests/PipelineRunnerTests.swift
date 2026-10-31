@@ -2,6 +2,7 @@ import BroDomain
 import BroEngine
 import BroFoundation
 import BroPorts
+import BroTestKit
 import BroTestSupport
 import Foundation
 import Testing
@@ -496,23 +497,6 @@ final class PipelineHarness {
             e.data["queue"]!.string! + ": " + e.data["order"]!.array!.map { name($0.string!) }.joined(separator: " ")
         }
     }
-}
-
-/// Ids that count: 00000000-0000-4000-8000-000000000001, … after the given jobs'.
-final class CountingIds: IdGenerator, @unchecked Sendable {
-    private let lock = NSLock()
-    private var n: Int64
-
-    init(_ given: Int64) { n = given }
-
-    static func id(_ n: Int64) -> Id {
-        let hex = String(n, radix: 16)
-        return Id("00000000-0000-4000-8000-" + String(repeating: "0", count: 12 - hex.count) + hex)
-    }
-
-    func next() -> Id { lock.withLock { n += 1; return CountingIds.id(n) } }
-
-    func peek() -> Id { lock.withLock { CountingIds.id(n + 1) } }
 }
 
 /// shared/fixtures/engine/pipeline-runner.cases.json, job-service.cases.json (the same harness with a JobService over the

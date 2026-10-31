@@ -7,8 +7,8 @@ import Foundation
 /// `advance` fires each due timer in due order (ties in the order they were made), with the time set to its due time,
 /// then awaits `settle`. Its local time is UTC plus `utcOffsetMinutes` (0 unless set; no daylight saving time). Safe
 /// to use from any thread.
-final class ManualClock: Clock, @unchecked Sendable {
-    static let startMs: Int64 = 1_790_971_200_000
+public final class ManualClock: Clock, @unchecked Sendable {
+    public static let startMs: Int64 = 1_790_971_200_000
 
     private final class Pending: TimerHandle, @unchecked Sendable {
         let lock = NSLock()
@@ -28,20 +28,20 @@ final class ManualClock: Clock, @unchecked Sendable {
     private var offsetMinutes = 0
 
     /// The local time's fixed offset from UTC.
-    var utcOffsetMinutes: Int {
+    public var utcOffsetMinutes: Int {
         get { lock.withLock { offsetMinutes } }
         set { lock.withLock { offsetMinutes = newValue } }
     }
 
-    func now() -> Instant { lock.withLock { Instant(unixMilliseconds: nowMs) } }
+    public func now() -> Instant { lock.withLock { Instant(unixMilliseconds: nowMs) } }
 
-    func monotonic() -> Duration { lock.withLock { Duration(seconds: Double(nowMs - ManualClock.startMs) / 1000) } }
+    public func monotonic() -> Duration { lock.withLock { Duration(seconds: Double(nowMs - ManualClock.startMs) / 1000) } }
 
-    func sleep(_ duration: Duration, cancel: CancellationToken) async throws(BroError) {
+    public func sleep(_ duration: Duration, cancel: CancellationToken) async throws(BroError) {
         fatalError("not used by the engine")
     }
 
-    func localTime(_ instant: Instant) -> LocalTime {
+    public func localTime(_ instant: Instant) -> LocalTime {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: utcOffsetMinutes * 60)!
         let seconds = instant.unixMilliseconds >= 0 ? instant.unixMilliseconds / 1000 : (instant.unixMilliseconds - 999) / 1000
@@ -49,7 +49,7 @@ final class ManualClock: Clock, @unchecked Sendable {
         return LocalTime(year: c.year!, month: c.month!, day: c.day!, hour: c.hour!, minute: c.minute!, second: c.second!)
     }
 
-    func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle {
+    public func timer(_ schedule: TimerSchedule, handler: @escaping @Sendable () -> Void) -> any TimerHandle {
         lock.withLock {
             let t = Pending()
             t.handler = handler
@@ -66,6 +66,11 @@ final class ManualClock: Clock, @unchecked Sendable {
         }
     }
 
+    public init() {}
+
+    /// The timers not cancelled yet.
+    public func pending() -> Int { lock.withLock { timers.filter { !$0.cancelled }.count } }
+
     /// The next due timer's handler, with the time moved to its due time; nil (and the time at target) when none.
     private func nextDue(before target: Int64) -> (@Sendable () -> Void)? {
         lock.withLock {
@@ -81,7 +86,7 @@ final class ManualClock: Clock, @unchecked Sendable {
     }
 
     /// Fires the due timers, awaiting `settle` after each.
-    func advance(_ ms: Int64, settle: () async -> Void) async {
+    public func advance(_ ms: Int64, settle: () async -> Void) async {
         let target = lock.withLock { nowMs + ms }
         while let handler = nextDue(before: target) {
             handler()
@@ -90,13 +95,8 @@ final class ManualClock: Clock, @unchecked Sendable {
     }
 
     /// Fires the due timers without waiting for anything (on the executor).
-    func advanceNow(_ ms: Int64) {
+    public func advanceNow(_ ms: Int64) {
         let target = lock.withLock { nowMs + ms }
         while let handler = nextDue(before: target) { handler() }
     }
-}
-
-final class Box<T>: @unchecked Sendable {
-    var value: T
-    init(_ value: T) { self.value = value }
 }

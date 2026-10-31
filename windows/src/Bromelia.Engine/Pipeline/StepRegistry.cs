@@ -15,4 +15,11 @@ public sealed class StepRegistry
     }
 
     public IStep? Step(StepKind kind) => _steps.GetValueOrDefault(kind);
+
+    /// <summary>The phase 3 steps; both composition roots use it, so their lists can't drift.</summary>
+    public static StepRegistry Standard() => new(new IStep[]
+    {
+        new AwaitMediaStep(), new ProbeStep(), new ReconcileStep(), new IdentifyStep(), new PlanStep(), new DecideStep(), new AcquireStep(),
+        new ReleaseStep(), new VerifyRipsStep(), new NameStep(), new SealStep(), new CommitStep(), new NotifyStep(), new KeepApartStep(),
+    });
 }

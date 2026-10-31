@@ -1,0 +1,2446 @@
+{
+  "description": "LocalEngine (plan §13.1, §15.1; Phase 3 session G, decisions 166-170, 174, 176, 186-) over TestCompositionRoot: the real services, StepRegistry.standard() and LocalEngine over the test kit's fakes. The world: a manual clock at 2026-10-02T20:00:00.000Z; files in memory, every volume 1 TB free; the data folder /root/data (config.json there); SQLite in a temporary folder (restart reopens it); the library lib at /root/library with its marker; the configuration {\"version\": 3, \"libraries\": [{\"id\": \"lib\", \"name\": \"Library\", \"path\": \"/root/library\"}]} unless given.config replaces it; makemkvcon at /tools/makemkvcon and mkvmerge at /tools/mkvmerge unless given.makemkvcon/mkvmerge is false (given.makemkvVersion is makemkvcon's version); EngineFacts {version test, pid 4242, platform macos, dataDir /root/data, cores 8}. Drives: the OS lists /dev/disk4 (HL-DT-ST BD-RE WH16NS60, mounted at /Volumes/MOVIE_DISC) and /dev/disk6 (MATSHITA DVD-R UJ8C2), video unless given.content {device: audio|data}; MakeMKV's drive scan (makemkvcon info disc:9999) prints given.scan, else the BD drive drv-86920bcfd062b640 with MOVIE_DISC and the DVD drive drv-de63b28f402c2eb5 empty. makemkvcon info prints the generated listing of {volume MOVIE_DISC, type bluray, one title 1:40:00 with 12 chapters, 30 GB}; other runs print nothing and exit 0. given.holds lists the makemkvcon commands (info, mkv, backup) that run until they are stopped; given.stopTakes (seconds) is how long a stopped process takes to end. given.slowMarkerRead makes every whole read of a library marker take 0.3 s of real time, given.slowDriveScan the first drive scan. given.jobs are stored before the first start (ids 00000000-0000-4000-8000-100000000001 ...): {name, title, state, driveId, mediaGeneration, automatic, rows [{kind, state}]}, plus given.finishedJobs finished jobs created before them; new jobs count from 00000000-0000-4000-8000-000000000001. given.folders and markers {folder: library id} are made in memory. expect.steps, in order: start; stop (the test root's); restart (stop, build on the same database and files, start); settle (until the executor's activity is the held processes'); call {call: operation, args, as (names the job a JobDto result is), expect (a subset of the result's JSON; arrays match in length), error {code, params}} where a job argument is a job's name and {name} in strings is its id; feed {after, jobLog [names]} as; next (a feed: its next event, expect [subset or null]; seqIsLast: the event's seq is the bus's last; jobCount; firstJob); drain (a feed: every event until none comes, jobLogsOf: the jobs whose jobLog events came); seq (names the bus's last seq); stopBegins (the root's stop, not awaited, then 50 ms) and stopEnds (awaits it); monitoring (whether the fake device monitor is started); timers (the manual clock's timers not cancelled); fail {op, path} (that FileSystem operation fails with fs.failed {operation, path, reason injected}); unfail; unmount / mount (a path: the test root's); limitsOf {config, cores} (SchedulerLimits.of); engineLog [the engine log's lines {code, params}, exactly]; processes [the makemkvcon runs other than drive scans, as 'info <source>' or 'mkv <source>']; trayCalls [the fake drives' tray calls]; files {exist, absent}; stored {job: subset of its stored record}; released {executorStopped, processesRunning} (what the root's release saw); systemSeqIsLast (system().eventSeq is the bus's last).",
+  "functions": [
+    "LocalEngine.start",
+    "LocalEngine.startJob",
+    "EngineAPI.events",
+    "EventFeed.next",
+    "SchedulerLimits.of",
+    "StepRegistry.standard"
+  ],
+  "cases": [
+    {
+      "id": "start-logs-the-recovery-summary-of-unfinished-jobs",
+      "from": [
+        "rearchitecture-plan §15.1 recoveryService.recover",
+        "G1 owner answer 3 (the engine log)"
+      ],
+      "given": {
+        "holds": [
+          "info"
+        ],
+        "jobs": [
+          {
+            "name": "old",
+            "title": "MOVIE_DISC",
+            "state": "running",
+            "driveId": "drv-86920bcfd062b640",
+            "mediaGeneration": 1,
+            "automatic": false,
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "running"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "engineLog": [
+              {
+                "code": "recovery.summary",
+                "params": {
+                  "count": 1
+                }
+              }
+            ]
+          },
+          {
+            "call": "job",
+            "args": [
+              "old"
+            ],
+            "expect": {
+              "state": "running",
+              "driveId": "drv-86920bcfd062b640"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "start-logs-nothing-when-no-job-was-left-unfinished",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "engineLog": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "start-runs-requeued-jobs-once-the-libraries-are-checked",
+      "from": [
+        "G1 decision 169: a requeued job doesn't block for a moment on a library that is online"
+      ],
+      "given": {
+        "holds": [
+          "mkv"
+        ],
+        "slowMarkerRead": true,
+        "jobs": [
+          {
+            "name": "old",
+            "title": "MOVIE_DISC",
+            "state": "running",
+            "driveId": "drv-86920bcfd062b640",
+            "mediaGeneration": 1,
+            "automatic": false,
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "running"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "old"
+            ],
+            "expect": {
+              "state": "running",
+              "steps": [
+                {
+                  "kind": "probe",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "identify",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "plan",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "acquire",
+                  "state": "running"
+                },
+                {
+                  "kind": "release",
+                  "state": "pending"
+                },
+                {
+                  "kind": "verifyRips",
+                  "state": "pending"
+                },
+                {
+                  "kind": "name",
+                  "state": "pending"
+                },
+                {
+                  "kind": "seal",
+                  "state": "pending"
+                },
+                {
+                  "kind": "commit",
+                  "state": "pending"
+                },
+                {
+                  "kind": "notify",
+                  "state": "pending"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "start-reads-the-drives-before-it-runs-requeued-jobs",
+      "from": [
+        "G1 decision 169: by then the drives are known"
+      ],
+      "given": {
+        "holds": [
+          "info"
+        ],
+        "slowDriveScan": true,
+        "jobs": [
+          {
+            "name": "old",
+            "title": "MOVIE_DISC",
+            "state": "running",
+            "driveId": "drv-86920bcfd062b640",
+            "mediaGeneration": 1,
+            "automatic": false,
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "running"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "old"
+            ],
+            "expect": {
+              "state": "running"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "start-gives-the-scheduler-the-configurations-limits",
+      "from": [
+        "rearchitecture-plan §15.1, §21 (limits.acquisitions)"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/root/library"
+            }
+          ],
+          "limits": {
+            "acquisitions": 1
+          }
+        },
+        "holds": [
+          "mkv"
+        ],
+        "scan": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE_DISC\",\"/dev/rdisk4\"",
+          "DRV:1,2,999,1,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"SECOND_DISC\",\"/dev/rdisk6\""
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "a"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-de63b28f402c2eb5",
+              {}
+            ],
+            "as": "b"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "a"
+            ],
+            "expect": {
+              "state": "running"
+            }
+          },
+          {
+            "call": "job",
+            "args": [
+              "b"
+            ],
+            "expect": {
+              "state": "waitingForResources"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "start-follows-the-limits-as-the-configuration-changes",
+      "from": [
+        "rearchitecture-plan §15.7 scheduler.updateLimits on configChanged"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/root/library"
+            }
+          ],
+          "limits": {
+            "acquisitions": 1
+          }
+        },
+        "holds": [
+          "mkv"
+        ],
+        "scan": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE_DISC\",\"/dev/rdisk4\"",
+          "DRV:1,2,999,1,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"SECOND_DISC\",\"/dev/rdisk6\""
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "a"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-de63b28f402c2eb5",
+              {}
+            ],
+            "as": "b"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "updateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ],
+                "limits": {
+                  "acquisitions": 0
+                }
+              },
+              0
+            ],
+            "expect": {
+              "version": 1
+            }
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "b"
+            ],
+            "expect": {
+              "state": "running"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-failed-configuration-load-starts-nothing",
+      "from": [
+        "G1 decision 169 (decision 24: a failed load fails start)"
+      ],
+      "given": {
+        "configUnreadable": true,
+        "jobs": [
+          {
+            "name": "old",
+            "title": "MOVIE_DISC",
+            "state": "running",
+            "driveId": "drv-86920bcfd062b640",
+            "mediaGeneration": 1,
+            "automatic": false,
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "running"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {},
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "read",
+                "path": "/root/data/config.json",
+                "reason": "injected"
+              }
+            }
+          },
+          {
+            "engineLog": []
+          },
+          {
+            "processes": []
+          },
+          {
+            "call": "drives",
+            "args": [],
+            "expect": []
+          },
+          {
+            "call": "job",
+            "args": [
+              "old"
+            ],
+            "expect": {
+              "state": "running"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "limits-of-cpu-zero-are-half-the-cores",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "limitsOf": {
+              "config": {
+                "version": 3
+              },
+              "cores": 8
+            },
+            "expect": {
+              "acquisitions": 0,
+              "processing": 1,
+              "cpu": 4,
+              "ioPerVolume": 2
+            }
+          },
+          {
+            "limitsOf": {
+              "config": {
+                "version": 3,
+                "limits": {
+                  "cpu": 0
+                }
+              },
+              "cores": 1
+            },
+            "expect": {
+              "acquisitions": 0,
+              "processing": 1,
+              "cpu": 1,
+              "ioPerVolume": 2
+            }
+          },
+          {
+            "limitsOf": {
+              "config": {
+                "version": 3,
+                "limits": {
+                  "acquisitions": 2,
+                  "processing": 3,
+                  "cpu": 6,
+                  "ioPerVolume": 4
+                }
+              },
+              "cores": 2
+            },
+            "expect": {
+              "acquisitions": 2,
+              "processing": 3,
+              "cpu": 6,
+              "ioPerVolume": 4
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "stop-leaves-a-running-rip-to-recovery",
+      "from": [
+        "G1 owner answer 2: stop leaves the store as a killed engine would",
+        "rearchitecture-plan §20.4"
+      ],
+      "given": {
+        "holds": [
+          "mkv"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "j"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "j"
+            ],
+            "expect": {
+              "state": "running"
+            }
+          },
+          {
+            "stop": {}
+          },
+          {
+            "restart": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "engineLog": [
+              {
+                "code": "recovery.summary",
+                "params": {
+                  "count": 1
+                }
+              }
+            ]
+          },
+          {
+            "call": "job",
+            "args": [
+              "j"
+            ],
+            "expect": {
+              "state": "finished",
+              "outcome": "interrupted",
+              "error": {
+                "code": "recovery.interrupted",
+                "params": {
+                  "step": "acquire"
+                }
+              },
+              "steps": [
+                {
+                  "kind": "probe",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "identify",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "plan",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "acquire",
+                  "state": "interrupted"
+                },
+                {
+                  "kind": "release",
+                  "state": "pending"
+                },
+                {
+                  "kind": "verifyRips",
+                  "state": "pending"
+                },
+                {
+                  "kind": "name",
+                  "state": "pending"
+                },
+                {
+                  "kind": "seal",
+                  "state": "pending"
+                },
+                {
+                  "kind": "commit",
+                  "state": "pending"
+                },
+                {
+                  "kind": "notify",
+                  "state": "pending"
+                }
+              ]
+            }
+          },
+          {
+            "files": {
+              "exist": [
+                "/root/library/.bromelia/staging/{j}"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "stop-during-probe-leaves-the-job-to-be-read-again",
+      "given": {
+        "holds": [
+          "info"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "j"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "stop": {}
+          },
+          {
+            "restart": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "engineLog": [
+              {
+                "code": "recovery.summary",
+                "params": {
+                  "count": 1
+                }
+              }
+            ]
+          },
+          {
+            "call": "job",
+            "args": [
+              "j"
+            ],
+            "expect": {
+              "state": "running",
+              "steps": [
+                {
+                  "kind": "probe",
+                  "state": "running"
+                },
+                {
+                  "kind": "identify",
+                  "state": "pending"
+                },
+                {
+                  "kind": "plan",
+                  "state": "pending"
+                }
+              ]
+            }
+          },
+          {
+            "call": "jobLog",
+            "args": [
+              "j",
+              0
+            ],
+            "includes": [
+              {
+                "code": "recovery.requeued"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "stop-leaves-queued-jobs-queued",
+      "given": {
+        "holds": [
+          "info"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "a"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "startJob",
+            "args": [
+              {
+                "kind": "videoDisc",
+                "title": "Second",
+                "driveId": "drv-86920bcfd062b640"
+              }
+            ],
+            "as": "b"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "b"
+            ],
+            "expect": {
+              "state": "waitingForResources"
+            }
+          },
+          {
+            "stop": {}
+          },
+          {
+            "restart": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "engineLog": [
+              {
+                "code": "recovery.summary",
+                "params": {
+                  "count": 2
+                }
+              }
+            ]
+          },
+          {
+            "call": "job",
+            "args": [
+              "a"
+            ],
+            "expect": {
+              "state": "running"
+            }
+          },
+          {
+            "call": "job",
+            "args": [
+              "b"
+            ],
+            "expect": {
+              "state": "waitingForResources"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "after-stop-every-call-answers-server-stopping",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "stop": {}
+          },
+          {
+            "call": "system",
+            "args": [],
+            "error": {
+              "code": "server.stopping"
+            }
+          },
+          {
+            "call": "drives",
+            "args": [],
+            "error": {
+              "code": "server.stopping"
+            }
+          },
+          {
+            "call": "jobs",
+            "args": [
+              {}
+            ],
+            "error": {
+              "code": "server.stopping"
+            }
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/x",
+              "X"
+            ],
+            "error": {
+              "code": "server.stopping"
+            }
+          },
+          {
+            "call": "stop",
+            "args": [],
+            "error": {
+              "code": "server.stopping"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "stop-releases-the-store-once-the-jobs-have-settled",
+      "from": [
+        "G1 decision 170 step 4-5",
+        "Session B note: the C engine must settle every live job before it stops"
+      ],
+      "given": {
+        "holds": [
+          "info"
+        ],
+        "stopTakes": 0.3
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ]
+          },
+          {
+            "settle": {}
+          },
+          {
+            "stopBegins": {}
+          },
+          {
+            "call": "system",
+            "args": [],
+            "error": {
+              "code": "server.stopping"
+            }
+          },
+          {
+            "stopEnds": {}
+          },
+          {
+            "released": {
+              "executorStopped": true,
+              "processesRunning": 0
+            }
+          },
+          {
+            "monitoring": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "stop-closes-the-event-feeds",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "feed": {},
+            "as": "f"
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "snapshot"
+              }
+            ]
+          },
+          {
+            "timers": 2
+          },
+          {
+            "stop": {}
+          },
+          {
+            "next": "f",
+            "expect": [
+              null
+            ]
+          },
+          {
+            "timers": 0
+          },
+          {
+            "monitoring": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-makes-a-manual-job-on-the-drives-disc",
+      "from": [
+        "rearchitecture-plan §13.1 rip(driveId, options)"
+      ],
+      "given": {
+        "holds": [
+          "info"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {
+                "mode": "backup",
+                "profile": "default"
+              }
+            ],
+            "expect": {
+              "kind": "videoDisc",
+              "state": "queued",
+              "driveId": "drv-86920bcfd062b640",
+              "title": "MOVIE_DISC",
+              "automatic": false
+            },
+            "as": "j"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "stored": {
+              "j": {
+                "mediaGeneration": 1,
+                "request": {
+                  "kind": "videoDisc",
+                  "driveId": "drv-86920bcfd062b640",
+                  "mediaGeneration": 1,
+                  "automatic": false,
+                  "options": {
+                    "mode": "backup",
+                    "profile": "default"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-of-an-unknown-drive-is-drive-not-found",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-0000000000000000",
+              {}
+            ],
+            "error": {
+              "code": "drive.notFound",
+              "params": {
+                "driveId": "drv-0000000000000000"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-of-a-drive-that-isnt-connected-is-drive-not-found",
+      "given": {
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/root/library"
+            }
+          ],
+          "drives": [
+            {
+              "id": "gone",
+              "name": "Old drive",
+              "match": {
+                "driveName": "BD-RE GONE 1.00"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-a987c25d7c68984b",
+              {}
+            ],
+            "error": {
+              "code": "drive.notFound",
+              "params": {
+                "driveId": "drv-a987c25d7c68984b"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-of-an-empty-drive-is-drive-no-disc",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-de63b28f402c2eb5",
+              {}
+            ],
+            "error": {
+              "code": "drive.noDisc"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-of-a-busy-drive-is-drive-busy",
+      "given": {
+        "holds": [
+          "info"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ]
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "error": {
+              "code": "drive.busy"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-of-an-audio-disc-is-disc-not-video",
+      "given": {
+        "content": {
+          "/dev/rdisk4": "audio"
+        }
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "error": {
+              "code": "disc.notVideo",
+              "params": {
+                "drive": "HL-DT-ST BD-RE WH16NS60"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-of-chosen-titles-is-session-not-open",
+      "from": [
+        "G1 decision 166: titles need SessionService"
+      ],
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {
+                "titles": [
+                  0
+                ]
+              }
+            ],
+            "error": {
+              "code": "session.notOpen"
+            }
+          },
+          {
+            "call": "jobs",
+            "args": [
+              {}
+            ],
+            "expect": {
+              "total": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-into-a-folder-that-is-no-library-is-library-not-attached",
+      "from": [
+        "shared/scenarios/naming-one-off-folder.yaml"
+      ],
+      "given": {
+        "folders": [
+          "/root/OneOff"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {
+                "outputFolder": "/root/OneOff"
+              }
+            ],
+            "error": {
+              "code": "library.notAttached",
+              "params": {
+                "path": "/root/OneOff"
+              }
+            }
+          },
+          {
+            "call": "jobs",
+            "args": [
+              {}
+            ],
+            "expect": {
+              "total": 0
+            }
+          },
+          {
+            "files": {
+              "absent": [
+                "/root/OneOff/.bromelia-library"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rip-into-a-librarys-folder-uses-that-library",
+      "given": {
+        "holds": [
+          "info"
+        ],
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/root/library"
+            },
+            {
+              "id": "two",
+              "name": "Two",
+              "path": "/root/two"
+            }
+          ]
+        },
+        "markers": {
+          "/root/two": "two"
+        }
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {
+                "outputFolder": "/root/two/",
+                "library": "lib"
+              }
+            ],
+            "as": "j"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "stored": {
+              "j": {
+                "request": {
+                  "options": {
+                    "library": "two"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "start-job-runs-the-request",
+      "from": [
+        "G1 owner answer 5: LocalEngine.startJob"
+      ],
+      "given": {
+        "holds": [
+          "info"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "startJob",
+            "args": [
+              {
+                "kind": "videoDisc",
+                "title": "From an image",
+                "details": {
+                  "source": {
+                    "iso": "/root/movie.iso"
+                  }
+                }
+              }
+            ],
+            "expect": {
+              "kind": "videoDisc",
+              "state": "queued",
+              "title": "From an image"
+            },
+            "as": "j"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "j"
+            ],
+            "expect": {
+              "state": "running",
+              "steps": [
+                {
+                  "kind": "probe",
+                  "state": "running"
+                },
+                {
+                  "kind": "identify",
+                  "state": "pending"
+                },
+                {
+                  "kind": "plan",
+                  "state": "pending"
+                }
+              ]
+            }
+          },
+          {
+            "processes": [
+              "info iso:/root/movie.iso"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "attach-library-writes-the-marker-and-adds-it-to-the-configuration",
+      "given": {
+        "folders": [
+          "/root/Movies"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/Movies",
+              "My Movies"
+            ],
+            "expect": {
+              "id": "my-movies",
+              "name": "My Movies",
+              "path": "/root/Movies",
+              "online": true
+            }
+          },
+          {
+            "files": {
+              "exist": [
+                "/root/Movies/.bromelia-library"
+              ]
+            }
+          },
+          {
+            "call": "config",
+            "args": [],
+            "expect": {
+              "version": 1,
+              "doc": {
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  },
+                  {
+                    "id": "my-movies",
+                    "name": "My Movies",
+                    "path": "/root/Movies"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "call": "libraries",
+            "args": [],
+            "expect": [
+              {
+                "id": "lib",
+                "online": true
+              },
+              {
+                "id": "my-movies",
+                "online": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "attach-library-takes-the-folders-name-and-a-free-id",
+      "given": {
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/root/library"
+            },
+            {
+              "id": "movies",
+              "name": "Old",
+              "path": "/root/old"
+            }
+          ]
+        },
+        "folders": [
+          "/root/disk/Movies"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/disk/Movies",
+              ""
+            ],
+            "expect": {
+              "id": "movies-2",
+              "name": "Movies",
+              "online": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "attach-library-of-a-name-without-letters-is-library",
+      "given": {
+        "folders": [
+          "/root/x"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/x",
+              "***"
+            ],
+            "expect": {
+              "id": "library",
+              "name": "***"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "attach-library-of-an-attached-folder-is-already-attached",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/library",
+              "Again"
+            ],
+            "error": {
+              "code": "library.alreadyAttached",
+              "params": {
+                "path": "/root/library",
+                "library": "Library"
+              }
+            }
+          },
+          {
+            "call": "config",
+            "args": [],
+            "expect": {
+              "version": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-failed-configuration-save-takes-the-marker-back",
+      "from": [
+        "G1 decision 166: otherwise a retry answers library.alreadyAttached"
+      ],
+      "given": {
+        "folders": [
+          "/root/Movies"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "fail": {
+              "op": "write",
+              "path": "/root/data/config.json"
+            }
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/Movies",
+              "Movies"
+            ],
+            "error": {
+              "code": "config.saveFailed",
+              "params": {
+                "reason": "fs.failed"
+              }
+            }
+          },
+          {
+            "files": {
+              "absent": [
+                "/root/Movies/.bromelia-library"
+              ]
+            }
+          },
+          {
+            "call": "libraries",
+            "args": [],
+            "expect": [
+              {
+                "id": "lib"
+              }
+            ]
+          },
+          {
+            "unfail": {}
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/Movies",
+              "Movies"
+            ],
+            "expect": {
+              "id": "movies",
+              "online": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "system-gives-the-engines-status",
+      "given": {
+        "makemkvVersion": "1.18.1"
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "system",
+            "args": [],
+            "expect": {
+              "version": "test",
+              "engine": {
+                "pid": 4242,
+                "startedAt": "2026-10-02T20:00:00.000Z",
+                "platform": "macos",
+                "dataDir": "/root/data"
+              },
+              "makemkv": {
+                "found": true,
+                "version": "1.18.1",
+                "registration": "unknown"
+              },
+              "tools": [
+                {
+                  "tool": "makemkvcon",
+                  "found": true,
+                  "path": "/tools/makemkvcon",
+                  "version": "1.18.1"
+                },
+                {
+                  "tool": "mkvmerge",
+                  "found": true,
+                  "path": "/tools/mkvmerge"
+                }
+              ],
+              "problems": [],
+              "libraries": [
+                {
+                  "id": "lib",
+                  "online": true
+                }
+              ],
+              "configVersion": 0
+            }
+          },
+          {
+            "systemSeqIsLast": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "system-without-makemkv",
+      "given": {
+        "makemkvcon": false,
+        "mkvmerge": false
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "system",
+            "args": [],
+            "expect": {
+              "makemkv": {
+                "found": false,
+                "registration": "unknown"
+              },
+              "tools": [
+                {
+                  "tool": "makemkvcon",
+                  "found": false,
+                  "why": {
+                    "code": "tool.missing"
+                  }
+                },
+                {
+                  "tool": "mkvmerge",
+                  "found": false,
+                  "why": {
+                    "code": "tool.missing"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "events-start-with-a-snapshot-then-the-deltas",
+      "given": {
+        "holds": [
+          "info"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "feed": {},
+            "as": "f"
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "snapshot",
+                "seqIsLast": true,
+                "data": {
+                  "drives": [
+                    {
+                      "id": "drv-86920bcfd062b640"
+                    },
+                    {
+                      "id": "drv-de63b28f402c2eb5"
+                    }
+                  ],
+                  "sessions": [],
+                  "jobs": [],
+                  "queues": {
+                    "acquisition": [],
+                    "processing": [],
+                    "maintenance": []
+                  },
+                  "problems": [],
+                  "libraries": [
+                    {
+                      "id": "lib"
+                    }
+                  ],
+                  "configVersion": 0
+                }
+              }
+            ]
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "j"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "queueChanged",
+                "data": {
+                  "queue": "acquisition",
+                  "order": [
+                    "{j}"
+                  ]
+                }
+              },
+              {
+                "type": "jobChanged",
+                "data": {
+                  "job": {
+                    "id": "{j}",
+                    "state": "queued"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "events-replay-from-after",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "seq": "s"
+          },
+          {
+            "call": "updateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              },
+              0
+            ]
+          },
+          {
+            "feed": {
+              "after": "{s}"
+            },
+            "as": "f"
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "configChanged",
+                "data": {
+                  "version": 1
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "events-from-a-seq-the-engine-never-had-start-with-a-snapshot",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "feed": {
+              "after": 999999
+            },
+            "as": "f"
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "snapshot",
+                "seqIsLast": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "events-after-a-gap-send-a-new-snapshot",
+      "given": {
+        "streamCapacity": 2
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "feed": {},
+            "as": "f"
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "snapshot"
+              }
+            ]
+          },
+          {
+            "call": "updateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              },
+              0
+            ]
+          },
+          {
+            "call": "updateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              },
+              1
+            ]
+          },
+          {
+            "call": "updateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              },
+              2
+            ]
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "snapshot",
+                "seqIsLast": true,
+                "data": {
+                  "configVersion": 3
+                }
+              }
+            ]
+          },
+          {
+            "call": "updateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              },
+              3
+            ]
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "configChanged",
+                "data": {
+                  "version": 4
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "events-carry-the-log-lines-of-the-jobs-asked-for-only",
+      "given": {
+        "holds": [
+          "info"
+        ],
+        "scan": [
+          "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE  WH16NS60 1.02 KLAM6E84325\",\"MOVIE_DISC\",\"/dev/rdisk4\"",
+          "DRV:1,2,999,1,\"DVD+R-DL MATSHITA DVD-R   UJ8C2 SB00\",\"SECOND_DISC\",\"/dev/rdisk6\""
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "a"
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-de63b28f402c2eb5",
+              {}
+            ],
+            "as": "b"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "feed": {
+              "after": 0,
+              "jobLog": [
+                "a"
+              ]
+            },
+            "as": "f"
+          },
+          {
+            "drain": "f",
+            "jobLogsOf": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-snapshot-holds-the-unfinished-jobs-and-the-last-50-finished",
+      "given": {
+        "holds": [
+          "info"
+        ],
+        "finishedJobs": 52,
+        "jobs": [
+          {
+            "name": "old",
+            "title": "MOVIE_DISC",
+            "state": "queued",
+            "driveId": "drv-86920bcfd062b640",
+            "mediaGeneration": 1,
+            "automatic": false,
+            "rows": []
+          }
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "settle": {}
+          },
+          {
+            "feed": {},
+            "as": "f"
+          },
+          {
+            "next": "f",
+            "expect": [
+              {
+                "type": "snapshot",
+                "jobCount": 51,
+                "firstJob": "old",
+                "data": {
+                  "queues": {
+                    "acquisition": [
+                      "{old}"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "drive-operations-pass-through",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "eject",
+            "args": [
+              "drv-86920bcfd062b640"
+            ]
+          },
+          {
+            "call": "closeTray",
+            "args": [
+              "drv-86920bcfd062b640"
+            ]
+          },
+          {
+            "call": "closeAllTrays",
+            "args": []
+          },
+          {
+            "call": "eject",
+            "args": [
+              "drv-0000000000000000"
+            ],
+            "error": {
+              "code": "drive.notFound",
+              "params": {
+                "driveId": "drv-0000000000000000"
+              }
+            }
+          },
+          {
+            "trayCalls": [
+              "eject /dev/rdisk4",
+              "closeTray /dev/rdisk4",
+              "closeTray /dev/rdisk6"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "job-operations-pass-through-with-their-errors",
+      "given": {
+        "holds": [
+          "info"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "rip",
+            "args": [
+              "drv-86920bcfd062b640",
+              {}
+            ],
+            "as": "j"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "startJob",
+            "args": [
+              {
+                "kind": "videoDisc",
+                "title": "Second",
+                "driveId": "drv-86920bcfd062b640"
+              }
+            ],
+            "as": "w"
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "jobs",
+            "args": [
+              {}
+            ],
+            "expect": {
+              "total": 2,
+              "items": [
+                {
+                  "id": "{w}"
+                },
+                {
+                  "id": "{j}"
+                }
+              ]
+            }
+          },
+          {
+            "call": "job",
+            "args": [
+              "nope"
+            ],
+            "error": {
+              "code": "job.notFound",
+              "params": {
+                "jobId": "00000000-0000-4000-8000-0000000000ff"
+              }
+            }
+          },
+          {
+            "call": "jobLog",
+            "args": [
+              "j",
+              0
+            ],
+            "includes": [
+              {
+                "code": "makemkv.message"
+              }
+            ]
+          },
+          {
+            "call": "jobLog",
+            "args": [
+              "nope",
+              0
+            ],
+            "error": {
+              "code": "job.notFound",
+              "params": {
+                "jobId": "00000000-0000-4000-8000-0000000000ff"
+              }
+            }
+          },
+          {
+            "call": "move",
+            "args": [
+              "w",
+              -1
+            ]
+          },
+          {
+            "call": "startNow",
+            "args": [
+              "w"
+            ]
+          },
+          {
+            "call": "decide",
+            "args": [
+              "w",
+              "q",
+              "yes"
+            ],
+            "error": {
+              "code": "job.notAwaitingDecision",
+              "params": {
+                "jobId": "{w}"
+              }
+            }
+          },
+          {
+            "call": "keepApart",
+            "args": [
+              "w"
+            ],
+            "error": {
+              "code": "job.notInterrupted",
+              "params": {
+                "jobId": "{w}"
+              }
+            }
+          },
+          {
+            "call": "cancel",
+            "args": [
+              "j"
+            ]
+          },
+          {
+            "settle": {}
+          },
+          {
+            "call": "job",
+            "args": [
+              "j"
+            ],
+            "expect": {
+              "state": "finished",
+              "outcome": "cancelled"
+            }
+          },
+          {
+            "call": "retry",
+            "args": [
+              "j",
+              null
+            ],
+            "expect": {
+              "state": "queued"
+            },
+            "as": "again"
+          },
+          {
+            "call": "cancel",
+            "args": [
+              "nope"
+            ],
+            "error": {
+              "code": "job.notFound",
+              "params": {
+                "jobId": "00000000-0000-4000-8000-0000000000ff"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "configuration-operations-pass-through-with-their-errors",
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "updateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              },
+              7
+            ],
+            "error": {
+              "code": "config.versionConflict",
+              "params": {
+                "current": 0
+              }
+            }
+          },
+          {
+            "call": "validateConfig",
+            "args": [
+              {
+                "version": 3,
+                "libraries": [
+                  {
+                    "id": "lib"
+                  }
+                ]
+              }
+            ],
+            "expect": [
+              {
+                "severity": "error"
+              }
+            ]
+          },
+          {
+            "call": "setSecret",
+            "args": [
+              "omdbKey",
+              "s3cret"
+            ]
+          },
+          {
+            "call": "exportConfig",
+            "args": [],
+            "expect": {
+              "format": "bromelia-config",
+              "version": 3,
+              "config": {
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "call": "config",
+            "args": [],
+            "expect": {
+              "version": 0,
+              "doc": {
+                "libraries": [
+                  {
+                    "id": "lib",
+                    "name": "Library",
+                    "path": "/root/library"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "unmounting-a-library-takes-it-offline-at-once",
+      "from": [
+        "G1 owner answer 10: the test root's mount and unmount call libraryService.check()"
+      ],
+      "given": {},
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "unmount": "/root/library"
+          },
+          {
+            "call": "libraries",
+            "args": [],
+            "expect": [
+              {
+                "id": "lib",
+                "online": false
+              }
+            ]
+          },
+          {
+            "mount": "/root/library"
+          },
+          {
+            "call": "libraries",
+            "args": [],
+            "expect": [
+              {
+                "id": "lib",
+                "online": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -52,40 +52,6 @@ failed (BroMessageCode code, BroJsonValue *params)
   return _bro_step_failed (bro_bro_message_to_error (m, NULL));
 }
 
-/* The session's choices as the resolver's session layer: the chosen profile's fields, then the chosen library. NULL
- * without a session (or with nothing chosen). */
-static BroJsonValue *
-session_layer (const BroConfig *config, const BroSessionChoices *choices)
-{
-  BroJsonValue *layer;
-  if (!choices)
-    return NULL;
-  layer = bro_json_value_new_object ();
-  if (choices->profile)
-    {
-      g_autoptr (GPtrArray) profiles = bro_config_profiles (config);
-      for (guint i = 0; i < profiles->len; i++)
-        {
-          const BroJsonValue *json = ((BroProfile *) g_ptr_array_index (profiles, i))->json;
-          if (g_strcmp0 (bro_json_value_get_string (bro_json_value_member (json, "id"), NULL), choices->profile) != 0
-              || json->kind != BRO_JSON_VALUE_OBJECT)
-            continue;
-          for (guint k = 0; k < json->keys->len; k++)
-            {
-              const char *key = json->keys->pdata[k];
-              if (strcmp (key, "id") != 0 && strcmp (key, "name") != 0 && !(choices->library && strcmp (key, "library") == 0))
-                bro_json_value_set (layer, key, bro_json_value_ref (json->items->pdata[k]));
-            }
-          break;
-        }
-    }
-  if (choices->library)
-    bro_json_value_set (layer, "library", bro_json_value_new_string (choices->library));
-  if (layer->keys->len == 0)
-    g_clear_pointer (&layer, bro_json_value_unref);
-  return layer;
-}
-
 static char *
 profile_name (const BroConfig *config, const char *profile_id)
 {
@@ -241,7 +207,13 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   g_autofree char *label = listing && *listing->name ? g_strdup (listing->name) : bro_step_sources_label (request->source, drive);
   gboolean by_hand = FALSE;
   BroRuleFacts facts = { NULL };
-  g_autoptr (BroJsonValue) layer = session_layer (context->config, choices);
+  const char *chosen_profile = choices && choices->profile
+                                   ? choices->profile
+                                   : bro_json_value_get_string (bro_json_value_member (job->request->options, "profile"), NULL);
+  const char *chosen_library = choices && choices->library
+                                   ? choices->library
+                                   : bro_json_value_get_string (bro_json_value_member (job->request->options, "library"), NULL);
+  g_autoptr (BroJsonValue) layer = _bro_step_sources_layer (context->config, chosen_profile, chosen_library);
   g_autoptr (BroEffectiveProfile) profile = NULL;
   const char *profile_id = NULL;
   const char *library_id;
@@ -258,8 +230,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   facts.kind = bro_media_kind_to_wire (plan->identity->kind);
   facts.automatic = job->request->automatic;
   profile = bro_profile_resolver_resolve (context->config, config_id, &facts, layer);
-  if (choices && choices->profile)
-    profile_id = choices->profile;
+  profile_id = chosen_profile;
   for (guint i = 0; i < profile->trace->len && !profile_id; i++)
     {
       const BroResolveTrace *t = g_ptr_array_index (profile->trace, profile->trace->len - 1 - i);

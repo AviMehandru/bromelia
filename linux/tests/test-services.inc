@@ -157,7 +157,7 @@ problem_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArr
     {
       BroJsonValue *op = bro_json_value_at (ops, i);
       if (strcmp (op->keys->pdata[0], "advance") == 0)
-        manual_advance (w.clock, bro_json_value_get_integer (op->items->pdata[0], 0) * 1000, settle, &w);
+        test_manual_clock_advance (w.clock, bro_json_value_get_integer (op->items->pdata[0], 0) * 1000, settle, &w);
       else
         {
           ProblemOp o = { problems, op };

@@ -32,10 +32,25 @@ public enum StepSources {
         }
     }
 
-    /// The profile before Plan: the drive entry's, with no facts yet but whether the rip is automatic.
+    /// The profile before Plan: the drive entry's, with no facts yet but whether the rip is automatic, and the request's
+    /// options.profile above it (as Plan has it).
     public static func profile(_ context: StepContext, _ configId: String?) -> EffectiveProfile {
         ProfileResolver.resolve(context.config, driveId: configId, facts: RuleFacts(name: "", label: "", formatCode: "", automatic: context.job.request.automatic),
-                                sessionChoices: nil)
+                                sessionChoices: layer(context.config, context.job.request.options?["profile"]?.string, nil))
+    }
+
+    /// A chosen profile and library as the resolver's session layer: the profile's fields (an id that isn't configured
+    /// adds none), then the library. Nil with nothing chosen.
+    static func layer(_ config: Config, _ profileId: String?, _ libraryId: String?) -> JsonValue? {
+        var members: [(key: String, value: JsonValue)] = []
+        if let profileId, let p = Config.profiles(config).first(where: { $0.id == profileId }), let m = p.json.members {
+            members += m.filter { $0.key != "id" && $0.key != "name" }
+        }
+        if let libraryId {
+            members.removeAll { $0.key == "library" }
+            members.append(("library", .string(libraryId)))
+        }
+        return members.isEmpty ? nil : .object(members)
     }
 
     /// The mode before Plan: the request's (options.mode), else the profile's mode.default.

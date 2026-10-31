@@ -16,11 +16,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="Bromelia.TestKit" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="..\Bromelia.Foundation.Tests\Fixtures.cs" Link="Fixtures.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Bromelia.Engine\Bromelia.Engine.csproj" />
+    <ProjectReference Include="..\Bromelia.TestKit\Bromelia.TestKit.csproj" />
   </ItemGroup>
 
 </Project>

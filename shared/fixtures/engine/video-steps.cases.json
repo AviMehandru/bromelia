@@ -577,6 +577,78 @@
       }
     },
     {
+      "id": "probe-the-request-profile",
+      "description": "The request's options.profile chooses the profile makemkvcon runs with, above the drive entry's (G4b, owner 2026-10-28).",
+      "given": {
+        "step": "probe",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "options": {
+            "profile": "short"
+          }
+        },
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default"
+            },
+            {
+              "id": "long",
+              "makemkv": {
+                "minLengthSeconds": 120
+              }
+            },
+            {
+              "id": "short",
+              "makemkv": {
+                "minLengthSeconds": 600
+              }
+            }
+          ],
+          "drives": [
+            {
+              "id": "d1",
+              "profile": "long"
+            }
+          ]
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT",
+            "configId": "d1"
+          }
+        },
+        "makemkv": {
+          "listing": {
+            "volume": "HEAT",
+            "type": "dvd",
+            "titles": [
+              [
+                "1:40:00",
+                1
+              ],
+              [
+                "0:05:00",
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          "invocation - minLength=600",
+          "listing disc:0"
+        ]
+      }
+    },
+    {
       "id": "probe-not-numbered-yet",
       "given": {
         "step": "probe",
@@ -2611,6 +2683,97 @@
             }
           }
         ]
+      },
+      "expect": {
+        "data": {
+          "encrypted": true,
+          "formatCode": "DVDe"
+        }
+      }
+    },
+    {
+      "id": "identify-a-backup-by-the-request-profile",
+      "description": "The request's options.profile gives the mode before Plan: its mode.default backup stays encrypted (G4b, owner 2026-10-28).",
+      "given": {
+        "step": "identify",
+        "request": {
+          "kind": "videoDisc",
+          "title": "HEAT",
+          "driveId": "drv-0123456789abcdef",
+          "options": {
+            "profile": "backups"
+          }
+        },
+        "drives": {
+          "drv-0123456789abcdef": {
+            "makemkvIndex": 0,
+            "device": "/dev/disk4",
+            "generation": 2,
+            "label": "HEAT"
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "HEAT",
+                "volumeName": "HEAT",
+                "type": "dvd",
+                "typeText": "DVD disc",
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "durationSeconds": 6000,
+                    "duration": "1:40:00",
+                    "segmentMap": "1",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      },
+                      {
+                        "index": 1,
+                        "kind": "audio"
+                      }
+                    ]
+                  },
+                  {
+                    "index": 1,
+                    "sourceTitleId": 2,
+                    "durationSeconds": 300,
+                    "duration": "0:05:00",
+                    "segmentMap": "2",
+                    "tracks": [
+                      {
+                        "index": 0,
+                        "kind": "video"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fingerprint": null,
+              "libreDrive": null,
+              "fromSession": false
+            }
+          }
+        ],
+        "config": {
+          "version": 3,
+          "profiles": [
+            {
+              "id": "default"
+            },
+            {
+              "id": "backups",
+              "mode": {
+                "default": "backup"
+              }
+            }
+          ]
+        }
       },
       "expect": {
         "data": {

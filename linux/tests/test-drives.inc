@@ -2,9 +2,9 @@
  * shared/fixtures/adapters/os-drive-states.cases.json, and the drive list on this machine (lsblk agrees). */
 
 /* A clock whose timers fire when the test says so; its local time is UTC. */
-#define TEST_TYPE_MANUAL_TIMER (test_manual_timer_get_type ())
-G_DECLARE_FINAL_TYPE (TestManualTimer, test_manual_timer, TEST, MANUAL_TIMER, GObject)
-struct _TestManualTimer {
+#define TEST_TYPE_TICK_TIMER (test_tick_timer_get_type ())
+G_DECLARE_FINAL_TYPE (TestTickTimer, test_tick_timer, TEST, TICK_TIMER, GObject)
+struct _TestTickTimer {
   GObject parent_instance;
   BroTimerSchedule schedule;
   BroTimerFunc handler;
@@ -12,13 +12,13 @@ struct _TestManualTimer {
   GDestroyNotify destroy;
   gboolean cancelled;
 };
-static void test_manual_timer_iface_init (BroTimerHandleInterface *iface);
-G_DEFINE_TYPE_WITH_CODE (TestManualTimer, test_manual_timer, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_TIMER_HANDLE, test_manual_timer_iface_init))
+static void test_tick_timer_iface_init (BroTimerHandleInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestTickTimer, test_tick_timer, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_TIMER_HANDLE, test_tick_timer_iface_init))
 
 static void
 mt_cancel (BroTimerHandle *t)
 {
-  TestManualTimer *self = TEST_MANUAL_TIMER (t);
+  TestTickTimer *self = TEST_TICK_TIMER (t);
   if (self->cancelled)
     return;
   self->cancelled = TRUE;
@@ -26,49 +26,49 @@ mt_cancel (BroTimerHandle *t)
     self->destroy (self->data);
 }
 
-static void test_manual_timer_class_init (TestManualTimerClass *k) {}
-static void test_manual_timer_init (TestManualTimer *self) {}
-static void test_manual_timer_iface_init (BroTimerHandleInterface *iface) { iface->cancel = mt_cancel; }
+static void test_tick_timer_class_init (TestTickTimerClass *k) {}
+static void test_tick_timer_init (TestTickTimer *self) {}
+static void test_tick_timer_iface_init (BroTimerHandleInterface *iface) { iface->cancel = mt_cancel; }
 
-#define TEST_TYPE_MANUAL_CLOCK (test_manual_clock_get_type ())
-G_DECLARE_FINAL_TYPE (TestManualClock, test_manual_clock, TEST, MANUAL_CLOCK, GObject)
-struct _TestManualClock {
+#define TEST_TYPE_TICK_CLOCK (test_tick_clock_get_type ())
+G_DECLARE_FINAL_TYPE (TestTickClock, test_tick_clock, TEST, TICK_CLOCK, GObject)
+struct _TestTickClock {
   GObject parent_instance;
-  GPtrArray *timers; /* TestManualTimer * */
+  GPtrArray *timers; /* TestTickTimer * */
 };
-static void test_manual_clock_iface_init (BroClockInterface *iface);
-G_DEFINE_TYPE_WITH_CODE (TestManualClock, test_manual_clock, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_CLOCK, test_manual_clock_iface_init))
+static void test_tick_clock_iface_init (BroClockInterface *iface);
+G_DEFINE_TYPE_WITH_CODE (TestTickClock, test_tick_clock, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_CLOCK, test_tick_clock_iface_init))
 
 static BroTimerHandle *
 mc_timer (BroClock *c, const BroTimerSchedule *schedule, BroTimerFunc handler, gpointer data, GDestroyNotify destroy)
 {
-  TestManualTimer *t = g_object_new (TEST_TYPE_MANUAL_TIMER, NULL);
+  TestTickTimer *t = g_object_new (TEST_TYPE_TICK_TIMER, NULL);
   t->schedule = *schedule;
   t->handler = handler;
   t->data = data;
   t->destroy = destroy;
-  g_ptr_array_add (TEST_MANUAL_CLOCK (c)->timers, g_object_ref (t));
+  g_ptr_array_add (TEST_TICK_CLOCK (c)->timers, g_object_ref (t));
   return BRO_TIMER_HANDLE (t);
 }
 
 /* Fires every timer that isn't cancelled. */
 static void
-manual_clock_tick (TestManualClock *self)
+tick_clock_tick (TestTickClock *self)
 {
   for (guint i = 0; i < self->timers->len; i++)
     {
-      TestManualTimer *t = self->timers->pdata[i];
+      TestTickTimer *t = self->timers->pdata[i];
       if (!t->cancelled)
         t->handler (t->data);
     }
 }
 
-static void test_manual_clock_finalize (GObject *o) { g_ptr_array_unref (TEST_MANUAL_CLOCK (o)->timers); G_OBJECT_CLASS (test_manual_clock_parent_class)->finalize (o); }
-static void test_manual_clock_class_init (TestManualClockClass *k) { G_OBJECT_CLASS (k)->finalize = test_manual_clock_finalize; }
-static void test_manual_clock_init (TestManualClock *self) { self->timers = g_ptr_array_new_with_free_func (g_object_unref); }
+static void test_tick_clock_finalize (GObject *o) { g_ptr_array_unref (TEST_TICK_CLOCK (o)->timers); G_OBJECT_CLASS (test_tick_clock_parent_class)->finalize (o); }
+static void test_tick_clock_class_init (TestTickClockClass *k) { G_OBJECT_CLASS (k)->finalize = test_tick_clock_finalize; }
+static void test_tick_clock_init (TestTickClock *self) { self->timers = g_ptr_array_new_with_free_func (g_object_unref); }
 
 static void
-test_manual_clock_iface_init (BroClockInterface *iface)
+test_tick_clock_iface_init (BroClockInterface *iface)
 {
   iface->now = firing_now;
   iface->monotonic = firing_monotonic;
@@ -132,13 +132,13 @@ drive_states_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GP
   BroJsonValue *snapshots = bro_json_value_member (given, "snapshots");
   if (snapshots)
     {
-      g_autoptr (TestManualClock) clock = g_object_new (TEST_TYPE_MANUAL_CLOCK, NULL);
+      g_autoptr (TestTickClock) clock = g_object_new (TEST_TYPE_TICK_CLOCK, NULL);
       g_autoptr (GPtrArray) got = g_ptr_array_new_with_free_func (g_free);
       Script script = { snapshots, 0 };
       g_autoptr (BroDrivePoller) poller = bro_drive_poller_new (scripted_snapshot, &script, NULL, BRO_CLOCK (clock),
                                                                 (BroDuration) { bro_json_value_get_number (bro_json_value_member (given, "interval"), 0) });
       BroJsonValue *ticks = bro_json_value_member (expect, "afterTicks");
-      TestManualTimer *timer;
+      TestTickTimer *timer;
       bro_drive_poller_start (poller, collect, got, NULL);
       if (clock->timers->len != 1)
         {
@@ -154,7 +154,7 @@ drive_states_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GP
           g_autofree char *want = hb_expected (bro_json_value_at (ticks, i), FALSE), *got_text = NULL;
           script.index++;
           g_ptr_array_set_size (got, 0);
-          manual_clock_tick (clock);
+          tick_clock_tick (clock);
           got_text = hb_joined (got);
           bro_test_same_string (failures, id, "events", want, got_text);
         }

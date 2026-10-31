@@ -13,6 +13,10 @@ G_DECLARE_FINAL_TYPE (BroStepRegistry, bro_step_registry, BRO, STEP_REGISTRY, GO
 /* @steps: BroStep *; takes references. */
 BroStepRegistry *bro_step_registry_new (GPtrArray *steps);
 
+/* The phase 3 steps (AwaitMedia, Probe, Reconcile, Identify, Plan, Decide, Acquire, Release, VerifyRips, Name, Seal,
+ * Commit, Notify, KeepApart); both composition roots use it, so their lists can't drift. */
+BroStepRegistry *bro_step_registry_standard (void);
+
 /* The step of @kind (borrowed), or NULL. */
 BroStep *bro_step_registry_step (BroStepRegistry *self, BroStepKind kind);
 

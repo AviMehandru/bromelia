@@ -418,135 +418,6 @@ test_memory_store_init (TestMemoryStore *self)
   self->unit_states = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 }
 
-/* ---- files and folders in memory ------------------------------------------------------------------------------- */
-
-#define TEST_TYPE_MEMORY_FS (test_memory_fs_get_type ())
-G_DECLARE_FINAL_TYPE (TestMemoryFs, test_memory_fs, TEST, MEMORY_FS, GObject)
-
-struct _TestMemoryFs {
-  GObject parent_instance;
-  GMutex lock;
-  GHashTable *files;   /* path → GBytes */
-  GHashTable *folders; /* paths */
-};
-
-static void memory_fs_iface_init (BroFileSystemInterface *iface);
-G_DEFINE_FINAL_TYPE_WITH_CODE (TestMemoryFs, test_memory_fs, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_FILE_SYSTEM, memory_fs_iface_init))
-
-static gboolean
-fs_exists (BroFileSystem *fs, const char *path)
-{
-  TestMemoryFs *self = TEST_MEMORY_FS (fs);
-  gboolean found;
-  g_mutex_lock (&self->lock);
-  found = g_hash_table_contains (self->files, path) || g_hash_table_contains (self->folders, path);
-  g_mutex_unlock (&self->lock);
-  return found;
-}
-
-static GBytes *
-fs_read (BroFileSystem *fs, const char *path, BroBroError **error)
-{
-  TestMemoryFs *self = TEST_MEMORY_FS (fs);
-  GBytes *b;
-  g_mutex_lock (&self->lock);
-  b = g_hash_table_lookup (self->files, path);
-  b = b ? g_bytes_ref (b) : NULL;
-  g_mutex_unlock (&self->lock);
-  if (!b)
-    bro_bro_error_set (error, "fs.notFound", NULL);
-  return b;
-}
-
-static BroFileInfo *
-fs_stat (BroFileSystem *fs, const char *path, BroBroError **error)
-{
-  TestMemoryFs *self = TEST_MEMORY_FS (fs);
-  BroFileInfo *info = NULL;
-  GBytes *b;
-  g_mutex_lock (&self->lock);
-  b = g_hash_table_lookup (self->files, path);
-  if (b || g_hash_table_contains (self->folders, path))
-    {
-      info = bro_file_info_new ();
-      info->size = b ? (gint64) g_bytes_get_size (b) : 0;
-      info->is_directory = !b;
-    }
-  g_mutex_unlock (&self->lock);
-  if (!info)
-    bro_bro_error_set (error, "fs.notFound", NULL);
-  return info;
-}
-
-static gboolean
-fs_create_directory (BroFileSystem *fs, const char *path, gboolean parents_must_exist, BroBroError **error)
-{
-  TestMemoryFs *self = TEST_MEMORY_FS (fs);
-  g_auto (GStrv) parts = g_strsplit (path, "/", -1);
-  GString *current = g_string_new ("");
-  g_mutex_lock (&self->lock);
-  for (guint i = 0; parts[i]; i++)
-    if (*parts[i])
-      {
-        g_string_append_printf (current, "/%s", parts[i]);
-        g_hash_table_add (self->folders, g_strdup (current->str));
-      }
-  g_mutex_unlock (&self->lock);
-  g_string_free (current, TRUE);
-  return TRUE;
-}
-
-static gboolean
-fs_write_atomically (BroFileSystem *fs, const char *path, GBytes *bytes, int mode, BroBroError **error)
-{
-  TestMemoryFs *self = TEST_MEMORY_FS (fs);
-  g_autofree char *folder = g_path_get_dirname (path);
-  gboolean ok;
-  g_mutex_lock (&self->lock);
-  ok = g_hash_table_contains (self->folders, folder);
-  if (ok)
-    g_hash_table_replace (self->files, g_strdup (path), g_bytes_ref (bytes));
-  g_mutex_unlock (&self->lock);
-  if (!ok)
-    bro_bro_error_set (error, "fs.notFound", NULL);
-  return ok;
-}
-
-static void
-memory_fs_iface_init (BroFileSystemInterface *iface)
-{
-  iface->exists = fs_exists;
-  iface->read = fs_read;
-  iface->stat = fs_stat;
-  iface->create_directory = fs_create_directory;
-  iface->write_atomically = fs_write_atomically;
-}
-
-static void
-test_memory_fs_finalize (GObject *object)
-{
-  TestMemoryFs *self = TEST_MEMORY_FS (object);
-  g_hash_table_unref (self->files);
-  g_hash_table_unref (self->folders);
-  g_mutex_clear (&self->lock);
-  G_OBJECT_CLASS (test_memory_fs_parent_class)->finalize (object);
-}
-
-static void
-test_memory_fs_class_init (TestMemoryFsClass *klass)
-{
-  G_OBJECT_CLASS (klass)->finalize = test_memory_fs_finalize;
-}
-
-static void
-test_memory_fs_init (TestMemoryFs *self)
-{
-  g_mutex_init (&self->lock);
-  self->files = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_bytes_unref);
-  self->folders = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-  g_hash_table_add (self->folders, g_strdup ("/"));
-}
-
 /* ---- gates a fake step can wait at -------------------------------------------------------------------------- */
 
 typedef struct {
@@ -971,48 +842,6 @@ test_fake_step_init (TestFakeStep *self)
 {
 }
 
-/* ---- ids that count: 00000000-0000-4000-8000-000000000001, ... after the given jobs' ---------------------------- */
-
-#define TEST_TYPE_IDS (test_ids_get_type ())
-G_DECLARE_FINAL_TYPE (TestIds, test_ids, TEST, IDS, GObject)
-
-struct _TestIds {
-  GObject parent_instance;
-  gint n; /* the last one given */
-};
-
-static void test_ids_iface_init (BroIdGeneratorInterface *iface);
-G_DEFINE_FINAL_TYPE_WITH_CODE (TestIds, test_ids, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_ID_GENERATOR, test_ids_iface_init))
-
-static BroId
-counted_id (int n)
-{
-  BroId id;
-  g_snprintf (id.value, sizeof id.value, "00000000-0000-4000-8000-%012x", n);
-  return id;
-}
-
-static BroId
-test_ids_next (BroIdGenerator *ids)
-{
-  return counted_id (g_atomic_int_add (&TEST_IDS (ids)->n, 1) + 1);
-}
-
-static void
-test_ids_iface_init (BroIdGeneratorInterface *iface)
-{
-  iface->next = test_ids_next;
-}
-
-static void
-test_ids_class_init (TestIdsClass *klass)
-{
-}
-
-static void
-test_ids_init (TestIds *self)
-{
-}
 
 /* ---- the harness -------------------------------------------------------------------------------------------- */
 
@@ -1422,7 +1251,7 @@ static void
 svc_name (PipeHarness *h, const char *name)
 {
   BroId *id = g_new0 (BroId, 1);
-  *id = counted_id (g_atomic_int_get (&h->ids->n) + 1);
+  *id = bro_test_counted_id (g_atomic_int_get (&h->ids->n) + 1);
   g_ptr_array_add (h->names, g_strdup (name));
   g_hash_table_replace (h->jobs, g_strdup (name), id);
   g_hash_table_add (h->started, g_strdup (name));
@@ -1514,7 +1343,7 @@ pipe_run_op (PipeHarness *h, BroJsonValue *op)
   if (strcmp (name, "open") == 0)
     gates_open (&h->gates, arg->string);
   else if (strcmp (name, "advance") == 0)
-    manual_advance (h->w.clock, bro_json_value_get_integer (arg, 0), settle, &h->w);
+    test_manual_clock_advance (h->w.clock, bro_json_value_get_integer (arg, 0), settle, &h->w);
   else if (strcmp (name, "holdInserts") == 0 || strcmp (name, "releaseInserts") == 0)
     store_hold_inserts (h->store, strcmp (name, "holdInserts") == 0);
   else if (strcmp (name, "holdLoads") == 0)
@@ -1743,7 +1572,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
       if (r->state == BRO_JOB_STATE_FINISHED)
         {
           r->has_finished_at = TRUE;
-          r->finished_at.unix_milliseconds = START_MS;
+          r->finished_at.unix_milliseconds = TEST_MANUAL_CLOCK_START_MS;
         }
       r->position = (int) bro_json_value_get_integer (bro_json_value_member (j, "position"), 0);
       r->queue = queue;
@@ -1758,7 +1587,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
           r->has_media_generation = r->request->has_media_generation = TRUE;
           r->media_generation = r->request->media_generation = v->integer;
         }
-      r->created_at.unix_milliseconds = START_MS;
+      r->created_at.unix_milliseconds = TEST_MANUAL_CLOCK_START_MS;
       if ((v = bro_json_value_member (j, "created")))
         g_assert_true (bro_instant_parse (v->string, &r->created_at));
       if (plan)
@@ -1787,7 +1616,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
             g_assert_true (bro_step_state_from_wire (bro_json_value_get_string (bro_json_value_member (d, "state"), ""), &s->state));
           s->attempt = 1;
           s->has_started_at = s->has_finished_at = TRUE;
-          s->started_at.unix_milliseconds = s->finished_at.unix_milliseconds = START_MS;
+          s->started_at.unix_milliseconds = s->finished_at.unix_milliseconds = TEST_MANUAL_CLOCK_START_MS;
           {
             BroJsonValue *summary = bro_json_value_member (d, "summary"), *e = bro_json_value_member (d, "error");
             BroBroMessage *message = NULL;
@@ -1836,7 +1665,7 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
           for (guint k = 0; k < bro_json_value_length (done); k++)
             {
               BroMessageCode code;
-              BroInstant at = { START_MS };
+              BroInstant at = { TEST_MANUAL_CLOCK_START_MS };
               g_assert_true (bro_message_code_parse (bro_json_value_get_string (bro_json_value_at (done, k), ""), &code));
               g_ptr_array_add (lines, bro_log_line_dto_new (k + 1, at, BRO_SEVERITY_INFO, code, NULL));
             }

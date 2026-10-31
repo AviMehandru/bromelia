@@ -583,7 +583,7 @@ drive_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray
         }
       else if (strcmp (name, "advance") == 0)
         {
-          manual_advance (h.w.clock, bro_json_value_get_integer (arg, 0) * 1000, drive_settle, &h);
+          test_manual_clock_advance (h.w.clock, bro_json_value_get_integer (arg, 0) * 1000, drive_settle, &h);
           drive_settle (&h);
         }
       else if (strcmp (name, "lease") == 0 || strcmp (name, "config") == 0)

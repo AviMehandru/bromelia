@@ -615,7 +615,7 @@ recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
         }
       else if (strcmp (name, "advance") == 0)
         {
-          manual_advance (h.lib.clock, (gint64) (bro_json_value_get_number (arg, 0) * 1000), library_settle, &h.lib);
+          test_manual_clock_advance (h.lib.clock, (gint64) (bro_json_value_get_number (arg, 0) * 1000), library_settle, &h.lib);
           library_settle (&h.lib);
           library_record (&h.lib, i, bro_json_value_new_string ("ok"));
         }

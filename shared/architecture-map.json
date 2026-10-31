@@ -13043,6 +13043,19 @@
           "swift": "Scheduler.position(_:)",
           "cs": "Scheduler.Position",
           "c": "bro_scheduler_position"
+        },
+        {
+          "name": "SchedulerLimits.of",
+          "params": [
+            "config",
+            "cores"
+          ],
+          "returns": "SchedulerLimits",
+          "doc": "The configuration's limits resolved (config-3 Limits): cpu 0 = max(1, cores / 2). LocalEngine applies it after the load and on every configChanged (plan §15.7's scheduler.updateLimits).",
+          "phase": 3,
+          "swift": "SchedulerLimits.of(_:cores:)",
+          "cs": "SchedulerLimits.Of",
+          "c": "bro_scheduler_limits_of"
         }
       ]
     },
@@ -13934,6 +13947,166 @@
             "name": "BroJobFileDto",
             "file": "linux/src/engine/api/bro-job-file-dto.h"
           }
+        },
+        {
+          "name": "EngineAPI",
+          "kind": "protocol",
+          "doc": "The one interface between the engine and anything outside it (plan §13.1): DTOs in and out, never live objects. LocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of the phases built so far (G1 owner question 1).",
+          "phase": 3,
+          "swift": {
+            "name": "EngineAPI",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/EngineAPI.swift"
+          },
+          "cs": {
+            "name": "IEngineAPI",
+            "file": "windows/src/Bromelia.Engine/API/IEngineAPI.cs"
+          },
+          "c": {
+            "name": "BroEngineAPI",
+            "file": "linux/src/engine/api/bro-engine-api.h"
+          }
+        },
+        {
+          "name": "LocalEngine",
+          "kind": "class",
+          "doc": "Implements EngineAPI over the services (plan §13.1, §15.1): callable from any thread, each call hops onto the EngineExecutor; start() runs the startup order, stop() the stop order; after stop every call answers server.stopping.",
+          "phase": 3,
+          "swift": {
+            "name": "LocalEngine",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/LocalEngine.swift"
+          },
+          "cs": {
+            "name": "LocalEngine",
+            "file": "windows/src/Bromelia.Engine/API/LocalEngine.cs"
+          },
+          "c": {
+            "name": "BroLocalEngine",
+            "file": "linux/src/engine/api/bro-local-engine.h"
+          }
+        },
+        {
+          "name": "EngineFacts",
+          "kind": "struct",
+          "fields": [
+            "version",
+            "pid",
+            "platform",
+            "dataDir",
+            "cores"
+          ],
+          "doc": "What the host knows and the engine can't ask the system for (the composition root fills it): the app's version, the process id, the platform, the data folder, the processor count (limits.cpu 0 = cores / 2).",
+          "phase": 3,
+          "swift": {
+            "name": "EngineFacts",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/EngineFacts.swift"
+          },
+          "cs": {
+            "name": "EngineFacts",
+            "file": "windows/src/Bromelia.Engine/API/EngineFacts.cs"
+          },
+          "c": {
+            "name": "BroEngineFacts",
+            "file": "linux/src/engine/api/bro-engine-facts.h"
+          }
+        },
+        {
+          "name": "SystemStatusDto",
+          "kind": "struct",
+          "fields": [
+            "facts",
+            "startedAt",
+            "makemkvFound",
+            "makemkvVersion",
+            "tools",
+            "problems",
+            "libraries",
+            "configVersion",
+            "eventSeq"
+          ],
+          "doc": "dtos.json SystemStatus: MakeMKV's registration is unknown until MakemkvService's phase 5 part; tools are what the ToolLocator finds of the tools phase 3 runs (makemkvcon, mkvmerge).",
+          "phase": 3,
+          "swift": {
+            "name": "SystemStatusDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/SystemStatusDto.swift"
+          },
+          "cs": {
+            "name": "SystemStatusDto",
+            "file": "windows/src/Bromelia.Engine/API/SystemStatusDto.cs"
+          },
+          "c": {
+            "name": "BroSystemStatusDto",
+            "file": "linux/src/engine/api/bro-system-status-dto.h"
+          }
+        },
+        {
+          "name": "SnapshotDto",
+          "kind": "struct",
+          "fields": [
+            "system",
+            "drives",
+            "jobs",
+            "queues",
+            "problems",
+            "libraries",
+            "configVersion"
+          ],
+          "doc": "The data of a snapshot event (events.json Snapshot): sessions empty until SessionService; jobs every unfinished one and the last 50 finished; queues as the Scheduler orders them.",
+          "phase": 3,
+          "swift": {
+            "name": "SnapshotDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/SnapshotDto.swift"
+          },
+          "cs": {
+            "name": "SnapshotDto",
+            "file": "windows/src/Bromelia.Engine/API/SnapshotDto.cs"
+          },
+          "c": {
+            "name": "BroSnapshotDto",
+            "file": "linux/src/engine/api/bro-snapshot-dto.h"
+          }
+        },
+        {
+          "name": "RipOptionsDto",
+          "kind": "struct",
+          "fields": [
+            "mode",
+            "profile",
+            "library",
+            "titles",
+            "outputFolder"
+          ],
+          "doc": "dtos.json RipOptions.",
+          "phase": 3,
+          "swift": {
+            "name": "RipOptionsDto",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/RipOptionsDto.swift"
+          },
+          "cs": {
+            "name": "RipOptionsDto",
+            "file": "windows/src/Bromelia.Engine/API/RipOptionsDto.cs"
+          },
+          "c": {
+            "name": "BroRipOptionsDto",
+            "file": "linux/src/engine/api/bro-rip-options-dto.h"
+          }
+        },
+        {
+          "name": "EventFeed",
+          "kind": "class",
+          "doc": "What EngineAPI.events gives: a snapshot event first (seq = the last event's), then the deltas; after a gap a new snapshot instead of the missed deltas; jobLog events only for the jobs asked for.",
+          "phase": 3,
+          "swift": {
+            "name": "EventFeed",
+            "file": "macos/BromeliaKit/Sources/BroEngine/API/EventFeed.swift"
+          },
+          "cs": {
+            "name": "EventFeed",
+            "file": "windows/src/Bromelia.Engine/API/EventFeed.cs"
+          },
+          "c": {
+            "name": "BroEventFeed",
+            "file": "linux/src/engine/api/bro-event-feed.h"
+          }
         }
       ],
       "functions": [
@@ -14085,6 +14258,990 @@
           "swift": "JobDetailDto.json(_:)",
           "cs": "JobDetailDto.Json",
           "c": "bro_job_detail_dto_json"
+        },
+        {
+          "name": "EngineAPI.system",
+          "params": [],
+          "returns": "SystemStatusDto",
+          "doc": "Versions, MakeMKV, tools, problems, libraries, configuration version, last event seq.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.system()",
+          "cs": "EngineAPI.System",
+          "c": "bro_engine_api_system"
+        },
+        {
+          "name": "EngineAPI.stop",
+          "params": [],
+          "doc": "The stop order (G1 decision; owner question 2). server.stopping when stopping already.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.stop()",
+          "cs": "EngineAPI.Stop",
+          "c": "bro_engine_api_stop"
+        },
+        {
+          "name": "EngineAPI.drives",
+          "params": [],
+          "returns": "[DriveDto]",
+          "doc": "DriveService.drives().",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.drives()",
+          "cs": "EngineAPI.Drives",
+          "c": "bro_engine_api_drives"
+        },
+        {
+          "name": "EngineAPI.eject",
+          "params": [
+            "driveId"
+          ],
+          "doc": "DriveService.eject.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "drive_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.eject(_:)",
+          "cs": "EngineAPI.Eject",
+          "c": "bro_engine_api_eject"
+        },
+        {
+          "name": "EngineAPI.closeTray",
+          "params": [
+            "driveId"
+          ],
+          "doc": "DriveService.closeTray.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "drive_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.closeTray(_:)",
+          "cs": "EngineAPI.CloseTray",
+          "c": "bro_engine_api_close_tray"
+        },
+        {
+          "name": "EngineAPI.closeAllTrays",
+          "params": [],
+          "doc": "DriveService.closeAll.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.closeAllTrays()",
+          "cs": "EngineAPI.CloseAllTrays",
+          "c": "bro_engine_api_close_all_trays"
+        },
+        {
+          "name": "EngineAPI.rip",
+          "params": [
+            "driveId",
+            "options"
+          ],
+          "returns": "JobDto",
+          "doc": "A manual video-disc job on the drive's disc (its generation), through JobService.create: drive.notFound, drive.noDisc, drive.busy, disc.notVideo; titles: session.notOpen until SessionService; an outputFolder that is no library's: library.notAttached.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "drive_id",
+            "options",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.rip(_:options:)",
+          "cs": "EngineAPI.Rip",
+          "c": "bro_engine_api_rip"
+        },
+        {
+          "name": "EngineAPI.jobs",
+          "params": [
+            "query"
+          ],
+          "returns": "JobPageDto",
+          "doc": "JobService.query.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "query",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.jobs(_:)",
+          "cs": "EngineAPI.Jobs",
+          "c": "bro_engine_api_jobs"
+        },
+        {
+          "name": "EngineAPI.job",
+          "params": [
+            "jobId"
+          ],
+          "returns": "JobDetailDto",
+          "doc": "JobService.job.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.job(_:)",
+          "cs": "EngineAPI.Job",
+          "c": "bro_engine_api_job"
+        },
+        {
+          "name": "EngineAPI.jobLog",
+          "params": [
+            "jobId",
+            "after"
+          ],
+          "returns": "[LogLineDto]",
+          "doc": "JobService.log.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "after",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.jobLog(_:after:)",
+          "cs": "EngineAPI.JobLog",
+          "c": "bro_engine_api_job_log"
+        },
+        {
+          "name": "EngineAPI.cancel",
+          "params": [
+            "jobId"
+          ],
+          "doc": "JobService.cancel.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.cancel(_:)",
+          "cs": "EngineAPI.Cancel",
+          "c": "bro_engine_api_cancel"
+        },
+        {
+          "name": "EngineAPI.retry",
+          "params": [
+            "jobId",
+            "fromStep"
+          ],
+          "returns": "JobDto",
+          "doc": "JobService.retry.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "from_step",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.retry(_:fromStep:)",
+          "cs": "EngineAPI.Retry",
+          "c": "bro_engine_api_retry"
+        },
+        {
+          "name": "EngineAPI.keepApart",
+          "params": [
+            "jobId"
+          ],
+          "doc": "JobService.keepApart; nothing returned (204) once queued.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.keepApart(_:)",
+          "cs": "EngineAPI.KeepApart",
+          "c": "bro_engine_api_keep_apart"
+        },
+        {
+          "name": "EngineAPI.decide",
+          "params": [
+            "jobId",
+            "decisionId",
+            "answer"
+          ],
+          "doc": "JobService.decide.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "decision_id",
+            "answer",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.decide(_:decisionId:answer:)",
+          "cs": "EngineAPI.Decide",
+          "c": "bro_engine_api_decide"
+        },
+        {
+          "name": "EngineAPI.move",
+          "params": [
+            "jobId",
+            "by"
+          ],
+          "doc": "JobService.move.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "by",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.move(_:by:)",
+          "cs": "EngineAPI.Move",
+          "c": "bro_engine_api_move"
+        },
+        {
+          "name": "EngineAPI.startNow",
+          "params": [
+            "jobId"
+          ],
+          "doc": "JobService.startNow.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "job_id",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.startNow(_:)",
+          "cs": "EngineAPI.StartNow",
+          "c": "bro_engine_api_start_now"
+        },
+        {
+          "name": "EngineAPI.libraries",
+          "params": [],
+          "returns": "[LibraryDto]",
+          "doc": "LibraryService.libraries().",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.libraries()",
+          "cs": "EngineAPI.Libraries",
+          "c": "bro_engine_api_libraries"
+        },
+        {
+          "name": "EngineAPI.attachLibrary",
+          "params": [
+            "path",
+            "name"
+          ],
+          "returns": "LibraryDto",
+          "doc": "A new library id from the name (else the folder's name), LibraryService.attach writes the marker, then the library is added to the configuration (ConfigService.update); if that save fails the marker this call wrote is removed and the error returned.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "path",
+            "name",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.attachLibrary(_:name:)",
+          "cs": "EngineAPI.AttachLibrary",
+          "c": "bro_engine_api_attach_library"
+        },
+        {
+          "name": "EngineAPI.config",
+          "params": [],
+          "returns": "ConfigEnvelope",
+          "doc": "ConfigService.envelope.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.config()",
+          "cs": "EngineAPI.Config",
+          "c": "bro_engine_api_config"
+        },
+        {
+          "name": "EngineAPI.updateConfig",
+          "params": [
+            "doc",
+            "version"
+          ],
+          "returns": "ConfigEnvelope",
+          "doc": "ConfigService.update.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "doc",
+            "version",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.updateConfig(_:version:)",
+          "cs": "EngineAPI.UpdateConfig",
+          "c": "bro_engine_api_update_config"
+        },
+        {
+          "name": "EngineAPI.validateConfig",
+          "params": [
+            "doc"
+          ],
+          "returns": "[Issue]",
+          "doc": "ConfigService.validate.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "doc",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.validateConfig(_:)",
+          "cs": "EngineAPI.ValidateConfig",
+          "c": "bro_engine_api_validate_config"
+        },
+        {
+          "name": "EngineAPI.setSecret",
+          "params": [
+            "name",
+            "value"
+          ],
+          "doc": "ConfigService.setSecret.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "name",
+            "value",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.setSecret(_:value:)",
+          "cs": "EngineAPI.SetSecret",
+          "c": "bro_engine_api_set_secret"
+        },
+        {
+          "name": "EngineAPI.exportConfig",
+          "params": [],
+          "returns": "JsonValue",
+          "doc": "ConfigService.export as the ExportBundle document.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.exportConfig()",
+          "cs": "EngineAPI.ExportConfig",
+          "c": "bro_engine_api_export_config"
+        },
+        {
+          "name": "EngineAPI.events",
+          "params": [
+            "after:after",
+            "jobLog"
+          ],
+          "returns": "EventFeed",
+          "doc": "The event feed from after (null: a snapshot first).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "after",
+            "job_log",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EngineAPI.events(after:jobLog:)",
+          "cs": "EngineAPI.Events",
+          "c": "bro_engine_api_events"
+        },
+        {
+          "name": "EngineAPI.cancelCountdown",
+          "params": [
+            "driveId"
+          ],
+          "doc": "AutomationService (the owner places it).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "drive_id",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.cancelCountdown(_:)",
+          "cs": "EngineAPI.CancelCountdown",
+          "c": "bro_engine_api_cancel_countdown"
+        },
+        {
+          "name": "EngineAPI.openSession",
+          "params": [
+            "source"
+          ],
+          "returns": "SessionDto",
+          "doc": "SessionService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "source",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.openSession(_:)",
+          "cs": "EngineAPI.OpenSession",
+          "c": "bro_engine_api_open_session"
+        },
+        {
+          "name": "EngineAPI.session",
+          "params": [
+            "sessionId"
+          ],
+          "returns": "SessionDto",
+          "doc": "SessionService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "session_id",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.session(_:)",
+          "cs": "EngineAPI.Session",
+          "c": "bro_engine_api_session"
+        },
+        {
+          "name": "EngineAPI.patchSession",
+          "params": [
+            "sessionId",
+            "patch",
+            "rev"
+          ],
+          "returns": "SessionDto",
+          "doc": "SessionService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "session_id",
+            "patch",
+            "rev",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.patchSession(_:patch:rev:)",
+          "cs": "EngineAPI.PatchSession",
+          "c": "bro_engine_api_patch_session"
+        },
+        {
+          "name": "EngineAPI.lookUp",
+          "params": [
+            "sessionId"
+          ],
+          "doc": "SessionService (metadata, phase 5).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "session_id",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.lookUp(_:)",
+          "cs": "EngineAPI.LookUp",
+          "c": "bro_engine_api_look_up"
+        },
+        {
+          "name": "EngineAPI.previewSession",
+          "params": [
+            "sessionId"
+          ],
+          "returns": "PlanPreviewDto",
+          "doc": "SessionService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "session_id",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.previewSession(_:)",
+          "cs": "EngineAPI.PreviewSession",
+          "c": "bro_engine_api_preview_session"
+        },
+        {
+          "name": "EngineAPI.ripSession",
+          "params": [
+            "sessionId",
+            "options"
+          ],
+          "returns": "JobDto",
+          "doc": "SessionService then JobService.create.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "session_id",
+            "options",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.ripSession(_:options:)",
+          "cs": "EngineAPI.RipSession",
+          "c": "bro_engine_api_rip_session"
+        },
+        {
+          "name": "EngineAPI.closeSession",
+          "params": [
+            "sessionId"
+          ],
+          "doc": "SessionService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "session_id",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.closeSession(_:)",
+          "cs": "EngineAPI.CloseSession",
+          "c": "bro_engine_api_close_session"
+        },
+        {
+          "name": "EngineAPI.rescan",
+          "params": [
+            "libraryId"
+          ],
+          "returns": "JobDto",
+          "doc": "A rescan job (catalogue data).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "library_id",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.rescan(_:)",
+          "cs": "EngineAPI.Rescan",
+          "c": "bro_engine_api_rescan"
+        },
+        {
+          "name": "EngineAPI.units",
+          "params": [
+            "query"
+          ],
+          "returns": "UnitPageDto",
+          "doc": "The catalogue.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "query",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.units(_:)",
+          "cs": "EngineAPI.Units",
+          "c": "bro_engine_api_units"
+        },
+        {
+          "name": "EngineAPI.unit",
+          "params": [
+            "unitId"
+          ],
+          "returns": "UnitDetailDto",
+          "doc": "The catalogue.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "unit_id",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.unit(_:)",
+          "cs": "EngineAPI.Unit",
+          "c": "bro_engine_api_unit"
+        },
+        {
+          "name": "EngineAPI.patchUnit",
+          "params": [
+            "unitId",
+            "patch"
+          ],
+          "returns": "UnitDto",
+          "doc": "The catalogue.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "unit_id",
+            "patch",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.patchUnit(_:patch:)",
+          "cs": "EngineAPI.PatchUnit",
+          "c": "bro_engine_api_patch_unit"
+        },
+        {
+          "name": "EngineAPI.works",
+          "params": [
+            "query"
+          ],
+          "returns": "WorkPageDto",
+          "doc": "The catalogue.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "query",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.works(_:)",
+          "cs": "EngineAPI.Works",
+          "c": "bro_engine_api_works"
+        },
+        {
+          "name": "EngineAPI.set",
+          "params": [
+            "setId"
+          ],
+          "returns": "DiscSetDto",
+          "doc": "The catalogue.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "set_id",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.set(_:)",
+          "cs": "EngineAPI.Set",
+          "c": "bro_engine_api_set"
+        },
+        {
+          "name": "EngineAPI.verify",
+          "params": [
+            "target"
+          ],
+          "returns": "JobDto",
+          "doc": "MaintenanceService (verification).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "target",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.verify(_:)",
+          "cs": "EngineAPI.Verify",
+          "c": "bro_engine_api_verify"
+        },
+        {
+          "name": "EngineAPI.repair",
+          "params": [
+            "unitId"
+          ],
+          "returns": "JobDto",
+          "doc": "MaintenanceService (archive hardening).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "unit_id",
+            "done"
+          ],
+          "phase": 7,
+          "swift": "EngineAPI.repair(_:)",
+          "cs": "EngineAPI.Repair",
+          "c": "bro_engine_api_repair"
+        },
+        {
+          "name": "EngineAPI.replicate",
+          "params": [
+            "unitId"
+          ],
+          "returns": "JobDto",
+          "doc": "MaintenanceService (archive hardening).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "unit_id",
+            "done"
+          ],
+          "phase": 7,
+          "swift": "EngineAPI.replicate(_:)",
+          "cs": "EngineAPI.Replicate",
+          "c": "bro_engine_api_replicate"
+        },
+        {
+          "name": "EngineAPI.createParity",
+          "params": [
+            "unitId"
+          ],
+          "returns": "JobDto",
+          "doc": "MaintenanceService (archive hardening).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "unit_id",
+            "done"
+          ],
+          "phase": 7,
+          "swift": "EngineAPI.createParity(_:)",
+          "cs": "EngineAPI.CreateParity",
+          "c": "bro_engine_api_create_parity"
+        },
+        {
+          "name": "EngineAPI.checks",
+          "params": [
+            "query"
+          ],
+          "returns": "CheckPageDto",
+          "doc": "Verification results.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "query",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.checks(_:)",
+          "cs": "EngineAPI.Checks",
+          "c": "bro_engine_api_checks"
+        },
+        {
+          "name": "EngineAPI.previewPlan",
+          "params": [
+            "request"
+          ],
+          "returns": "PlanPreviewDto",
+          "doc": "The rules' preview.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "request",
+            "done"
+          ],
+          "phase": 4,
+          "swift": "EngineAPI.previewPlan(_:)",
+          "cs": "EngineAPI.PreviewPlan",
+          "c": "bro_engine_api_preview_plan"
+        },
+        {
+          "name": "EngineAPI.importConfig",
+          "params": [
+            "bundle"
+          ],
+          "returns": "ConfigEnvelope",
+          "doc": "ConfigService.import (ConfigCodec.importBundle).",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "bundle",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.importConfig(_:)",
+          "cs": "EngineAPI.ImportConfig",
+          "c": "bro_engine_api_import_config"
+        },
+        {
+          "name": "EngineAPI.register",
+          "params": [
+            "key"
+          ],
+          "returns": "TextResultDto",
+          "doc": "MakemkvService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "key",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.register(_:)",
+          "cs": "EngineAPI.Register",
+          "c": "bro_engine_api_register"
+        },
+        {
+          "name": "EngineAPI.installBetaKey",
+          "params": [],
+          "returns": "TextResultDto",
+          "doc": "MakemkvService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.installBetaKey()",
+          "cs": "EngineAPI.InstallBetaKey",
+          "c": "bro_engine_api_install_beta_key"
+        },
+        {
+          "name": "EngineAPI.firmware",
+          "params": [
+            "driveId"
+          ],
+          "returns": "TextResultDto",
+          "doc": "MakemkvService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "drive_id",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.firmware(_:)",
+          "cs": "EngineAPI.Firmware",
+          "c": "bro_engine_api_firmware"
+        },
+        {
+          "name": "EngineAPI.testStep",
+          "params": [
+            "stepId",
+            "unitId"
+          ],
+          "returns": "JobDto",
+          "doc": "Post steps.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "step_id",
+            "unit_id",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.testStep(_:unitId:)",
+          "cs": "EngineAPI.TestStep",
+          "c": "bro_engine_api_test_step"
+        },
+        {
+          "name": "EngineAPI.testNotification",
+          "params": [
+            "targetId"
+          ],
+          "doc": "NotificationService.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "target_id",
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.testNotification(_:)",
+          "cs": "EngineAPI.TestNotification",
+          "c": "bro_engine_api_test_notification"
+        },
+        {
+          "name": "EngineAPI.diagnosticsBundle",
+          "params": [],
+          "returns": "String",
+          "doc": "Diagnostics.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 5,
+          "swift": "EngineAPI.diagnosticsBundle()",
+          "cs": "EngineAPI.DiagnosticsBundle",
+          "c": "bro_engine_api_diagnostics_bundle"
+        },
+        {
+          "name": "LocalEngine.start",
+          "params": [],
+          "doc": "The startup order (plan §15.1): configService.load, recoveryService.recover (recovery.summary into the engine log), the configuration's limits to the Scheduler, libraryService.start, driveService.start, jobService.start. A failed load fails it.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "LocalEngine.start()",
+          "cs": "LocalEngine.Start",
+          "c": "bro_local_engine_start"
+        },
+        {
+          "name": "LocalEngine.startJob",
+          "params": [
+            "request"
+          ],
+          "returns": "JobDto",
+          "doc": "A phase 3 door outside EngineAPI (G1 owner question 5): JobService.create(request), for the scenario runner and the real-ISO test, whose sources (an ISO, a folder) need SessionService. Retired when openSession/ripSession come.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "request",
+            "done"
+          ],
+          "phase": 3,
+          "swift": "LocalEngine.startJob(_:)",
+          "cs": "LocalEngine.StartJob",
+          "c": "bro_local_engine_start_job"
+        },
+        {
+          "name": "EventFeed.next",
+          "params": [],
+          "returns": "EngineEvent?",
+          "doc": "The next event (the snapshot first); null once closed.",
+          "throws": true,
+          "async": true,
+          "cNames": [
+            "done"
+          ],
+          "phase": 3,
+          "swift": "EventFeed.next()",
+          "cs": "EventFeed.Next",
+          "c": "bro_event_feed_next"
+        },
+        {
+          "name": "EventFeed.close",
+          "params": [],
+          "phase": 3,
+          "swift": "EventFeed.close()",
+          "cs": "EventFeed.Close",
+          "c": "bro_event_feed_close"
+        },
+        {
+          "name": "SystemStatusDto.json",
+          "params": [
+            "status"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "SystemStatusDto.json(_:)",
+          "cs": "SystemStatusDto.Json",
+          "c": "bro_system_status_dto_json"
+        },
+        {
+          "name": "SnapshotDto.json",
+          "params": [
+            "snapshot"
+          ],
+          "returns": "JsonValue",
+          "phase": 3,
+          "swift": "SnapshotDto.json(_:)",
+          "cs": "SnapshotDto.Json",
+          "c": "bro_snapshot_dto_json"
         }
       ]
     },
@@ -14926,6 +16083,16 @@
           "swift": "PipelineRunner.shutdown()",
           "cs": "PipelineRunner.Shutdown",
           "c": "bro_pipeline_runner_shutdown"
+        },
+        {
+          "name": "StepRegistry.standard",
+          "params": [],
+          "returns": "StepRegistry",
+          "doc": "The phase 3 steps (AwaitMedia, Probe, Reconcile, Identify, Plan, Decide, Acquire, Release, VerifyRips, Name, Seal, Commit, Notify, KeepApart); both composition roots use it.",
+          "phase": 3,
+          "swift": "StepRegistry.standard()",
+          "cs": "StepRegistry.Standard",
+          "c": "bro_step_registry_standard"
         }
       ]
     },
@@ -17264,6 +18431,44 @@
           "swift": "MessageTextRenderer.renderJson(_:)",
           "cs": "MessageTextRenderer.RenderJson",
           "c": "bro_message_text_renderer_render_json"
+        }
+      ]
+    },
+    "ports/engine-log": {
+      "layer": "ports",
+      "folder": "",
+      "cFolder": "",
+      "doc": "The engine log (plan §16): the engine's own lines (recovery.summary at start, internal.unexpected, the stop), each a BroMessage with its time. The host's adapter writes logs/engine.log; rotation and the secret redaction come with bromeliad (phase 4).",
+      "phase": 3,
+      "types": [
+        {
+          "name": "EngineLog",
+          "kind": "protocol",
+          "doc": "Where the engine writes its own log lines (any thread).",
+          "swift": {
+            "name": "EngineLog",
+            "file": "macos/BromeliaKit/Sources/BroPorts/EngineLog.swift"
+          },
+          "cs": {
+            "name": "IEngineLog",
+            "file": "windows/src/Bromelia.Ports/IEngineLog.cs"
+          },
+          "c": {
+            "name": "BroEngineLog",
+            "file": "linux/src/ports/bro-engine-log.h"
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "EngineLog.log",
+          "params": [
+            "message"
+          ],
+          "doc": "Appends the line (time, severity, code, params); a failure to write is dropped (logging never fails the engine).",
+          "swift": "EngineLog.log(_:)",
+          "cs": "EngineLog.Log",
+          "c": "bro_engine_log_log"
         }
       ]
     }

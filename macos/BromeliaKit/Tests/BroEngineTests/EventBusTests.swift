@@ -1,5 +1,6 @@
 import BroEngine
 import BroFoundation
+import BroTestKit
 import BroTestSupport
 import Testing
 

@@ -11,4 +11,12 @@ public final class StepRegistry: Sendable {
     }
 
     public func step(_ kind: StepKind) -> (any Step)? { steps[kind] }
+
+    /// The phase 3 steps; both composition roots use it, so their lists can't drift.
+    public static func standard() -> StepRegistry {
+        StepRegistry([
+            AwaitMediaStep(), ProbeStep(), ReconcileStep(), IdentifyStep(), PlanStep(), DecideStep(), AcquireStep(),
+            ReleaseStep(), VerifyRipsStep(), NameStep(), SealStep(), CommitStep(), NotifyStep(), KeepApartStep(),
+        ])
+    }
 }

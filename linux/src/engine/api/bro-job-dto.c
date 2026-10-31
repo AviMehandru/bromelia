@@ -26,6 +26,24 @@ bro_job_dto_free (BroJobDto *job)
   g_free (job);
 }
 
+BroJobDto *
+bro_job_dto_copy (const BroJobDto *job)
+{
+  BroJobDto *c = g_memdup2 (job, sizeof *job);
+  c->drive_id = g_strdup (job->drive_id);
+  c->session_id = job->session_id ? g_memdup2 (job->session_id, sizeof *job->session_id) : NULL;
+  c->title = g_strdup (job->title);
+  c->mode = g_strdup (job->mode);
+  c->progress = job->progress ? bro_progress_dto_copy (job->progress) : NULL;
+  c->blocked_by = job->blocked_by ? bro_bro_message_copy (job->blocked_by) : NULL;
+  c->decision = job->decision ? bro_decision_dto_copy (job->decision) : NULL;
+  c->error = job->error ? bro_bro_error_copy (job->error) : NULL;
+  c->output_path = g_strdup (job->output_path);
+  c->fingerprint = g_strdup (job->fingerprint);
+  c->counts = job->counts ? g_memdup2 (job->counts, sizeof *job->counts) : NULL;
+  return c;
+}
+
 /* {code, params, cause} (shared/schema/common.json BroError), params left out when empty. */
 static BroJsonValue *
 error_json (const BroBroError *error)

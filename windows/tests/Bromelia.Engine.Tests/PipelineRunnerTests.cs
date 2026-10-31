@@ -103,18 +103,6 @@ public sealed class PipelineRunnerTests
         }
     }
 
-    /// <summary>Ids that count: 00000000-0000-4000-8000-000000000001, … after the given jobs'.</summary>
-    internal sealed class CountingIds : IIdGenerator
-    {
-        long _n;
-
-        public CountingIds(long given) { _n = given; }
-
-        public Id Next() => new($"00000000-0000-4000-8000-{Interlocked.Increment(ref _n):x12}");
-
-        public Id Peek() => new($"00000000-0000-4000-8000-{Interlocked.Read(ref _n) + 1:x12}");
-    }
-
     /// <summary>Gives the document the case sets (given.config, then the config ops); read on the executor.</summary>
     sealed class CaseConfig : IConfigSource
     {

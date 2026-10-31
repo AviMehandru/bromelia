@@ -3,8 +3,8 @@ import BroFoundation
 
 /// Step 6 (plan §20.1): decides what the job makes and appends the rest of its steps.
 /// - The profile: ProfileResolver.resolve with the identity's facts (name, label, format code, kind), the drive entry and
-///   whether the rip is automatic; a session's choices are its session layer (the chosen profile's fields, then the
-///   chosen library).
+///   whether the rip is automatic; the chosen profile and library are its session layer (the chosen profile's fields,
+///   then the chosen library): a session's choices, else the request's options.profile and options.library.
 /// - The mode: the request's (options.mode); MKV when titles were chosen by hand; else ModeChooser by the disc's format.
 /// - A mode that makes MKV files needs the listing (disc.noInformation) and titles: the session's ticked titles
 ///   (numbered as Reconcile found them; titles.noneChosenExist when none is on the disc), else TitleRules.select (each
@@ -40,8 +40,11 @@ public struct PlanStep: Step {
         let label = listing.map(\.name).flatMap { $0.isEmpty ? nil : $0 } ?? StepSources.label(request.source, drive)
         let facts = RuleFacts(name: identity.name, label: label, formatCode: identity.formatCode.text, kind: identity.kind.rawValue,
                               automatic: job.request.automatic)
-        let profile = ProfileResolver.resolve(context.config, driveId: configId, facts: facts, sessionChoices: PlanStep.sessionLayer(context.config, choices))
-        let profileId = choices?.profile ?? profile.trace.last(where: { $0.layer == .driveProfile })?.id
+        let chosenProfile = choices?.profile ?? job.request.options?["profile"]?.string
+        let chosenLibrary = choices?.library ?? job.request.options?["library"]?.string
+        let profile = ProfileResolver.resolve(context.config, driveId: configId, facts: facts,
+                                              sessionChoices: StepSources.layer(context.config, chosenProfile, chosenLibrary))
+        let profileId = chosenProfile ?? profile.trace.last(where: { $0.layer == .driveProfile })?.id
             ?? profile.trace.first(where: { $0.layer == .defaultProfile })?.id ?? "default"
         let byHand = choices?.titles.contains(where: \.selected) ?? false
         let mode = job.request.options?["mode"]?.string.flatMap(RipMode.init(rawValue:))
@@ -122,21 +125,6 @@ public struct PlanStep: Step {
         if mode != .infoOnly, profile.profile["archive"]?["verifyRips"]?.bool != false { steps.append(.verifyRips) }
         steps += [.name, .seal, .commit, .notify]
         return StepReport(data: PlanOutput.encode(output), appendSteps: steps, plan: plan)
-    }
-
-    /// The session's choices as the resolver's session layer: the chosen profile's fields, then the chosen library. Nil
-    /// without a session (or with nothing chosen).
-    static func sessionLayer(_ config: Config, _ choices: SessionChoices?) -> JsonValue? {
-        guard let choices else { return nil }
-        var members: [(key: String, value: JsonValue)] = []
-        if let id = choices.profile, let p = Config.profiles(config).first(where: { $0.id == id }), let m = p.json.members {
-            members += m.filter { $0.key != "id" && $0.key != "name" }
-        }
-        if let library = choices.library {
-            members.removeAll { $0.key == "library" }
-            members.append(("library", .string(library)))
-        }
-        return members.isEmpty ? nil : .object(members)
     }
 
     static func profileName(_ config: Config, _ profileId: String) -> String {

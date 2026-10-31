@@ -2,7 +2,7 @@ using Bromelia.Foundation;
 using Bromelia.Ports;
 using FileInfo = Bromelia.Ports.FileInfo;
 
-namespace Bromelia.Engine.Tests;
+namespace Bromelia.TestKit;
 
 /// <summary>Files and folders in memory: what the engine's tests need of the FileSystem port. Thread-safe. While
 /// <see cref="Recording"/> is on, the calls that change something are written to <see cref="Ops"/> ('write', 'sync',
@@ -11,7 +11,7 @@ namespace Bromelia.Engine.Tests;
 /// <see cref="Fails"/> makes an operation on a path fail before it acts (open, read, sync, syncDirectory, write, remove,
 /// rename: its from path); a rename refuses a path that exists and a folder that isn't there, as the real ones do;
 /// <see cref="OnOp"/> hears of each operation before it acts.</summary>
-internal sealed class MemoryFileSystem : IFileSystem
+public sealed class MemoryFileSystem : IFileSystem
 {
     readonly object _lock = new();
     readonly Dictionary<string, byte[]> _files = new();
@@ -20,12 +20,16 @@ internal sealed class MemoryFileSystem : IFileSystem
     public readonly Dictionary<string, BroError> ReadFails = new();
     /// <summary>What <see cref="Volume"/> gives for these paths.</summary>
     public readonly Dictionary<string, VolumeInfo> Volumes = new();
+    /// <summary>What <see cref="Volume"/> gives for a path <see cref="Volumes"/> doesn't have (null: fs.notFound).</summary>
+    public VolumeInfo? AnyVolume;
     public readonly List<string> Ops = new();
     public bool Recording;
     /// <summary>What a read that doesn't bypass the cache gives for these paths.</summary>
     public readonly Dictionary<string, byte[]> Cached = new();
     public readonly List<(string Op, string Path, BroError Error)> Fails = new();
     public Action<string, string>? OnOp;
+    /// <summary>Hears of each whole-file <see cref="Read"/> before it reads (a read that is slow, say).</summary>
+    public Action<string>? OnRead;
     /// <summary>How many pieces of each file were read while <see cref="Recording"/> was on.</summary>
     public readonly Dictionary<string, int> Reads = new();
     /// <summary>The streams OpenForReading gave that aren't closed yet.</summary>
@@ -79,6 +83,7 @@ internal sealed class MemoryFileSystem : IFileSystem
 
     public byte[] Read(string path)
     {
+        OnRead?.Invoke(path);
         lock (_lock)
             return ReadFails.TryGetValue(path, out var fails) ? throw new BroFailure(fails)
                 : _files.TryGetValue(path, out var b) ? b
@@ -245,6 +250,6 @@ internal sealed class MemoryFileSystem : IFileSystem
     public VolumeInfo Volume(string path)
     {
         lock (_lock)
-            return Volumes.TryGetValue(path, out var v) ? v : throw NotFound(path);
+            return Volumes.TryGetValue(path, out var v) ? v : AnyVolume ?? throw NotFound(path);
     }
 }

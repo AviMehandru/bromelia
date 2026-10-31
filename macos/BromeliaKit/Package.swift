@@ -23,7 +23,7 @@ let package = Package(
         .target(name: "BroTestSupport", dependencies: ["BroFoundation"], path: "Tests/BroTestSupport"),
         // Renders messages in English with the host's MessageTextRenderer, for the tests that check a text.
         .target(name: "BroTestEnglish", dependencies: ["BroFoundation", "BroAdapters"], path: "Tests/BroTestEnglish"),
-        // The test kit (plan §17): fakes of the ports for the adapter tests and the test composition root.
+        // The test kit (plan §17): fakes of the ports for the adapter and engine tests and the test composition root.
         .target(name: "BroTestKit", dependencies: ["BroFoundation", "BroDomain", "BroPorts"], path: "Tests/BroTestKit"),
         .testTarget(name: "BroFoundationTests", dependencies: ["BroFoundation", "BroTestSupport"]),
         .testTarget(name: "BroDomainTests", dependencies: ["BroDomain", "BroTestSupport", "BroTestEnglish"]),
@@ -32,7 +32,10 @@ let package = Package(
         .executableTarget(name: "BroTestProbe", dependencies: ["BroFoundation", "BroDomain", "BroPorts", "BroAdapters"],
                           path: "Tests/BroTestProbe"),
         .testTarget(name: "BroAdaptersTests", dependencies: ["BroAdapters", "BroTestSupport", "BroTestEnglish", "BroTestKit", "BroTestProbe"]),
-        .testTarget(name: "BroEngineTests", dependencies: ["BroEngine", "BroTestSupport"]),
+        .testTarget(name: "BroEngineTests", dependencies: ["BroEngine", "BroTestSupport", "BroTestKit"]),
+        // The scenario test unit (plan §5.1): the test composition root over the real engine and adapters, and the
+        // LocalEngine cases; H adds the scenario runner.
+        .testTarget(name: "SharedScenarioTests", dependencies: ["BroEngine", "BroAdapters", "BroTestKit", "BroTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

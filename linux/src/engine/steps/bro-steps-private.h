@@ -7,6 +7,11 @@
 
 G_BEGIN_DECLS
 
+/* A chosen profile and library (each nullable) as the resolver's session layer: the profile's fields but id and name
+ * (an id that isn't configured adds none), then the library. NULL with nothing chosen. Shared by Plan and
+ * bro_step_sources_profile; in bro-step-sources.c. */
+BroJsonValue *_bro_step_sources_layer (const BroConfig *config, const char *profile_id, const char *library_id);
+
 /* {key: value}; takes @value. */
 static inline BroJsonValue *
 _bro_param (const char *key, BroJsonValue *value)

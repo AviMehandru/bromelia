@@ -1501,7 +1501,7 @@ run_library_op (LibraryHarness *h, guint i, BroJsonValue *op, GPtrArray *async)
     }
   if (strcmp (name, "advance") == 0)
     {
-      manual_advance (h->clock, (gint64) (bro_json_value_get_number (arg, 0) * 1000), library_settle, h);
+      test_manual_clock_advance (h->clock, (gint64) (bro_json_value_get_number (arg, 0) * 1000), library_settle, h);
       library_settle (h);
       library_record (h, i, bro_json_value_new_string ("ok"));
     }
