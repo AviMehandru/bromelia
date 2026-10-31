@@ -1,5 +1,6 @@
 {
   "title": "An audio CD is ripped with cyanrip in staging, without makemkvcon, and archived with checksums",
+  "phase": 5,
   "from": [
     "macos IntegrationJobTests.audioCDsUseTheAudioCommand",
     "docs/configuration.md#other-discs"

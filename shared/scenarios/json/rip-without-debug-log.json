@@ -1,5 +1,6 @@
 {
   "title": "Without app_ShowDebug no debug log is copied into the unit",
+  "phase": 3,
   "from": [
     "macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder"
   ],

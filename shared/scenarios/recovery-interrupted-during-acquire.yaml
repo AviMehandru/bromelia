@@ -1,4 +1,5 @@
 title: A rip interrupted by an engine crash is marked interrupted after the restart; its staging is kept and nothing appears in the library
+phase: 3
 from:
   - macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop
   - linux /reliability/unfinished-jobs

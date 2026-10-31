@@ -1,5 +1,6 @@
 {
   "title": "With autoUpdateBetaKey, an expired key gets MakeMKV's current beta key from the forum, registered with makemkvcon reg",
+  "phase": 5,
   "from": [
     "docs/configuration.md (autoUpdateBetaKey; MakeMKV messages shown outside the log)",
     "docker.md (registration)",

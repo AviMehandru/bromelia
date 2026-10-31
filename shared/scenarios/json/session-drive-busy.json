@@ -1,5 +1,6 @@
 {
   "title": "A drive busy with a job can't be opened",
+  "phase": 4,
   "from": [
     "macos AppModel.open (The drive is busy with a job.)"
   ],

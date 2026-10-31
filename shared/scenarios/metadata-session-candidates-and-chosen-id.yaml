@@ -1,4 +1,5 @@
 title: The disc page lists the lookup's candidates; a typed id replaces the search and decides movie or TV
+phase: 5
 from:
   - docs/configuration.md#online-lookup (choosing the match)
   - shared/fixtures/lookup/expected.json

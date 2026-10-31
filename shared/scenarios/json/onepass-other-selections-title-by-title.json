@@ -1,5 +1,6 @@
 {
   "title": "A selection that leaves out a longer title is ripped title by title",
+  "phase": 3,
   "from": [
     "macos OnePassJobTests.otherSelectionsAreRippedTitleByTitle"
   ],

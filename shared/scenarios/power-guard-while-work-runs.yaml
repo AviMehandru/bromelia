@@ -1,4 +1,5 @@
 title: The computer is kept awake while a rip or a background step runs; turning preventSleep off releases it at once
+phase: 5
 from:
   - macos ReliabilityTests.backgroundStepsKeepTheMacAwake
   - windows ReliabilityTests.BackgroundStepsKeepTheComputerAwake

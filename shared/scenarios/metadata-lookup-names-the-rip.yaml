@@ -1,4 +1,5 @@
 title: The online lookup's canonical title and year name a movie in the media server layout; the runners-up are logged
+phase: 5
 from:
   - docs/configuration.md#online-lookup
   - README.md (online lookup)

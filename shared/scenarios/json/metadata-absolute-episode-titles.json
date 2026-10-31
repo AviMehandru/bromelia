@@ -1,5 +1,6 @@
 {
   "title": "With absoluteEpisodes on, episodes numbered across seasons (One Piece 138) get their titles from TMDb's absolute order",
+  "phase": 5,
   "from": [
     "claudeDocs/bromelia-handoff.md (absolutely numbered anime; a decision for the owner)",
     "rearchitecture-plan §30 decision 5; owner decision 2026-10-03 (an option, off by default)",

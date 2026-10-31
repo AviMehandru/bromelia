@@ -1,4 +1,5 @@
 title: Only successful units whose folder still exists count as archived; read-error units, failures and vanished folders don't
+phase: 5
 from:
   - macos ArchiveCheckTests.findsEarlierArchives
   - macos ArchiveCheckTests.discsArchivedBefore (only while the folder is there)

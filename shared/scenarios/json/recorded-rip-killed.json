@@ -1,5 +1,6 @@
 {
   "title": "Recorded makemkvcon run rip-killed: exit 143, a file written → failed; the file is set aside at the next start",
+  "phase": 3,
   "from": [
     "shared/fixtures/rip-outcomes.json",
     "macos RecordedRunTests.everyRecordedRunEndsAsExpected",

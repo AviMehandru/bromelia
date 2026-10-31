@@ -1,4 +1,5 @@
 title: An automatic rip waits for the OS to mount the disc, and goes on after waitForMountSeconds without it
+phase: 4
 from:
   - docs/configuration.md#driveconfig (waitForMountSeconds)
   - README.md (automatic rips wait for the system to mount the disc first)

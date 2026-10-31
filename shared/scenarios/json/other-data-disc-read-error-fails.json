@@ -1,5 +1,6 @@
 {
   "title": "A read error fails a data-disc copy",
+  "phase": 5,
   "from": [
     "docs/configuration.md#other-discs (a read error fails the job)"
   ],

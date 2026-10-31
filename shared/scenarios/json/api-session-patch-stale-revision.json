@@ -1,5 +1,6 @@
 {
   "title": "Two clients changing the same open disc: a patch based on an old revision is refused",
+  "phase": 4,
   "from": [
     "rearchitecture-plan §15.3 (409 if rev is stale)"
   ],

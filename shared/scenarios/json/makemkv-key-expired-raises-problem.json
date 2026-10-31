@@ -1,0 +1,39 @@
+{
+  "title": "An expired key raises a problem with the beta-key action",
+  "phase": 5,
+  "from": [
+    "macos OnePassJobTests.expiredKeyExplainsTheFailure",
+    "docs/configuration.md (MakeMKV messages shown outside the log)",
+    "H1-3 (2026-10-31): the problem check of makemkv-key-expired-explains-failure, which is phase 3 without it"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-key-expired.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "makemkv.keyExpired"
+          }
+        },
+        "problems": {
+          "active": [
+            "makemkv.keyExpired"
+          ]
+        }
+      }
+    }
+  ]
+}

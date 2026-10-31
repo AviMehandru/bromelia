@@ -1,5 +1,6 @@
 {
   "title": "A test notification is sent to one target on request",
+  "phase": 5,
   "from": [
     "rearchitecture-plan §13.1 (testNotification)"
   ],

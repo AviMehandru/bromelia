@@ -1,4 +1,5 @@
 title: Backup then MKV without keepAfterMkv removes the backup once the MKV files are made
+phase: 3
 from:
   - docs/configuration.md#driveconfig (keepBackupAfterMKV)
 given:

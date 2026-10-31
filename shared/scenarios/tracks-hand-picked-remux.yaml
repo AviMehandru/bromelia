@@ -1,4 +1,5 @@
 title: A title with hand-picked tracks is ripped with every track, then mkvmerge keeps the chosen ones
+phase: 5
 from:
   - docs/architecture.md#hand-picked-tracks
   - macos IntegrationTests.ripsTitleWithCustomTracksRenameAndScript

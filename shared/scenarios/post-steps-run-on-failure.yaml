@@ -1,4 +1,5 @@
 title: A failure step runs when no title matched; a success step doesn't
+phase: 5
 from:
   - macos IntegrationTests.failsCleanlyWhenNoTitleMatches
   - macos TemplateTests.runConditions

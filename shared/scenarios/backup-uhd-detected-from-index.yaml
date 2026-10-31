@@ -1,4 +1,5 @@
 title: Without a listing, a backup's index.bdmv (INDX0300) tells a 4K UHD disc from a Blu-ray, and the backup is renamed
+phase: 3
 from:
   - README.md (index.bdmv version 3 in a backup)
   - docs/configuration.md#naming-formats-and-episodes

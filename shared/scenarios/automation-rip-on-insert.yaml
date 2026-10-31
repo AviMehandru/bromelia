@@ -1,4 +1,5 @@
 title: Inserting a disc into a drive set to rip on insert starts a countdown, then an automatic job with the drive's profile
+phase: 4
 from:
   - macos DriveDetectionTests.autoRipQueuesOnInsertOnly
   - windows DriveDetectionTests.AutoRipQueuesOnInsertOnly

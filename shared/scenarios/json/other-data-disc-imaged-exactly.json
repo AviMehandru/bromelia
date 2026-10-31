@@ -1,5 +1,6 @@
 {
   "title": "A data disc is copied byte for byte to an ISO image whose checksum is the disc's",
+  "phase": 5,
   "from": [
     "macos IntegrationJobTests.dataDiscsAreImagedExactly",
     "windows IntegrationJobTests.DataDiscsAreCopiedExactly",

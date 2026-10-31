@@ -1,0 +1,41 @@
+{
+  "title": "A rip with read errors records the read errors in its manifest",
+  "phase": 5,
+  "from": [
+    "docs/configuration.md#output-folder-read-errors-and-checks",
+    "docs/architecture.md#staging-read-errors-and-checks",
+    "H1-3 (2026-10-31): the manifest check of safety-read-errors-quarantine, which is phase 3 without it"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "tools": {
+      "makemkvcon": "tools/makemkvcon-read-error.yaml"
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeededWithReadErrors"
+        },
+        "manifest": {
+          "job": "job",
+          "json": {
+            "status": "errors",
+            "outcome": "succeededWithReadErrors"
+          }
+        }
+      }
+    }
+  ]
+}

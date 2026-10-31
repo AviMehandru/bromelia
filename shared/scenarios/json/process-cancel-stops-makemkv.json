@@ -1,5 +1,6 @@
 {
   "title": "Cancelling a running rip stops makemkvcon (SIGTERM, since it ignores SIGINT) and keeps what it wrote hidden in staging",
+  "phase": 3,
   "from": [
     "docs/architecture.md#stopping-processes",
     "linux /reliability/cancel-without-main-loop"

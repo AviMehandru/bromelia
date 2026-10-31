@@ -1,0 +1,26 @@
+title: The keep-apart route refuses a job whose MakeMKV was left behind until a restart, and a job already kept apart
+phase: 4
+from:
+  - docs/architecture.md#stopping-processes
+  - docs/architecture.md#unfinished-jobs (an interrupted job's files become visible, with a note)
+  - owner decision 2026-10-25 (a job whose MakeMKV was left behind is kept apart only after a restart)
+  - "H1-3 (2026-10-31): the api checks of process-unkillable-rip-is-abandoned and recovery-interrupted-kept-apart"
+given:
+  disc: sample-movie-one-title
+  configPatch: {limits: {stallTimeoutMinutes: 1}}
+  tools: {makemkvcon: tools/makemkvcon-stalls-unkillable.yaml}
+steps:
+  - rip: {iso: true, titles: [0], as: job}
+  - advance: 100
+  - expect:
+      job: {name: job, outcome: failed, error: {code: makemkv.stalled, params: {abandoned: true}}}
+  - api: {method: POST, path: "/v1/jobs/{jobId:job}/keep-apart", headers: {X-Bromelia: "1"}, as: early}
+  - expect:
+      response: {as: early, status: 409, error: {code: job.processAbandoned}}
+  - restart: {}
+  - keepApart: job
+  - expect:
+      job: {name: job, outcome: cancelled}
+  - api: {method: POST, path: "/v1/jobs/{jobId:job}/keep-apart", headers: {X-Bromelia: "1"}, as: twice}
+  - expect:
+      response: {as: twice, status: 409, error: {code: job.notInterrupted}}

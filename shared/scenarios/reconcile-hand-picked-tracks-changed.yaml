@@ -1,4 +1,5 @@
 title: A title with hand-picked tracks whose track list changed fails the job before ripping
+phase: 4
 from:
   - macos RipCheckTests.matchesTitlesAcrossListings
   - docs/configuration.md#output-folder-read-errors-and-checks

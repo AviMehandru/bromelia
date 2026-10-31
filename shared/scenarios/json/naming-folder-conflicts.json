@@ -1,5 +1,6 @@
 {
   "title": "When the unit's folder exists, newFolder makes 'Name (2)', merge adds to it, skip fails the job",
+  "phase": 3,
   "from": [
     "docs/configuration.md#driveconfig (conflictPolicy)"
   ],

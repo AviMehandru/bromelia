@@ -1,5 +1,6 @@
 {
   "title": "A decrypted ISO backup is kept as an image file",
+  "phase": 3,
   "from": [
     "macos ReliabilityTests.isoBackupIsKept",
     "docs/configuration.md#drivecon"

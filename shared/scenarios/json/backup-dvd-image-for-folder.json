@@ -1,5 +1,6 @@
 {
   "title": "MakeMKV writes a DVD backup as an ISO image even when a folder was asked for; the image gets its .iso extension and the MKV step reads it",
+  "phase": 3,
   "from": [
     "macos ReliabilityTests.dvdImageWrittenForAFolderBackupGetsItsExtension",
     "windows ReliabilityTests.DvdImageWrittenForAFolderBackupGetsItsExtension",

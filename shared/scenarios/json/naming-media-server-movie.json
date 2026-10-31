@@ -1,5 +1,6 @@
 {
   "title": "Media server layout names the main feature after the movie and puts extras in Other/",
+  "phase": 3,
   "from": [
     "macos IntegrationJobTests.moviesAreNamedForMediaServers",
     "docs/configuration.md#media-server-layout"

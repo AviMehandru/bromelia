@@ -1,4 +1,5 @@
 title: Rescans while a disc stays in don't start another automatic rip
+phase: 4
 from:
   - macos DriveDetectionTests.autoRipQueuesOnInsertOnly (rescans do not queue duplicates)
   - macos DriveDetectionTests.aDriveLeftOutOfOneScanIsNotANewDisc (a drive missing from one scan keeps its disc)

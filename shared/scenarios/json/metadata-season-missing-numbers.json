@@ -1,5 +1,6 @@
 {
   "title": "When the season doesn't list every episode number of the disc, no episode gets a title and the log says why",
+  "phase": 5,
   "from": [
     "docs/configuration.md#online-lookup (episode titles)",
     "README.md limitations (absolute numbers such as 138)"

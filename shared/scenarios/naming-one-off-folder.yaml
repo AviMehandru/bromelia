@@ -1,4 +1,5 @@
 title: Ripping into a one-off folder that isn't a library is refused until it is attached (with its marker); then the rip goes there
+phase: 4
 from:
   - README.md (pick a one-off output folder)
   - owner decision 2026-10-03 (picking a folder offers to use it as a library)

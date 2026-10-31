@@ -1,5 +1,6 @@
 {
   "title": "A drive ejects the disc when done (ejectWhenDone) and after a failure only with ejectOnFailure",
+  "phase": 3,
   "from": [
     "docs/configuration.md#driveconfig (ejectWhenDone, ejectOnFailure)",
     "README.md (automatic eject on success and/or failure)"

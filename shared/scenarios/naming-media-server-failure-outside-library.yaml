@@ -1,4 +1,5 @@
 title: In the media server layout a failed job's files, kept apart, are quarantined outside the library's show and movie folders
+phase: 3
 from:
   - docs/configuration.md#media-server-layout
   - owner decision 2026-10-25 (a failed job's staging stays hidden for a retry; keep-apart or the next start moves it to _Quarantine)

@@ -1,5 +1,6 @@
 {
   "title": "Only one check runs at a time",
+  "phase": 5,
   "from": [
     "macos ArchiveCheckTests.verifiesFromTheApp (one at a time)",
     "macos AppModel.webAction verify (A check is already running)"

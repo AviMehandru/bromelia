@@ -1,5 +1,6 @@
 {
   "title": "A title that failed keeps MakeMKV's file name; kept apart, it is in an INCOMPLETE folder in quarantine",
+  "phase": 3,
   "from": [
     "macos SafetyTests.failedTitleIsKeptUnderMakeMKVsNameInAnIncompleteFolder",
     "docs/configuration.md#output-folder-read-errors-and-checks",

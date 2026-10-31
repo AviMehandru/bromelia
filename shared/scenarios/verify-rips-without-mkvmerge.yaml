@@ -1,4 +1,5 @@
 title: Without mkvmerge the MKV files aren't checked, and the log says so once
+phase: 3
 from:
   - docs/configuration.md#output-folder-read-errors-and-checks
 given:

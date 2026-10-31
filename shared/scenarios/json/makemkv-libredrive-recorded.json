@@ -1,5 +1,6 @@
 {
   "title": "LibreDrive mode is recorded in the archive record",
+  "phase": 3,
   "from": [
     "macos OnePassJobTests.libreDriveIsRecorded",
     "docs/configuration.md (MakeMKV messages shown outside the log)"

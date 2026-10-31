@@ -1,5 +1,6 @@
 {
   "title": "The INCOMPLETE note of a failed job set aside at the next start names the logs next to it, and makemkv's log has everything it printed",
+  "phase": 3,
   "from": [
     "macos SafetyTests.failureInASharedFolderUsesASubfolder",
     "docs/configuration.md#archive-files",

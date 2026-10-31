@@ -1,5 +1,6 @@
 {
   "title": "In the media server layout, backups go into Backup/ with .plexignore and .ignore so servers leave them alone",
+  "phase": 3,
   "from": [
     "docs/configuration.md#media-server-layout"
   ],

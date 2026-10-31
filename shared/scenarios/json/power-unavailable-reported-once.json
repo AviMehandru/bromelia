@@ -1,5 +1,6 @@
 {
   "title": "When the computer can't be kept awake (no logind on the system bus), that is reported once and work carries on",
+  "phase": 4,
   "from": [
     "linux /reliability/keep-awake-without-logind",
     "docs/architecture.md#sleep",

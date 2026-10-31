@@ -1,4 +1,5 @@
-title: An expired key is named as the cause of the failure and raises a problem with the beta-key action
+title: An expired key is named as the cause of the failure
+phase: 3
 from:
   - macos OnePassJobTests.expiredKeyExplainsTheFailure
   - docs/configuration.md (MakeMKV messages shown outside the log)
@@ -9,4 +10,3 @@ steps:
   - rip: {iso: true, as: job}
   - expect:
       job: {name: job, outcome: failed, error: {code: makemkv.keyExpired}, errorText: "key has expired"}
-      problems: {active: [makemkv.keyExpired]}

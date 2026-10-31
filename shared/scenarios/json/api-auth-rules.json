@@ -1,5 +1,6 @@
 {
   "title": "Over TCP: Host allowlist without a token, X-Bromelia on writes, Bearer and cookie tokens, read-only tokens, no tokens in URLs",
+  "phase": 4,
   "from": [
     "macos IntegrationFeatureTests.webRequestsAndAccess",
     "windows IntegrationFeatureTests.WebAccessRules",

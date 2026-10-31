@@ -1,5 +1,6 @@
 {
   "title": "Close one tray, close all trays, and eject from the API",
+  "phase": 4,
   "from": [
     "README.md (trays: close one drive's tray or all trays)",
     "docs/configuration.md#web-page (Eject, Close tray)"

@@ -1,5 +1,6 @@
 {
   "title": "A finished rip is moved out of staging into the library, with checksums, a record and the logs",
+  "phase": 3,
   "from": [
     "macos SafetyTests.successfulRipIsMovedIntoTheOutputFolder",
     "docs/configuration.md#output-folder-read-errors-and-checks",

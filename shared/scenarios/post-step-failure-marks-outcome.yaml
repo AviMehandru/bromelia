@@ -1,4 +1,5 @@
 title: A failed step marked affectsOutcome gives succeededStepsFailed; the archive stays committed
+phase: 5
 from:
   - rearchitecture-plan §20.3 (a failed post-processing step never turns a good archive into a failed job)
   - docs/configuration.md#postprocessstep (failJobOnError)

@@ -1,4 +1,5 @@
 title: A title renamed on the disc page gets that file name instead of the template's
+phase: 4
 from:
   - README.md (rename output files per title)
 given:

@@ -1,4 +1,5 @@
 title: A drive without its own configuration rips every disc inserted, one after another, with the automation defaults
+phase: 4
 from:
   - macos DriveDetectionTests.reinsertedDiscStartsARipWhenTheEmptyDriveHadNoDevicePath
   - windows DriveDetectionTests.ReinsertedDiscStartsARipWhenTheEmptyDriveHadNoDevicePath

@@ -1,5 +1,6 @@
 {
   "title": "The server answers the system status, serves the web page, refuses writes without X-Bromelia and returns codes for unknown ids",
+  "phase": 4,
   "from": [
     "macos IntegrationJobTests.webServerServesStatusAndActions",
     "windows IntegrationFeatureTests.WebServerAnswersStatusAndActions",

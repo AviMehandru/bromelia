@@ -1,4 +1,5 @@
 title: Another disc of the set with the same label isn't taken for the archived one
+phase: 3
 from:
   - macos ArchiveCheckTests.discsArchivedBefore
   - macos ArchiveCheckTests.fingerprintsMatchEveryPlatform

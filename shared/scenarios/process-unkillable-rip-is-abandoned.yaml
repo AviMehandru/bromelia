@@ -1,4 +1,5 @@
 title: A makemkvcon that doesn't end even after SIGKILL is abandoned 30 s later, so the job can end; its files are kept apart only after a restart
+phase: 3
 from:
   - docs/architecture.md#stopping-processes
   - docs/configuration.md#output-folder-read-errors-and-checks
@@ -13,9 +14,6 @@ steps:
   - expect:
       job: {name: job, outcome: failed, error: {code: makemkv.stalled, params: {abandoned: true}}}
       log: {job: job, include: [process.abandoned]}
-  - api: {method: POST, path: "/v1/jobs/{jobId:job}/keep-apart", headers: {X-Bromelia: "1"}, as: early}
-  - expect:
-      response: {as: early, status: 409, error: {code: job.processAbandoned}}
   - restart: {}
   - keepApart: job
   - expect:

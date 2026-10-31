@@ -1,5 +1,6 @@
 {
   "title": "If MakeMKV's drive number now means another device, the backup stops instead of reading the wrong disc",
+  "phase": 3,
   "from": [
     "README.md (safety check when MakeMKV's drive numbering changes)",
     "docs/architecture.md#makemkvcon"

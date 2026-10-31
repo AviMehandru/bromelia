@@ -1,4 +1,5 @@
 title: Hand-picked tracks without mkvmerge fail the job before ripping
+phase: 5
 from:
   - macos JobRunner (Choosing individual tracks requires mkvmerge)
   - README.md limitations (individual track selection needs mkvmerge)

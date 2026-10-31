@@ -1,5 +1,6 @@
 {
   "title": "A backup can only be made from a disc in a drive (MakeMKV accepts only disc:N for backups)",
+  "phase": 3,
   "from": [
     "docs/architecture.md#makemkvcon",
     "CLAUDE.md pitfalls (backups only accept disc:N)"

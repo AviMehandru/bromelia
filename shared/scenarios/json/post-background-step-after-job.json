@@ -1,5 +1,6 @@
 {
   "title": "A background step runs after the job, on the processing queue, with the job's status",
+  "phase": 5,
   "from": [
     "macos IntegrationJobTests.backgroundStepsRunAfterTheJob",
     "docs/configuration.md#postprocessstep (background steps)"

@@ -1,4 +1,5 @@
 title: A media server unit with an online match gets the movie's .nfo and the poster; an existing .nfo is never replaced, and neither is in SHA256SUMS
+phase: 5
 from:
   - docs/configuration.md#media-server-layout (Kodi / Jellyfin / Emby metadata)
   - shared/fixtures/nfo

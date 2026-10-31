@@ -1,5 +1,6 @@
 {
   "title": "Settings switch automatic rips and the mode of a drive's profile through the configuration; an invalid mode is refused with an issue",
+  "phase": 4,
   "from": [
     "macos WebTests.titlesSettingsAndLogs (settings)",
     "docs/configuration.md#web-page (Settings)"

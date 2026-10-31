@@ -1,4 +1,5 @@
 title: Titles chosen by hand are ripped as MKV files whatever the format's mode
+phase: 4
 from:
   - docs/configuration.md#driveconfig (formatModes are not for titles chosen by hand)
   - macos WebTests.titlesSettingsAndLogs (?titles= rips as MKV)

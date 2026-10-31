@@ -1,4 +1,5 @@
 title: A failed lookup is logged and the job continues with the disc's own name
+phase: 5
 from:
   - docs/configuration.md#online-lookup (a failed lookup is logged and the job continues)
   - docs/architecture.md#services (failures are logged and never fail a job)

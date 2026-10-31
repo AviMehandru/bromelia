@@ -1,5 +1,6 @@
 {
   "title": "Scheduled verification runs when a unit's last check is intervalDays old, only while no rip runs, and reports damage to notifications",
+  "phase": 5,
   "from": [
     "macos ArchiveCheckTests.verifiesFromTheApp",
     "linux /archive/verify-in-state",

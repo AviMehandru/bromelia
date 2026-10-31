@@ -1,5 +1,6 @@
 {
   "title": "Drives rip in parallel, one job per drive; limits.acquisitions caps rips across drives; the queue can be reordered and started now",
+  "phase": 3,
   "from": [
     "README.md (parallel rips, one job per drive at a time, optional global limit, queue reorder, cancel, retry, start now)",
     "docs/configuration.md#top-level (maxConcurrentJobs)",
@@ -23,6 +24,12 @@
         "identification": "BD-RE B 1.00",
         "device": "/dev/b",
         "disc": "sample-movie-one-title"
+      },
+      {
+        "id": "c",
+        "identification": "BD-RE C 1.00",
+        "device": "/dev/c",
+        "disc": "sample-movie-one-title"
       }
     ],
     "tools": {
@@ -44,7 +51,7 @@
     },
     {
       "rip": {
-        "drive": "a",
+        "drive": "c",
         "as": "third"
       }
     },

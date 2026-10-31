@@ -1,5 +1,6 @@
 {
   "title": "A TV disc's episodes get their titles from the show's season and they appear in the names and the record",
+  "phase": 5,
   "from": [
     "docs/configuration.md#online-lookup (episode titles)",
     "macos LookupTests.episodeTitlesInNames"

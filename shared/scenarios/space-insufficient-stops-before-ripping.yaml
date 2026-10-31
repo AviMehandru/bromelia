@@ -1,4 +1,5 @@
 title: A rip that wouldn't fit stops before anything is written
+phase: 3
 from:
   - macos ReliabilityTests.notEnoughFreeSpaceStopsBeforeRipping
   - docs/configuration.md#output-folder-read-errors-and-checks

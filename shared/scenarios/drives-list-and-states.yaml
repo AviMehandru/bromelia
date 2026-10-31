@@ -1,4 +1,5 @@
 title: The drive list shows every drive with its device, tray state, disc label and type; configured drives that aren't attached stay listed
+phase: 3
 from:
   - macos DriveDetectionTests.disconnectedConfigurationsStayVisibleAndSetUpCopiesDefaults
   - README.md (drive list with drive model, device, tray state, disc label and disc type)

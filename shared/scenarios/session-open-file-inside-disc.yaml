@@ -1,4 +1,5 @@
 title: Opening a file inside a disc structure opens the disc it belongs to
+phase: 4
 from:
   - macos ParityTests.opensTheDiscAFileBelongsTo
   - README.md (open a file inside a disc)

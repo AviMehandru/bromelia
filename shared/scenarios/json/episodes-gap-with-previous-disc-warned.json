@@ -1,5 +1,6 @@
 {
   "title": "A first episode typed for the disc wins over the previous disc's, and the gap is logged",
+  "phase": 5,
   "from": [
     "docs/configuration.md#naming-formats-and-episodes (the log warns about the gap or overlap)"
   ],

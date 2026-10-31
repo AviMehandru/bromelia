@@ -1,4 +1,5 @@
 title: A rip started by hand is never stopped because the disc was archived before; the session says so and the job warns
+phase: 4
 from:
   - macos ArchiveCheckTests.discsArchivedBefore
   - docs/configuration.md#archive-check

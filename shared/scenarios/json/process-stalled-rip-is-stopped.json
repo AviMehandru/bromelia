@@ -1,5 +1,6 @@
 {
   "title": "A rip that prints nothing for the stall timeout is stopped with SIGTERM and fails",
+  "phase": 3,
   "from": [
     "macos ReliabilityTests.stuckProcessIsStopped",
     "docs/configuration.md#output-folder-read-errors-and-checks",

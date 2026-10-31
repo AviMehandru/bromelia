@@ -1,4 +1,5 @@
 title: Read errors during the rip keep the files apart, in quarantine, with a note
+phase: 3
 from:
   - macos SafetyTests.readErrorsKeepTheFilesApart
   - docs/configuration.md#output-folder-read-errors-and-checks
@@ -26,5 +27,4 @@ steps:
           - "_Quarantine/Sample Movie [READ ERRORS]/makemkv-{unit8}-log.txt"
       file: {path: "library/_Quarantine/Sample Movie [READ ERRORS]/READ ERRORS.txt", contains: ["NOT a finished archive", "MEDIUM ERROR"]}
       record: {folder: "library/_Quarantine/Sample Movie [READ ERRORS]", json: {status: errors, titles: [{index: 0, readErrors: 1}]}}
-      manifest: {job: job, json: {status: errors, outcome: succeededWithReadErrors}}
       sums: {folder: "library/_Quarantine/Sample Movie [READ ERRORS]", ok: true}

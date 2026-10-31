@@ -1,4 +1,5 @@
 title: Stopping a check keeps the results of the folders it finished, and nothing for the rest
+phase: 5
 from:
   - macos ArchiveCheckTests.verifiesArchives (stopping keeps only folders that were finished)
 given:

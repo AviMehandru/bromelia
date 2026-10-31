@@ -1,4 +1,5 @@
 title: While the library is offline, inserted discs don't start automatic rips, and a notification goes out
+phase: 5
 from:
   - claudeDocs/bromelia-handoff.md backlog 1 (pause automatic rips and send a notification while the root is missing)
   - rearchitecture-plan §15.2, §22.2

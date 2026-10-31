@@ -1,5 +1,6 @@
 {
   "title": "A chosen title that isn't in the new listing fails the job before ripping",
+  "phase": 4,
   "from": [
     "macos SafetyTests.aChosenTitleMissingFromTheListingFailsTheJob",
     "docs/configuration.md#output-folder-read-errors-and-checks"

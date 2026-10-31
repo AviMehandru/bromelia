@@ -1,5 +1,6 @@
 {
   "title": "Rules add steps for matching discs only (by name or label, and by format code)",
+  "phase": 5,
   "from": [
     "macos IntegrationTests.splitsPlayAllTitleIntoEpisodes (plugins)",
     "macos NamingTests.pluginMatching",

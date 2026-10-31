@@ -1,4 +1,5 @@
 title: A mode for the disc's format replaces the profile's mode in automatic and quick rips
+phase: 3
 from:
   - macos IntegrationJobTests.formatModesReplaceTheConfiguredMode
   - docs/configuration.md#driveconfig (formatModes)

@@ -1,4 +1,5 @@
 title: Without the archive record the logs stay in the job's folder only, also when the files are set aside at the next start; the note names that log
+phase: 3
 from:
   - macos SafetyTests.logsFollowFilesOnlyWithTheArchiveRecord
   - docs/configuration.md#archive-files

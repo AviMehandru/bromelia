@@ -1,5 +1,6 @@
 {
   "title": "Disc 2 of a set continues after the last episode of disc 1's record",
+  "phase": 5,
   "from": [
     "docs/configuration.md#naming-formats-and-episodes (numbering across discs)",
     "shared/fixtures/episode-continuation.json",

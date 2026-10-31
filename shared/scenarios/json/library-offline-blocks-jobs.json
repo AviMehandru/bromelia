@@ -1,5 +1,6 @@
 {
   "title": "A job whose library is offline waits, blocked, and never writes to the boot disk; it continues when the library is back",
+  "phase": 3,
   "from": [
     "claudeDocs/bromelia-handoff.md backlog 1 (refuse to write when the archive drive is missing)",
     "rearchitecture-plan §22.1 I2, §22.2"

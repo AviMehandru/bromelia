@@ -1,4 +1,5 @@
 title: With ripAudioCDs off an audio CD is left alone, and Rip says why
+phase: 5
 from:
   - docs/configuration.md#other-discs
   - macos IntegrationFeatureTests.otherDiscModesAndBetaKeys

@@ -1,5 +1,6 @@
 {
   "title": "An interrupted rip can be continued from its kept staging, once the same disc is back",
+  "phase": 4,
   "from": [
     "rearchitecture-plan §20.4 (when the same fingerprint is inserted again, the UI offers to continue)",
     "owner decision 2026-10-03 (keep staging while it can be continued)"

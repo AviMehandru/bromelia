@@ -1,5 +1,6 @@
 {
   "title": "Any folder can be verified; every folder with a SHA256SUMS below it is checked and hidden folders are skipped",
+  "phase": 5,
   "from": [
     "macos ArchiveCheckTests.verifiesArchives",
     "docs/configuration.md#archive-check (Verify Archive… on a chosen folder)"

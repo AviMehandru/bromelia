@@ -1,5 +1,6 @@
 {
   "title": "A backup without a disc structure fails the check; at the next start it is set aside in quarantine with the logs, but counts as nothing produced",
+  "phase": 3,
   "from": [
     "macos ReliabilityTests.folderWithoutADiscIsNotAcceptedAsAnISO",
     "docs/configuration.md#output-folder-read-errors-and-checks",

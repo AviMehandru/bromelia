@@ -1,4 +1,5 @@
 title: A failed job can be retried; the retry is a new job with the same request
+phase: 3
 from:
   - README.md (retry)
   - rearchitecture-plan §13.1 (retry)

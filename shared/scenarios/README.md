@@ -31,6 +31,7 @@ the JSON copy in `json/`** (same paths, `.json` instead of `.yaml`), so no platf
 
 ```yaml
 title: Read errors keep the files apart
+phase: 3                        # the earliest phase that can run it (below)
 from: [docs/configuration.md#output-folder-read-errors-and-checks]
 given:
   disc: sample-movie            # discs/sample-movie.yaml, in the ISO the job reads
@@ -43,6 +44,16 @@ steps:
       files:
         include: ["library/_Quarantine/Sample Movie [READ ERRORS]/READ ERRORS.txt"]
 ```
+
+### The phase
+
+`phase` (required, 3 to 7) is the earliest phase of the rebuild (rearchitecture plan §29) whose engine can run the
+scenario: for example 3 for the engine core, 4 when it needs the Server (`api`), sessions or automation, 5 when it
+needs verification, post-processing, metadata or notifications. A runner runs every scenario whose phase it has
+built, and whose `platforms`, when given, names its platform; a scenario it selects and that fails is a failure,
+never a skip.
+Give a scenario the phase of the latest thing it needs; a check that needs a later phase than the rest belongs in a
+scenario of its own, so the earlier part runs sooner. `tools/check-contracts.py` rejects a scenario without one.
 
 ### The world a scenario starts in
 
@@ -99,6 +110,7 @@ so far has settled* (finished, blocked, or awaiting a decision), unless it names
 | `verify: {library \| path \| unit, as}` | `EngineAPI.verify`. |
 | `advance: <seconds>` | Move the fake clock; due timers fire in order. |
 | `kill: {at: <crash point>}` then `restart: {}` | Stop the engine graph abruptly at a named crash point (see below) and build a new one on the same root, database and data folder. `restart: {}` alone stops the settled engine and builds a new one the same way (startup recovery runs: a failed or cancelled job's staging is set aside). |
+| `stop: {at: <crash point>}` then `restart: {}` | Stop the engine the normal way while it is at a crash point: the engine is held at the point, `LocalEngine.stop` begins, the point is released, and the stop ends (so whatever the stop waits for, such as a commit that holds its unit, runs to its end first). `restart: {}` then builds a new engine as after a `kill`. A stop that hits its 30 s cap fails the scenario. |
 | `swapDisc: <disc>` | The ISO (or folder) now holds another disc: a disc opened earlier is no longer the one a job reads. |
 | `mounted: {drive, after}` | The OS mounts the drive's disc (after that many seconds of the fake clock). |
 | `cancelCountdown: {drive}` | Stop an automatic rip's countdown. |
@@ -111,9 +123,10 @@ so far has settled* (finished, blocked, or awaiting a decision), unless it names
 | `wait: {job, state \| outcome \| step}` | Run until the job gets there (an `expect` with `when` does the same). |
 
 **Crash points** are named places where the test root can stop the engine: `beforeStep:<kind>`, `inStep:<kind>` (once the
-step's first process has started), `afterStep:<kind>` (after its result is stored),
+step's first process has started), `inStep:<kind>:<n>` (once the step's n-th process has started; `inStep:<kind>:1`
+is `inStep:<kind>`), `afterStep:<kind>` (after its result is stored),
 `commit.afterIntent`, `commit.afterMove:<n>`, `commit.beforeDone`, `seal.afterHash`. Every platform defines all of
-them; a `kill` at a point that is never reached fails the scenario.
+them; a `kill` or `stop` at a point that is never reached fails the scenario.
 
 ### Expectations
 

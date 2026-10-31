@@ -1,5 +1,6 @@
 {
   "title": "Notifications go to every enabled target when a job finishes; onlyProblems targets only hear about problems",
+  "phase": 5,
   "from": [
     "macos IntegrationFeatureTests.notificationReachesAWebhook",
     "docs/configuration.md#notifications"

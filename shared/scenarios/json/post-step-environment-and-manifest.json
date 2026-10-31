@@ -1,5 +1,6 @@
 {
   "title": "Steps get the BROMELIA_* variables and the manifest, with paths where the files are after the commit",
+  "phase": 5,
   "from": [
     "macos IntegrationTests.ripsTitleWithCustomTracksRenameAndScript",
     "docs/configuration.md#postprocessstep"

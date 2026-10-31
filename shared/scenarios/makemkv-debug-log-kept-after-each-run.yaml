@@ -1,4 +1,5 @@
 title: MakeMKV's debug log is kept after every run, since MakeMKV starts it afresh each time
+phase: 3
 from:
   - macos SafetyTests.makeMKVsDebugLogIsKeptAfterEachRun
   - docs/architecture.md#per-drive-makemkv-settings

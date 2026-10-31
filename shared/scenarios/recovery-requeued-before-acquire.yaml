@@ -1,4 +1,5 @@
 title: A job that hadn't reached its rip when the engine stopped is queued again and runs after the restart
+phase: 3
 from:
   - macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop (queued jobs)
   - "rearchitecture-plan §20.4 (not started yet, or before Acquire: requeued)"

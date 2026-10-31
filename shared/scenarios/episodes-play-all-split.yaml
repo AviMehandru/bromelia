@@ -1,4 +1,5 @@
 title: A DVD "play all" title is split into episodes where its menus start them, plus the closing clip, and the unsplit title is kept
+phase: 5
 from:
   - README.md (TV episodes from play all titles)
   - docs/configuration.md#naming-formats-and-episodes

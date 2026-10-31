@@ -1,5 +1,6 @@
 {
   "title": "Listening on the network without a token is refused, and HTTPS needs both the certificate and its key",
+  "phase": 4,
   "from": [
     "macos IntegrationFeatureTests.webRequestsAndAccess (startProblem)",
     "macos WebTests.tlsIdentity",

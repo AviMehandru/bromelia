@@ -1,5 +1,6 @@
 {
   "title": "A drive without a tray motor accepts \"close tray\" and leaves the tray open; the next scan shows it, and a problem says to push it in by hand",
+  "phase": 4,
   "from": [
     "macos DriveDetectionTests.aTrayThatStaysOpenAfterCloseIsReported",
     "windows DriveDetectionTests.ATrayThatStaysOpenAfterCloseIsReported",

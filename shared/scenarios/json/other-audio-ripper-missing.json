@@ -1,5 +1,6 @@
 {
   "title": "Without cyanrip or abcde an audio CD fails with a clear message",
+  "phase": 5,
   "from": [
     "macos IntegrationJobTests.missingAudioRipperFailsClearly",
     "docs/configuration.md#other-discs"

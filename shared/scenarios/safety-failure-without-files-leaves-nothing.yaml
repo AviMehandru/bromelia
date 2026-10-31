@@ -1,4 +1,5 @@
 title: A job that saved nothing leaves no folder
+phase: 3
 from:
   - macos SafetyTests.failureWithoutFilesLeavesNoFolder
   - docs/configuration.md#output-folder-read-errors-and-checks

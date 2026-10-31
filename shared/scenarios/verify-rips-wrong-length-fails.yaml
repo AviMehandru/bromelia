@@ -1,4 +1,5 @@
 title: An MKV whose length doesn't match its title fails the job; titles that passed are logged as checked; kept apart, the files are sealed in quarantine
+phase: 3
 from:
   - macos SafetyTests.ripsAreCheckedAgainstTheListing
   - docs/configuration.md#output-folder-read-errors-and-checks

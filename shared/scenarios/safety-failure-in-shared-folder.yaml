@@ -1,4 +1,5 @@
 title: A failure in a folder other jobs share is set aside without touching the shared folder; the logs go with the files
+phase: 3
 from:
   - macos SafetyTests.failureInASharedFolderUsesASubfolder
   - docs/configuration.md#output-folder-read-errors-and-checks

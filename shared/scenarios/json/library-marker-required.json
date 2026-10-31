@@ -1,5 +1,6 @@
 {
   "title": "A library folder without its marker is offline; Bromelia never writes the marker or creates the root on its own",
+  "phase": 3,
   "from": [
     "rearchitecture-plan §22.1 I2",
     "claudeDocs/bromelia-handoff.md backlog 1 (never create the output root itself)"

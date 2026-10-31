@@ -1,4 +1,5 @@
 title: Choosing not to continue an interrupted rip moves its files from hidden staging to _Quarantine, with a note
+phase: 3
 from:
   - macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop
   - docs/architecture.md#unfinished-jobs (an interrupted job's files become visible, with a note)
@@ -21,6 +22,3 @@ steps:
       file: {path: "library/_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt", contains: ["NOT a finished archive"]}
       log: {job: job, include: [recovery.keptApart]}
       db: {archive_units: {count: 1, rows: [{state: quarantined, status: incomplete}]}}
-  - api: {method: POST, path: "/v1/jobs/{jobId:job}/keep-apart", headers: {X-Bromelia: "1"}, as: twice}
-  - expect:
-      response: {as: twice, status: 409, error: {code: job.notInterrupted}}

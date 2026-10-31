@@ -1,4 +1,5 @@
 title: After a restart, a queued automatic job whose drive now holds another disc is cancelled; the new disc is ripped once it is inserted again
+phase: 4
 from:
   - rearchitecture-plan §20.4 (automatic jobs are cancelled with disc.changed if the drive's media generation moved on)
   - docs/architecture.md#unfinished-jobs (the disc in the drive may have changed since)

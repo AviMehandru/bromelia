@@ -1,4 +1,5 @@
 title: A commit interrupted between moving items is rolled forward from its intent at startup
+phase: 3
 from:
   - rearchitecture-plan §22.3 (a crash between 4 and 6 rolls forward)
   - invariants I1, I3, I5

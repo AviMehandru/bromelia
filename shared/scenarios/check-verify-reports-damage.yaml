@@ -1,4 +1,5 @@
 title: Verifying re-hashes every listed file and reports changed, missing and unlisted files per folder; Bromelia's own files and media server metadata aren't reported
+phase: 5
 from:
   - macos ArchiveCheckTests.verifiesArchives
   - linux /archive/verify

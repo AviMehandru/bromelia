@@ -1,4 +1,5 @@
 title: Two rips on one volume reserve their space, so the second doesn't count on room the first will use
+phase: 3
 from:
   - rearchitecture-plan §21 (space reservations)
   - README.md (a job that wouldn't fit stops before writing)

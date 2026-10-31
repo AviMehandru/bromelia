@@ -1,5 +1,6 @@
 {
   "title": "A HandBrake step without HandBrakeCLI fails with a clear message",
+  "phase": 5,
   "from": [
     "macos HandBrakeTests.encodesEveryMKVWithoutReplacingAnything"
   ],

@@ -1,4 +1,5 @@
 title: When MakeMKV writes a folder instead of the ISO asked for, the checked folder is kept and the MKV step reads it
+phase: 3
 from:
   - macos ReliabilityTests.folderWrittenInsteadOfAnISOIsKeptAsAFolder
   - docs/configuration.md#output-folder-read-errors-and-checks

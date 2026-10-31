@@ -1,4 +1,5 @@
 title: Errors while reading the listing don't mark the rip as damaged
+phase: 3
 from:
   - macos SafetyTests.listingErrorsAreNotReadErrors
   - docs/configuration.md#output-folder-read-errors-and-checks

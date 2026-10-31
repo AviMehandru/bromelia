@@ -1,4 +1,5 @@
 title: "The web page's flow: Open, tick titles, Make MKV; the job's log; refusals when the disc isn't open or no title is chosen"
+phase: 4
 from:
   - macos WebTests.titlesSettingsAndLogs
   - windows WebApiTests.TitlesSettingsAndLogs

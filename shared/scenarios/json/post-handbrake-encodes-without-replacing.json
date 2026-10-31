@@ -1,5 +1,6 @@
 {
   "title": "A HandBrake step encodes every MKV of the unit (not ISOs), never replacing a file",
+  "phase": 5,
   "from": [
     "macos HandBrakeTests.encodesEveryMKVWithoutReplacingAnything",
     "docs/configuration.md#postprocessstep (HandBrake steps)"

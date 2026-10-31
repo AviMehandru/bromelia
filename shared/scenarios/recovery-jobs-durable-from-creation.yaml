@@ -1,4 +1,5 @@
 title: Jobs are in the database from the moment they are created until they finish, so a crash can't lose one
+phase: 3
 from:
   - macos ReliabilityTests.unfinishedJobsAreRecordedAfterAStop (this process's own jobs are written down while they wait)
   - README.md (nothing lost on a crash)

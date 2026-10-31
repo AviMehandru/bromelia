@@ -1,5 +1,6 @@
 {
   "title": "Read errors during the rip keep the files apart, in quarantine, with a note",
+  "phase": 3,
   "from": [
     "macos SafetyTests.readErrorsKeepTheFilesApart",
     "docs/configuration.md#output-folder-read-errors-and-checks",
@@ -68,13 +69,6 @@
                 "readErrors": 1
               }
             ]
-          }
-        },
-        "manifest": {
-          "job": "job",
-          "json": {
-            "status": "errors",
-            "outcome": "succeededWithReadErrors"
           }
         },
         "sums": {

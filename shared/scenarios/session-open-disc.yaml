@@ -1,4 +1,5 @@
 title: Opening a disc reads its listing, picks titles with the profile's rules (with the reason for each), identifies it and fingerprints it
+phase: 4
 from:
   - README.md (open a disc; title and track tree; live preview of title rules)
   - docs/architecture.md#makemkvcon (open disc)

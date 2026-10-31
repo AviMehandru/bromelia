@@ -9,6 +9,12 @@
     "title": {
       "type": "string"
     },
+    "phase": {
+      "type": "integer",
+      "minimum": 3,
+      "maximum": 7,
+      "description": "The earliest phase (rearchitecture plan §29) whose engine can run the scenario; a runner runs every scenario whose phase it has built."
+    },
     "from": {
       "type": "array",
       "items": {
@@ -781,7 +787,7 @@
                 "properties": {
                   "at": {
                     "type": "string",
-                    "pattern": "^(beforeStep|afterStep|inStep):[a-zA-Z]+$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$"
+                    "pattern": "^(beforeStep|afterStep):[a-zA-Z]+$|^inStep:[a-zA-Z]+(:[1-9][0-9]*)?$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$"
                   }
                 },
                 "required": [
@@ -805,6 +811,28 @@
             },
             "required": [
               "restart"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "stop": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "at": {
+                    "type": "string",
+                    "pattern": "^(beforeStep|afterStep):[a-zA-Z]+$|^inStep:[a-zA-Z]+(:[1-9][0-9]*)?$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$"
+                  }
+                },
+                "required": [
+                  "at"
+                ]
+              }
+            },
+            "required": [
+              "stop"
             ]
           },
           {
@@ -1706,6 +1734,7 @@
   },
   "required": [
     "title",
+    "phase",
     "steps"
   ],
   "$defs": {

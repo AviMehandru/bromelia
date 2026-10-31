@@ -1,5 +1,6 @@
 {
   "title": "A backup-then-MKV job stopped after its backup was complete makes the MKV files from the backup, without the disc",
+  "phase": 3,
   "from": [
     "rearchitecture-plan §15.8, §20.4",
     "README.md (backup then MKV from the backup, safest for damaged discs)"
@@ -29,7 +30,7 @@
     },
     {
       "kill": {
-        "at": "inStep:acquire"
+        "at": "inStep:acquire:2"
       }
     },
     {

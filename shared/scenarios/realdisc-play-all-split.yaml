@@ -1,4 +1,5 @@
 title: "One_Piece_S2_P7_D2.iso: title 11 is split into episodes 138–143 (menu OCR) with checksums; a DVD rule's step runs, a Blu-ray one doesn't"
+phase: 5
 realDisc: {env: BROMELIA_TEST_PLAYALL_ISO, note: "Runs only when BROMELIA_TEST_PLAYALL_ISO is set (TEST_RUNNER_BROMELIA_TEST_PLAYALL_ISO for xcodebuild); uses the real makemkvcon and mkvmerge, not the scripted tools."}
 from:
   - macos IntegrationTests.splitsPlayAllTitleIntoEpisodes

@@ -1,5 +1,6 @@
 {
   "title": "A job stopped after its files were sealed resumes at the commit after the restart",
+  "phase": 3,
   "from": [
     "rearchitecture-plan §20.4 (after Release: resumes automatically), §15.8"
   ],
