@@ -23,6 +23,30 @@ public sealed class MakemkvSink : IRunSink
         _operation = operation;
     }
 
+    /// <summary>MakeMKV starts its debug log (app_ShowDebug, named by message 1004) afresh at every start, so after each run
+    /// the steps add it to the job folder's makemkv-debug.txt (SealStep.debugTranscript), after a line "==== &lt;its path&gt;
+    /// after $ makemkvcon &lt;command&gt;" (the subcommand: info, mkv, backup), as today's apps do. Nothing when the run named none or it is empty; a file that can't be read or written is
+    /// left out (the run's result stands).</summary>
+    public static void KeepDebugLog(StepContext context, RunOutcome outcome, string command)
+    {
+        if (outcome.DebugLog is not { Length: > 0 } path) return;
+        var fs = context.Fs;
+        try
+        {
+            if (!fs.Exists(path)) return;
+            var text = System.Text.Encoding.UTF8.GetString(fs.Read(path));
+            if (text.Length == 0) return;
+            var file = context.JobDirectory + "/" + SealStep.DebugTranscript;
+            var before = fs.Exists(file) ? System.Text.Encoding.UTF8.GetString(fs.Read(file)) : "";
+            if (!fs.Exists(context.JobDirectory)) fs.CreateDirectory(context.JobDirectory, parentsMustExist: false);
+            fs.WriteAtomically(file, System.Text.Encoding.UTF8.GetBytes(before + "==== " + path + " after $ makemkvcon " + command + "\n" + text + (text.EndsWith('\n') ? "" : "\n")),
+                0x180); // 0600, as the job's other files
+        }
+        catch (BroFailure)
+        {
+        }
+    }
+
     public void Event(RobotEvent @event)
     {
         lock (_lock)

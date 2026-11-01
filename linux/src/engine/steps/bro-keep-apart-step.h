@@ -23,6 +23,7 @@
 
 #include "bro-bro-error.h"
 #include "bro-outcome.h"
+#include "bro-job-snapshot.h"
 #include "bro-step.h"
 #include <glib-object.h>
 
@@ -41,5 +42,11 @@ BroKeepApartStep *bro_keep_apart_step_new (void);
 /* The checkpoint JobService.keepApart stores with the step: {kind: "outcome", outcome, error?}, the outcome the job had
  * (interrupted, failed, cancelled) and its error, which the note names. Transfer full. */
 BroJsonValue *bro_keep_apart_step_kept (BroOutcome outcome, const BroBroError *error);
+
+/* The job's (BroJobSnapshot) name in _Quarantine, before " [INCOMPLETE]" and ConflictNamer: the Plan output's identity
+ * name, else the job's title, else Probe's listing name, else the source's label, else the job's id
+ * (bro_sanitizer_component). RecoveryService sets a failed job's staging aside under it too (owner H3a-2). Transfer
+ * full. */
+char *bro_keep_apart_step_folder_name (const BroJobSnapshot *job);
 
 G_END_DECLS

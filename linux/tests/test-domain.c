@@ -1338,12 +1338,15 @@ test_tokens_and_template_layout (void)
   g_free (ep->extension);
   ep->extension = g_strdup (".mkv");
   g_ptr_array_add (outputs, ep);
-  g_ptr_array_add (outputs, bro_planned_output_new (BRO_PATH_ROLE_BACKUP));
+  BroPlannedOutput *backup = bro_planned_output_new (BRO_PATH_ROLE_BACKUP);
+  g_hash_table_insert (backup->values, g_strdup ("rip"), g_strdup ("Backup"));
+  g_ptr_array_add (outputs, backup);
   g_autoptr (GPtrArray) paths = bro_layouts_paths (naming, values, outputs);
   BroPlannedPath *p0 = paths->pdata[0], *p1 = paths->pdata[1];
   g_assert_cmpstr (p0->path, ==, "One Piece - Season 2 Part 7 Disc 2/One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv");
   g_assert_cmpint (p0->episode, ==, 138);
-  g_assert_cmpstr (p1->path, ==, "One Piece - Season 2 Part 7 Disc 2/backup");
+  /* In the backup subfolder under the file name template (owner H3b-1). */
+  g_assert_cmpstr (p1->path, ==, "One Piece - Season 2 Part 7 Disc 2/backup/One Piece - Season 2 Part 7 Disc 2 - Backup - DVD");
 }
 
 /* ---- archive format ---------------------------------------------------------------------------------- */
@@ -1519,7 +1522,8 @@ test_notes (void)
   g_autoptr (GPtrArray) read_errors = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_robot_message_free);
   g_ptr_array_add (read_errors, bro_robot_message_new (2003, 516, "Error 'Scsi error - MEDIUM ERROR' occurred while reading"));
   const char *logs[] = { "bromelia-a1b2c3d4-log.txt", "makemkv-a1b2c3d4-log.txt", NULL };
-  g_autoptr (GPtrArray) lines = bro_notes_render (&job, BRO_OUTCOME_SUCCEEDED_WITH_READ_ERRORS, error, read_errors, logs);
+  g_autoptr (GPtrArray) lines = bro_notes_render (&job, BRO_OUTCOME_SUCCEEDED_WITH_READ_ERRORS, error, read_errors, logs,
+                                                      "/data/jobs/b2c3d4e5-0000-4000-8000-00000000abcd/log.jsonl");
   GString *text = g_string_new (NULL);
   for (guint i = 0; i < lines->len; i++) {
     g_autoptr (BroJsonValue) m = bro_bro_message_to_json (lines->pdata[i]);
@@ -1532,7 +1536,8 @@ test_notes (void)
                    "MakeMKV reported 1 read error while reading the disc, so the files may be damaged. They were kept apart from finished archives.\n"
                    "Errors reported by MakeMKV while reading the disc:\n"
                    "Error 'Scsi error - MEDIUM ERROR' occurred while reading\n"
-                   "The job's log is in this folder as bromelia-a1b2c3d4-log.txt, and everything MakeMKV printed as makemkv-a1b2c3d4-log.txt.");
+                   "The job's log is in this folder as bromelia-a1b2c3d4-log.txt, and everything MakeMKV printed as makemkv-a1b2c3d4-log.txt.\n"
+                   "Full log: /data/jobs/b2c3d4e5-0000-4000-8000-00000000abcd/log.jsonl");
   g_string_free (text, TRUE);
 }
 

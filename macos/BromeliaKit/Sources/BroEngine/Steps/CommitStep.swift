@@ -8,7 +8,8 @@ import BroPorts
 /// folder), a folder told from Seal's files, then Bromelia's own files Seal wrote (the record, the logs, the note); its
 /// destination is <library>/<Name's folder>, merged item by item when Name says the folder is shared. A unit Seal tagged
 /// (READ ERRORS) goes to _Quarantine/<Name's name> [<tag>] instead (commit.quarantined), never merged, and the step
-/// reports it quarantined; otherwise archive.moved. LibraryService waits while a roll forward of the unit runs (the job's
+/// reports it quarantined; otherwise archive.moved. A folder of its own that another job committed after Name ran takes the
+/// next free name (archive.outputFolder, a warning), unless naming.conflictPolicy is skip (owner H3b-2), and never a name the library has called taken. LibraryService waits while a roll forward of the unit runs (the job's
 /// cancel ends that wait), finishes an open intent of the unit and gives a unit committed already its result again, so a
 /// rerun rolls forward. Holds the library write. Data: CommitOutput. Skipped when Plan or Seal hasn't run. Paths compare
 /// by their bytes.
@@ -37,17 +38,44 @@ public struct CommitStep: Step {
         let staging = try context.library.stagingDirectory(plan.libraryId, jobId: job.id)
 
         let tag = seal.tag
-        let path = tag != nil ? Self.quarantineFolder + "/" + named.name : named.folder
+        var path = tag != nil ? Self.quarantineFolder + "/" + named.name : named.folder
         let now = context.clock.now()
-        let intent = CommitIntent(unitId: seal.unitId, jobId: job.id, staging: staging, destination: root + "/" + path, merge: named.merge && tag == nil,
+        var intent = CommitIntent(unitId: seal.unitId, jobId: job.id, staging: staging, destination: root + "/" + path, merge: named.merge && tag == nil,
                                   quarantine: false, createdAt: now, items: Self.items(named, seal))
-        let unit = Self.unit(job, plan, named, seal, path, now)
+        var unit = Self.unit(job, plan, named, seal, path, now)
         context.progress.report(0, operation: BroMessage(.archiveMoving), current: nil)
-        let result = if let tag {
-            try await context.library.quarantine(unit, intent: intent, files: seal.files, tag: tag, cancel: context.cancel)
+        var committedResult: CommitResult?
+        if let tag {
+            committedResult = try await context.library.quarantine(unit, intent: intent, files: seal.files, tag: tag, cancel: context.cancel)
         } else {
-            try await context.library.commit(unit, intent: intent, files: seal.files, cancel: context.cancel)
+            // A folder of its own that another job committed after Name ran (two discs of the same name at once): the next
+            // free name, as Name would have given it, unless the profile says skip (owner H3b-2). The library refuses a
+            // taken folder before it writes anything, and an open intent or a unit committed already never gets that far.
+            let free = !named.merge && NamingSettings.decode(plan.profile["naming"] ?? .object([])).conflictPolicy != .skip
+            // Each name the library called taken, the first being Name's: never asked for again, even when the listing
+            // shows it under other bytes (a file system that ignores case beyond ASCII, or normalization).
+            var refusedNames: [String] = []
+            while committedResult == nil {
+                do throws(BroError) {
+                    committedResult = try await context.library.commit(unit, intent: intent, files: seal.files, cancel: context.cancel)
+                } catch {
+                    let refused = error.params.first { $0.key == "path" }?.value.string
+                    guard free, error.code == MessageCode.wire(.libraryFolderExists), let refused,
+                          refused.utf8.elementsEqual(intent.destination.utf8) else { throw error }
+                    let cut = path.utf8.lastIndex(of: Self.slash)
+                    let parent = cut.map { String(decoding: path.utf8[..<$0], as: UTF8.self) } ?? ""
+                    let last = cut.map { String(decoding: path.utf8[path.utf8.index(after: $0)...], as: UTF8.self) } ?? path
+                    let directory = parent.isEmpty ? root : root + "/" + parent
+                    refusedNames.append(last)
+                    let name = ConflictNamer.next(refusedNames[0], existing: try context.fs.list(directory).map(\.name) + refusedNames, isFolder: true)
+                    path = parent.isEmpty ? name : parent + "/" + name
+                    intent.destination = root + "/" + path
+                    unit.path = path
+                    context.log.log(BroMessage(.archiveOutputFolder, [("path", .string(intent.destination))], severity: .warning))
+                }
+            }
         }
+        let result = committedResult!
 
         context.log.log(tag != nil
             ? BroMessage(.commitQuarantined, [("path", .string(result.destination))], severity: .warning)

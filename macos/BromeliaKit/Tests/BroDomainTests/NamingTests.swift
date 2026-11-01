@@ -81,10 +81,11 @@ struct NamingTests {
         #expect(values["libraryFolder"] == "TV Shows")
         let paths = Layouts.paths(NamingSettings(), values: values, outputs: [
             PlannedOutput(role: .episode, values: ["episode": "Episode 138", "track": "Title 11 Ch 1-7"], title: 0, episode: 138, extension: ".mkv"),
-            PlannedOutput(role: .backup),
+            PlannedOutput(role: .backup, values: ["rip": "Backup"]),
         ])
         #expect(paths[0].path == "One Piece - Season 2 Part 7 Disc 2/One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv")
         #expect(paths[0].episode == 138)
-        #expect(paths[1].path == "One Piece - Season 2 Part 7 Disc 2/backup")
+        // In the backup subfolder under the file name template (owner H3b-1).
+        #expect(paths[1].path == "One Piece - Season 2 Part 7 Disc 2/backup/One Piece - Season 2 Part 7 Disc 2 - Backup - DVD")
     }
 }

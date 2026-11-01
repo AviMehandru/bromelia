@@ -20,6 +20,26 @@ public final class MakemkvSink: RunSink, @unchecked Sendable {
         self.operation = operation
     }
 
+    /// MakeMKV starts its debug log (app_ShowDebug, named by message 1004) afresh at every start, so after each run the
+    /// steps add it to the job folder's makemkv-debug.txt (SealStep.debugTranscript), after a line "==== <its path> after
+    /// $ makemkvcon <command>" (the subcommand: info, mkv, backup), as today's apps do. Nothing when the run named none or
+    /// it is empty; a file that can't be read or written is left out (the run's result stands).
+    public static func keepDebugLog(_ context: StepContext, _ outcome: RunOutcome, command: String) {
+        guard let path = outcome.debugLog, !path.isEmpty else { return }
+        let fs = context.fs
+        do throws(BroError) {
+            if !fs.exists(path) { return }
+            let text = String(decoding: try fs.read(path), as: UTF8.self)
+            if text.isEmpty { return }
+            let file = context.jobDirectory + "/" + SealStep.debugTranscript
+            let before = fs.exists(file) ? String(decoding: try fs.read(file), as: UTF8.self) : ""
+            if !fs.exists(context.jobDirectory) { try fs.createDirectory(context.jobDirectory, parentsMustExist: false) }
+            let added = "==== " + path + " after $ makemkvcon " + command + "\n" + text + (text.utf8.last == UInt8(ascii: "\n") ? "" : "\n")
+            try fs.writeAtomically(file, bytes: Array((before + added).utf8), mode: 0o600) // as the job's other files
+        } catch {
+        }
+    }
+
     public func event(_ event: RobotEvent) {
         lock.lock()
         defer { lock.unlock() }

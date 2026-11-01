@@ -41,6 +41,17 @@ public struct KeepApartStep: Step {
         return ResourceSet(libraryWrites: [plan.libraryId])
     }
 
+    /// The job's name in _Quarantine, before " [INCOMPLETE]" and ConflictNamer: the Plan output's identity name, else the
+    /// job's title, else Probe's listing name, else the source's label, else the job's id (Sanitizer.component).
+    /// RecoveryService sets a failed job's staging aside under it too (owner H3a-2).
+    public static func folderName(_ job: JobSnapshot) -> String {
+        let probe = JobSnapshot.output(job, .probe).flatMap { $0.members != nil ? ProbeOutput.decode($0) : nil }
+        let source = DiscRequest.decode(job.request)?.source
+        return [PlanOutput.of(job)?.identity.name ?? "", job.request.title, probe?.listing?.name ?? "", source.map { StepSources.label($0, nil) } ?? "",
+                job.id.value]
+            .map(Sanitizer.component).first { !$0.isEmpty } ?? job.id.value
+    }
+
     public func run(_ context: StepContext) async throws(BroError) -> StepReport {
         let job = context.job
         guard let plan = PlanOutput.of(job) else { return StepReport(skipped: true) }
@@ -63,8 +74,7 @@ public struct KeepApartStep: Step {
         let source = DiscRequest.decode(job.request)?.source
         let sourceLabel = source.map { StepSources.label($0, nil) } ?? ""
         let label = if let listing = probe?.listing, !listing.name.isEmpty { listing.name } else { sourceLabel }
-        let name = [plan.identity.name, job.request.title, probe?.listing?.name ?? "", sourceLabel, job.id.value]
-            .map(Sanitizer.component).first { !$0.isEmpty } ?? job.id.value
+        let name = Self.folderName(job)
         let path = Self.quarantineFolder + "/" + name
         let now = context.clock.now()
         let identity = plan.identity
@@ -150,7 +160,7 @@ public struct KeepApartStep: Step {
         var error: BroError?
         if let e = kept?["error"], e.members != nil, let code = e["code"]?.string { error = BroError(code, e["params"]?.members ?? []) }
         let lines = Notes.render(context.job.id, outcome: kept?["outcome"]?.string.flatMap(Outcome.init(rawValue:)) ?? .interrupted, error: error,
-                                 readErrors: [], logs: logs)
+                                 readErrors: [], logs: logs, fullLog: context.jobDirectory + "/" + JobLog.fileName)
         try write(note, Array(lines.map { context.messages.render($0) + "\n" }.joined().utf8))
         let record = "bromelia-" + unit8 + ".json"
         let acquired = AcquireOutput(titles: [], others: [], backup: nil, discInfo: nil, readErrors: [])

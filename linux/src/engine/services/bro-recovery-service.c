@@ -6,6 +6,7 @@
 #include "bro-job-log.h"
 #include "bro-job-outcome.h"
 #include "bro-job-planner.h"
+#include "bro-keep-apart-step.h"
 #include "bro-message-code.h"
 #include "bro-notes.h"
 #include "bro-plan-output.h"
@@ -484,6 +485,23 @@ keep_copy (gpointer data, const char *name, GBytes *bytes, BroBroError **error)
   return TRUE;
 }
 
+/* The name a failed job's staging is set aside under: KeepApart's (bro_keep_apart_step_folder_name) for the job's request,
+ * plan and succeeded step outputs in seq order (owner H3a-2). Rows that can't be loaded leave the outputs out (the name
+ * from the job alone, as the Swift pass does). Transfer full. */
+static char *
+set_aside_name (BroRecoveryService *self, const BroJobRecord *job)
+{
+  g_autoptr (GPtrArray) rows = bro_step_repository_load (bro_store_steps (self->store), job->id, NULL);
+  g_autoptr (BroJobSnapshot) snap = bro_job_snapshot_new (&job->id, bro_job_request_copy (job->request), bro_job_plan_copy (job->plan));
+  for (guint i = 0; rows && i < rows->len; i++)
+    {
+      const BroStepRecord *row = rows->pdata[i];
+      if (row->state == BRO_STEP_STATE_SUCCEEDED && row->output)
+        g_ptr_array_add (snap->outputs, bro_step_output_copy (row->output));
+    }
+  return bro_keep_apart_step_folder_name (snap);
+}
+
 /* The job's logs as Seal copies them (_bro_seal_copy_logs_from: its log as text, MakeMKV's transcripts, each when the job
  * folder has it; none when its Plan's profile has archive.archiveRecord false) into @logs (name → GBytes), their names
  * into @names. When they can't be read, there are none: the files are set aside without them. */
@@ -549,6 +567,7 @@ tidy_work (gpointer data, BroBroError **error)
       g_autoptr (GBytes) note = NULL;
       g_autofree char *title = NULL;
       g_autofree char *dest = NULL;
+      g_autofree char *full_log = NULL;
       g_autoptr (GHashTable) logs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_bytes_unref);
       g_autoptr (GPtrArray) names = g_ptr_array_new_with_free_func (g_free);
       GString *text;
@@ -563,8 +582,13 @@ tidy_work (gpointer data, BroBroError **error)
         copy_logs (self, job, logs, names);
       g_ptr_array_add (names, NULL);
       read_errors = g_ptr_array_new ();
+      if (job)
+        {
+          g_autofree char *directory = job_directory (self, &job->id);
+          full_log = g_strconcat (directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+        }
       lines = bro_notes_render (&id, job && job->has_outcome ? job->outcome : BRO_OUTCOME_INTERRUPTED, job ? job->error : NULL, read_errors,
-                                (const char *const *) names->pdata);
+                                (const char *const *) names->pdata, full_log);
       text = g_string_new ("");
       for (guint k = 0; k < lines->len; k++)
         {
@@ -573,9 +597,9 @@ tidy_work (gpointer data, BroBroError **error)
           g_string_append_c (text, '\n');
         }
       note = g_string_free_to_bytes (text);
-      title = bro_sanitizer_component (job ? job->title : "");
+      title = job ? set_aside_name (self, job) : g_strdup (folder);
       /* a failure leaves it hidden in staging; the next start tries again */
-      dest = bro_library_service_set_aside (self->library, t->library_id, folder, *title ? title : folder, note, logs, NULL);
+      dest = bro_library_service_set_aside (self->library, t->library_id, folder, title, note, logs, NULL);
     }
   return TRUE;
 }

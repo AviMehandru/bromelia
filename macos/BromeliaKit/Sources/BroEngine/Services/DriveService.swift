@@ -9,7 +9,8 @@ import Foundation
 /// two lists; a drive's id comes from MakeMKV's identification. Each drive counts its discs: a disc that arrives gets the
 /// next generation and mediumArrived (not the discs already in at start, which never start a rip), one that leaves
 /// mediumRemoved. A drive a job holds keeps what it had (MakeMKV can't see a drive in use), and a drive left out of a
-/// scan keeps it until the OS says it's gone. Configured drives that aren't connected stay listed (connected false);
+/// scan keeps it until the OS says it's gone; a drive a scan found held is scanned again once the job gives it back (an
+/// eject while a job holds it). Configured drives that aren't connected stay listed (connected false);
 /// others are removed. Close tray checks, in the first scan 4 s later, that the tray closed (drive.trayStillOpen: a
 /// drive without a tray motor). As the `DriveLookup` of the steps it gives a snapshot, from any thread.
 /// shared/fixtures/engine/drive-service.cases.json.
@@ -60,6 +61,8 @@ public final class DriveService: DriveLookup {
     private var trayAsked: [(drive: String, at: Instant)] = []
     private var leases = LeaseSnapshot.empty
     private var started = false, firstDone = false, scanning = false, again = false, deferred = false
+    /// Drives a scan left as they were because a job held them: scanned again once it gives them back.
+    private var heldInScan: Set<String> = []
     private var waiting: [Resumption<Void>] = [], next: [Resumption<Void>] = []
     private var poll: EngineTimer?
     private var pollSeconds: Int64 = -1
@@ -277,7 +280,10 @@ public final class DriveService: DriveLookup {
             }
             seen.insert(drive.id)
             order.append(drive)
-            if busy.contains(drive.id) && drive.connected { continue } // a job holds it: MakeMKV can't see it
+            if busy.contains(drive.id) && drive.connected { // a job holds it: MakeMKV can't see it
+                heldInScan.insert(drive.id)
+                continue
+            }
             let wasConnected = drive.connected
             drive.makemkv = m
             drive.osDevice = j.os?.device ?? drive.osDevice
@@ -436,7 +442,9 @@ public final class DriveService: DriveLookup {
         guard let leases = LeaseSnapshot.parse(e.data) else { return }
         self.leases = leases
         publish(config.current(), [], [])
-        if deferred && leases.acquisitions == 0 {
+        let given = heldInScan.filter { id in !leases.drives.contains { $0.drive == id } }
+        heldInScan.subtract(given)
+        if (deferred && leases.acquisitions == 0) || !given.isEmpty {
             deferred = false
             startScan(asked: false)
         }

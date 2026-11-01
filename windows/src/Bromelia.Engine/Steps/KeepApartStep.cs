@@ -48,6 +48,18 @@ public sealed class KeepApartStep : IStep
         LibraryWrites = PlanOutput.Of(job) is { LibraryId.Length: > 0 } plan ? new[] { plan.LibraryId } : Array.Empty<string>(),
     };
 
+    /// <summary>The job's name in _Quarantine, before " [INCOMPLETE]" and ConflictNamer: the Plan output's identity name,
+    /// else the job's title, else Probe's listing name, else the source's label, else the job's id (Sanitizer.component).
+    /// RecoveryService sets a failed job's staging aside under it too (owner H3a-2).</summary>
+    public static string FolderName(JobSnapshot job)
+    {
+        var probe = JobSnapshot.Output(job, StepKind.Probe) is JsonValue.Object p ? ProbeOutput.Decode(p) : null;
+        var source = DiscRequest.Decode(job.Request)?.Source;
+        return new[] { PlanOutput.Of(job)?.Identity.Name ?? "", job.Request.Title, probe?.Listing?.Name ?? "",
+                source != null ? StepSources.Label(source, null) : "", job.Id.Value }
+            .Select(Sanitizer.Component).First(n => n.Length > 0);
+    }
+
     public async Task<StepReport> Run(StepContext context)
     {
         var job = context.Job;
@@ -65,8 +77,7 @@ public sealed class KeepApartStep : IStep
         var probe = JobSnapshot.Output(job, StepKind.Probe) is JsonValue.Object p ? ProbeOutput.Decode(p) : null;
         var source = DiscRequest.Decode(job.Request)?.Source;
         var label = probe?.Listing is { Name.Length: > 0 } listing ? listing.Name : source != null ? StepSources.Label(source, null) : "";
-        var name = new[] { plan.Identity.Name, job.Request.Title, probe?.Listing?.Name ?? "", source != null ? StepSources.Label(source, null) : "", job.Id.Value }
-            .Select(Sanitizer.Component).First(n => n.Length > 0);
+        var name = FolderName(job);
         var path = QuarantineFolder + "/" + name;
         var now = context.Clock.Now();
         var identity = plan.Identity;
@@ -147,7 +158,7 @@ public sealed class KeepApartStep : IStep
         var error = kept?["error"] is JsonValue.Object e && e["code"]?.AsString is { } code
             ? new BroError(code, e["params"] as JsonValue.Object ?? new JsonValue.Object(new List<KeyValuePair<string, JsonValue>>())) : null;
         var lines = Notes.Render(context.Job.Id, EnumWire.Parse<Outcome>(kept?["outcome"]?.AsString) ?? Outcome.Interrupted, error,
-            Array.Empty<RobotMessage>(), logs);
+            Array.Empty<RobotMessage>(), logs, context.JobDirectory + "/" + JobLog.FileName);
         Write(Note, Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => context.Messages.Render(l) + "\n"))));
         var record = "bromelia-" + unit8 + ".json";
         var acquired = new AcquireOutput(new List<AcquiredTitle>(), new List<string>(), null, null, new List<string>());

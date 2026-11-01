@@ -84,6 +84,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   if (!read)
     return NULL;
   const BroMakemkvRun *run = read->run;
+  bro_makemkv_sink_keep_debug_log (context, run->outcome, "info");
   const BroBroMessage *problems[] = { run->isolation_warning, run->transcript_problem, run->settings_problem };
   for (guint i = 0; i < G_N_ELEMENTS (problems); i++)
     if (problems[i]) {

@@ -14,7 +14,9 @@ namespace Bromelia.Engine;
 /// unit's folder), a folder told from Seal's files, then Bromelia's own files Seal wrote (the record, the logs, the note);
 /// its destination is &lt;library&gt;/&lt;Name's folder&gt;, merged item by item when Name says the folder is shared. A
 /// unit Seal tagged (READ ERRORS) goes to _Quarantine/&lt;Name's name&gt; [&lt;tag&gt;] instead (commit.quarantined), never
-/// merged, and the step reports it quarantined; otherwise archive.moved. LibraryService waits while a roll forward of
+/// merged, and the step reports it quarantined; otherwise archive.moved. A folder of its own that another job committed
+/// after Name ran takes the next free name (archive.outputFolder, a warning), unless naming.conflictPolicy is skip (owner
+/// H3b-2), and never a name the library has called taken. LibraryService waits while a roll forward of
 /// the unit runs (the job's cancel ends that wait), finishes an open intent of the unit and gives a unit committed already
 /// its result again, so a rerun rolls forward. Holds the library write. Data: CommitOutput. Skipped when Plan or Seal hasn't
 /// run.</summary>
@@ -47,9 +49,38 @@ public sealed class CommitStep : IStep
         var intent = new CommitIntent(seal.UnitId, job.Id, staging, root + "/" + path, named.Merge && !quarantine, false, now, Items(named, seal));
         var unit = Unit(job, plan, named, seal, path, now);
         context.Progress.Report(0, new BroMessage(MessageCode.ArchiveMoving));
-        var result = quarantine
-            ? await context.Library.Quarantine(unit, intent, seal.Files, seal.Tag!, context.Cancel)
-            : await context.Library.Commit(unit, intent, seal.Files, context.Cancel);
+        CommitResult result;
+        if (quarantine) result = await context.Library.Quarantine(unit, intent, seal.Files, seal.Tag!, context.Cancel);
+        else
+        {
+            // A folder of its own that another job committed after Name ran (two discs of the same name at once): the next
+            // free name, as Name would have given it, unless the profile says skip (owner H3b-2). The library refuses a
+            // taken folder before it writes anything, and an open intent or a unit committed already never gets that far.
+            bool free = !named.Merge && NamingSettings.Decode(plan.Profile["naming"] ?? JsonValue.Of()).ConflictPolicy != ConflictPolicy.Skip;
+            // Each name the library called taken, the first being Name's: never asked for again, even when the listing
+            // shows it under other bytes (a file system that ignores case beyond ASCII, or normalization).
+            var refused = new List<string>();
+            while (true)
+            {
+                try
+                {
+                    result = await context.Library.Commit(unit, intent, seal.Files, context.Cancel);
+                    break;
+                }
+                catch (BroFailure f) when (free && f.Error.Code == MessageCode.Wire(MessageCode.LibraryFolderExists)
+                    && f.Error.Params["path"]?.AsString == intent.Destination)
+                {
+                    var parent = path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
+                    var dir = parent.Length > 0 ? root + "/" + parent : root;
+                    refused.Add(path[(path.LastIndexOf('/') + 1)..]);
+                    var name = ConflictNamer.Next(refused[0], context.Fs.List(dir).Select(e => e.Name).Concat(refused).ToList(), isFolder: true);
+                    path = parent.Length > 0 ? parent + "/" + name : name;
+                    intent = intent with { Destination = root + "/" + path };
+                    unit = unit with { Path = path };
+                    context.Log.Log(new BroMessage(MessageCode.ArchiveOutputFolder, Severity.Warning, ("path", JsonValue.Of(intent.Destination))));
+                }
+            }
+        }
 
         context.Log.Log(quarantine
             ? new BroMessage(MessageCode.CommitQuarantined, Severity.Warning, ("path", JsonValue.Of(result.Destination)))

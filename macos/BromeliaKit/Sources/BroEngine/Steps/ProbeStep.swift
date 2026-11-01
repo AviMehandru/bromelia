@@ -34,6 +34,7 @@ public struct ProbeStep: Step {
                                                            sink: MakemkvSink(progress: context.progress, log: context.log, operation: operation),
                                                            cancel: context.cancel)
         let run = read.run
+        MakemkvSink.keepDebugLog(context, run.outcome, command: "info")
         for case var problem? in [run.isolationWarning, run.transcriptProblem, run.settingsProblem] {
             problem.severity = .warning
             context.log.log(problem)

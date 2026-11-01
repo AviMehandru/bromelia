@@ -198,10 +198,17 @@ public sealed class LocalEngine : IEngineAPI
     /// <summary>The id is the name (else the folder's last part) made into an EntryId, with -2, -3 … when the
     /// configuration has it already (decision 187). LibraryService writes the marker, then the configuration gets
     /// {id, name, path} at its current version; if that save fails the marker is removed and the save's error
-    /// returned, so a retry doesn't meet library.alreadyAttached.</summary>
+    /// returned, so a retry doesn't meet library.alreadyAttached. The path of a library the configuration already has
+    /// (the user confirming a folder without its marker, H1-7): the marker is written under that library's id and name,
+    /// and the configuration is left as it is.</summary>
     public Task<LibraryDto> AttachLibrary(string path, string name) => On(async () =>
     {
         var current = _config.Current();
+        if (Domain.Config.Libraries(current).FirstOrDefault(l => l.Path == path) is { } configured)
+        {
+            var marked = await _libraries.Attach(configured.Id, path, configured.Name);
+            return _libraries.Libraries().FirstOrDefault(l => l.Id == configured.Id) ?? marked;
+        }
         var display = name.Length > 0 ? name : LastPart(path);
         var id = NewLibraryId(display, Domain.Config.Libraries(current).Select(l => l.Id).ToList());
         var attached = await _libraries.Attach(id, path, name);

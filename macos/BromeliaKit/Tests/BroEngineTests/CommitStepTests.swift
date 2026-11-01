@@ -58,11 +58,17 @@ private final class CommitFakes: ProgressReporter, JobLogger, LibraryPort, Clock
     private func called(_ op: String, _ unit: UnitRecord, _ intent: CommitIntent, _ files: [UnitFile], _ tag: String?,
                         _ cancel: CancellationToken) throws(BroError) -> CommitResult {
         let call = commitCallJson(op, unit, intent, files, tag)
-        lock.withLock { _calls.append(call) }
+        let n = lock.withLock { () -> Int in
+            _calls.append(call)
+            return _calls.count - 1
+        }
         cancelOnCall?.cancel()
         // LibraryService ends its wait for the unit so when the token it was given is cancelled.
         if cancel.isCancelled { throw BroError(MessageCode.wire(.jobCancelled)) }
         let port = given["port"]
+        if let errors = port?["errors"]?.array, n < errors.count, let one = errors[n].members != nil ? errors[n] : nil {
+            throw BroError(one["code"]?.string ?? "", one["params"]?.members ?? [])
+        }
         if let e = port?["error"] { throw BroError(e["code"]?.string ?? "", e["params"]?.members ?? []) }
         let bytes = Array(intent.destination.utf8)
         let cut = bytes.lastIndex(of: UInt8(ascii: "/")) ?? 0
@@ -157,8 +163,10 @@ struct CommitStepTests {
                                  sessionId: nil, options: r["options"], details: r["details"])
         let job = JobSnapshot(id: Id(commitJobId), request: request, plan: nil, outputs: outputs, startedAt: nil)
         let unused = UnusedTools()
+        let fs = MemoryFileSystem()
+        for folder in given["taken"]?.array ?? [] { fs.putFolder(folder.string ?? "") }
         let context = StepContext(job: job, cancel: cancel.token, progress: fakes, log: fakes, decisions: fakes, tools: ToolSet(makemkv: unused, matroska: unused),
-                                  fs: MemoryFileSystem(), clock: fakes, drives: unused, library: fakes, catalog: unused,
+                                  fs: fs, clock: fakes, drives: unused, library: fakes, catalog: unused,
                                   config: Config(document: .object([]), issues: []), driveLookup: unused, makemkvSetup: unused, space: unused,
                                   checkpoint: fakes, jobDirectory: "/data/jobs/" + commitJobId, messages: UnusedRenderer(), appVersion: "test")
 

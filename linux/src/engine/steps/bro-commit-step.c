@@ -1,6 +1,9 @@
 /* bro-commit-step.c */
 #include "bro-commit-step.h"
 #include "bro-commit-output.h"
+#include "bro-conflict-namer.h"
+#include "bro-directory-entry.h"
+#include "bro-naming-settings.h"
 #include "bro-disc-request.h"
 #include "bro-name-output.h"
 #include "bro-plan-output.h"
@@ -180,8 +183,61 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   add_items (intent->items, named, seal);
   unit = unit_of (job, plan, named, seal, path, now);
   _bro_step_progress (context, 0, BRO_MSG_ARCHIVE_MOVING);
-  result = seal->tag ? bro_library_port_quarantine (context->library, unit, intent, seal->files, seal->tag, context->cancel, error)
-                     : bro_library_port_commit (context->library, unit, intent, seal->files, context->cancel, error);
+  if (seal->tag)
+    result = bro_library_port_quarantine (context->library, unit, intent, seal->files, seal->tag, context->cancel, error);
+  else
+    {
+      /* A folder of its own that another job committed after Name ran (two discs of the same name at once): the next free
+       * name, as Name would have given it, unless the profile says skip (owner H3b-2). The library refuses a taken folder
+       * before it writes anything, and an open intent or a unit committed already never gets that far. */
+      BroJsonValue *given = bro_json_value_member (plan->profile, "naming");
+      g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
+      g_autoptr (BroNamingSettings) naming = bro_naming_settings_decode (given ? given : none);
+      gboolean free_name = !named->merge && naming->conflict_policy != BRO_CONFLICT_POLICY_SKIP;
+      /* Each name the library called taken, the first being Name's: never asked for again, even when the listing shows it
+       * under other bytes (a file system that ignores case beyond ASCII, or normalization). */
+      g_autoptr (GPtrArray) refused_names = g_ptr_array_new_with_free_func (g_free);
+      for (;;)
+        {
+          g_autoptr (BroBroError) refused = NULL;
+          const char *slash;
+          g_autofree char *parent = NULL;
+          g_autofree char *dir = NULL;
+          g_autofree char *next = NULL;
+          g_autoptr (GPtrArray) entries = NULL;
+          g_autoptr (GPtrArray) names = NULL;
+          if ((result = bro_library_port_commit (context->library, unit, intent, seal->files, context->cancel, &refused)))
+            break;
+          if (!free_name || g_strcmp0 (refused->code, bro_message_code_wire (BRO_MSG_LIBRARY_FOLDER_EXISTS)) != 0
+              || g_strcmp0 (bro_json_value_get_string (bro_json_value_member (refused->params, "path"), NULL), intent->destination) != 0)
+            {
+              if (error)
+                *error = g_steal_pointer (&refused);
+              return NULL;
+            }
+          slash = strrchr (path, '/');
+          parent = slash ? g_strndup (path, slash - path) : g_strdup ("");
+          dir = *parent ? g_strconcat (library->path, "/", parent, NULL) : g_strdup (library->path);
+          if (!(entries = bro_file_system_list (context->fs, dir, error)))
+            return NULL;
+          names = g_ptr_array_new ();
+          for (guint i = 0; i < entries->len; i++)
+            g_ptr_array_add (names, ((BroDirectoryEntry *) entries->pdata[i])->name);
+          g_ptr_array_add (refused_names, g_strdup (slash ? slash + 1 : path));
+          for (guint i = 0; i < refused_names->len; i++)
+            g_ptr_array_add (names, refused_names->pdata[i]);
+          g_ptr_array_add (names, NULL);
+          next = bro_conflict_namer_next (refused_names->pdata[0], (const char *const *) names->pdata, TRUE);
+          g_free (path);
+          path = *parent ? g_strconcat (parent, "/", next, NULL) : g_strdup (next);
+          g_free (intent->destination);
+          intent->destination = g_strconcat (library->path, "/", path, NULL);
+          g_free (unit->path);
+          unit->path = g_strdup (path);
+          _bro_step_log (context, BRO_MSG_ARCHIVE_OUTPUT_FOLDER, _bro_param ("path", bro_json_value_new_string (intent->destination)),
+                         BRO_SEVERITY_WARNING);
+        }
+    }
   if (!result)
     return NULL;
 

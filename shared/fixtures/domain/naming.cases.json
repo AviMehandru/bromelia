@@ -319,6 +319,26 @@
       }
     },
     {
+      "id": "templates-backup-goes-into-its-subfolder-under-its-name",
+      "from": [
+        "owner H3b-1 (2026-10-31)",
+        "windows JobRunner.Backup (<folder>/<backupSubfolder>/<file name template>)"
+      ],
+      "given": {
+        "layout": "templates",
+        "kind": "movie",
+        "values": {
+          "name": "Inception",
+          "format": "BR",
+          "rip": "Backup"
+        }
+      },
+      "expect": {
+        "folder": "Inception",
+        "backup": "backup/Inception - Backup - BR"
+      }
+    },
+    {
       "id": "track-label-dvd",
       "from": [
         "macos IdentityTests.trackLabels",

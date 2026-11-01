@@ -11,7 +11,10 @@ G_BEGIN_DECLS
 
 /* The note's lines (BroBroMessage *): the job and its outcome, a warning that the files are not a finished archive,
  * the error (nullable), the read errors MakeMKV reported (@read_errors: BroRobotMessage *), and the log files copied
- * into the folder (@logs: the job's log, then MakeMKV's, when it was copied). */
-GPtrArray *bro_notes_render (const BroId *job_id, BroOutcome outcome, const BroBroError *error, GPtrArray *read_errors, const char *const *logs);
+ * into the folder (@logs: the job's log, then MakeMKV's, when it was copied), then where the job's full log is
+ * (@full_log, its log.jsonl in the data folder; NULL for a folder no job owns), as today's apps end the note (owner
+ * H3b-6). */
+GPtrArray *bro_notes_render (const BroId *job_id, BroOutcome outcome, const BroBroError *error, GPtrArray *read_errors, const char *const *logs,
+                             const char *full_log);
 
 G_END_DECLS

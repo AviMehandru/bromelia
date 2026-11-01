@@ -4,8 +4,10 @@ import BroFoundation
 public enum Notes {
     /// The note's lines: the job and its outcome, a warning that the files are not a finished archive, the error, the
     /// read errors MakeMKV reported, and the log files copied into the folder (`logs`: the job's log, then MakeMKV's,
-    /// when it was copied).
-    public static func render(_ jobId: Id, outcome: Outcome, error: BroError?, readErrors: [RobotMessage], logs: [String]) -> [BroMessage] {
+    /// when it was copied), then where the job's full log is (`fullLog`, its log.jsonl in the data folder; none for a
+    /// folder no job owns), as today's apps end the note (owner H3b-6).
+    public static func render(_ jobId: Id, outcome: Outcome, error: BroError?, readErrors: [RobotMessage], logs: [String],
+                              fullLog: String?) -> [BroMessage] {
         var lines = [BroMessage(.archiveNoteTitle, [("jobId", .string(jobId.value)), ("outcome", .string(outcome.rawValue))]),
                      BroMessage(.archiveNoteNotFinished)]
         if let error { lines.append(BroMessage(MessageCode.parse(error.code) ?? .internalUnexpected, error.params, severity: .error)) }
@@ -17,6 +19,7 @@ public enum Notes {
             lines.append(BroMessage(.archiveNoteLogs, [("log", .string(log)), ("hasMakemkv", .bool(logs.count > 1)),
                                                        ("makemkvLog", .string(logs.count > 1 ? logs[1] : ""))]))
         }
+        if let fullLog { lines.append(BroMessage(.archiveNoteFullLog, [("path", .string(fullLog))])) }
         return lines
     }
 }

@@ -32,6 +32,7 @@ public sealed class ProbeStep : IStep
         var invocation = context.MakemkvSetup.Invocation(context.Config, profile, null, context.JobDirectory);
         var read = await context.Tools.Makemkv.Listing(source, invocation, new MakemkvSink(context.Progress, context.Log, operation), context.Cancel);
         var run = read.Run;
+        MakemkvSink.KeepDebugLog(context, run.Outcome, "info");
         foreach (var problem in new[] { run.IsolationWarning, run.TranscriptProblem, run.SettingsProblem })
             if (problem != null) context.Log.Log(problem with { Severity = Severity.Warning });
         if (run.Outcome.Status == StatusWord.Cancelled || context.Cancel.IsCancelled)

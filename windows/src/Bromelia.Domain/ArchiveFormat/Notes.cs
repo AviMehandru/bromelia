@@ -8,8 +8,10 @@ public static class Notes
 {
     /// <summary>The note's lines: the job and its outcome, a warning that the files are not a finished archive,
     /// the error, the read errors MakeMKV reported, and the log files copied into the folder (<paramref name="logs"/>:
-    /// the job's log, then MakeMKV's, when it was copied).</summary>
-    public static List<BroMessage> Render(Id jobId, Outcome outcome, BroError? error, IReadOnlyList<RobotMessage> readErrors, IReadOnlyList<string> logs)
+    /// the job's log, then MakeMKV's, when it was copied), then where the job's full log is (<paramref name="fullLog"/>, its
+    /// log.jsonl in the data folder; none for a folder no job owns), as today's apps end the note (owner H3b-6).</summary>
+    public static List<BroMessage> Render(Id jobId, Outcome outcome, BroError? error, IReadOnlyList<RobotMessage> readErrors, IReadOnlyList<string> logs,
+        string? fullLog)
     {
         var lines = new List<BroMessage>
         {
@@ -26,6 +28,7 @@ public static class Notes
         if (logs.Count > 0)
             lines.Add(new BroMessage(MessageCode.ArchiveNoteLogs, Severity.Info, ("log", JsonValue.Of(logs[0])),
                 ("hasMakemkv", JsonValue.Of(logs.Count > 1)), ("makemkvLog", JsonValue.Of(logs.Count > 1 ? logs[1] : ""))));
+        if (fullLog != null) lines.Add(new BroMessage(MessageCode.ArchiveNoteFullLog, Severity.Info, ("path", JsonValue.Of(fullLog))));
         return lines;
     }
 }

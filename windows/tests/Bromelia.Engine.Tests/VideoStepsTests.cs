@@ -104,7 +104,10 @@ public sealed class VideoStepsTests
             if (run["cancel"]?.AsBool == true) Cancel.Cancel();
             var readErrors = (run["readErrors"]?.AsArray ?? new List<JsonValue>())
                 .Select(t => new RobotMessage(2003, 0, 0, t.AsString!, t.AsString!, new List<string>())).ToList();
-            var outcome = new RunOutcome(null, null, (int)(run["exitCode"]?.AsInteger ?? 0), null, null, readErrors, null, null,
+            // MakeMKV's debug log: the run names it, and it holds the text (written by the "process", so not recorded).
+            if (run["debugLog"] is { } debug && debug["text"]?.AsString is { } debugText)
+                Fs.Put(debug["path"]!.AsString!, System.Text.Encoding.UTF8.GetBytes(debugText));
+            var outcome = new RunOutcome(null, null, (int)(run["exitCode"]?.AsInteger ?? 0), null, null, readErrors, null, run["debugLog"]?["path"]?.AsString,
                 EnumWire.Parse<StatusWord>(run["status"]?.AsString) ?? StatusWord.Success, run["error"] is { } err ? MessageOf(err, Severity.Error) : null,
                 (run["produced"]?.AsArray?.Select(p => p.AsString!).ToList() ?? produced.ToList()), run["abandoned"]?.AsBool ?? false);
             BroMessage? Problem(string key) => run[key] is { } p ? MessageOf(p, Severity.Warning) : null;
@@ -441,6 +444,11 @@ public sealed class VideoStepsTests
         if (expect["tree"] is { } tree)
             Same(tree, JsonValue.Of((fs.Exists(staging) ? FileTree.Files(fs, staging) : new List<string>()).Select(f => JsonValue.Of(f))), "tree");
         if (expect["fs"] is { } ops) Same(string.Join(" | ", ops.AsArray!.Select(o => o.AsString)), string.Join(" | ", fs.Ops), "fs");
+        foreach (var (name, text) in expect["jobFiles"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+        {
+            var path = "/data/jobs/" + jobId.Value + "/" + name;
+            Same(text, fs.Exists(path) ? JsonValue.Of(System.Text.Encoding.UTF8.GetString(fs.Read(path))) : JsonValue.Null.Instance, "job file " + name);
+        }
         foreach (var (name, wanted) in expect["json"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
         {
             var want = wanted.AsString == "probe" ? Bromelia.Domain.Listing.Encode(Listing(GeneratedListing(given["probe"]!["disc"]!))) : wanted;

@@ -50,16 +50,23 @@ media_server_template (const BroPlannedOutput *o, GHashTable *v)
   return MEDIA_SERVER_OTHER;
 }
 
+/* The file name template's path (empty: the original name); a backup with a backup subfolder (backupThenMkv) goes inside
+ * it under that name, as today's apps put it (owner H3b-1), or is the subfolder itself when the name is empty. */
 static char *
 templates_file (const BroNamingSettings *naming, const BroPlannedOutput *o, GHashTable *v)
 {
-  if (o->role == BRO_PATH_ROLE_BACKUP && naming->backup_subfolder[0])
-    return bro_template_engine_render_path (naming->backup_subfolder, v);
+  char *file;
   if (!naming->file_name_template[0]) {
     const char *original = g_hash_table_lookup (v, "original");
-    return bro_sanitizer_component (original ? original : "");
-  }
-  return bro_template_engine_render_path (naming->file_name_template, v);
+    file = bro_sanitizer_component (original ? original : "");
+  } else
+    file = bro_template_engine_render_path (naming->file_name_template, v);
+  if (o->role != BRO_PATH_ROLE_BACKUP || !naming->backup_subfolder[0])
+    return file;
+  g_autofree char *sub = bro_template_engine_render_path (naming->backup_subfolder, v);
+  char *joined = g_strconcat (sub, sub[0] && file[0] ? "/" : "", file, NULL);
+  g_free (file);
+  return joined;
 }
 
 GPtrArray *

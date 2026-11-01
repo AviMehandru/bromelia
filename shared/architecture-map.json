@@ -4475,10 +4475,11 @@
             "outcome",
             "error",
             "readErrors",
-            "logs"
+            "logs",
+            "fullLog"
           ],
           "returns": "[BroMessage]",
-          "swift": "Notes.render(_:outcome:error:readErrors:logs:)",
+          "swift": "Notes.render(_:outcome:error:readErrors:logs:fullLog:)",
           "cs": "Notes.Render",
           "c": "bro_notes_render"
         },
@@ -17295,6 +17296,32 @@
           "swift": "KeepApartStep.kept(_:error:)",
           "cs": "KeepApartStep.Kept",
           "c": "bro_keep_apart_step_kept"
+        },
+        {
+          "name": "KeepApartStep.folderName",
+          "params": [
+            "job"
+          ],
+          "returns": "String",
+          "doc": "The job's name in _Quarantine, before \" [INCOMPLETE]\" and ConflictNamer: the Plan output's identity name, else the job's title, else Probe's listing name, else the source's label, else the job's id (Sanitizer.component). RecoveryService sets a failed job's staging aside under it too (owner H3a-2).",
+          "phase": 3,
+          "swift": "KeepApartStep.folderName(_:)",
+          "cs": "KeepApartStep.FolderName",
+          "c": "bro_keep_apart_step_folder_name"
+        },
+        {
+          "name": "MakemkvSink.keepDebugLog",
+          "params": [
+            "context",
+            "outcome",
+            "command"
+          ],
+          "returns": "Void",
+          "doc": "After each makemkvcon run, MakeMKV's debug log (RunOutcome.debugLog, named by message 1004; MakeMKV starts it afresh at every start) is added to the job folder's makemkv-debug.txt after a line \"==== <its path> after $ makemkvcon <command>\" (info, mkv, backup), as today's apps do; nothing when it is missing or empty; a file that can't be read or written is left out.",
+          "phase": 3,
+          "swift": "MakemkvSink.keepDebugLog(_:outcome:command:)",
+          "cs": "MakemkvSink.KeepDebugLog",
+          "c": "bro_makemkv_sink_keep_debug_log"
         }
       ]
     },

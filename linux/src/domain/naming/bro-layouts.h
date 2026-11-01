@@ -15,7 +15,7 @@ char *bro_layouts_folder (const BroNamingSettings *naming, GHashTable *values);
 /* The path (BroPlannedPath *) of each output (BroPlannedOutput *), relative to the library: the unit's folder,
  * then the file. Media server: episodes in Season NN, a movie's main feature by its name, other titles in Other,
  * backups and images in Backup. Templates: the file name template (MakeMKV's name, original, when it's empty); a
- * backup goes in the backup subfolder when there is one. */
+ * backup goes in the backup subfolder under that name when there is one. */
 GPtrArray *bro_layouts_paths (const BroNamingSettings *naming, GHashTable *values, GPtrArray *outputs);
 
 G_END_DECLS

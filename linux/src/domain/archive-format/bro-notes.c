@@ -9,7 +9,8 @@ add (GPtrArray *lines, BroMessageCode code, BroJsonValue *params, BroSeverity se
 }
 
 GPtrArray *
-bro_notes_render (const BroId *job_id, BroOutcome outcome, const BroBroError *error, GPtrArray *read_errors, const char *const *logs)
+bro_notes_render (const BroId *job_id, BroOutcome outcome, const BroBroError *error, GPtrArray *read_errors, const char *const *logs,
+                  const char *full_log)
 {
   GPtrArray *lines = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_bro_message_free);
   BroJsonValue *p = bro_json_value_new_object ();
@@ -37,6 +38,11 @@ bro_notes_render (const BroId *job_id, BroOutcome outcome, const BroBroError *er
     bro_json_value_set (l, "hasMakemkv", bro_json_value_new_bool (logs[1] != NULL));
     bro_json_value_set (l, "makemkvLog", bro_json_value_new_string (logs[1] ? logs[1] : ""));
     add (lines, BRO_MSG_ARCHIVE_NOTE_LOGS, l, BRO_SEVERITY_INFO);
+  }
+  if (full_log) {
+    BroJsonValue *f = bro_json_value_new_object ();
+    bro_json_value_set (f, "path", bro_json_value_new_string (full_log));
+    add (lines, BRO_MSG_ARCHIVE_NOTE_FULL_LOG, f, BRO_SEVERITY_INFO);
   }
   return lines;
 }

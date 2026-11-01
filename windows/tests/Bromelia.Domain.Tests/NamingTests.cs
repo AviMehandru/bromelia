@@ -87,11 +87,12 @@ public class NamingTests
         var outputs = new List<PlannedOutput>
         {
             new(PathRole.Episode, new Dictionary<string, string> { ["episode"] = "Episode 138", ["track"] = "Title 11 Ch 1-7" }, Title: 0, Episode: 138, Extension: ".mkv"),
-            new(PathRole.Backup, new Dictionary<string, string>(), Extension: ""),
+            new(PathRole.Backup, new Dictionary<string, string> { ["rip"] = "Backup" }, Extension: ""),
         };
         var paths = Layouts.Paths(naming, values, outputs);
         Assert.Equal("One Piece - Season 2 Part 7 Disc 2/One Piece - Episode 138 - Season 2 Part 7 Disc 2 - Rip - Title 11 Ch 1-7 - DVD.mkv", paths[0].Path);
         Assert.Equal(138, paths[0].Episode);
-        Assert.Equal("One Piece - Season 2 Part 7 Disc 2/backup", paths[1].Path);
+        // In the backup subfolder under the file name template (owner H3b-1).
+        Assert.Equal("One Piece - Season 2 Part 7 Disc 2/backup/One Piece - Season 2 Part 7 Disc 2 - Backup - DVD", paths[1].Path);
     }
 }

@@ -66,7 +66,9 @@ private final class StepFakes: Makemkv, Matroska, DriveControl, DriveLookup, Mak
         for line in run["robot"]?.array ?? [] { if let e = Robot.parseLine(line.string ?? "") { sink.event(e) } }
         if run["cancel"]?.bool == true { cancel.cancel() }
         let readErrors = (run["readErrors"]?.array ?? []).map { RobotMessage(code: 2003, flags: 0, text: $0.string ?? "", format: $0.string ?? "") }
-        let outcome = RunOutcome(exitCode: Int(run["exitCode"]?.int ?? 0), readErrors: readErrors,
+        // MakeMKV's debug log: the run names it, and it holds the text (written by the "process", so not recorded).
+        if let debug = run["debugLog"], let text = debug["text"]?.string { fs.put(debug["path"]!.string!, Array(text.utf8)) }
+        let outcome = RunOutcome(exitCode: Int(run["exitCode"]?.int ?? 0), readErrors: readErrors, debugLog: run["debugLog"]?["path"]?.string,
                                  status: run["status"]?.string.flatMap(StatusWord.init(rawValue:)) ?? .success, error: message(run["error"], .error),
                                  produced: run["produced"]?.array?.map { $0.string ?? "" } ?? produced, abandoned: run["abandoned"]?.bool ?? false)
         return MakemkvRun(outcome: outcome, notice: notice(run["notice"]?.string), transcriptProblem: message(run["transcriptProblem"], .warning),
@@ -454,6 +456,10 @@ struct VideoStepsTests {
         }
         if let ops = expect["fs"]?.array {
             try Fixtures.same(ops.map { $0.string ?? "" }.joined(separator: " | "), fs.ops.joined(separator: " | "), "fs")
+        }
+        for (name, text) in expect["jobFiles"]?.members ?? [] {
+            let path = "/data/jobs/" + jobId.value + "/" + name
+            try Fixtures.same(text, fs.exists(path) ? JsonValue.string(String(decoding: try fs.read(path), as: UTF8.self)) : .null, "job file " + name)
         }
         for (name, wanted) in expect["json"]?.members ?? [] {
             var want = wanted

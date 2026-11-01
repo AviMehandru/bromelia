@@ -188,6 +188,20 @@ commit_port_called (TestCommitPort *p, const char *op, const BroUnitRecord *unit
       bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_JOB_CANCELLED), NULL);
       return NULL;
     }
+  {
+    /* port.errors: the error of each call in turn (null: none). */
+    BroJsonValue *errors = bro_json_value_member (port, "errors");
+    BroJsonValue *one;
+    guint n;
+    g_mutex_lock (&p->lock);
+    n = bro_json_value_length (p->calls) - 1;
+    g_mutex_unlock (&p->lock);
+    if (n < bro_json_value_length (errors) && (one = bro_json_value_at (errors, n)) && one->kind == BRO_JSON_VALUE_OBJECT)
+      {
+        *error = commit_error_of (one);
+        return NULL;
+      }
+  }
   if (why)
     {
       *error = commit_error_of (why);
@@ -290,6 +304,8 @@ commit_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GP
       bro_test_fail (failures, id, "given.now isn't an instant");
       goto out;
     }
+  for (guint i = 0; i < bro_json_value_length (bro_json_value_member (given, "taken")); i++)
+    steps_tree_put_dir (fakes, bro_json_value_get_string (bro_json_value_at (bro_json_value_member (given, "taken"), i), ""));
   if (g_strcmp0 (cancel_at, "start") == 0)
     bro_cancellation_source_cancel (cancel);
   else if (g_strcmp0 (cancel_at, "commit") == 0)

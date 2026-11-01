@@ -263,6 +263,14 @@ reason_of (const BroRunOutcome *outcome)
   return bro_bro_message_new (BRO_MSG_PROCESS_EXIT_STATUS, _bro_param ("status", bro_json_value_new_integer (outcome->exit_code)), BRO_SEVERITY_ERROR);
 }
 
+/* A reason that stopped makemkvcon (BroRunOutcome: a renumbered drive, MakeMKV's space warning, a stall): the step fails
+ * with it, and no later title is ripped. */
+static gboolean
+stops (const BroBroMessage *reason)
+{
+  return reason->code == BRO_MSG_DRIVE_RENUMBERED || reason->code == BRO_MSG_SPACE_MAKEMKV_WARNING || reason->code == BRO_MSG_MAKEMKV_STALLED;
+}
+
 /* The checkpoint: the disc, the titles done, the backup a backup-then-MKV job rips from and the read errors of runs no
  * title owns (a backup's: its MKV files inherit them). The staging folder is synced first, so what the checkpoint names
  * is there after a power loss. */
@@ -328,8 +336,9 @@ sink (Run *r, const BroBroMessage *operation, double from, double width)
 }
 
 static void
-log_run (Run *r, const BroMakemkvRun *run)
+log_run (Run *r, const BroMakemkvRun *run, const char *command)
 {
+  bro_makemkv_sink_keep_debug_log (r->c, run->outcome, command);
   const BroBroMessage *problems[] = { run->isolation_warning, run->transcript_problem, run->settings_problem };
   for (guint i = 0; i < G_N_ELEMENTS (problems); i++)
     if (problems[i])
@@ -432,7 +441,7 @@ make_backup (Run *r, gboolean decrypt, double from, double width, char **name, B
   s = sink (r, operation, from, width);
   if (!(run = bro_makemkv_backup (r->c->tools->makemkv, source, decrypt, destination, inv, BRO_RUN_SINK (s), r->c->cancel, error)))
     return FALSE;
-  log_run (r, run);
+  log_run (r, run, "backup");
   outcome = run->outcome;
   if (outcome->status == BRO_STATUS_WORD_CANCELLED || is_cancelled (r))
     {
@@ -451,9 +460,23 @@ make_backup (Run *r, gboolean decrypt, double from, double width, char **name, B
       g_autoptr (BroBroMessage) reason = reason_of (outcome);
       if (!r->notice && run->notice)
         r->notice = bro_makemkv_notice_copy (run->notice);
+      /* A folder without a disc structure isn't a backup MakeMKV made (BroRunOutcome counts none): the check says why. */
+      if (reason->code == BRO_MSG_PROCESS_SAVED_NOTHING && bro_file_system_exists (r->c->fs, destination))
+        {
+          g_autoptr (BroFileInfo) at = bro_file_system_stat (r->c->fs, destination, NULL);
+          g_autoptr (BroBroMessage) problem = at && at->is_directory ? bro_backup_check_problem (r->c->fs, destination) : NULL;
+          if (problem)
+            {
+              *stopped = failed (r, bro_bro_message_new (BRO_MSG_BACKUP_CHECK_FAILED, _bro_param ("problem", bro_bro_message_to_json (problem)),
+                                                         BRO_SEVERITY_ERROR));
+              return TRUE;
+            }
+        }
       if (bro_file_system_exists (r->c->fs, destination))
         g_ptr_array_add (r->others, g_strdup (made));
-      *stopped = failed (r, bro_bro_message_new (BRO_MSG_BACKUP_FAILED, _bro_param ("reason", bro_bro_message_to_json (reason)), BRO_SEVERITY_ERROR));
+      *stopped = failed (r, stops (reason) ? g_steal_pointer (&reason)
+                                           : bro_bro_message_new (BRO_MSG_BACKUP_FAILED, _bro_param ("reason", bro_bro_message_to_json (reason)),
+                                                                  BRO_SEVERITY_ERROR));
       return TRUE;
     }
   if (!(info = bro_file_system_stat (r->c->fs, destination, error)))
@@ -542,7 +565,7 @@ rip (Run *r, const BroMakemkvSource *source, const BroListing *listing, GHashTab
       s = sink (r, operation, from, 0);
       if (!(pass_read = bro_makemkv_listing (r->c->tools->makemkv, source, inv, BRO_RUN_SINK (s), r->c->cancel, error)))
         return FALSE;
-      log_run (r, pass_read->run);
+      log_run (r, pass_read->run, "info");
       if (pass_read->run->outcome->status == BRO_STATUS_WORD_CANCELLED || is_cancelled (r))
         {
           *stopped = cancelled (r);
@@ -615,7 +638,7 @@ rip (Run *r, const BroMakemkvSource *source, const BroListing *listing, GHashTab
       s = sink (r, operation, at, width / runs);
       if (!(run = bro_makemkv_rip (r->c->tools->makemkv, source, title, r->staging, inv, BRO_RUN_SINK (s), r->c->cancel, error)))
         return FALSE;
-      log_run (r, run);
+      log_run (r, run, "mkv");
       outcome = run->outcome;
       if (outcome->status == BRO_STATUS_WORD_CANCELLED || is_cancelled (r))
         {
@@ -637,10 +660,15 @@ rip (Run *r, const BroMakemkvSource *source, const BroListing *listing, GHashTab
                              BRO_SEVERITY_WARNING);
               g_ptr_array_add (r->others, g_strdup (outcome->produced->pdata[i]));
             }
-          g_ptr_array_add (failure_titles, GINT_TO_POINTER (single ? 0 : first->index + 1));
-          g_ptr_array_add (failure_reasons, reason);
           if (!r->notice && run->notice)
             r->notice = bro_makemkv_notice_copy (run->notice);
+          if (stops (reason))
+            {
+              *stopped = failed (r, reason);
+              return TRUE;
+            }
+          g_ptr_array_add (failure_titles, GINT_TO_POINTER (single ? 0 : first->index + 1));
+          g_ptr_array_add (failure_reasons, reason);
           continue;
         }
       {
@@ -770,7 +798,7 @@ backup_then_mkv (Run *r, const BroListing *listing, const char *resumed, BroBroE
   s = sink (r, reading, rips_from, 0);
   if (!(read = bro_makemkv_listing (r->c->tools->makemkv, source, inv, BRO_RUN_SINK (s), r->c->cancel, error)))
     return NULL;
-  log_run (r, read->run);
+  log_run (r, read->run, "info");
   if (read->run->outcome->status == BRO_STATUS_WORD_CANCELLED || is_cancelled (r))
     return cancelled (r);
   if (read->listing->titles->len == 0)

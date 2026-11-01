@@ -89,7 +89,8 @@ struct ArchiveFormatTests {
         let lines = Notes.render(Id("b2c3d4e5-0000-4000-8000-00000000abcd"), outcome: .succeededWithReadErrors,
                                  error: BroError("rip.readErrors", [("count", .integer(1))]),
                                  readErrors: [RobotMessage(code: 2003, flags: 516, text: "Error 'Scsi error - MEDIUM ERROR' occurred while reading")],
-                                 logs: ["bromelia-a1b2c3d4-log.txt", "makemkv-a1b2c3d4-log.txt"])
+                                 logs: ["bromelia-a1b2c3d4-log.txt", "makemkv-a1b2c3d4-log.txt"],
+                                 fullLog: "/data/jobs/b2c3d4e5-0000-4000-8000-00000000abcd/log.jsonl")
         let text = try lines.map { try English.render($0.toJson()) }.joined(separator: "\n")
         #expect(text == """
             Bromelia job b2c3d4e5-0000-4000-8000-00000000abcd: Completed with read errors.
@@ -99,6 +100,7 @@ struct ArchiveFormatTests {
             Errors reported by MakeMKV while reading the disc:
             Error 'Scsi error - MEDIUM ERROR' occurred while reading
             The job's log is in this folder as bromelia-a1b2c3d4-log.txt, and everything MakeMKV printed as makemkv-a1b2c3d4-log.txt.
+            Full log: /data/jobs/b2c3d4e5-0000-4000-8000-00000000abcd/log.jsonl
             """)
     }
 }

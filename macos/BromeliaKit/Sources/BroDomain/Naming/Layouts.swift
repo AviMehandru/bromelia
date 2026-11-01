@@ -18,7 +18,7 @@ public enum Layouts {
     /// The path of each output, relative to the library: the unit's folder, then the file. Media server: episodes in
     /// `Season NN`, a movie's main feature by its name, other titles in `Other`, backups and images in `Backup`.
     /// Templates: the file name template (MakeMKV's name, `original`, when it's empty); a backup goes in the backup
-    /// subfolder when there is one.
+    /// subfolder under that name when there is one.
     public static func paths(_ naming: NamingSettings, values: [String: String], outputs: [PlannedOutput]) -> [PlannedPath] {
         let unit = folder(naming, values: values)
         return outputs.map { o in
@@ -36,9 +36,13 @@ public enum Layouts {
         return mediaServerOther
     }
 
+    /// The file name template's path (empty: the original name); a backup with a backup subfolder (backupThenMkv) goes inside
+    /// it under that name, as today's apps put it (owner H3b-1), or is the subfolder itself when the name is empty.
     static func templatesFile(_ naming: NamingSettings, _ o: PlannedOutput, _ v: [String: String]) -> String {
-        if o.role == .backup && !naming.backupSubfolder.isEmpty { return TemplateEngine.renderPath(naming.backupSubfolder, values: v) }
-        if naming.fileNameTemplate.isEmpty { return Sanitizer.component(v["original"] ?? "") }
-        return TemplateEngine.renderPath(naming.fileNameTemplate, values: v)
+        let file = naming.fileNameTemplate.isEmpty ? Sanitizer.component(v["original"] ?? "")
+            : TemplateEngine.renderPath(naming.fileNameTemplate, values: v)
+        if o.role != .backup || naming.backupSubfolder.isEmpty { return file }
+        let sub = TemplateEngine.renderPath(naming.backupSubfolder, values: v)
+        return [sub, file].filter { !$0.isEmpty }.joined(separator: "/")
     }
 }

@@ -127,7 +127,8 @@ public sealed class SealStep : IStep
             var errors = acquired.Titles.SelectMany(t => t.ReadErrors).Concat(acquired.ReadErrors)
                 .Select(text => new RobotMessage(2003, 0, 0, text, text, new List<string>())).ToList();
             var lines = Notes.Render(job.Id, Outcome.SucceededWithReadErrors,
-                new BroMessage(MessageCode.RipReadErrors, Severity.Error, ("count", JsonValue.Of(readErrors))).ToError(), errors, logs);
+                new BroMessage(MessageCode.RipReadErrors, Severity.Error, ("count", JsonValue.Of(readErrors))).ToError(), errors, logs,
+                context.JobDirectory + "/" + JobLog.FileName);
             Write(ReadErrorsNote, Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => context.Messages.Render(l) + "\n"))));
             note = ReadErrorsNote;
         }

@@ -95,7 +95,7 @@ public class ArchiveFormatTests
         var lines = Notes.Render(new Id("b2c3d4e5-0000-4000-8000-00000000abcd"), Outcome.SucceededWithReadErrors,
             new BroError("rip.readErrors", ("count", JsonValue.Of(1))),
             new List<RobotMessage> { new(2003, 516, 0, "Error 'Scsi error - MEDIUM ERROR' occurred while reading", "", new List<string>()) },
-            new List<string> { "bromelia-a1b2c3d4-log.txt", "makemkv-a1b2c3d4-log.txt" });
+            new List<string> { "bromelia-a1b2c3d4-log.txt", "makemkv-a1b2c3d4-log.txt" }, "/data/jobs/b2c3d4e5-0000-4000-8000-00000000abcd/log.jsonl");
         var text = string.Join("\n", lines.Select(l => English.Render(l.ToJson())));
         Assert.Equal(
             "Bromelia job b2c3d4e5-0000-4000-8000-00000000abcd: Completed with read errors.\n" +
@@ -103,6 +103,7 @@ public class ArchiveFormatTests
             "MakeMKV reported 1 read error while reading the disc, so the files may be damaged. They were kept apart from finished archives.\n" +
             "Errors reported by MakeMKV while reading the disc:\n" +
             "Error 'Scsi error - MEDIUM ERROR' occurred while reading\n" +
-            "The job's log is in this folder as bromelia-a1b2c3d4-log.txt, and everything MakeMKV printed as makemkv-a1b2c3d4-log.txt.", text);
+            "The job's log is in this folder as bromelia-a1b2c3d4-log.txt, and everything MakeMKV printed as makemkv-a1b2c3d4-log.txt.\n" +
+            "Full log: /data/jobs/b2c3d4e5-0000-4000-8000-00000000abcd/log.jsonl", text);
     }
 }

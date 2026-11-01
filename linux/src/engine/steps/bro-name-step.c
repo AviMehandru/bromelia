@@ -808,6 +808,8 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
       if (strcmp (to->pdata[i], from) != 0 && !rename_in (c, staging, from, to->pdata[i], error))
         return NULL;
     }
+  if (corrected && strcmp (to->pdata[backup], at->pdata[backup]) != 0)
+    _bro_step_log (c, BRO_MSG_BACKUP_RENAMED, _bro_param ("name", bro_json_value_new_string (last_of (to->pdata[backup]))), BRO_SEVERITY_INFO);
 
   output = bro_name_output_new ();
   g_free (output->folder);

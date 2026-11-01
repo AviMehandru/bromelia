@@ -1533,6 +1533,95 @@
       }
     },
     {
+      "id": "attach-library-of-a-configured-folder-writes-its-marker-and-leaves-the-configuration",
+      "from": [
+        "H1-7 (owner 2026-10-31): attaching the folder of a configured library is the user's confirmation"
+      ],
+      "given": {
+        "config": {
+          "version": 3,
+          "libraries": [
+            {
+              "id": "lib",
+              "name": "Library",
+              "path": "/root/library"
+            },
+            {
+              "id": "films",
+              "name": "Films",
+              "path": "/root/films"
+            }
+          ]
+        },
+        "folders": [
+          "/root/films"
+        ]
+      },
+      "expect": {
+        "steps": [
+          {
+            "start": {}
+          },
+          {
+            "call": "libraries",
+            "args": [],
+            "expect": [
+              {
+                "id": "lib",
+                "online": true
+              },
+              {
+                "id": "films",
+                "online": false
+              }
+            ]
+          },
+          {
+            "call": "attachLibrary",
+            "args": [
+              "/root/films",
+              "Other"
+            ],
+            "expect": {
+              "id": "films",
+              "name": "Films",
+              "path": "/root/films",
+              "online": true
+            }
+          },
+          {
+            "files": {
+              "exist": [
+                "/root/films/.bromelia-library"
+              ]
+            }
+          },
+          {
+            "call": "config",
+            "args": [],
+            "expect": {
+              "version": 0
+            }
+          },
+          {
+            "call": "libraries",
+            "args": [],
+            "expect": [
+              {
+                "id": "lib",
+                "online": true
+              },
+              {
+                "id": "films",
+                "name": "Films",
+                "online": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "id": "a-failed-configuration-save-takes-the-marker-back",
       "from": [
         "G1 decision 166: otherwise a retry answers library.alreadyAttached"

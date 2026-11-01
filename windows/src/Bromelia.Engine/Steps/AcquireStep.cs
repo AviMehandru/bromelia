@@ -20,10 +20,12 @@ namespace Bromelia.Engine;
 /// holds exactly the titles (rip.onePassListing, then rip.onePass or rip.onePassMismatch); else title by title
 /// (rip.rippingTitle), hand-picked tracks with +sel:all. A failed title (rip.titleFailed) leaves its files under
 /// MakeMKV's names (rip.keptUnderMakemkvName) and the others are still ripped; the step then fails (rip.failed,
-/// rip.titlesFailed) with the MakeMKV notice that explains it.</item>
+/// rip.titlesFailed) with the MakeMKV notice that explains it. A run that was stopped (drive.renumbered,
+/// space.makemkvWarning, makemkv.stalled) fails the step with that reason at once.</item>
 /// <item>backup, backupDecrypted: the disc as a folder or an image (profile backup.format), named backup or backup.iso;
 /// an image MakeMKV made for a folder gets .iso (backup.imageForFolder), a folder made for an image loses it
-/// (backup.folderInsteadOfIso); backup.saved, or backup.failed.</item>
+/// (backup.folderInsteadOfIso); backup.saved, or backup.failed (a stopped run: its reason; a folder without a disc
+/// structure, which counts as nothing produced: backup.checkFailed).</item>
 /// <item>backupThenMkv: a decrypted backup, its structure checked (backup.checkFailed), then the titles from the backup
 /// (mapped from Probe's listing to the backup's), and the backup removed unless backup.keepAfterMkv (backup.removed).</item>
 /// </list>
@@ -174,7 +176,7 @@ public sealed class AcquireStep : IStep
             var reading = new BroMessage(MessageCode.DiscOpReading);
             _c.Progress.Report(ripsFrom, reading);
             var read = await _c.Tools.Makemkv.Listing(source, Invocation(null, null), Sink(reading, ripsFrom, 0), _c.Cancel);
-            LogRun(read.Run);
+            LogRun(read.Run, "info");
             if (read.Run.Outcome.Status == StatusWord.Cancelled || _c.Cancel.IsCancelled) return Cancelled();
             if (read.Listing.Titles.Count == 0)
                 return Failed(new BroMessage(MessageCode.DiscNoTitles, Severity.Error, ("source", JsonValue.Of(path)),
@@ -209,7 +211,7 @@ public sealed class AcquireStep : IStep
                 var operation = new BroMessage(MessageCode.RipOnePassListing);
                 _c.Progress.Report(from, operation);
                 var read = await _c.Tools.Makemkv.Listing(source, Invocation(m, null), Sink(operation, from, 0), _c.Cancel);
-                LogRun(read.Run);
+                LogRun(read.Run, "info");
                 if (read.Run.Outcome.Status == StatusWord.Cancelled || _c.Cancel.IsCancelled) return Cancelled();
                 var indices = wanted.Select(t => map[t.Index]).ToList();
                 if (OnePass.Matches(read.Listing, indices, listing))
@@ -240,7 +242,7 @@ public sealed class AcquireStep : IStep
                 _c.Progress.Report(at, operation);
                 var run = await _c.Tools.Makemkv.Rip(source, title, _staging,
                     Invocation(minLength, !single && group[0].Tracks != null ? "+sel:all" : null), Sink(operation, at, width / runs.Count), _c.Cancel);
-                LogRun(run);
+                LogRun(run, "mkv");
                 var outcome = run.Outcome;
                 if (outcome.Status == StatusWord.Cancelled || _c.Cancel.IsCancelled)
                 {
@@ -257,8 +259,9 @@ public sealed class AcquireStep : IStep
                         _c.Log.Log(new BroMessage(MessageCode.RipKeptUnderMakemkvName, Severity.Warning, ("file", JsonValue.Of(f))));
                         _others.Add(f);
                     }
-                    failures.Add((single ? null : group[0].Index, reason));
                     _notice ??= run.Notice;
+                    if (Stops(reason)) return Failed(reason);
+                    failures.Add((single ? null : group[0].Index, reason));
                     continue;
                 }
                 var errors = outcome.ReadErrors.Select(e => e.Text).ToList();
@@ -300,7 +303,7 @@ public sealed class AcquireStep : IStep
             var operation = new BroMessage(MessageCode.BackupBackingUp, Severity.Info, ("decrypted", JsonValue.Of(decrypt)));
             _c.Progress.Report(from, operation);
             var run = await _c.Tools.Makemkv.Backup(source, decrypt, destination, Invocation(null, null), Sink(operation, from, width), _c.Cancel);
-            LogRun(run);
+            LogRun(run, "backup");
             var outcome = run.Outcome;
             if (outcome.Status == StatusWord.Cancelled || _c.Cancel.IsCancelled)
             {
@@ -311,8 +314,12 @@ public sealed class AcquireStep : IStep
             {
                 _notice ??= run.Notice;
                 var reason = outcome.Error ?? new BroMessage(MessageCode.ProcessExitStatus, Severity.Error, ("status", JsonValue.Of(outcome.ExitCode)));
+                // A folder without a disc structure isn't a backup MakeMKV made (RunOutcome counts none): the check says why.
+                if (reason.Code == MessageCode.ProcessSavedNothing && _fs.Exists(destination) && _fs.Stat(destination).IsDirectory
+                    && BackupCheck.Problem(_fs, destination) is { } problem)
+                    return (null, Failed(new BroMessage(MessageCode.BackupCheckFailed, Severity.Error, ("problem", problem.ToJson()))));
                 if (_fs.Exists(destination)) _others.Add(name);
-                return (null, Failed(new BroMessage(MessageCode.BackupFailed, Severity.Error, ("reason", reason.ToJson()))));
+                return (null, Failed(Stops(reason) ? reason : new BroMessage(MessageCode.BackupFailed, Severity.Error, ("reason", reason.ToJson()))));
             }
             bool folder = _fs.Stat(destination).IsDirectory;
             if (iso && folder)
@@ -385,8 +392,9 @@ public sealed class AcquireStep : IStep
 
         MakemkvSink Sink(BroMessage operation, double from, double width) => new(new Portion(_c.Progress, from, width), _c.Log, operation);
 
-        void LogRun(MakemkvRun run)
+        void LogRun(MakemkvRun run, string command)
         {
+            MakemkvSink.KeepDebugLog(_c, run.Outcome, command);
             foreach (var problem in new[] { run.IsolationWarning, run.TranscriptProblem, run.SettingsProblem })
                 if (problem != null) _c.Log.Log(problem with { Severity = Severity.Warning });
             if (run.Outcome.Abandoned)
@@ -405,6 +413,11 @@ public sealed class AcquireStep : IStep
         StepReport Failed(BroMessage message) => Report(message.ToError());
 
         StepReport Cancelled() => Report(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
+
+        /// <summary>A reason that stopped makemkvcon (RunOutcome: a renumbered drive, MakeMKV's space warning, a stall):
+        /// the step fails with it, and no later title is ripped.</summary>
+        static bool Stops(BroMessage reason) => reason.Code == MessageCode.DriveRenumbered || reason.Code == MessageCode.SpaceMakemkvWarning
+            || reason.Code == MessageCode.MakemkvStalled;
 
         static BroFailure NoInformation() => new(new BroMessage(MessageCode.DiscNoInformation, Severity.Error).ToError());
     }

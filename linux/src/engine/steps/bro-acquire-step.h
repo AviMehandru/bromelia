@@ -8,10 +8,12 @@
  *   exactly the titles (rip.onePassListing, then rip.onePass or rip.onePassMismatch); else title by title
  *   (rip.rippingTitle), hand-picked tracks with +sel:all. A failed title (rip.titleFailed) leaves its files under
  *   MakeMKV's names (rip.keptUnderMakemkvName) and the others are still ripped; the step then fails (rip.failed,
- *   rip.titlesFailed) with the MakeMKV notice that explains it.
+ *   rip.titlesFailed) with the MakeMKV notice that explains it. A run that was stopped (drive.renumbered,
+ *   space.makemkvWarning, makemkv.stalled) fails the step with that reason at once.
  * - backup, backupDecrypted: the disc as a folder or an image (profile backup.format), named backup or backup.iso; an
  *   image MakeMKV made for a folder gets .iso (backup.imageForFolder), a folder made for an image loses it
- *   (backup.folderInsteadOfIso); backup.saved, or backup.failed.
+ *   (backup.folderInsteadOfIso); backup.saved, or backup.failed (a stopped run: its reason; a folder without a disc
+ *   structure, which counts as nothing produced: backup.checkFailed).
  * - backupThenMkv: a decrypted backup, its structure checked (backup.checkFailed), then the titles from the backup (mapped
  *   from Probe's listing to the backup's), and the backup removed unless backup.keepAfterMkv (backup.removed).
  * Read errors are counted per title (title by title) or per run (report read_errors); Release and Commit act on them. A

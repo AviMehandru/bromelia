@@ -1100,15 +1100,48 @@ attach_attached (BroLibraryDto *library, const BroBroError *error, gpointer data
   bro_config_service_update (self->config, doc, bro_config_service_version (self->config), attach_saved, c, NULL);
 }
 
+/* The configured library's marker is written: the library as LibraryService lists it now, else what attach gave. */
+static void
+attach_marked (BroLibraryDto *library, const BroBroError *error, gpointer data)
+{
+  Call *c = data;
+  g_autoptr (GPtrArray) libraries = NULL;
+  const BroLibraryDto *found = library;
+  if (!library)
+    {
+      fail (c, error);
+      return;
+    }
+  c->library = library;
+  libraries = bro_library_service_libraries (c->self->libraries);
+  for (guint i = 0; i < libraries->len; i++)
+    if (strcmp (((BroLibraryDto *) g_ptr_array_index (libraries, i))->id, c->text3) == 0)
+      found = g_ptr_array_index (libraries, i);
+  ((BroEngineLibraryDone) c->done) (found, NULL, c->data);
+  call_free (c);
+}
+
 /* The id is the name (else the folder's last part) made into an EntryId, with -2, -3 … when the configuration has it
  * already (decision 187). LibraryService writes the marker, then the configuration gets {id, name, path} at its
  * current version; if that save fails the marker is removed and the save's error returned, so a retry doesn't meet
- * library.alreadyAttached. */
+ * library.alreadyAttached. The path of a library the configuration already has (the user confirming a folder without
+ * its marker, H1-7): the marker is written under that library's id and name, and the configuration is left as it is. */
 static void
 work_attach_library (Call *c)
 {
   BroLocalEngine *self = c->self;
   g_autoptr (BroConfig) current = bro_config_service_current (self->config);
+  g_autoptr (GPtrArray) configured = bro_config_libraries (current);
+  for (guint i = 0; i < configured->len; i++)
+    {
+      const BroLibraryEntry *l = g_ptr_array_index (configured, i);
+      if (strcmp (l->path, c->text) == 0)
+        {
+          c->text3 = g_strdup (l->id);
+          bro_library_service_attach (self->libraries, l->id, c->text, l->name, attach_marked, c, NULL);
+          return;
+        }
+    }
   g_autofree char *display = *c->text2 ? g_strdup (c->text2) : last_part (c->text);
   c->text3 = new_library_id (display, current);
   bro_library_service_attach (self->libraries, c->text3, c->text, c->text2, attach_attached, c, NULL);

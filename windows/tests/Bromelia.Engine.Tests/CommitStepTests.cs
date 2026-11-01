@@ -8,7 +8,7 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 namespace Bromelia.Engine.Tests;
 
 /// <summary>shared/fixtures/engine/commit-steps.cases.json: CommitStep (or NotifyStep) alone, with a fake library port
-/// that records what it is asked to commit, a fixed clock, a log and progress. The format is in
+/// that records what it is asked to commit, a fixed clock, a log, progress and the folders given as taken. The format is in
 /// claudeDocs/tools/rebuild-phase3/gen-commit-cases.py.</summary>
 public sealed class CommitStepTests
 {
@@ -66,6 +66,10 @@ public sealed class CommitStepTests
             // LibraryService ends its wait for the unit so when the token it was given is cancelled.
             if (cancel.IsCancelled) throw new BroFailure(new BroError(MessageCode.Wire(MessageCode.JobCancelled)));
             var port = _given["port"];
+            int n;
+            lock (Calls) n = Calls.Count - 1;
+            if (port?["errors"]?.AsArray is { } errors && n < errors.Count && errors[n] is JsonValue.Object one)
+                throw new BroFailure(new BroError(one["code"]!.AsString!, (JsonValue.Object)(one["params"] ?? EmptyObject)));
             if (port?["error"] is { } e) throw new BroFailure(new BroError(e["code"]!.AsString!, (JsonValue.Object)(e["params"] ?? EmptyObject)));
             var parent = intent.Destination[..intent.Destination.LastIndexOf('/')];
             var destination = port?["destination"]?.AsString
@@ -149,7 +153,9 @@ public sealed class CommitStepTests
             Same(resources["libraryWrites"], JsonValue.Of(step.Resources(job).LibraryWrites.Select(d => JsonValue.Of(d))), "resources.libraryWrites");
         if (expect["resumes"] is { } resumes) Same(resumes["resumability"]!.AsString, EnumWire.Name(step.Resumability), "resumability");
 
-        var context = new StepContext(job, cancel.Token, fakes, fakes, null!, new ToolSet(null!, null!), null!, fakes, null!, fakes, null!,
+        var fs = new Bromelia.TestKit.MemoryFileSystem();
+        foreach (var folder in given["taken"]?.AsArray ?? new List<JsonValue>()) fs.PutFolder(folder.AsString!);
+        var context = new StepContext(job, cancel.Token, fakes, fakes, null!, new ToolSet(null!, null!), fs, fakes, null!, fakes, null!,
             new Config(JsonValue.Of(), new List<Issue>()), null!, null!, null!, null!, "/data/jobs/" + JobId, null!, "test");
         StepReport? report = null;
         BroError? thrown = null;

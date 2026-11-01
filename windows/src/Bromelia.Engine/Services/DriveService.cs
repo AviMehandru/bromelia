@@ -15,7 +15,8 @@ namespace Bromelia.Engine;
 /// pairs the two lists; a drive's id comes from MakeMKV's identification. Each drive counts its discs: a disc that
 /// arrives gets the next generation and mediumArrived (not the discs already in at start, which never start a rip),
 /// one that leaves mediumRemoved. A drive a job holds keeps what it had (MakeMKV can't see a drive in use), and a
-/// drive left out of a scan keeps it until the OS says it's gone. Configured drives that aren't connected stay listed
+/// drive left out of a scan keeps it until the OS says it's gone; a drive a scan found held is scanned again once
+/// the job gives it back (an eject while a job holds it). Configured drives that aren't connected stay listed
 /// (connected false); others are removed. Close tray checks, in the first scan 4 s later, that the tray closed
 /// (drive.trayStillOpen: a drive without a tray motor). As the <see cref="IDriveLookup"/> of the steps it gives a
 /// snapshot, from any thread. shared/fixtures/engine/drive-service.cases.json.
@@ -58,6 +59,8 @@ public sealed class DriveService : IDriveLookup
     readonly Dictionary<string, Instant> _trayAsked = new();
     LeaseSnapshot _leases = LeaseSnapshot.Empty;
     bool _started, _firstDone, _scanning, _again, _deferred;
+    /// <summary>Drives a scan left as they were because a job held them: scanned again once it gives them back.</summary>
+    readonly HashSet<string> _heldInScan = new();
     List<TaskCompletionSource> _waiting = new(), _next = new();
     EngineTimer? _poll;
     long _pollSeconds = -1;
@@ -273,7 +276,11 @@ public sealed class DriveService : IDriveLookup
             }
             seen.Add(drive.Id);
             order.Add(drive);
-            if (busy.Contains(drive.Id) && drive.Connected) continue; // a job holds it: MakeMKV can't see it
+            if (busy.Contains(drive.Id) && drive.Connected) // a job holds it: MakeMKV can't see it
+            {
+                _heldInScan.Add(drive.Id);
+                continue;
+            }
             var wasConnected = drive.Connected;
             drive.Makemkv = m;
             drive.OsDevice = j.Os?.Device ?? drive.OsDevice;
@@ -433,7 +440,8 @@ public sealed class DriveService : IDriveLookup
         if (LeaseSnapshot.Parse(e.Data) is not { } leases) return;
         _leases = leases;
         Publish(_config.Current(), new(), new());
-        if (_deferred && leases.Acquisitions == 0)
+        bool given = _heldInScan.RemoveWhere(id => leases.Drives.All(h => h.Drive != id)) > 0;
+        if ((_deferred && leases.Acquisitions == 0) || given)
         {
             _deferred = false;
             _ = Scan(asked: false);

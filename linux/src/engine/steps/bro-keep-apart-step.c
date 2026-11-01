@@ -8,6 +8,7 @@
 #include "bro-disc-request.h"
 #include "bro-file-info.h"
 #include "bro-file-tree.h"
+#include "bro-job-log.h"
 #include "bro-notes.h"
 #include "bro-plan-output.h"
 #include "bro-probe-output.h"
@@ -133,6 +134,26 @@ bro_keep_apart_step_kept (BroOutcome outcome, const BroBroError *error)
   if (error)
     bro_json_value_set (checkpoint, "error", error_json (error));
   return checkpoint;
+}
+
+char *
+bro_keep_apart_step_folder_name (const BroJobSnapshot *job)
+{
+  g_autoptr (BroPlanOutput) plan = bro_plan_output_of (job);
+  BroJsonValue *probe_json = bro_job_snapshot_output (job, BRO_STEP_KIND_PROBE);
+  g_autoptr (BroProbeOutput) probe = probe_json && probe_json->kind == BRO_JSON_VALUE_OBJECT ? bro_probe_output_decode (probe_json) : NULL;
+  g_autoptr (BroDiscRequest) request = bro_disc_request_decode (job->request);
+  g_autofree char *source_label = request && request->source ? bro_step_sources_label (request->source, NULL) : g_strdup ("");
+  const char *candidates[] = { plan && plan->identity ? plan->identity->name : NULL, job->request->title,
+                               probe && probe->listing ? probe->listing->name : NULL, source_label, job->id.value };
+  for (guint i = 0; i < G_N_ELEMENTS (candidates); i++)
+    {
+      char *n = bro_sanitizer_component (candidates[i] ? candidates[i] : "");
+      if (*n)
+        return n;
+      g_free (n);
+    }
+  return g_strdup ("");
 }
 
 /* Seals what staging holds into @files (BroUnitFile *) and @own (char *: the record first, the logs, the note), once the
@@ -269,7 +290,8 @@ seal (const BroStepContext *c, const BroPlanOutput *plan, const char *staging, c
     if (code)
       kept_error = bro_bro_error_new (code, params && params->kind == BRO_JSON_VALUE_OBJECT ? bro_json_value_ref (params) : bro_json_value_new_object (),
                                       NULL);
-    lines = bro_notes_render (&c->job->id, outcome, kept_error, NULL, (const char *const *) log_names->pdata);
+    g_autofree char *full_log = g_strconcat (c->job_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+    lines = bro_notes_render (&c->job->id, outcome, kept_error, NULL, (const char *const *) log_names->pdata, full_log);
   }
   {
     GString *text = g_string_new ("");
@@ -429,17 +451,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   source_label = request && request->source ? bro_step_sources_label (request->source, NULL) : g_strdup ("");
   listing_name = probe && probe->listing && probe->listing->name ? probe->listing->name : "";
   identity = plan->identity;
-  {
-    const char *candidates[] = { identity->name, job->request->title, listing_name, source_label, job->id.value };
-    for (guint i = 0; i < G_N_ELEMENTS (candidates) && !name; i++)
-      {
-        char *n = bro_sanitizer_component (candidates[i] ? candidates[i] : "");
-        if (*n)
-          name = n;
-        else
-          g_free (n);
-      }
-  }
+  name = bro_keep_apart_step_folder_name (job);
   path = g_strconcat (QUARANTINE_FOLDER "/", name, NULL);
   now = bro_clock_now (c->clock);
 

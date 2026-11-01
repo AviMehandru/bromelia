@@ -4,7 +4,9 @@
  * out as the unit's folder), a folder told from Seal's files, then Bromelia's own files Seal wrote (the record, the logs,
  * the note); its destination is <library>/<Name's folder>, merged item by item when Name says the folder is shared. A
  * unit Seal tagged (READ ERRORS) goes to _Quarantine/<Name's name> [<tag>] instead (commit.quarantined), never merged,
- * and the step reports it quarantined; otherwise archive.moved. LibraryService waits while a roll forward of the unit
+ * and the step reports it quarantined; otherwise archive.moved. A folder of its own that another job committed after
+ * Name ran takes the next free name (archive.outputFolder, a warning), unless naming.conflictPolicy is skip (owner
+ * H3b-2), and never a name the library has called taken. LibraryService waits while a roll forward of the unit
  * runs (the job's cancel ends that wait), finishes an open intent of the unit and gives a unit committed already its
  * result again, so a rerun rolls forward. Holds the library write. Data: CommitOutput. Skipped when Plan or Seal hasn't
  * run. */

@@ -573,6 +573,14 @@ steps_fakes_ran (TestStepFakes *f, BroJsonValue *run, BroRunSink *sink, GPtrArra
     }
   outcome->produced = produced;
   outcome->abandoned = bro_json_value_get_bool (bro_json_value_member (run, "abandoned"), FALSE);
+  /* MakeMKV's debug log: the run names it, and it holds the text (written by the "process", so not recorded). */
+  {
+    BroJsonValue *debug = bro_json_value_member (run, "debugLog");
+    const char *text = bro_json_value_get_string (bro_json_value_member (debug, "text"), NULL);
+    outcome->debug_log = g_strdup (bro_json_value_get_string (bro_json_value_member (debug, "path"), NULL));
+    if (text)
+      steps_tree_put (f, outcome->debug_log, g_bytes_new (text, strlen (text)));
+  }
   if (!bro_status_word_from_wire (bro_json_value_get_string (bro_json_value_member (run, "status"), "success"), &outcome->status))
     outcome->status = BRO_STATUS_WORD_SUCCESS;
   outcome->error = fakes_message (bro_json_value_member (run, "error"), BRO_SEVERITY_ERROR);
@@ -1558,6 +1566,16 @@ video_steps_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPt
       bro_test_same_string (failures, id, "fs", want->str, got->str);
       g_string_free (want, TRUE);
       g_string_free (got, TRUE);
+    }
+  for (guint i = 0; (v = bro_json_value_member (expect, "jobFiles")) && i < v->keys->len; i++)
+    {
+      g_autofree char *path = g_strconcat (directory, "/", (char *) v->keys->pdata[i], NULL);
+      g_autoptr (BroBroError) unread = NULL;
+      g_autoptr (GBytes) bytes = bro_file_system_exists (BRO_FILE_SYSTEM (fakes), path) ? steps_fakes_read (BRO_FILE_SYSTEM (fakes), path, &unread) : NULL;
+      g_autofree char *text = bytes ? g_strndup (g_bytes_get_data (bytes, NULL), g_bytes_get_size (bytes)) : NULL;
+      g_autoptr (BroJsonValue) got = text ? bro_json_value_new_string (text) : bro_json_value_new_null ();
+      g_autofree char *what = g_strconcat ("job file ", (char *) v->keys->pdata[i], NULL);
+      bro_test_same_json (failures, id, what, v->items->pdata[i], got);
     }
   if ((v = bro_json_value_member (expect, "json")))
     for (guint i = 0; i < v->keys->len; i++)

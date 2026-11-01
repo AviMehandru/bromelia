@@ -6,11 +6,12 @@ import BroPorts
 /// inside staging so staging is laid out exactly as the unit's folder will be (Seal hashes it so, Commit moves it).
 /// - The names: Layouts (the profile's naming) with the identity's tokens, the date tokens in local time at the job's
 ///   start (Clock.localTime of JobSnapshot.startedAt, as today's apps use the rip's time); a title's hand-given name is its
-///   own template. A backup is named by the file name template unless the job is backupThenMkv (the backup subfolder).
+///   own template. A backup is named by the file name template, inside the backup subfolder when the job is
+///   backupThenMkv (owner H3b-1).
 ///   disc-info.json and the files no title owns keep their names.
 /// - A folder backup's BDMV/index.bdmv (or VIDEO_TS) gives the disc's format when it differs from the identity's (a UHD
 ///   disc read without a listing looks like a Blu-ray; name.formatFromBackup): the names use it and NameOutput carries the
-///   corrected identity for Seal's record.
+///   corrected identity for Seal's record; the backup's new name is logged as backup.renamed too (today's apps did so).
 /// - Nothing is overwritten (I5): a folder of its own takes a free name ("Name (2)"; conflictPolicy skip fails with
 ///   library.folderExists); a shared folder (media server layout, conflictPolicy merge) is merged item by item, so an item
 ///   whose name is taken there takes a free one. Names in staging never collide either, and an item never takes another
@@ -156,6 +157,9 @@ public struct NameStep: Step {
         context.log.log(BroMessage(.archiveOutputFolder, [("path", .string(library + "/" + folder))], severity: .info))
         for i in items.indices { if let v = via[i] { try NameStep.rename(context, staging, at[i], v) } }
         for i in items.indices where !NameStep.same(targets[i], via[i] ?? at[i]) { try NameStep.rename(context, staging, via[i] ?? at[i], targets[i]) }
+        if corrected != nil, let b = items.firstIndex(where: { $0.role == "backup" }), !NameStep.same(targets[b], at[b]) {
+            context.log.log(BroMessage(.backupRenamed, [("name", .string(NameStep.last(targets[b])))], severity: .info))
+        }
         var files = items
         for i in files.indices { files[i].path = targets[i] }
         return StepReport(data: NameOutput.encode(NameOutput(folder: folder, name: NameStep.last(folder), merge: merge, files: files,

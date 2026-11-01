@@ -228,9 +228,11 @@ public sealed class RecoveryService
             if (job?.Outcome == Outcome.Interrupted) continue; // kept so it can be continued (owner, 2026-10-03)
             var copies = job == null ? new List<(string, byte[])>() : await Logs(job);
             var lines = Notes.Render(new Id(folder), job?.Outcome ?? Outcome.Interrupted, job?.Error, Array.Empty<RobotMessage>(),
-                copies.Select(c => c.Item1).ToList());
+                copies.Select(c => c.Item1).ToList(), job == null ? null : JobDirectory(job.Id) + "/" + JobLog.FileName);
             var note = Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => _renderer.Render(l) + "\n")));
-            var name = Sanitizer.Component(job?.Title ?? "") is { Length: > 0 } title ? title : folder;
+            var name = job == null ? folder : await _executor.Worker(async () => KeepApartStep.FolderName(new JobSnapshot(job.Id, job.Request, job.Plan,
+                (await _store.Steps().Load(job.Id)).Where(r => r.State == StepState.Succeeded && r.Output != null).OrderBy(r => r.Seq)
+                .Select(r => r.Output!).ToList())));
             try { await _library.SetAside(libraryId, folder, name, note, copies); }
             catch (BroFailure) { } // left hidden in staging; the next start tries again
         }

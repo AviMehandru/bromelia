@@ -126,7 +126,7 @@ public struct SealStep: Step {
             let errors = (acquired.titles.flatMap(\.readErrors) + acquired.readErrors).map { RobotMessage(code: 2003, flags: 0, count: 0, text: $0, format: $0, params: []) }
             let lines = Notes.render(job.id, outcome: .succeededWithReadErrors,
                                      error: BroMessage(.ripReadErrors, [("count", .integer(Int64(readErrors)))], severity: .error).toError(),
-                                     readErrors: errors, logs: logs)
+                                     readErrors: errors, logs: logs, fullLog: context.jobDirectory + "/" + JobLog.fileName)
             try write(readErrorsNote, Array(lines.map { context.messages.render($0) + "\n" }.joined().utf8))
             note = readErrorsNote
         }

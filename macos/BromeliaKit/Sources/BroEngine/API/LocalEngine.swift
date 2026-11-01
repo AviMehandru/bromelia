@@ -217,10 +217,16 @@ public final class LocalEngine: EngineAPI {
     /// The id is the name (else the folder's last part) made into an EntryId, with -2, -3 … when the configuration has
     /// it already (decision 187). LibraryService writes the marker, then the configuration gets {id, name, path} at its
     /// current version; if that save fails the marker is removed and the save's error returned, so a retry doesn't meet
-    /// library.alreadyAttached.
+    /// library.alreadyAttached. The path of a library the configuration already has (the user confirming a folder
+    /// without its marker, H1-7), compared byte for byte: the marker is written under that library's id and name, and
+    /// the configuration is left as it is.
     public nonisolated func attachLibrary(_ path: String, name: String) async throws(BroError) -> LibraryDto {
         try await on { () throws(BroError) in
             let current = self.configService.current()
+            if let configured = Config.libraries(current).first(where: { Array($0.path.utf8) == Array(path.utf8) }) {
+                let marked = try await self.libraryService.attach(configured.id, path: path, name: configured.name)
+                return self.libraryService.libraries().first(where: { $0.id == configured.id }) ?? marked
+            }
             let display = name.isEmpty ? Self.lastPart(path) : name
             let id = Self.newLibraryId(display, taken: Config.libraries(current).map(\.id))
             let attached = try await self.libraryService.attach(id, path: path, name: name)

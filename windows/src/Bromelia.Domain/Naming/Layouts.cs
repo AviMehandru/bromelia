@@ -26,7 +26,7 @@ public static class Layouts
     /// <summary>The path of each output, relative to the library: the unit's folder, then the file. Media server:
     /// episodes in <c>Season NN</c>, a movie's main feature by its name, other titles in <c>Other</c>, backups and
     /// images in <c>Backup</c>. Templates: the file name template (MakeMKV's name, <c>original</c>, when it's
-    /// empty); a backup goes in the backup subfolder when there is one.</summary>
+    /// empty); a backup goes in the backup subfolder under that name when there is one.</summary>
     public static List<PlannedPath> Paths(NamingSettings naming, IReadOnlyDictionary<string, string> values, IReadOnlyList<PlannedOutput> outputs)
     {
         var folder = Folder(naming, values);
@@ -50,10 +50,15 @@ public static class Layouts
         return MediaServerOther;
     }
 
+    /// <summary>The file name template's path (empty: the original name); a backup with a backup subfolder (backupThenMkv) goes
+    /// inside it under that name, as today's apps put it (owner H3b-1), or is the subfolder itself when the name is empty.</summary>
     private static string TemplatesFile(NamingSettings naming, PlannedOutput o, IReadOnlyDictionary<string, string> v)
     {
-        if (o.Role == PathRole.Backup && naming.BackupSubfolder.Length > 0) return TemplateEngine.RenderPath(naming.BackupSubfolder, v);
-        if (naming.FileNameTemplate.Length == 0) return Sanitizer.Component(v.TryGetValue("original", out var original) ? original : "");
-        return TemplateEngine.RenderPath(naming.FileNameTemplate, v);
+        var file = naming.FileNameTemplate.Length == 0
+            ? Sanitizer.Component(v.TryGetValue("original", out var original) ? original : "")
+            : TemplateEngine.RenderPath(naming.FileNameTemplate, v);
+        if (o.Role != PathRole.Backup || naming.BackupSubfolder.Length == 0) return file;
+        var sub = TemplateEngine.RenderPath(naming.BackupSubfolder, v);
+        return string.Join("/", new[] { sub, file }.Where(p => p.Length > 0));
     }
 }

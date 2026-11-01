@@ -54,6 +54,7 @@ struct _BroDriveService {
   GPtrArray *tray_asked;   /* TrayAsk * */
   BroLeaseSnapshot *leases;
   gboolean started, first_done, scanning, again, deferred;
+  GHashTable *held_in_scan; /* ids a scan left as they were because a job held them: scanned again once given back */
   GPtrArray *waiting, *next; /* Waiter * */
   BroEngineTimer *poll;
   gint64 poll_seconds;
@@ -123,6 +124,7 @@ bro_drive_service_finalize (GObject *object)
   g_hash_table_unref (self->stored);
   g_ptr_array_unref (self->tray_asked);
   bro_lease_snapshot_free (self->leases);
+  g_hash_table_unref (self->held_in_scan);
   g_ptr_array_unref (self->waiting);
   g_ptr_array_unref (self->next);
   g_clear_object (&self->poll);
@@ -148,6 +150,7 @@ bro_drive_service_init (BroDriveService *self)
   self->stored = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_drive_record_free);
   self->tray_asked = g_ptr_array_new_with_free_func ((GDestroyNotify) tray_ask_free);
   self->leases = bro_lease_snapshot_new ();
+  self->held_in_scan = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->waiting = g_ptr_array_new_with_free_func ((GDestroyNotify) waiter_free);
   self->next = g_ptr_array_new_with_free_func ((GDestroyNotify) waiter_free);
   self->poll_seconds = -1;
@@ -533,7 +536,10 @@ apply (BroDriveService *self, Scan *s)
       g_hash_table_add (seen, drive->id);
       g_ptr_array_add (order, drive);
       if (g_hash_table_contains (s->busy, drive->id) && drive->connected)
-        continue; /* a job holds it: MakeMKV can't see it */
+        {
+          g_hash_table_add (self->held_in_scan, g_strdup (drive->id));
+          continue; /* a job holds it: MakeMKV can't see it */
+        }
       gboolean was_connected = drive->connected;
       g_clear_pointer (&drive->makemkv, bro_makemkv_drive_free);
       drive->makemkv = bro_makemkv_drive_copy (m);
@@ -839,7 +845,22 @@ on_leases (BroEngineEvent *event, gpointer data)
   bro_lease_snapshot_free (self->leases);
   self->leases = leases;
   publish (self, NULL, NULL);
-  if (self->deferred && leases->acquisitions == 0)
+  gboolean given = FALSE;
+  GHashTableIter it;
+  gpointer id;
+  g_hash_table_iter_init (&it, self->held_in_scan);
+  while (g_hash_table_iter_next (&it, &id, NULL))
+    {
+      gboolean held = FALSE;
+      for (guint i = 0; i < leases->drives->len && !held; i++)
+        held = strcmp (((BroDriveHolder *) leases->drives->pdata[i])->drive, id) == 0;
+      if (!held)
+        {
+          g_hash_table_iter_remove (&it);
+          given = TRUE;
+        }
+    }
+  if ((self->deferred && leases->acquisitions == 0) || given)
     {
       self->deferred = FALSE;
       scan (self, FALSE, NULL, NULL, NULL);

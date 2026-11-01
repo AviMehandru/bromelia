@@ -4,8 +4,9 @@
  * automation.pollWhileRipping. DriveJoin pairs the two lists; a drive's id comes from MakeMKV's identification. Each
  * drive counts its discs: a disc that arrives gets the next generation and mediumArrived (not the discs already in at
  * start, which never start a rip), one that leaves mediumRemoved. A drive a job holds keeps what it had (MakeMKV can't
- * see a drive in use), and a drive left out of a scan keeps it until the OS says it's gone. Configured drives that
- * aren't connected stay listed (connected false); others are removed. Close tray checks, in the first scan 4 s later,
+ * see a drive in use), and a drive left out of a scan keeps it until the OS says it's gone; a drive a scan found held is
+ * scanned again once the job gives it back (an eject while a job holds it). Configured drives that aren't connected stay
+ * listed (connected false); others are removed. Close tray checks, in the first scan 4 s later,
  * that the tray closed (drive.trayStillOpen: a drive without a tray motor). As the BroDriveLookup of the steps it gives
  * a snapshot, from any thread. shared/fixtures/engine/drive-service.cases.json. */
 #pragma once

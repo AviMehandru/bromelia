@@ -334,6 +334,7 @@ note_text (const BroStepContext *c, const BroAcquireOutput *acquired, int read_e
   g_autoptr (GPtrArray) log_names = g_ptr_array_new ();
   g_autoptr (BroBroError) error = failure (BRO_MSG_RIP_READ_ERRORS, _bro_param ("count", bro_json_value_new_integer (read_errors)), NULL);
   g_autoptr (GPtrArray) lines = NULL;
+  g_autofree char *full_log = NULL;
   GString *text = g_string_new ("");
   for (guint i = 0; i <= acquired->titles->len; i++)
     {
@@ -344,7 +345,9 @@ note_text (const BroStepContext *c, const BroAcquireOutput *acquired, int read_e
   for (guint i = 0; i < logs->len; i++)
     g_ptr_array_add (log_names, logs->pdata[i]);
   g_ptr_array_add (log_names, NULL);
-  lines = bro_notes_render (&c->job->id, BRO_OUTCOME_SUCCEEDED_WITH_READ_ERRORS, error, errors, (const char *const *) log_names->pdata);
+  full_log = g_strconcat (c->job_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+  lines = bro_notes_render (&c->job->id, BRO_OUTCOME_SUCCEEDED_WITH_READ_ERRORS, error, errors, (const char *const *) log_names->pdata,
+                            full_log);
   for (guint i = 0; i < lines->len; i++)
     {
       g_autofree char *rendered = bro_message_renderer_render (c->messages, lines->pdata[i]);

@@ -1,7 +1,10 @@
 /* bro-makemkv-sink.c */
 #include "bro-makemkv-sink.h"
 #include "bro-message-catalog.h"
+#include "bro-seal-step.h"
 #include "bro-steps-private.h"
+
+#include <string.h>
 
 struct _BroMakemkvSink {
   GObject parent;
@@ -99,4 +102,41 @@ bro_makemkv_sink_new (BroProgressReporter *progress, BroJobLogger *log, const Br
   self->log = g_object_ref (log);
   self->operation = bro_bro_message_copy (operation);
   return self;
+}
+
+void
+bro_makemkv_sink_keep_debug_log (const BroStepContext *context, const BroRunOutcome *outcome, const char *command)
+{
+  BroFileSystem *fs = context->fs;
+  const char *path = outcome->debug_log;
+  g_autoptr (GBytes) text = NULL;
+  g_autoptr (GBytes) before = NULL;
+  g_autoptr (GBytes) bytes = NULL;
+  g_autoptr (BroBroError) ignored = NULL;
+  g_autofree char *file = NULL;
+  GByteArray *all;
+  gsize n;
+  const guint8 *t;
+  if (!path || !*path || !bro_file_system_exists (fs, path))
+    return;
+  if (!(text = bro_file_system_read (fs, path, &ignored)) || g_bytes_get_size (text) == 0)
+    return; /* a file that can't be read is left out (the run's result stands) */
+  file = g_strconcat (context->job_directory, "/" BRO_SEAL_STEP_DEBUG_TRANSCRIPT, NULL);
+  if (bro_file_system_exists (fs, file) && !(before = bro_file_system_read (fs, file, &ignored)))
+    return;
+  if (!bro_file_system_exists (fs, context->job_directory) && !bro_file_system_create_directory (fs, context->job_directory, FALSE, &ignored))
+    return;
+  all = g_byte_array_new ();
+  if (before)
+    g_byte_array_append (all, g_bytes_get_data (before, NULL), g_bytes_get_size (before));
+  {
+    g_autofree char *header = g_strconcat ("==== ", path, " after $ makemkvcon ", command, "\n", NULL);
+    g_byte_array_append (all, (const guint8 *) header, strlen (header));
+  }
+  t = g_bytes_get_data (text, &n);
+  g_byte_array_append (all, t, n);
+  if (t[n - 1] != '\n')
+    g_byte_array_append (all, (const guint8 *) "\n", 1);
+  bytes = g_byte_array_free_to_bytes (all);
+  bro_file_system_write_atomically (fs, file, bytes, 0600, &ignored); /* 0600, as the job's other files */
 }

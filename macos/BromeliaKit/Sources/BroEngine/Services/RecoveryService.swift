@@ -253,10 +253,16 @@ public final class RecoveryService {
             let job = try? await executor.worker { () async throws(BroError) -> JobRecord? in try await store.jobs().load(Id(folder)) }
             if job?.outcome == .interrupted { continue } // kept so it can be continued (owner, 2026-10-03)
             let copies = if let job { await logs(job) } else { [(String, [UInt8])]() }
-            let lines = Notes.render(Id(folder), outcome: job?.outcome ?? .interrupted, error: job?.error, readErrors: [], logs: copies.map(\.0))
+            let lines = Notes.render(Id(folder), outcome: job?.outcome ?? .interrupted, error: job?.error, readErrors: [], logs: copies.map(\.0),
+                                     fullLog: job.map { jobDirectory($0.id) + "/" + JobLog.fileName })
             let note = Array(lines.map { renderer.render($0) + "\n" }.joined().utf8)
-            let title = Sanitizer.component(job?.title ?? "")
-            _ = try? await library.setAside(libraryId, folder: folder, name: title.isEmpty ? folder : title, note: note, logs: copies)
+            var name = folder
+            if let job {
+                let rows = (try? await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(job.id) }) ?? []
+                let outputs = rows.filter { $0.state == .succeeded && $0.output != nil }.sorted { $0.seq < $1.seq }.compactMap(\.output)
+                name = KeepApartStep.folderName(JobSnapshot(id: job.id, request: job.request, plan: job.plan, outputs: outputs))
+            }
+            _ = try? await library.setAside(libraryId, folder: folder, name: name, note: note, logs: copies)
             // a failure leaves it hidden in staging; the next start tries again
         }
     }

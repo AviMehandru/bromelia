@@ -4,7 +4,7 @@
     "LibraryService.stagingFolders",
     "LibraryService.setAside"
   ],
-  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. A next step that is keepApart (running or not started; F8) is resumed the same way, in the processing queue. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job; a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<job title or folder, Sanitizer.component> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], the log copies' names) each rendered by the MessageRenderer, one per line, and the job's logs as Seal copies them (F9, owner 2026-10-25: bromelia-<unit8>-log.txt = its log.jsonl as SealStep.logText, makemkv-<unit8>-log.txt and makemkv-<unit8>-debug-log.txt = its folder's makemkv.txt and makemkv-debug.txt, each when there; unit8 = the first 8 characters of ArchiveFiles.unitId(job); none for a folder no job owns, when the job's Plan output's profile has archive.archiveRecord false, or when one can't be read), written atomically before the move; removed instead when it holds no file, with nothing written). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}], fail [{op, path, error, times}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error, output (its StepOutput's data; {} by default)}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as canonical JSON without its final newline). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
+  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. A next step that is keepApart (running or not started; F8) is resumed the same way, in the processing queue. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job; a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<the name KeepApart gives the job (KeepApartStep.folderName: the Plan output's identity name, else its title, else Probe's listing name, else the source's label, else the job's id; owner H3a-2), or the folder when no job owns it> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], the log copies' names) each rendered by the MessageRenderer, one per line, and the job's logs as Seal copies them (F9, owner 2026-10-25: bromelia-<unit8>-log.txt = its log.jsonl as SealStep.logText, makemkv-<unit8>-log.txt and makemkv-<unit8>-debug-log.txt = its folder's makemkv.txt and makemkv-debug.txt, each when there; unit8 = the first 8 characters of ArchiveFiles.unitId(job); none for a folder no job owns, when the job's Plan output's profile has archive.archiveRecord false, or when one can't be read), written atomically before the move; removed instead when it holds no file, with nothing written). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}], fail [{op, path, error, times}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error, output (its StepOutput's data; {} by default)}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as canonical JSON without its final newline). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
   "cases": [
     {
       "id": "nothing-to-recover",
@@ -2699,7 +2699,7 @@
           "/lib/.bromelia/staging/j2/title_t00.mkv": "interrupted rip",
           "/lib/_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv": "from before",
           "/lib/_Quarantine/Sample Movie [INCOMPLETE] (2)/title_t00.mkv": "abandoned rip",
-          "/lib/_Quarantine/Sample Movie [INCOMPLETE] (2)/INCOMPLETE.txt": "archive.note.title jobId=j3 outcome=failed\narchive.note.notFinished\nprocess.abandoned tool=makemkvcon\n",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE] (2)/INCOMPLETE.txt": "archive.note.title jobId=j3 outcome=failed\narchive.note.notFinished\nprocess.abandoned tool=makemkvcon\narchive.note.fullLog path=/data/jobs/j3/log.jsonl\n",
           "/lib/_Quarantine/zz [INCOMPLETE]/a.mkv": "unknown",
           "/lib/_Quarantine/zz [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=zz outcome=interrupted\narchive.note.notFinished\n"
         },
@@ -2784,13 +2784,13 @@
                   "spaceReserved": false,
                   "askArchived": null,
                   "identity": {
-                    "name": "Sample Movie",
+                    "name": "Failed Movie",
                     "kind": "movie",
                     "format": "bluray",
                     "formatCode": "BR",
                     "encrypted": false,
                     "label": {
-                      "title": "Sample Movie",
+                      "title": "Failed Movie",
                       "season": null,
                       "part": null,
                       "volume": null,
@@ -2852,13 +2852,13 @@
                   "spaceReserved": false,
                   "askArchived": null,
                   "identity": {
-                    "name": "Sample Movie",
+                    "name": "Cancelled Movie",
                     "kind": "movie",
                     "format": "bluray",
                     "formatCode": "BR",
                     "encrypted": false,
                     "label": {
-                      "title": "Sample Movie",
+                      "title": "Cancelled Movie",
                       "season": null,
                       "part": null,
                       "volume": null,
@@ -2914,13 +2914,13 @@
                   "spaceReserved": false,
                   "askArchived": null,
                   "identity": {
-                    "name": "Sample Movie",
+                    "name": "Empty",
                     "kind": "movie",
                     "format": "bluray",
                     "formatCode": "BR",
                     "encrypted": false,
                     "label": {
-                      "title": "Sample Movie",
+                      "title": "Empty",
                       "season": null,
                       "part": null,
                       "volume": null,
@@ -2959,12 +2959,12 @@
           "/data/jobs/jc/makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n",
           "/data/jobs/jr/makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n",
           "/lib/_Quarantine/Failed Movie [INCOMPLETE]/title_t00.mkv": "failed rip",
-          "/lib/_Quarantine/Failed Movie [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jf outcome=failed\narchive.note.notFinished\nprocess.savedNothing tool=makemkvcon\narchive.note.logs log=bromelia-8337f42b-log.txt hasMakemkv=true makemkvLog=makemkv-8337f42b-log.txt\n",
+          "/lib/_Quarantine/Failed Movie [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jf outcome=failed\narchive.note.notFinished\nprocess.savedNothing tool=makemkvcon\narchive.note.logs log=bromelia-8337f42b-log.txt hasMakemkv=true makemkvLog=makemkv-8337f42b-log.txt\narchive.note.fullLog path=/data/jobs/jf/log.jsonl\n",
           "/lib/_Quarantine/Failed Movie [INCOMPLETE]/bromelia-8337f42b-log.txt": "2026-10-02T19:00:01.000Z disc.found name=Sample Movie\n2026-10-02T19:10:00.000Z [ERROR] process.savedNothing tool=makemkvcon\n",
           "/lib/_Quarantine/Failed Movie [INCOMPLETE]/makemkv-8337f42b-log.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n",
           "/lib/_Quarantine/Failed Movie [INCOMPLETE]/makemkv-8337f42b-debug-log.txt": "debug lines\n",
           "/lib/_Quarantine/Cancelled Movie [INCOMPLETE]/Movie/title_t00.mkv": "cancelled rip",
-          "/lib/_Quarantine/Cancelled Movie [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jc outcome=cancelled\narchive.note.notFinished\njob.cancelledByUser\narchive.note.logs log=bromelia-db2a89fc-log.txt hasMakemkv=true makemkvLog=makemkv-db2a89fc-log.txt\n",
+          "/lib/_Quarantine/Cancelled Movie [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jc outcome=cancelled\narchive.note.notFinished\njob.cancelledByUser\narchive.note.logs log=bromelia-db2a89fc-log.txt hasMakemkv=true makemkvLog=makemkv-db2a89fc-log.txt\narchive.note.fullLog path=/data/jobs/jc/log.jsonl\n",
           "/lib/_Quarantine/Cancelled Movie [INCOMPLETE]/bromelia-db2a89fc-log.txt": "2026-10-02T19:00:01.000Z disc.found name=Sample Movie\n2026-10-02T19:10:00.000Z [ERROR] process.savedNothing tool=makemkvcon\n",
           "/lib/_Quarantine/Cancelled Movie [INCOMPLETE]/makemkv-db2a89fc-log.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n"
         },
@@ -3043,13 +3043,13 @@
                   "spaceReserved": false,
                   "askArchived": null,
                   "identity": {
-                    "name": "Sample Movie",
+                    "name": "Record Off",
                     "kind": "movie",
                     "format": "bluray",
                     "formatCode": "BR",
                     "encrypted": false,
                     "label": {
-                      "title": "Sample Movie",
+                      "title": "Record Off",
                       "season": null,
                       "part": null,
                       "volume": null,
@@ -3086,7 +3086,7 @@
           "/data/jobs/jc/makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n",
           "/data/jobs/jr/makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n",
           "/lib/_Quarantine/Record Off [INCOMPLETE]/title_t00.mkv": "failed rip",
-          "/lib/_Quarantine/Record Off [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jr outcome=failed\narchive.note.notFinished\n"
+          "/lib/_Quarantine/Record Off [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jr outcome=failed\narchive.note.notFinished\narchive.note.fullLog path=/data/jobs/jr/log.jsonl\n"
         },
         "rule": "archive.archiveRecord false leaves out only the logs, as Seal does (owner 2026-10-20): the note names none"
       }
@@ -3171,13 +3171,13 @@
                   "spaceReserved": false,
                   "askArchived": null,
                   "identity": {
-                    "name": "Sample Movie",
+                    "name": "Unreadable",
                     "kind": "movie",
                     "format": "bluray",
                     "formatCode": "BR",
                     "encrypted": false,
                     "label": {
-                      "title": "Sample Movie",
+                      "title": "Unreadable",
                       "season": null,
                       "part": null,
                       "volume": null,
@@ -3214,9 +3214,134 @@
           "/data/jobs/jc/makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n",
           "/data/jobs/jr/makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 started\"\n",
           "/lib/_Quarantine/Unreadable [INCOMPLETE]/title_t00.mkv": "failed rip",
-          "/lib/_Quarantine/Unreadable [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jr outcome=failed\narchive.note.notFinished\n"
+          "/lib/_Quarantine/Unreadable [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jr outcome=failed\narchive.note.notFinished\narchive.note.fullLog path=/data/jobs/jr/log.jsonl\n"
         },
         "rule": "the files are worth more than their logs: a log that can't be read leaves them out, the note names none, and the files are set aside"
+      }
+    },
+    {
+      "id": "a-set-aside-is-named-as-keep-apart-names-it",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/jn/title_t00.mkv": "named rip",
+          "/lib/.bromelia/staging/jt/title_t00.mkv": "unplanned rip"
+        },
+        "jobs": [
+          {
+            "id": "jn",
+            "title": "SAMPLE_MOVIE",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded",
+                "output": {
+                  "mode": "mkv",
+                  "profileId": "default",
+                  "profile": {
+                    "id": "default",
+                    "name": "Default",
+                    "archive": {
+                      "archiveRecord": false
+                    }
+                  },
+                  "libraryId": "lib",
+                  "libraryOffline": false,
+                  "titles": [],
+                  "onePass": null,
+                  "spaceNeed": null,
+                  "spaceReserved": false,
+                  "askArchived": null,
+                  "identity": {
+                    "name": "Sample Movie",
+                    "kind": "movie",
+                    "format": "bluray",
+                    "formatCode": "BR",
+                    "encrypted": false,
+                    "label": {
+                      "title": "Sample Movie",
+                      "season": null,
+                      "part": null,
+                      "volume": null,
+                      "disc": null,
+                      "set": "",
+                      "looksLikeSeries": false
+                    },
+                    "reason": {
+                      "code": "identity.reason.chosen"
+                    }
+                  }
+                }
+              },
+              {
+                "kind": "acquire",
+                "state": "failed"
+              }
+            ],
+            "outcome": "failed"
+          },
+          {
+            "id": "jt",
+            "title": "OTHER_DISC",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "plan",
+              "acquire"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "failed"
+              }
+            ],
+            "outcome": "failed"
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv": "named rip",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jn outcome=failed\narchive.note.notFinished\narchive.note.fullLog path=/data/jobs/jn/log.jsonl\n",
+          "/lib/_Quarantine/OTHER_DISC [INCOMPLETE]/title_t00.mkv": "unplanned rip",
+          "/lib/_Quarantine/OTHER_DISC [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=jt outcome=failed\narchive.note.notFinished\narchive.note.fullLog path=/data/jobs/jt/log.jsonl\n"
+        },
+        "rule": "owner H3a-2: the folder is named as KeepApart names it (KeepApartStep.folderName): the Plan output's identity name, else the job's title (the disc's volume), else Probe's listing name, else the source's label, else the folder"
       }
     },
     {

@@ -11,10 +11,12 @@ import BroPorts
 ///   exactly the titles (rip.onePassListing, then rip.onePass or rip.onePassMismatch); else title by title
 ///   (rip.rippingTitle), hand-picked tracks with +sel:all. A failed title (rip.titleFailed) leaves its files under
 ///   MakeMKV's names (rip.keptUnderMakemkvName) and the others are still ripped; the step then fails (rip.failed,
-///   rip.titlesFailed) with the MakeMKV notice that explains it.
+///   rip.titlesFailed) with the MakeMKV notice that explains it. A run that was stopped (drive.renumbered,
+///   space.makemkvWarning, makemkv.stalled) fails the step with that reason at once.
 /// - backup, backupDecrypted: the disc as a folder or an image (profile backup.format), named backup or backup.iso; an
 ///   image MakeMKV made for a folder gets .iso (backup.imageForFolder), a folder made for an image loses it
-///   (backup.folderInsteadOfIso); backup.saved, or backup.failed.
+///   (backup.folderInsteadOfIso); backup.saved, or backup.failed (a stopped run: its reason; a folder without a disc
+///   structure, which counts as nothing produced: backup.checkFailed).
 /// - backupThenMkv: a decrypted backup, its structure checked (backup.checkFailed), then the titles from the backup
 ///   (mapped from Probe's listing to the backup's), and the backup removed unless backup.keepAfterMkv (backup.removed).
 ///
@@ -166,7 +168,7 @@ private final class Acquisition {
         let reading = BroMessage(.discOpReading)
         c.progress.report(ripsFrom, operation: reading, current: nil)
         let read = try await c.tools.makemkv.listing(source, invocation: try invocation(nil, nil), sink: sink(reading, ripsFrom, 0), cancel: c.cancel)
-        logRun(read.run)
+        logRun(read.run, command: "info")
         if read.run.outcome.status == .cancelled || c.cancel.isCancelled { return cancelled() }
         if read.listing.titles.isEmpty {
             let reason = read.run.outcome.error
@@ -200,7 +202,7 @@ private final class Acquisition {
             let operation = BroMessage(.ripOnePassListing)
             c.progress.report(from, operation: operation, current: nil)
             let read = try await c.tools.makemkv.listing(source, invocation: try invocation(m, nil), sink: sink(operation, from, 0), cancel: c.cancel)
-            logRun(read.run)
+            logRun(read.run, command: "info")
             if read.run.outcome.status == .cancelled || c.cancel.isCancelled { return cancelled() }
             let indices = wanted.map { map[$0.index]! }
             if OnePass.matches(read.listing, chosen: indices, of: listing) {
@@ -229,7 +231,7 @@ private final class Acquisition {
             let run = try await c.tools.makemkv.rip(source, title: title, destination: staging,
                                                     invocation: try invocation(minLength, !single && group[0].tracks != nil ? "+sel:all" : nil),
                                                     sink: sink(operation, at, width / Double(runs.count)), cancel: c.cancel)
-            logRun(run)
+            logRun(run, command: "mkv")
             let outcome = run.outcome
             if outcome.status == .cancelled || c.cancel.isCancelled {
                 try removePartial(outcome.produced, abandoned: outcome.abandoned)
@@ -243,8 +245,9 @@ private final class Acquisition {
                     c.log.log(BroMessage(.ripKeptUnderMakemkvName, [("file", .string(f))], severity: .warning))
                     others.append(f)
                 }
-                failures.append((single ? nil : group[0].index, reason))
                 notice = notice ?? run.notice
+                if Self.stops(reason) { return failed(reason) }
+                failures.append((single ? nil : group[0].index, reason))
                 continue
             }
             let errors = outcome.readErrors.map(\.text)
@@ -285,7 +288,7 @@ private final class Acquisition {
         c.progress.report(from, operation: operation, current: nil)
         let run = try await c.tools.makemkv.backup(source, decrypt: decrypt, destination: destination, invocation: try invocation(nil, nil),
                                                    sink: sink(operation, from, width), cancel: c.cancel)
-        logRun(run)
+        logRun(run, command: "backup")
         let outcome = run.outcome
         if outcome.status == .cancelled || c.cancel.isCancelled {
             if fs.exists(destination) { try removePartial([name], abandoned: outcome.abandoned) }
@@ -294,8 +297,13 @@ private final class Acquisition {
         if outcome.status == .failed {
             notice = notice ?? run.notice
             let reason = outcome.error ?? BroMessage(.processExitStatus, [("status", .integer(Int64(outcome.exitCode)))], severity: .error)
+            // A folder without a disc structure isn't a backup MakeMKV made (RunOutcome counts none): the check says why.
+            if reason.code == .processSavedNothing && fs.exists(destination), (try? fs.stat(destination).isDirectory) == true,
+               let problem = BackupCheck.problem(fs, path: destination) {
+                return (nil, failed(BroMessage(.backupCheckFailed, [("problem", problem.toJson())], severity: .error)))
+            }
             if fs.exists(destination) { others.append(name) }
-            return (nil, failed(BroMessage(.backupFailed, [("reason", reason.toJson())], severity: .error)))
+            return (nil, failed(Self.stops(reason) ? reason : BroMessage(.backupFailed, [("reason", reason.toJson())], severity: .error)))
         }
         let folder = try fs.stat(destination).isDirectory
         if iso && folder {
@@ -359,7 +367,8 @@ private final class Acquisition {
         MakemkvSink(progress: Portion(inner: c.progress, from: from, width: width), log: c.log, operation: operation)
     }
 
-    private func logRun(_ run: MakemkvRun) {
+    private func logRun(_ run: MakemkvRun, command: String) {
+        MakemkvSink.keepDebugLog(c, run.outcome, command: command)
         for case var problem? in [run.isolationWarning, run.transcriptProblem, run.settingsProblem] {
             problem.severity = .warning
             c.log.log(problem)
@@ -379,6 +388,12 @@ private final class Acquisition {
     private func failed(_ message: BroMessage) -> StepReport { report(message.toError()) }
 
     private func cancelled() -> StepReport { report(BroError(MessageCode.wire(.jobCancelled))) }
+
+    /// A reason that stopped makemkvcon (RunOutcome: a renumbered drive, MakeMKV's space warning, a stall): the step fails
+    /// with it, and no later title is ripped.
+    private static func stops(_ reason: BroMessage) -> Bool {
+        reason.code == .driveRenumbered || reason.code == .spaceMakemkvWarning || reason.code == .makemkvStalled
+    }
 
     private func noInformation() -> BroError { BroMessage(.discNoInformation, severity: .error).toError() }
 }
