@@ -131,7 +131,8 @@ them; a `kill` or `stop` at a point that is never reached fails the scenario.
 ### Expectations
 
 Every key is optional; all given keys must hold. Lists of files are matched after sorting. `json` subsets match
-recursively: objects by the keys given, lists element by element (same length).
+recursively: objects by the keys given, lists element by element (same length); an expected string that contains `*`
+matches as a glob, as file patterns do (`"v1:*"`; owner, H3b-5).
 
 **Placeholders** in steps, expected paths and texts: `{root}` the scenario root; `{unit8}` and `{jobId}` the unit
 short id and job id of the job named in the same `expect` (or of the only job); `{unit8:<name>}` / `{jobId:<name>}`
@@ -231,7 +232,7 @@ image) to MakeMKV.
 | Key | Meaning |
 | --- | --- |
 | `when` | `command`: for makemkvcon the subcommand (`info`, `mkv`, `backup`, `reg`, `f`), for other tools the first argument; `title`: makemkvcon's title argument; `argsInclude`: arguments that must be present; `file`: a glob on the input file. |
-| `print` | Lines on stdout, in order: a name from `lines.yaml`, `listing`, `fixture:<file>` (a file in `shared/fixtures`), or a literal line. `{title}`, `{dest}`, `{device}`, `{debugLog}`, `{input}`, `{output}` (the `-i` / `-o` arguments), `{arg0}`, `{arg1}`, … (the arguments) and `{env:NAME}` are filled in. |
+| `print` | Lines on stdout, in order: a name from `lines.yaml`, `listing`, `fixture:<file>` (a file in `shared/fixtures`), or a literal line. `{title}`, `{dest}`, `{device}`, `{debugLog}`, `{input}`, `{output}` (the `-i` / `-o` arguments), `{arg0}`, `{arg1}`, … (the arguments) and `{env:NAME}` are filled in. `saved` reports the number of titles the run wrote (owner, H3a-1). |
 | `writeTitles: {content, titles}` | Write `title_t0<i>.mkv` for the title argument (for `all`: every listed title, or only `titles`). |
 | `write: [{path, content \| bytes \| copyOf}]` | Write files relative to the destination (`{dest}`), or to the working directory for tools without one. `copyOf: input` copies the `-i` file (HandBrakeCLI). |
 | `writeIso: {bytes, descriptor: CD001 \| BEA01}` | Write the destination as an image file with the volume descriptor at byte 32769. |

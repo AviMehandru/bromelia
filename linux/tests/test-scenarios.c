@@ -1,7 +1,12 @@
 /* test-scenarios.c: the scenario test unit (plan §5.1): shared/fixtures/engine/local-engine.cases.json, LocalEngine over
- * TestCompositionRoot. The harness's steps are the C# LocalEngineTests' one for one (the case file's description). A
+ * TestCompositionRoot; and every shared scenario this runner selects (bro-scenario-catalog.h), each its own test case
+ * /scenarios/<id>, a selected scenario that fails being a failure, never a skip; /scenarios/runner-cases checks the runner
+ * itself (shared/fixtures/engine/scenario-runner.cases.json: each broken variant of a scenario must fail, with the failure
+ * text the case gives). The harness's steps are the C# LocalEngineTests' one for one (the case file's description). A
  * case that goes wrong (a call that never ends, an engine that never settles) is a case failure, never an abort, and
  * the run stops like the engine: whatever is still going is stopped and settled before the next case. */
+#include "bro-scenario-catalog.h"
+#include "bro-scenario-steps.h"
 #include "bro-test-composition-root.h"
 #include "bro-test-fixtures.h"
 
@@ -1219,10 +1224,95 @@ test_local_engine (void)
   bro_test_run_cases ("engine/local-engine.cases.json", local_engine_case);
 }
 
+/* ---- the scenario runner ------------------------------------------------------------------------------------------ */
+
+static void
+test_scenario (gconstpointer data)
+{
+  const char *id = data;
+  g_autoptr (BroJsonValue) scenario = bro_scenario_catalog_load (id);
+  g_autofree char *failure = NULL;
+  if (!scenario)
+    {
+      g_test_fail_printf ("%s: no such scenario", id);
+      return;
+    }
+  if (!bro_scenario_run_play (id, scenario, &failure))
+    g_test_fail_printf ("%s", failure);
+}
+
+/* The document with the value at the JSON pointer (RFC 6901) replaced, or added to its object. */
+static BroJsonValue *
+set_at (BroJsonValue *at, char **parts, guint i, BroJsonValue *value)
+{
+  BroJsonValue *c;
+  if (!parts[i])
+    return bro_json_value_ref (value);
+  if (at && at->kind == BRO_JSON_VALUE_ARRAY)
+    {
+      guint n = (guint) g_ascii_strtoull (parts[i], NULL, 10);
+      c = bro_json_value_new_array ();
+      for (guint k = 0; k < at->items->len; k++)
+        bro_json_value_append (c, k == n ? set_at (at->items->pdata[k], parts, i + 1, value) : bro_json_value_ref (at->items->pdata[k]));
+      return c;
+    }
+  c = bro_json_value_new_object ();
+  for (guint k = 0; at && at->kind == BRO_JSON_VALUE_OBJECT && k < at->keys->len; k++)
+    bro_json_value_set (c, at->keys->pdata[k],
+                        !strcmp (at->keys->pdata[k], parts[i]) ? set_at (at->items->pdata[k], parts, i + 1, value) : bro_json_value_ref (at->items->pdata[k]));
+  if (!J (at, parts[i]))
+    bro_json_value_set (c, parts[i], set_at (NULL, parts, i + 1, value));
+  return c;
+}
+
+static gboolean
+runner_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
+{
+  const char *name = S (given, "scenario", ""), *wanted = S (expect, "failure", "");
+  g_autoptr (BroJsonValue) scenario = bro_scenario_catalog_load (name);
+  g_auto (GStrv) raw = g_strsplit (S (given, "pointer", ""), "/", -1);
+  g_autoptr (GPtrArray) parts = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr (BroJsonValue) broken = NULL;
+  g_autofree char *failure = NULL;
+  for (guint i = 1; raw[i]; i++)
+    {
+      g_autoptr (GString) p = g_string_new (raw[i]);
+      g_string_replace (p, "~1", "/", 0);
+      g_string_replace (p, "~0", "~", 0);
+      g_ptr_array_add (parts, g_strdup (p->str));
+    }
+  g_ptr_array_add (parts, NULL);
+  if (!scenario)
+    {
+      bro_test_fail (failures, id, "no scenario %s", name);
+      return TRUE;
+    }
+  broken = set_at (scenario, (char **) parts->pdata, 0, J (given, "value"));
+  if (bro_scenario_run_play (name, broken, &failure))
+    bro_test_fail (failures, id, "the broken %s passed; wanted a failure with: %s", name, wanted);
+  else if (!strstr (failure, wanted))
+    bro_test_fail (failures, id, "the broken %s failed with:\n%s\nwanted it to contain:\n%s", name, failure, wanted);
+  return TRUE;
+}
+
+static void
+test_runner_cases (void)
+{
+  bro_test_run_cases ("engine/scenario-runner.cases.json", runner_case);
+}
+
 int
 main (int argc, char **argv)
 {
+  g_autoptr (GPtrArray) selected = NULL;
   g_test_init (&argc, &argv, NULL);
   g_test_add_func ("/local-engine", test_local_engine);
+  selected = bro_scenario_catalog_selected ();
+  for (guint i = 0; i < selected->len; i++)
+    {
+      g_autofree char *path = g_strconcat ("/scenarios/", (char *) selected->pdata[i], NULL);
+      g_test_add_data_func (path, selected->pdata[i], test_scenario);
+    }
+  g_test_add_func ("/scenarios/runner-cases", test_runner_cases);
   return g_test_run ();
 }

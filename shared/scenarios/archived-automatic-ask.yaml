@@ -4,12 +4,16 @@ from:
   - macos ArchiveCheckTests.discsArchivedBefore
   - docs/configuration.md#archive-check
   - rearchitecture-plan §20.1 (Decide)
+  - "owner H3b-4 (2026-10-31): the first job ends, and the disc goes back in, before each automatic rip"
 given:
   drives:
     - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
   configPatch: {automation: {defaults: {alreadyArchived: ask, ejectWhenDone: true}}}
 steps:
   - rip: {drive: drive, as: first}
+  - expect:
+      job: {name: first, outcome: succeeded}
+  - closeTray: {drive: drive}
   - rip: {drive: drive, automatic: true, as: asked}
   - expect:
       job: {name: asked, state: awaitingDecision, decision: {question: {code: decision.archivedBefore}}}
@@ -18,6 +22,7 @@ steps:
   - expect:
       job: {name: asked, outcome: succeeded}
       calls: {makemkvcon: {counts: {" mkv ": 2}}}
+  - closeTray: {drive: drive}
   - rip: {drive: drive, automatic: true, as: skipped}
   - decide: {job: skipped, answer: skip}
   - expect:

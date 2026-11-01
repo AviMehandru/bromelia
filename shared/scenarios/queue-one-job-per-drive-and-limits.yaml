@@ -4,6 +4,7 @@ from:
   - README.md (parallel rips, one job per drive at a time, optional global limit, queue reorder, cancel, retry, start now)
   - docs/configuration.md#top-level (maxConcurrentJobs)
   - rearchitecture-plan §21
+  - "owner H5-1 (2026-11-01): first reaches Acquire before the other rips, so which job gets the one slot isn't a race"
 given:
   configPatch: {limits: {acquisitions: 1}}
   drives:
@@ -13,13 +14,15 @@ given:
   tools: {makemkvcon: tools/makemkvcon-stalls.yaml}
 steps:
   - rip: {drive: a, as: first}
+  - wait: {job: first, step: acquire}
   - rip: {drive: b, as: second}
   - rip: {drive: c, as: third}
+  - wait: {job: second, state: waitingForResources}
   - expect:
-      when: {job: first, step: acquire}
-      job: {name: second, state: waitingForResources}
+      when: {job: third, state: waitingForResources}
+      job: {name: first, state: running}
   - move: {job: third, by: -1}
   - cancel: first
   - expect:
-      when: {job: second, step: acquire}
-      job: {name: third, state: waitingForResources}
+      when: {job: third, step: acquire}
+      job: {name: second, state: waitingForResources}

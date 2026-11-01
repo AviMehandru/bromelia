@@ -3,7 +3,8 @@
   "phase": 3,
   "from": [
     "macos ArchiveCheckTests.discsArchivedBefore",
-    "docs/configuration.md#archive-check (discs archived before)"
+    "docs/configuration.md#archive-check (discs archived before)",
+    "owner H3b-4 (2026-10-31): the disc goes back in before the automatic rip; H3b-5: a glob in a json subset"
   ],
   "given": {
     "drives": [
@@ -44,6 +45,11 @@
             }
           }
         }
+      }
+    },
+    {
+      "closeTray": {
+        "drive": "drive"
       }
     },
     {

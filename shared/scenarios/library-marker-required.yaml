@@ -3,13 +3,14 @@ phase: 3
 from:
   - rearchitecture-plan §22.1 I2
   - claudeDocs/bromelia-handoff.md backlog 1 (never create the output root itself)
+  - "owner H3b-3 (2026-10-31): a folder never attached is library.notAttached"
 given:
   disc: sample-movie-one-title
   libraries: [{id: lib, path: library, marker: false}]
 steps:
   - rip: {iso: true, as: job}
   - expect:
-      job: {name: job, state: blocked, blockedBy: {code: library.offline}}
+      job: {name: job, state: blocked, blockedBy: {code: library.notAttached}}
       file: {path: library/.bromelia-library, exists: false}
   - attachLibrary: {path: "{root}/library", as: attach}
   - advance: 30

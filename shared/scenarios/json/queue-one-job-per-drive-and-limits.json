@@ -4,7 +4,8 @@
   "from": [
     "README.md (parallel rips, one job per drive at a time, optional global limit, queue reorder, cancel, retry, start now)",
     "docs/configuration.md#top-level (maxConcurrentJobs)",
-    "rearchitecture-plan §21"
+    "rearchitecture-plan §21",
+    "owner H5-1 (2026-11-01): first reaches Acquire before the other rips, so which job gets the one slot isn't a race"
   ],
   "given": {
     "configPatch": {
@@ -44,6 +45,12 @@
       }
     },
     {
+      "wait": {
+        "job": "first",
+        "step": "acquire"
+      }
+    },
+    {
       "rip": {
         "drive": "b",
         "as": "second"
@@ -56,14 +63,20 @@
       }
     },
     {
+      "wait": {
+        "job": "second",
+        "state": "waitingForResources"
+      }
+    },
+    {
       "expect": {
         "when": {
-          "job": "first",
-          "step": "acquire"
+          "job": "third",
+          "state": "waitingForResources"
         },
         "job": {
-          "name": "second",
-          "state": "waitingForResources"
+          "name": "first",
+          "state": "running"
         }
       }
     },
@@ -79,11 +92,11 @@
     {
       "expect": {
         "when": {
-          "job": "second",
+          "job": "third",
           "step": "acquire"
         },
         "job": {
-          "name": "third",
+          "name": "second",
           "state": "waitingForResources"
         }
       }

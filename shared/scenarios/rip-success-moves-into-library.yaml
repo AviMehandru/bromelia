@@ -25,7 +25,7 @@ steps:
       transcript:
         job: job
         runs: 2
-        contains: ["TCOUNT:2", 'TINFO:1,27,0,"title_t01.mkv"', "Copy complete. 1 titles saved.", "exit status 0"]
+        contains: ["TCOUNT:2", 'TINFO:1,27,0,"title_t01.mkv"', "Copy complete. 2 titles saved.", "exit status 0"]
       calls: {makemkvcon: {counts: {" mkv ": 1}, include: [" all "]}}
       db:
         archive_units: {count: 1, rows: [{state: committed, status: success, path: Sample Movie}]}

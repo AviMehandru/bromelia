@@ -4,7 +4,8 @@
   "from": [
     "macos ArchiveCheckTests.discsArchivedBefore",
     "docs/configuration.md#archive-check",
-    "rearchitecture-plan §20.1 (Decide)"
+    "rearchitecture-plan §20.1 (Decide)",
+    "owner H3b-4 (2026-10-31): the first job ends, and the disc goes back in, before each automatic rip"
   ],
   "given": {
     "drives": [
@@ -30,6 +31,19 @@
       "rip": {
         "drive": "drive",
         "as": "first"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "first",
+          "outcome": "succeeded"
+        }
+      }
+    },
+    {
+      "closeTray": {
+        "drive": "drive"
       }
     },
     {
@@ -78,6 +92,11 @@
             }
           }
         }
+      }
+    },
+    {
+      "closeTray": {
+        "drive": "drive"
       }
     },
     {

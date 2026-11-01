@@ -23,8 +23,9 @@ test('adapters', executable('test-adapters', 'test-adapters.c', dependencies: [b
   bro_adapters_dep]), env: test_env, timeout: 180)
 test('engine', executable('test-engine', 'test-engine.c', dependencies: [bro_test_support_dep, bro_test_kit_dep, bro_engine_dep]), env: test_env)
 # The scenario test unit (plan §5.1): LocalEngine over TestCompositionRoot (the real services and adapters over the kit's
-# fakes); H adds the scenario runner.
-test('scenarios', executable('test-scenarios', 'test-scenarios.c', 'bro-test-composition-root.c',
-  dependencies: [bro_test_support_dep, bro_test_kit_dep, bro_engine_dep, bro_adapters_dep]), env: test_env, timeout: 300)
+# fakes), and the scenario runner (H): every selected shared scenario.
+test('scenarios', executable('test-scenarios', 'test-scenarios.c', 'bro-test-composition-root.c', 'bro-scenario-catalog.c',
+  'bro-scenario-world.c', 'bro-scenario-tools.c', 'bro-scenario-steps.c', 'bro-scenario-expect.c',
+  dependencies: [bro_test_support_dep, bro_test_kit_dep, bro_engine_dep, bro_adapters_dep]), env: test_env, timeout: 900)
 # The hosts layer: the real composition root's smoke test (no makemkvcon, no system keystore, a temporary data folder).
 test('hosts', executable('test-hosts', 'test-hosts.c', dependencies: [bro_test_kit_dep, bro_host_dep]), env: test_env, timeout: 120)

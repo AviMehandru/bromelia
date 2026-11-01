@@ -3,12 +3,15 @@ phase: 3
 from:
   - macos ArchiveCheckTests.discsArchivedBefore
   - docs/configuration.md#archive-check
+  - "owner H3b-4 (2026-10-31): the first job ends before the automatic rip"
 given:
   drives:
     - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
   configPatch: {automation: {defaults: {alreadyArchived: ripAgain}}}
 steps:
   - rip: {drive: drive, as: first}
+  - expect:
+      job: {name: first, outcome: succeeded}
   - rip: {drive: drive, automatic: true, as: again}
   - expect:
       job: {name: again, outcome: succeeded}

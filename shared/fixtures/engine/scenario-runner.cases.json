@@ -1,0 +1,196 @@
+{
+  "description": "The scenario runners checked (session H, decision 244): each case is a broken variant of a shared scenario that the runner plays in full (shared/scenarios/json/<scenario>.json with the value at the JSON pointer set to the given one: replaced, or added when it isn't there). The runner passes a case only when the variant fails, with a failure whose text contains the expected one (the runners' failure text is '<id> step <n> (<kind>): <what was expected> / <what was found>', decision 243). So a runner that checks nothing, or skips a key, fails here. Each scenario used passes as it is on every platform's runner.",
+  "cases": [
+    {
+      "id": "another-outcome",
+      "given": {
+        "scenario": "recorded-mkv-rip",
+        "pointer": "/steps/1/expect/job/outcome",
+        "value": "failed"
+      },
+      "expect": {
+        "failure": "recorded-mkv-rip step 2 (expect): job job outcome \"failed\" / \"succeeded\""
+      }
+    },
+    {
+      "id": "an-excluded-folder-that-is-there",
+      "given": {
+        "scenario": "recorded-mkv-rip",
+        "pointer": "/steps/1/expect/files/exclude",
+        "value": [
+          "Sample Movie"
+        ]
+      },
+      "expect": {
+        "failure": "recorded-mkv-rip step 2 (expect): no Sample Movie under library"
+      }
+    },
+    {
+      "id": "an-excluded-event-that-was-published",
+      "given": {
+        "scenario": "recorded-mkv-rip",
+        "pointer": "/steps/1/expect/events",
+        "value": {
+          "exclude": [
+            "jobFinished"
+          ]
+        }
+      },
+      "expect": {
+        "failure": "recorded-mkv-rip step 2 (expect): no jobFinished"
+      }
+    },
+    {
+      "id": "a-missing-file-in-exactly",
+      "given": {
+        "scenario": "safety-failure-without-files-leaves-nothing",
+        "pointer": "/steps/1/expect/files/exactly",
+        "value": [
+          "title_t00.mkv"
+        ]
+      },
+      "expect": {
+        "failure": "safety-failure-without-files-leaves-nothing step 2 (expect): exactly [\"title_t00.mkv\"] under library"
+      }
+    },
+    {
+      "id": "a-wrong-db-count",
+      "given": {
+        "scenario": "safety-failure-without-files-leaves-nothing",
+        "pointer": "/steps/1/expect/db/archive_units/count",
+        "value": 1
+      },
+      "expect": {
+        "failure": "safety-failure-without-files-leaves-nothing step 2 (expect): 1 rows in archive_units"
+      }
+    },
+    {
+      "id": "another-error-code",
+      "given": {
+        "scenario": "safety-failure-without-files-leaves-nothing",
+        "pointer": "/steps/1/expect/job/error/code",
+        "value": "rip.readErrors"
+      },
+      "expect": {
+        "failure": "safety-failure-without-files-leaves-nothing step 2 (expect): job job error"
+      }
+    },
+    {
+      "id": "a-wrong-call-count",
+      "given": {
+        "scenario": "safety-failed-title-keeps-makemkv-name",
+        "pointer": "/steps/1/expect/calls/makemkvcon/counts/ mkv ",
+        "value": 3
+      },
+      "expect": {
+        "failure": "safety-failed-title-keeps-makemkv-name step 2 (expect): 3 makemkvcon calls with \" mkv \""
+      }
+    },
+    {
+      "id": "another-unit-state",
+      "given": {
+        "scenario": "safety-failed-title-keeps-makemkv-name",
+        "pointer": "/steps/3/expect/job/unit/state",
+        "value": "committed"
+      },
+      "expect": {
+        "failure": "safety-failed-title-keeps-makemkv-name step 4 (expect): job job unit"
+      }
+    },
+    {
+      "id": "text-the-note-lacks",
+      "given": {
+        "scenario": "safety-failed-title-keeps-makemkv-name",
+        "pointer": "/steps/3/expect/file/contains",
+        "value": [
+          "a line no note has"
+        ]
+      },
+      "expect": {
+        "failure": "safety-failed-title-keeps-makemkv-name step 4 (expect): library/_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt containing \"a line no note has\""
+      }
+    },
+    {
+      "id": "a-wrong-transcript-run-count",
+      "given": {
+        "scenario": "safety-failed-title-keeps-makemkv-name",
+        "pointer": "/steps/1/expect/transcript",
+        "value": {
+          "job": "job",
+          "runs": 5
+        }
+      },
+      "expect": {
+        "failure": "safety-failed-title-keeps-makemkv-name step 2 (expect): 5 runs in the transcript of job"
+      }
+    },
+    {
+      "id": "a-log-code-the-job-did-not-log",
+      "given": {
+        "scenario": "recovery-requeued-before-acquire",
+        "pointer": "/steps/3/expect/log/include",
+        "value": [
+          "recovery.resumed"
+        ]
+      },
+      "expect": {
+        "failure": "recovery-requeued-before-acquire step 4 (expect): recovery.resumed in the log of job"
+      }
+    },
+    {
+      "id": "sums-that-should-fail",
+      "given": {
+        "scenario": "recovery-resumes-after-release",
+        "pointer": "/steps/3/expect/sums/ok",
+        "value": false
+      },
+      "expect": {
+        "failure": "recovery-resumes-after-release step 4 (expect): sha256sum -c in library/Sample Movie failing"
+      }
+    },
+    {
+      "id": "a-kill-point-never-reached",
+      "given": {
+        "scenario": "recovery-commit-rolled-forward",
+        "pointer": "/steps/1/kill/at",
+        "value": "commit.afterMove:9"
+      },
+      "expect": {
+        "failure": "recovery-commit-rolled-forward step 2 (kill): the engine to reach commit.afterMove:9 / it never did"
+      }
+    },
+    {
+      "id": "a-stop-point-never-reached",
+      "given": {
+        "scenario": "recovery-stop-during-commit-resumes",
+        "pointer": "/steps/1/stop/at",
+        "value": "commit.afterMove:9"
+      },
+      "expect": {
+        "failure": "recovery-stop-during-commit-resumes step 2 (stop): the engine to reach commit.afterMove:9 / it never did"
+      }
+    },
+    {
+      "id": "a-wrong-record-value",
+      "given": {
+        "scenario": "onepass-longest-titles",
+        "pointer": "/steps/1/expect/record/json/titles/0/sourceTitleId",
+        "value": 2
+      },
+      "expect": {
+        "failure": "onepass-longest-titles step 2 (expect): the record in"
+      }
+    },
+    {
+      "id": "a-glob-in-a-json-subset-that-does-not-match",
+      "given": {
+        "scenario": "archived-automatic-skip",
+        "pointer": "/steps/1/expect/record/json/disc/fingerprint",
+        "value": "v2:*"
+      },
+      "expect": {
+        "failure": "archived-automatic-skip step 2 (expect): the record in library/Sample Movie"
+      }
+    }
+  ]
+}

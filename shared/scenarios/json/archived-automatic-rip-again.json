@@ -3,7 +3,8 @@
   "phase": 3,
   "from": [
     "macos ArchiveCheckTests.discsArchivedBefore",
-    "docs/configuration.md#archive-check"
+    "docs/configuration.md#archive-check",
+    "owner H3b-4 (2026-10-31): the first job ends before the automatic rip"
   ],
   "given": {
     "drives": [
@@ -28,6 +29,14 @@
       "rip": {
         "drive": "drive",
         "as": "first"
+      }
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "first",
+          "outcome": "succeeded"
+        }
       }
     },
     {
