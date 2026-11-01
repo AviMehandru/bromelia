@@ -31,6 +31,12 @@ public sealed class PipelineRunnerTests
 
     static List<string> Strings(JsonValue? j) => j?.AsArray?.Select(s => s.AsString!).ToList() ?? new List<string>();
 
+    /// <summary>Log entries: a code (info), or {code, severity}.</summary>
+    static List<BroMessage> LogEntries(JsonValue? j) => j?.AsArray?.Select(e => e.AsString is { } code
+        ? new BroMessage(MessageCode.Parse(code)!.Value)
+        : new BroMessage(MessageCode.Parse(e["code"]!.AsString!)!.Value, (JsonValue.Object)EmptyObject, EnumWire.Parse<Severity>(e["severity"]!.AsString)!.Value)).ToList()
+        ?? new List<BroMessage>();
+
     /// <summary>A step that does what the case says.</summary>
     sealed class FakeStep : IStep
     {
@@ -60,13 +66,13 @@ public sealed class PipelineRunnerTests
         {
             if (context.Finishing is { } end)
             {
-                foreach (var code in Strings(_b["log"])) context.Log.Log(new BroMessage(MessageCode.Parse(code)!.Value));
+                foreach (var line in LogEntries(_b["log"])) context.Log.Log(line);
                 lock (_h.Finishing) _h.Finishing[context.Job.Id] = EnumWire.Name(end.Outcome) + " " + end.Error?.Code;
                 return new StepReport(EmptyObject);
             }
             foreach (var p in _b["progress"]?.AsArray ?? new List<JsonValue>())
                 context.Progress.Report(p.AsArray![0].AsNumber!.Value, new BroMessage(MessageCode.Parse(p.AsArray[1].AsString!)!.Value));
-            foreach (var code in Strings(_b["log"])) context.Log.Log(new BroMessage(MessageCode.Parse(code)!.Value));
+            foreach (var line in LogEntries(_b["log"])) context.Log.Log(line);
             var data = _b["output"] ?? EmptyObject;
             if (_b["config"]?.AsString is { } key)
                 data = JsonValue.Of((key, context.Config.Document[key] ?? JsonValue.Null.Instance));
@@ -125,6 +131,10 @@ public sealed class PipelineRunnerTests
         /// <summary>What the Release at the end saw, by job: '&lt;outcome&gt; &lt;error code&gt;'.</summary>
         public readonly Dictionary<Id, string> Finishing = new();
         public readonly List<EngineEvent> Events = new();
+        /// <summary>Every crash point the runner reached (on the executor), in order.</summary>
+        public readonly List<string> CrashPoints = new();
+        /// <summary>The jobs whose run ended with server.stopping (a crash point, a shutdown).</summary>
+        public readonly HashSet<string> Stopped = new();
         readonly object _gateLock = new();
         readonly Dictionary<string, TaskCompletionSource> _gates = new();
         readonly Dictionary<Id, int> _atGate = new();
@@ -147,7 +157,14 @@ public sealed class PipelineRunnerTests
             }
             var env = new StepEnvironment(new ToolSet(null!, null!), Fs, W.Clock, null!, null!, null!, Config, null!, null!, "/data",
                 new RecoveryServiceTests.Renderer(), "test");
-            Runner = new PipelineRunner(W.Executor, Bus, Scheduler, Store, new StepRegistry(steps), env, W.EngineClock);
+            var crashAt = given["crashAt"]?.AsString;
+            Runner = new PipelineRunner(W.Executor, Bus, Scheduler, Store, new StepRegistry(steps), env, W.EngineClock, point =>
+            {
+                CrashPoints.Add(point);
+                if (point != crashAt) return;
+                _stopped = true; // the crashed job never finishes
+                throw new InvalidOperationException("crashed at " + point);
+            });
             Ids = new CountingIds(given["jobs"]!.AsArray!.Count);
             Service = new JobService(W.Executor, Bus, Store, Scheduler, Runner, W.EngineClock, Ids, Fs, "/data");
             W.OnExecutor(() => Bus.Subscribe(null, OnEvent));
@@ -182,7 +199,7 @@ public sealed class PipelineRunnerTests
                 if (j["log"] is { } log)
                 {
                     long line = 0;
-                    var lines = Strings(log).Select(c => new LogLineDto(++line, W.Clock.Now(), Severity.Info, MessageCode.Parse(c)!.Value,
+                    var lines = LogEntries(log).Select(m => new LogLineDto(++line, W.Clock.Now(), m.Severity, m.Code,
                         new JsonValue.Object(new List<KeyValuePair<string, JsonValue>>()))).ToList();
                     Fs.CreateDirectory($"/data/jobs/{id.Value}", parentsMustExist: false);
                     Fs.WriteAtomically($"/data/jobs/{id.Value}/log.jsonl", JobLog.Encode(lines), 0x180);
@@ -314,8 +331,14 @@ public sealed class PipelineRunnerTests
 
         async void Track(string name, Task<Decided> run)
         {
-            var decided = await run;
-            Outcomes[name] = decided;
+            try
+            {
+                Outcomes[name] = await run;
+            }
+            catch (BroFailure f) when (f.Error.Code == MessageCode.Wire(MessageCode.ServerStopping))
+            {
+                Stopped.Add(name);
+            }
         }
 
         public void Run(JsonValue op)
@@ -690,6 +713,25 @@ public sealed class PipelineRunnerTests
             foreach (var (name, want) in expect["outputs"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
                 foreach (var (kind, data) in want.AsObject!)
                     Same(data, h.Store.StepsOf(h.Jobs[name]).Last(s => EnumWire.Name(s.Kind) == kind).Output!.Data, $"output of {name}'s {kind}");
+            if (expect["crashPoints"] is { } points)
+            {
+                string? got = null;
+                h.W.OnExecutor(() => got = string.Join(" | ", h.CrashPoints));
+                Same(string.Join(" | ", Strings(points)), got!, "crash points");
+            }
+            if (expect["stopped"] is { } stopped)
+            {
+                string? got = null;
+                h.W.OnExecutor(() => got = string.Join(" ", h.Stopped.OrderBy(n => n, StringComparer.Ordinal)));
+                Same(string.Join(" ", Strings(stopped)), got!, "stopped");
+            }
+            foreach (var (name, want) in expect["counts"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())
+            {
+                JsonValue? got = null;
+                h.W.OnExecutor(() => got = h.Events.LastOrDefault(e => e.Type is EngineEventType.JobChanged or EngineEventType.JobFinished
+                    && e.Data["job"]?["id"]?.AsString == h.Jobs[name].Value)?.Data["job"]?["counts"]);
+                Same(want, got ?? JsonValue.Null.Instance, "counts of " + name);
+            }
             if (expect["events"] is { } events)
             {
                 JsonValue? got = null;

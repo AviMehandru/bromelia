@@ -9,7 +9,8 @@ namespace Bromelia.TestKit;
 /// <see cref="Send"/> reports to the monitor's sink, the content <see cref="ProbeContent"/> finds for a device (video unless
 /// <see cref="SetContent"/> says otherwise),
 /// and the tray calls, recorded in <see cref="Calls"/> ("eject &lt;device&gt;", "closeTray &lt;device&gt;"). A mount wait
-/// answers the drive's mount path at once. Raw sector reads aren't faked. Thread-safe.</summary>
+/// answers the drive's mount path at once. Raw sector reads aren't faked. <see cref="OnEject"/> and <see cref="OnCloseTray"/>
+/// hear of each tray call after it is recorded (a scenario's drive world changes with it). Thread-safe.</summary>
 public sealed class FakeDrives : IDeviceMonitor, IDriveControl
 {
     readonly object _lock = new();
@@ -17,6 +18,10 @@ public sealed class FakeDrives : IDeviceMonitor, IDriveControl
     readonly Dictionary<string, DiscContent> _contents = new();
     readonly List<string> _calls = new();
     Action<DeviceEvent>? _sink;
+    /// <summary>Hears of each eject the engine asks for, with its device (outside the lock).</summary>
+    public Action<string>? OnEject;
+    /// <summary>Hears of each tray close the engine asks for, with its device (outside the lock).</summary>
+    public Action<string>? OnCloseTray;
 
     /// <summary>A drive the OS lists from now on.</summary>
     public void Add(OsDrive drive)
@@ -71,12 +76,14 @@ public sealed class FakeDrives : IDeviceMonitor, IDriveControl
     public Task Eject(string device)
     {
         lock (_lock) _calls.Add("eject " + device);
+        OnEject?.Invoke(device);
         return Task.CompletedTask;
     }
 
     public Task CloseTray(string device)
     {
         lock (_lock) _calls.Add("closeTray " + device);
+        OnCloseTray?.Invoke(device);
         return Task.CompletedTask;
     }
 

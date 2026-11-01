@@ -1,5 +1,7 @@
 /* bro-test-kit.c */
 #include "bro-test-kit.h"
+#include "bro-conflict-namer.h"
+#include "bro-moved-item.h"
 
 #include "bro-byte-stream.h"
 #include "bro-directory-entry.h"
@@ -739,6 +741,36 @@ test_manual_clock_advance (TestManualClock *self, gint64 ms, void (*settle) (gpo
 }
 
 
+gboolean
+test_manual_clock_next_due (TestManualClock *self, BroInstant *due)
+{
+  gboolean found = FALSE;
+  g_mutex_lock (&self->lock);
+  for (guint i = 0; i < self->timers->len; i++)
+    {
+      Pending *p = g_ptr_array_index (self->timers, i);
+      if (!p->cancelled && (!found || p->due_ms < due->unix_milliseconds))
+        {
+          found = TRUE;
+          due->unix_milliseconds = p->due_ms;
+        }
+    }
+  g_mutex_unlock (&self->lock);
+  return found;
+}
+
+void
+test_manual_clock_cancel_all (TestManualClock *self)
+{
+  g_autoptr (GPtrArray) dropped = NULL;
+  g_mutex_lock (&self->lock);
+  for (guint i = 0; i < self->timers->len; i++)
+    ((Pending *) g_ptr_array_index (self->timers, i))->cancelled = TRUE;
+  dropped = g_steal_pointer (&self->timers);
+  self->timers = g_ptr_array_new_with_free_func ((GDestroyNotify) pending_unref);
+  g_mutex_unlock (&self->lock);
+}
+
 int
 test_manual_clock_pending (TestManualClock *self)
 {
@@ -756,11 +788,30 @@ static void memory_fs_iface_init (BroFileSystemInterface *iface);
 G_DEFINE_FINAL_TYPE_WITH_CODE (TestMemoryFs, test_memory_fs, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_FILE_SYSTEM, memory_fs_iface_init))
 
 /* FALSE (and @error) when a test made @op on @path fail. */
+/* FALSE (and @error: fs.failed, reason "frozen") while the files are frozen. */
+static gboolean
+fs_not_frozen (TestMemoryFs *self, const char *op, const char *path, BroBroError **error)
+{
+  BroJsonValue *params;
+  if (!g_atomic_int_get (&self->frozen))
+    return TRUE;
+  params = bro_json_value_new_object ();
+  bro_json_value_set (params, "operation", bro_json_value_new_string (op));
+  bro_json_value_set (params, "path", bro_json_value_new_string (path));
+  bro_json_value_set (params, "reason", bro_json_value_new_string ("frozen"));
+  bro_bro_error_set (error, "fs.failed", params);
+  return FALSE;
+}
+
 static gboolean
 fs_check (TestMemoryFs *self, const char *op, const char *path, BroBroError **error)
 {
   g_autofree char *key = g_strconcat (op, "\n", path, NULL);
   const BroBroError *found = NULL;
+  if ((strcmp (op, "write") == 0 || strcmp (op, "rename") == 0 || strcmp (op, "remove") == 0 || strcmp (op, "sync") == 0
+       || strcmp (op, "syncDirectory") == 0)
+      && !fs_not_frozen (self, op, path, error))
+    return FALSE;
   g_mutex_lock (&self->lock);
   for (guint i = 0; i < self->fails->len && !found; i++)
     if (strcmp (g_ptr_array_index (self->fails, i), key) == 0)
@@ -816,6 +867,24 @@ test_memory_fs_put_folder (TestMemoryFs *self, const char *path)
   g_mutex_lock (&self->lock);
   put_folder_locked (self, path);
   g_mutex_unlock (&self->lock);
+}
+
+void
+test_memory_fs_freeze (TestMemoryFs *self)
+{
+  g_atomic_int_set (&self->frozen, TRUE);
+}
+
+void
+test_memory_fs_thaw (TestMemoryFs *self)
+{
+  g_atomic_int_set (&self->frozen, FALSE);
+}
+
+gboolean
+test_memory_fs_frozen (TestMemoryFs *self)
+{
+  return g_atomic_int_get (&self->frozen);
 }
 
 void
@@ -902,8 +971,12 @@ static gboolean
 fs_create_directory (BroFileSystem *fs, const char *path, gboolean parents_must_exist, BroBroError **error)
 {
   TestMemoryFs *self = TEST_MEMORY_FS (fs);
-  g_auto (GStrv) parts = g_strsplit (path, "/", -1);
-  GString *current = g_string_new ("");
+  g_auto (GStrv) parts = NULL;
+  GString *current;
+  if (!fs_not_frozen (self, "createDirectory", path, error))
+    return FALSE;
+  parts = g_strsplit (path, "/", -1);
+  current = g_string_new ("");
   g_mutex_lock (&self->lock);
   for (guint i = 0; parts[i]; i++)
     if (*parts[i])
@@ -1129,12 +1202,149 @@ fs_sync_directory (BroFileSystem *fs, const char *path, BroBroError **error)
   return fs_sync (TEST_MEMORY_FS (fs), "syncDirectory", TEST_MEMORY_FS (fs)->folders, path, error);
 }
 
+static char *
+ascii_lower (const char *s)
+{
+  char *l = g_strdup (s);
+  for (char *c = l; *c; c++)
+    if (*c >= 'A' && *c <= 'Z')
+      *c = (char) (*c + 32);
+  return l;
+}
+
+static int
+by_text (gconstpointer a, gconstpointer b)
+{
+  return strcmp (*(const char *const *) a, *(const char *const *) b);
+}
+
+static int
+moved_by_from (gconstpointer a, gconstpointer b)
+{
+  return strcmp ((*(BroMovedItem *const *) a)->from, (*(BroMovedItem *const *) b)->from);
+}
+
+static void
+moved_add (GPtrArray *moved, const char *from, const char *to, BroMovedFunc on_moved, gpointer data)
+{
+  BroMovedItem *m = bro_moved_item_new ();
+  m->from = g_strdup (from);
+  m->to = g_strdup (to);
+  g_ptr_array_add (moved, m);
+  if (on_moved)
+    on_moved (m, data);
+}
+
+/* Each entry of @source in turn (by name), a folder merging into a folder of the same name (ASCII case ignored), anything
+ * else moving under ConflictNamer's name; an emptied folder goes. */
+static gboolean
+fs_merge (BroFileSystem *fs, const char *source, const char *target, GPtrArray *moved, BroMovedFunc on_moved, gpointer data,
+          BroBroError **error)
+{
+  TestMemoryFs *self = TEST_MEMORY_FS (fs);
+  g_autoptr (GPtrArray) entries = fs_list (fs, source, error);
+  if (!entries)
+    return FALSE;
+  for (guint i = 0; i < entries->len; i++)
+    {
+      const BroDirectoryEntry *e = g_ptr_array_index (entries, i);
+      g_autofree char *src = g_strconcat (source, "/", e->name, NULL);
+      g_autofree char *lower = ascii_lower (e->name);
+      g_autoptr (GPtrArray) existing = fs_list (fs, target, error);
+      g_autoptr (GPtrArray) names = NULL;
+      const BroDirectoryEntry *same = NULL;
+      g_autofree char *free_name = NULL;
+      g_autofree char *dst = NULL;
+      if (!existing)
+        return FALSE;
+      names = g_ptr_array_new ();
+      for (guint k = 0; k < existing->len; k++)
+        {
+          const BroDirectoryEntry *x = g_ptr_array_index (existing, k);
+          g_autofree char *x_lower = ascii_lower (x->name);
+          if (!same && strcmp (x_lower, lower) == 0)
+            same = x;
+          g_ptr_array_add (names, x->name);
+        }
+      g_ptr_array_add (names, NULL);
+      if (e->is_directory && same && same->is_directory)
+        {
+          g_autofree char *into = g_strconcat (target, "/", same->name, NULL);
+          if (!fs_merge (fs, src, into, moved, on_moved, data, error) || !fs_remove (fs, src, error))
+            return FALSE;
+          continue;
+        }
+      free_name = bro_conflict_namer_next (e->name, (const char *const *) names->pdata, e->is_directory);
+      dst = g_strconcat (target, "/", free_name, NULL);
+      if (!fs_rename (fs, src, dst, error))
+        return FALSE;
+      if (!e->is_directory)
+        moved_add (moved, src, dst, on_moved, data);
+      else
+        {
+          g_autofree char *under = g_strconcat (dst, "/", NULL);
+          g_autoptr (GPtrArray) files = g_ptr_array_new_with_free_func (g_free);
+          GHashTableIter it;
+          gpointer key;
+          g_mutex_lock (&self->lock);
+          g_hash_table_iter_init (&it, self->files);
+          while (g_hash_table_iter_next (&it, &key, NULL))
+            if (g_str_has_prefix (key, under))
+              g_ptr_array_add (files, g_strdup (key));
+          g_mutex_unlock (&self->lock);
+          g_ptr_array_sort (files, by_text);
+          for (guint k = 0; k < files->len; k++)
+            {
+              const char *f = g_ptr_array_index (files, k);
+              g_autofree char *from = g_strconcat (src, f + strlen (dst), NULL);
+              moved_add (moved, from, f, on_moved, data);
+            }
+        }
+    }
+  return TRUE;
+}
+
+/* As the platform file systems do it (fs_merge); what moved, by where it came from. */
 static GPtrArray *
 fs_move_merging (BroFileSystem *fs, const char *from, const char *to, BroMovePolicy policy, BroMovedFunc on_moved, gpointer data,
                  BroBroError **error)
 {
-  bro_bro_error_set (error, "fs.failed", NULL); /* not faked */
-  return NULL;
+  g_autoptr (BroFileInfo) source = fs_stat (fs, from, error);
+  g_autoptr (GPtrArray) moved = NULL;
+  if (!source)
+    return NULL;
+  if (!source->is_directory)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "operation", bro_json_value_new_string ("move"));
+      bro_json_value_set (params, "path", bro_json_value_new_string (from));
+      bro_json_value_set (params, "reason", bro_json_value_new_string ("it isn't a folder"));
+      bro_bro_error_set (error, "fs.failed", params);
+      return NULL;
+    }
+  if (!fs_exists (fs, to))
+    {
+      if (!fs_create_directory (fs, to, TRUE, error))
+        return NULL;
+    }
+  else
+    {
+      g_autoptr (BroFileInfo) target = fs_stat (fs, to, error);
+      if (!target)
+        return NULL;
+      if (!target->is_directory)
+        {
+          BroJsonValue *params = bro_json_value_new_object ();
+          bro_json_value_set (params, "path", bro_json_value_new_string (to));
+          bro_bro_error_set (error, "fs.alreadyExists", params);
+          return NULL;
+        }
+    }
+  moved = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_moved_item_free);
+  if (!fs_merge (fs, from, to, moved, on_moved, data, error))
+    return NULL;
+  g_ptr_array_sort (moved, moved_by_from);
+  return g_steal_pointer (&moved);
 }
 
 static gboolean
@@ -1338,6 +1548,8 @@ struct _TestFakeDrives {
   BroDeviceSinkFunc sink; /* NULL: not monitoring */
   gpointer sink_data;
   GDestroyNotify sink_destroy;
+  TestTrayFunc on_eject, on_close_tray; /* nullable */
+  gpointer tray_data;
 };
 
 static void fake_drives_monitor_iface (BroDeviceMonitorInterface *iface);
@@ -1466,13 +1678,29 @@ fake_drives_call (BroDriveControl *c, const char *verb, const char *device)
 static gboolean
 fake_drives_eject (BroDriveControl *c, const char *device, BroBroError **error)
 {
-  return fake_drives_call (c, "eject", device);
+  TestFakeDrives *self = TEST_FAKE_DRIVES (c);
+  fake_drives_call (c, "eject", device);
+  if (self->on_eject)
+    self->on_eject (device, self->tray_data);
+  return TRUE;
 }
 
 static gboolean
 fake_drives_close_tray (BroDriveControl *c, const char *device, BroBroError **error)
 {
-  return fake_drives_call (c, "closeTray", device);
+  TestFakeDrives *self = TEST_FAKE_DRIVES (c);
+  fake_drives_call (c, "closeTray", device);
+  if (self->on_close_tray)
+    self->on_close_tray (device, self->tray_data);
+  return TRUE;
+}
+
+void
+test_fake_drives_on_tray (TestFakeDrives *self, TestTrayFunc on_eject, TestTrayFunc on_close_tray, gpointer data)
+{
+  self->on_eject = on_eject;
+  self->on_close_tray = on_close_tray;
+  self->tray_data = data;
 }
 
 static char *

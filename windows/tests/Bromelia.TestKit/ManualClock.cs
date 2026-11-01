@@ -80,6 +80,26 @@ public sealed class ManualClock : IClock
         lock (_lock) return _timers.Count(t => !t.Cancelled);
     }
 
+    /// <summary>When the next timer not cancelled is due; null when there is none.</summary>
+    public Instant? NextDue()
+    {
+        lock (_lock)
+        {
+            var next = _timers.Where(t => !t.Cancelled).OrderBy(t => t.DueMs).FirstOrDefault();
+            return next is null ? null : new Instant(next.DueMs);
+        }
+    }
+
+    /// <summary>Cancels every timer (a killed engine's: none of them fires any more).</summary>
+    public void CancelAll()
+    {
+        lock (_lock)
+        {
+            foreach (var t in _timers) t.Cancelled = true;
+            _timers.Clear();
+        }
+    }
+
     public void Advance(long ms)
     {
         long target;

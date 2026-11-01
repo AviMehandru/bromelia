@@ -3,7 +3,8 @@
  * memory under TEST_ROOT (the data folder is TEST_ROOT_DATA_DIR); SQLite on a file in a temporary folder of the real
  * disk, so restart reopens the same database; scripted processes under the real MakemkvTool and MkvToolNix; the fake
  * drives; an in-memory keystore pair; counting ids; a recording engine log; English messages and app version "test".
- * Build with test_composition_root_new, then start. Test code, not shipped. TestWaiter is how the tests wait for an
+ * Build with test_composition_root_new, then start. A scenario runner passes its own launcher for the tools, and kills the
+ * engine at a crash point (test_composition_root_kill, then test_composition_root_restart). Test code, not shipped. TestWaiter is how the tests wait for an
  * engine's callbacks. */
 #pragma once
 
@@ -52,6 +53,7 @@ typedef struct {
   TestManualClock *clock;
   TestMemoryFs *fs;
   TestScriptedLauncher *launcher;
+  BroProcessLauncher *tool_launcher; /* what MakemkvTool and MkvToolNix start with: the constructor's, else launcher */
   TestRecordingIsolation *isolation;
   TestFixedLocator *locator;
   TestFakeDrives *drives;
@@ -65,23 +67,35 @@ typedef struct {
   /* Called when an engine's release runs (after its executor stopped), before the store closes. */
   void (*on_release) (gpointer data);
   gpointer on_release_data;
-  /* LibraryService's crash hook (H's crash points), settable any time: FALSE stops a commit as a killed engine would. */
+  /* The crash hook of LibraryService (commit.*) and PipelineRunner (beforeStep:/afterStep:<kind>), settable any time: FALSE
+   * (the error test_composition_root_kill gives) stops the engine there as a killed one would. */
   BroCrashPointFunc crash;
   gpointer crash_data;
+  double last_stop;   /* how long the last stop took, in real seconds */
+  gboolean killed;    /* killed at killed_at, not finished yet (restart finishes it) */
+  char *killed_at;
+  gint64 killed_seq;  /* the bus's last seq when it was killed: what it publishes after that never happened */
   /* The graph built last (a harness peeks at the store; the engine owns it). */
   BroEngineExecutor *executor;
   BroEventBus *bus;
   BroLibraryService *libraries;
+  BroJobService *jobs;
   BroSqliteStore *store;
   BroLocalEngine *engine;
   gboolean stopped;
 } TestCompositionRoot;
 
+/* A stop that takes this long hit LocalEngine's cap (G8 N1: a restart after it fails the case). */
+#define TEST_ROOT_STOP_CAP 30.0
+/* How long a killed engine has to go quiet before its executor is stopped. */
+#define TEST_ROOT_KILL_CAP 10.0
+
 /* @makemkvcon_version: what the locator reports as makemkvcon's version (nullable). @environment: copied (nullable:
  * none). @cores: the processor count in BroEngineFacts. @stream_capacity: the bus's (a small one makes a feed's
- * reader fall behind). */
+ * reader fall behind). @launcher: what the tools start their processes with (a scenario's scripted tools; a reference;
+ * NULL: the root's launcher). */
 TestCompositionRoot *test_composition_root_new (gboolean makemkvcon, const char *makemkvcon_version, gboolean mkvmerge,
-                                                GHashTable *environment, int cores, guint stream_capacity);
+                                                GHashTable *environment, int cores, guint stream_capacity, BroProcessLauncher *launcher);
 /* Stops the engine when it runs (waiting at most 40 s), closes the store and deletes the folder. */
 void test_composition_root_free (TestCompositionRoot *root);
 
@@ -89,9 +103,18 @@ void test_composition_root_free (TestCompositionRoot *root);
 TestWaiter *test_composition_root_start (TestCompositionRoot *root);
 /* The engine's stop (once: a waiter already finished when it is stopped). */
 TestWaiter *test_composition_root_stop (TestCompositionRoot *root);
-/* Stops the engine (when running), then builds a new one on the same database and files and starts it. FALSE (and
- * @error, or nothing when it never ended within @seconds each) when the stop or the start failed. */
-gboolean test_composition_root_restart (TestCompositionRoot *root, double seconds, BroBroError **error);
+/* The stop, waited for at most @seconds and timed in real time (last_stop). FALSE when it never ended. */
+gboolean test_composition_root_stop_timed (TestCompositionRoot *root, double seconds);
+/* Stops the engine (when running), then builds a new one on the same database and files and starts it. After a kill it
+ * finishes the kill instead of stopping. FALSE (and @error, or nothing when it never ended within @seconds each) when the
+ * stop or the start failed; *@why (nullable) says so in words: a stop that hit the 30 s cap (G8 N1), a killed engine that
+ * didn't go quiet within 10 s. */
+gboolean test_composition_root_restart (TestCompositionRoot *root, double seconds, BroBroError **error, char **why);
+/* Kills the engine at a crash point (decision 240), called at the point (on the executor or a worker): the files freeze
+ * (no write lands from now on), JobService's stop is posted ahead of whatever the point unwinds into (so the runner stores
+ * nothing more) and the bus's last seq is noted. Returns the error the point must fail with. The store stays open until
+ * the old executor is quiet (restart): closing it in the middle of a call isn't safe. */
+BroBroError *test_composition_root_kill (TestCompositionRoot *root, const char *point);
 /* The library folder's volume goes away (its files are kept aside), and LibraryService checks at once (owner answer 10:
  * no OS event reports a library's volume); mount brings it back. FALSE when the check never ended within @seconds. */
 gboolean test_composition_root_unmount (TestCompositionRoot *root, const char *path, double seconds);

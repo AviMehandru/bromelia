@@ -2,7 +2,8 @@
  * executor. Today's JobRunner.run()/execute() becomes JobPlanner (which steps), the step types (what each does),
  * JobOutcome.decide (the result) and this loop (the order, the resources, and the durable record of every step).
  * In C the loop is a chain of callbacks: each await of the other two is a worker or a scheduler answer arriving on the
- * executor. shared/fixtures/engine/pipeline-runner.cases.json. */
+ * executor. An optional crash hook (test roots only) hears beforeStep:<kind> and afterStep:<kind>.
+ * shared/fixtures/engine/pipeline-runner.cases.json. */
 #pragma once
 
 #include "bro-coalescer.h"
@@ -28,9 +29,18 @@ typedef void (*BroRunDone) (const BroDecided *decided, const BroBroError *error,
 /* No job is live any more (after bro_pipeline_runner_shutdown), on the executor. */
 typedef void (*BroRunnerIdle) (gpointer data);
 
-/* Call on the executor. Keeps references; copies @environment. */
+/* A crash point of a run, on the executor (beforeStep:<kind>, afterStep:<kind>): FALSE (with @error set) stops the
+ * runner there, as a killed engine would. Only a test root passes one. */
+typedef gboolean (*BroRunnerCrashFunc) (const char *point, gpointer data, BroBroError **error);
+
+/* Call on the executor. Keeps references; copies @environment. @crash (@crash_data) may be NULL (the real roots): it is
+ * called at each crash point of a run (the scenario runners' kill): beforeStep:<kind> before the step asks for its
+ * resources (nothing of it is stored yet), afterStep:<kind> once its finished row is stored (before stepFinished). Its
+ * failure stops the runner as bro_pipeline_runner_shutdown does, without cancelling anything: nothing more is stored for
+ * any job, as a killed engine leaves it, and the run ends with server.stopping. */
 BroPipelineRunner *bro_pipeline_runner_new (BroEngineExecutor *executor, BroEventBus *bus, BroScheduler *scheduler, BroStore *store,
-                                            BroStepRegistry *registry, const BroStepEnvironment *environment, BroEngineClock *clock);
+                                            BroStepRegistry *registry, const BroStepEnvironment *environment, BroEngineClock *clock,
+                                            BroRunnerCrashFunc crash, gpointer crash_data);
 
 /* Runs the job to its end, or until it is cancelled, then calls @done; @destroy frees @data afterwards. The job is live
  * (cancel reaches it) as soon as this is called, before its record is loaded. After a shutdown the run ends wherever it

@@ -1,6 +1,7 @@
 /* bro-pipeline-runner.c */
 #include "bro-pipeline-runner.h"
 
+#include "bro-acquire-output.h"
 #include "bro-cancellation-source.h"
 #include "bro-job-dto.h"
 #include "bro-job-log.h"
@@ -9,6 +10,7 @@
 #include "bro-lease-snapshot.h"
 #include "bro-log-line-dto.h"
 #include "bro-message-code.h"
+#include "bro-seal-output.h"
 #include "bro-step-result.h"
 
 #include <string.h>
@@ -103,6 +105,8 @@ struct _BroPipelineRunner {
   BroEngineClock *clock;
   BroCoalescer *coalescer;
   GHashTable *live; /* job id → Live (a reference) */
+  BroRunnerCrashFunc crash; /* nullable: the test roots' crash hook */
+  gpointer crash_data;
   gboolean stopping; /* set by shutdown: nothing more is stored for any job */
   GPtrArray *idle;   /* Idle: who waits in shutdown for no job to be live */
 };
@@ -144,6 +148,7 @@ struct _Live {
   Waiter *waiter;
   gint64 log_seq;
   GBytes *log_before; /* the log file as an earlier run (or recovery) left it; this run's lines follow */
+  int warnings_before, errors_before; /* the warnings and errors in log_before, for the job's counts */
   GPtrArray *log;     /* BroLogLineDto */
   gboolean directory_made;
   gboolean log_read;
@@ -205,6 +210,45 @@ job_directory (BroPipelineRunner *self, const BroId *id)
   return g_strconcat (self->environment->data_directory, "/jobs/", id->value, NULL);
 }
 
+/* The job's counts (dtos.json Job.counts) once its log is read: the files it produced (Seal's, else Acquire's, as
+ * JobService's job lists them), the read errors of its steps' outputs, and the warnings and errors in its log (an
+ * earlier run's lines too). */
+static BroJobTotals *
+totals (Live *l)
+{
+  BroJobTotals *t = g_new0 (BroJobTotals, 1);
+  const BroStepOutput *seal = NULL, *acquire = NULL;
+  for (guint i = 0; i < l->outputs->len; i++)
+    {
+      const BroStepOutput *o = g_ptr_array_index (l->outputs, i);
+      if (!seal && o->kind == BRO_STEP_KIND_SEAL && bro_json_value_member (o->data, "files"))
+        seal = o;
+      if (!acquire && o->kind == BRO_STEP_KIND_ACQUIRE && bro_json_value_member (o->data, "titles"))
+        acquire = o;
+      t->read_errors += o->read_errors;
+    }
+  if (seal)
+    {
+      g_autoptr (BroSealOutput) decoded = bro_seal_output_decode (seal->data);
+      t->files = decoded ? (int) decoded->files->len : 0;
+    }
+  else if (acquire)
+    {
+      g_autoptr (BroAcquireOutput) decoded = bro_acquire_output_decode (acquire->data);
+      g_autoptr (GPtrArray) produced = decoded ? bro_acquire_output_produced (decoded) : NULL;
+      t->files = produced ? (int) produced->len : 0;
+    }
+  t->warnings = l->warnings_before;
+  t->errors = l->errors_before;
+  for (guint i = 0; i < l->log->len; i++)
+    {
+      const BroLogLineDto *line = g_ptr_array_index (l->log, i);
+      t->warnings += line->severity == BRO_SEVERITY_WARNING;
+      t->errors += line->severity == BRO_SEVERITY_ERROR;
+    }
+  return t;
+}
+
 static BroJobDto *
 dto (Live *l)
 {
@@ -212,6 +256,8 @@ dto (Live *l)
   d->progress = bro_progress_dto_copy (l->progress);
   d->blocked_by = l->blocked_by ? bro_bro_message_copy (l->blocked_by) : NULL;
   d->decision = bro_decision_dto_copy (l->decision);
+  g_free (d->counts);
+  d->counts = l->log_read ? totals (l) : NULL;
   return d;
 }
 
@@ -679,17 +725,46 @@ static gboolean
 end_work (gpointer data, BroBroError **error)
 {
   Work *w = data;
-  if (!bro_step_repository_save (bro_store_steps (w->store), w->step, error))
+  return bro_step_repository_save (bro_store_steps (w->store), w->step, error);
+}
+
+/* Writes the job's log file (w->log into w->log_directory). */
+static gboolean
+log_work (gpointer data, BroBroError **error)
+{
+  Work *w = data;
+  g_autofree char *path = g_strconcat (w->log_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
+  if (w->make_directory && !bro_file_system_create_directory (w->fs, w->log_directory, FALSE, error))
     return FALSE;
-  if (w->log)
-    {
-      g_autofree char *path = g_strconcat (w->log_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
-      if (w->make_directory && !bro_file_system_create_directory (w->fs, w->log_directory, FALSE, error))
-        return FALSE;
-      if (!bro_file_system_write_atomically (w->fs, path, w->log, 0600, error))
-        return FALSE;
-    }
-  return TRUE;
+  return bro_file_system_write_atomically (w->fs, path, w->log, 0600, error);
+}
+
+/* The crash hook at a point: FALSE when it failed, which stops the runner (nothing more is stored for any job) and ends
+ * the run as a shutdown does. */
+static gboolean
+crash_point (BroPipelineRunner *self, const char *prefix, BroStepKind kind)
+{
+  g_autofree char *point = NULL;
+  g_autoptr (BroBroError) error = NULL;
+  if (!self->crash)
+    return TRUE;
+  point = g_strconcat (prefix, bro_step_kind_to_wire (kind), NULL);
+  if (self->crash (point, self->crash_data, &error))
+    return TRUE;
+  self->stopping = TRUE;
+  return FALSE;
+}
+
+static void after_step (Live *l, const BroStepRecord *rec);
+
+static void
+log_done (gpointer data, const BroBroError *error)
+{
+  Work *w = data;
+  if (error)
+    conclude (w->live, bro_bro_error_copy (error));
+  else
+    after_step (w->live, w->step);
 }
 
 static void
@@ -699,21 +774,54 @@ end_done (gpointer data, const BroBroError *error)
   Live *l = w->live;
   BroPipelineRunner *self = l->runner;
   BroStepRecord *rec = w->step;
-  BroStepKind kind = rec->kind;
-  BroStepResult *result;
+  Work *lw;
   if (error)
     {
       conclude (l, bro_bro_error_copy (error));
+      return;
+    }
+  if (!crash_point (self, "afterStep:", rec->kind))
+    {
+      conclude (l, NULL);
       return;
     }
   {
     g_autoptr (BroJsonValue) event = bro_json_value_new_object ();
     bro_json_value_set (event, "job", bro_json_value_new_string (l->id.value));
     bro_json_value_set (event, "seq", bro_json_value_new_integer (rec->seq));
-    bro_json_value_set (event, "kind", bro_json_value_new_string (bro_step_kind_to_wire (kind)));
+    bro_json_value_set (event, "kind", bro_json_value_new_string (bro_step_kind_to_wire (rec->kind)));
     bro_json_value_set (event, "state", bro_json_value_new_string (bro_step_state_to_wire (rec->state)));
     bro_engine_event_unref (bro_event_bus_publish (self->bus, BRO_ENGINE_EVENT_TYPE_STEP_FINISHED, event));
   }
+  if (l->log->len == 0)
+    {
+      after_step (l, rec);
+      return;
+    }
+  lw = work_new (l);
+  lw->step = g_steal_pointer (&w->step);
+  {
+    g_autoptr (GBytes) added = bro_job_log_encode (l->log);
+    GByteArray *all = g_byte_array_new ();
+    if (l->log_before)
+      g_byte_array_append (all, g_bytes_get_data (l->log_before, NULL), g_bytes_get_size (l->log_before));
+    g_byte_array_append (all, g_bytes_get_data (added, NULL), g_bytes_get_size (added));
+    lw->log = g_byte_array_free_to_bytes (all);
+  }
+  lw->log_directory = job_directory (self, &l->id);
+  lw->fs = g_object_ref (self->environment->fs);
+  lw->make_directory = !l->directory_made;
+  l->directory_made = TRUE;
+  bro_engine_executor_worker (self->executor, log_work, log_done, lw, work_free);
+}
+
+/* The step's row is stored (and the log written): its result, then what comes next. */
+static void
+after_step (Live *l, const BroStepRecord *rec)
+{
+  BroPipelineRunner *self = l->runner;
+  BroStepKind kind = rec->kind;
+  BroStepResult *result;
   g_ptr_array_add (l->outputs, bro_step_output_copy (rec->output));
   result = bro_step_result_new (kind, rec->state);
   result->error = bro_bro_error_copy (rec->error);
@@ -815,19 +923,6 @@ step_done (gpointer data, const BroBroError *error)
     BroJsonValue *checkpoint = g_hash_table_lookup (l->checkpoints, GINT_TO_POINTER (kind));
     end->step->checkpoint = checkpoint ? bro_json_value_ref (checkpoint) : NULL;
   }
-  if (l->log->len > 0)
-    {
-      g_autoptr (GBytes) added = bro_job_log_encode (l->log);
-      GByteArray *all = g_byte_array_new ();
-      if (l->log_before)
-        g_byte_array_append (all, g_bytes_get_data (l->log_before, NULL), g_bytes_get_size (l->log_before));
-      g_byte_array_append (all, g_bytes_get_data (added, NULL), g_bytes_get_size (added));
-      end->log = g_byte_array_free_to_bytes (all);
-      end->log_directory = job_directory (self, &l->id);
-      end->fs = g_object_ref (self->environment->fs);
-      end->make_directory = !l->directory_made;
-      l->directory_made = TRUE;
-    }
   bro_engine_executor_worker (self->executor, end_work, end_done, end, work_free);
 }
 
@@ -937,6 +1032,11 @@ next_step (Live *l)
       conclude (l, unexpected (detail));
       return;
     }
+  if (!crash_point (self, "beforeStep:", kind))
+    {
+      conclude (l, NULL);
+      return;
+    }
   bro_coalescer_drop (self->coalescer, l->id.value); /* a new step's first progress goes out at once */
   bro_progress_dto_free (l->progress);
   l->progress = bro_progress_dto_new (kind, l->seq, l->steps->len, (double) l->seq / l->steps->len,
@@ -979,11 +1079,19 @@ completed_done (gpointer data, const BroBroError *error)
     {
       gsize n;
       const char *bytes = g_bytes_get_data (w->log, &n);
+      g_autoptr (GPtrArray) before = NULL;
       l->log_before = g_bytes_ref (w->log);
       for (gsize i = 0; i < n; i++)
         if (bytes[i] == '\n')
           l->log_seq++;
       l->directory_made = n > 0;
+      before = bro_job_log_decode (w->log);
+      for (guint i = 0; before && i < before->len; i++)
+        {
+          const BroLogLineDto *line = g_ptr_array_index (before, i);
+          l->warnings_before += line->severity == BRO_SEVERITY_WARNING;
+          l->errors_before += line->severity == BRO_SEVERITY_ERROR;
+        }
     }
   l->log_read = TRUE;
   for (guint i = 0; i < w->rows->len; i++) /* in seq order */
@@ -1409,9 +1517,11 @@ emit_progress (const char *key, BroJsonValue *value, gpointer data)
 
 BroPipelineRunner *
 bro_pipeline_runner_new (BroEngineExecutor *executor, BroEventBus *bus, BroScheduler *scheduler, BroStore *store, BroStepRegistry *registry,
-                         const BroStepEnvironment *environment, BroEngineClock *clock)
+                         const BroStepEnvironment *environment, BroEngineClock *clock, BroRunnerCrashFunc crash, gpointer crash_data)
 {
   BroPipelineRunner *self = g_object_new (BRO_TYPE_PIPELINE_RUNNER, NULL);
+  self->crash = crash;
+  self->crash_data = crash_data;
   BroDuration interval = { 0.1 };
   self->executor = g_object_ref (executor);
   self->bus = g_object_ref (bus);

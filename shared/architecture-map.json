@@ -15686,7 +15686,7 @@
         {
           "name": "PipelineRunner",
           "kind": "class",
-          "doc": "Runs jobs step by step (plan §12.3), on the executor; shutdown() at engine stop stores nothing more for the live jobs.",
+          "doc": "Runs jobs step by step (plan §12.3), on the executor; shutdown() at engine stop stores nothing more for the live jobs. An optional crash hook (test roots only) hears beforeStep:<kind> and afterStep:<kind>; what it throws stops the runner as shutdown does (pipeline-runner.cases.json, crash cases).",
           "swift": {
             "name": "PipelineRunner",
             "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/PipelineRunner.swift"

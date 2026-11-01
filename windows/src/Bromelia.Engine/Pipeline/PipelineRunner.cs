@@ -23,6 +23,7 @@ public sealed class PipelineRunner
     readonly StepEnvironment _env;
     readonly EngineClock _clock;
     readonly Coalescer _progress;
+    readonly Action<string>? _crash;
     readonly Dictionary<Id, Live> _live = new();
     /// <summary>Set by <see cref="Shutdown"/>: nothing more is stored for any job.</summary>
     bool _stopping;
@@ -44,6 +45,8 @@ public sealed class PipelineRunner
         public long LogSeq;
         /// <summary>The log file as an earlier run (or recovery) left it; this run's lines follow.</summary>
         public byte[] LogBefore = Array.Empty<byte>();
+        /// <summary>The warnings and errors in <see cref="LogBefore"/>, for the job's counts.</summary>
+        public int WarningsBefore, ErrorsBefore;
         public readonly List<LogLineDto> Log = new();
         public bool DirectoryMade;
         public bool LogRead;
@@ -54,9 +57,14 @@ public sealed class PipelineRunner
         public readonly Dictionary<StepKind, JsonValue> Checkpoints = new();
     }
 
+    /// <param name="crash">Called on the executor at each crash point of a run (the scenario runners' kill; the real roots pass
+    /// none): beforeStep:&lt;kind&gt; before the step asks for its resources (nothing of it is stored yet), afterStep:&lt;kind&gt;
+    /// once its finished row is stored (before stepFinished). What it throws stops the runner as <see cref="Shutdown"/> does,
+    /// without cancelling anything: nothing more is stored for any job, as a killed engine leaves it.</param>
     public PipelineRunner(EngineExecutor executor, EventBus bus, Scheduler scheduler, IStore store, StepRegistry registry,
-        StepEnvironment environment, EngineClock clock)
+        StepEnvironment environment, EngineClock clock, Action<string>? crash = null)
     {
+        _crash = crash;
         _executor = executor;
         _bus = bus;
         _scheduler = scheduler;
@@ -125,6 +133,22 @@ public sealed class PipelineRunner
         return _idle.Task;
     }
 
+    /// <summary>The crash hook at a point: what it throws stops the runner (nothing more is stored for any job) and goes on
+    /// up, ending the run as a shutdown does.</summary>
+    void CrashPoint(string point)
+    {
+        if (_crash is null) return;
+        try
+        {
+            _crash(point);
+        }
+        catch
+        {
+            _stopping = true;
+            throw;
+        }
+    }
+
     void Gone(Id jobId, Live live)
     {
         _live.Remove(jobId);
@@ -185,6 +209,9 @@ public sealed class PipelineRunner
         var logFile = JobDirectory(jobId) + "/" + JobLog.FileName;
         live.LogBefore = await _executor.Worker(() => _env.Fs.Exists(logFile) ? _env.Fs.Read(logFile) : Array.Empty<byte>());
         live.LogSeq = live.LogBefore.Count(b => b == (byte)'\n');
+        var before = JobLog.Decode(live.LogBefore);
+        live.WarningsBefore = before.Count(l => l.Severity == Severity.Warning);
+        live.ErrorsBefore = before.Count(l => l.Severity == Severity.Error);
         live.LogRead = true;
         live.DirectoryMade = live.LogBefore.Length > 0;
         var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
@@ -203,6 +230,7 @@ public sealed class PipelineRunner
             }
             var kind = live.Steps[seq];
             var step = _registry.Step(kind) ?? throw new BroFailure(Unexpected("no step " + EnumWire.Name(kind)));
+            CrashPoint("beforeStep:" + EnumWire.Name(kind));
             live.Seq = seq;
             _progress.Drop(jobId.Value); // a new step's first progress goes out at once
             live.Progress = new ProgressDto(kind, seq, live.Steps.Count, (double)seq / live.Steps.Count, null,
@@ -251,6 +279,7 @@ public sealed class PipelineRunner
             var output = new StepOutput(kind, report?.Data ?? Empty, report?.Summary, report?.ReadErrors ?? 0);
             await _executor.Worker(() => _store.Steps().Save(new StepRecord(jobId, seq, kind, state, 1, started, _clock.Now(), output, error,
                 live.Checkpoints.GetValueOrDefault(kind))));
+            CrashPoint("afterStep:" + EnumWire.Name(kind));
             _bus.Publish(EngineEventType.StepFinished, JsonValue.Of(("job", JsonValue.Of(jobId.Value)), ("seq", JsonValue.Of(seq)),
                 ("kind", JsonValue.Of(EnumWire.Name(kind))), ("state", JsonValue.Of(EnumWire.Name(state)))));
             await WriteLog(live);
@@ -354,7 +383,24 @@ public sealed class PipelineRunner
         }
     }
 
-    JobDto Dto(Live live) => JobDto.Of(live.Record) with { Progress = live.Progress, BlockedBy = live.BlockedBy, Decision = live.Decision?.Question };
+    JobDto Dto(Live live) => JobDto.Of(live.Record) with
+    {
+        Progress = live.Progress, BlockedBy = live.BlockedBy, Decision = live.Decision?.Question, Counts = live.LogRead ? Totals(live) : null,
+    };
+
+    /// <summary>The job's counts (dtos.json Job.counts) once its log is read: the files it produced (Seal's, else
+    /// Acquire's, as JobService.job lists them), the read errors of its steps' outputs, and the warnings and errors in its
+    /// log (an earlier run's lines too).</summary>
+    static JobTotals Totals(Live live)
+    {
+        int files = live.Outputs.FirstOrDefault(o => o.Kind == StepKind.Seal && o.Data["files"] != null) is { } seal
+            ? SealOutput.Decode(seal.Data).Files.Count
+            : live.Outputs.FirstOrDefault(o => o.Kind == StepKind.Acquire && o.Data["titles"] != null) is { } acquire
+                ? AcquireOutput.Produced(AcquireOutput.Decode(acquire.Data)).Count
+                : 0;
+        return new JobTotals(files, live.WarningsBefore + live.Log.Count(l => l.Severity == Severity.Warning),
+            live.ErrorsBefore + live.Log.Count(l => l.Severity == Severity.Error), live.Outputs.Sum(o => o.ReadErrors));
+    }
 
     void OnProgress(Live live, int seq, double fraction, BroMessage operation, string? current)
     {

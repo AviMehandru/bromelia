@@ -10,7 +10,8 @@ namespace Bromelia.TestKit;
 /// writing, a case's setup) aren't. <see cref="Cached"/> is what a read through the cache gives instead of what is on disk;
 /// <see cref="Fails"/> makes an operation on a path fail before it acts (open, read, sync, syncDirectory, write, remove,
 /// rename: its from path); a rename refuses a path that exists and a folder that isn't there, as the real ones do;
-/// <see cref="OnOp"/> hears of each operation before it acts.</summary>
+/// <see cref="OnOp"/> hears of each operation before it acts. While <see cref="Freeze"/> holds, every call that changes something
+/// fails (fs.failed, reason "frozen"): a killed engine's writes never land.</summary>
 public sealed class MemoryFileSystem : IFileSystem
 {
     readonly object _lock = new();
@@ -35,8 +36,25 @@ public sealed class MemoryFileSystem : IFileSystem
     /// <summary>The streams OpenForReading gave that aren't closed yet.</summary>
     public int OpenStreams;
 
+    volatile bool _frozen;
+
+    /// <summary>From now on every call that changes something (write, rename, remove, createDirectory, sync, syncDirectory)
+    /// fails, until <see cref="Thaw"/>. <see cref="Put"/> and <see cref="PutFolder"/> still work.</summary>
+    public void Freeze() => _frozen = true;
+
+    public void Thaw() => _frozen = false;
+
+    public bool Frozen => _frozen;
+
+    void CheckNotFrozen(string op, string path)
+    {
+        if (_frozen)
+            throw new BroFailure(new BroError("fs.failed", ("operation", JsonValue.Of(op)), ("path", JsonValue.Of(path)), ("reason", JsonValue.Of("frozen"))));
+    }
+
     void Check(string op, string path)
     {
+        if (op is "write" or "rename" or "remove" or "sync" or "syncDirectory") CheckNotFrozen(op, path);
         OnOp?.Invoke(op, path);
         foreach (var f in Fails)
             if (f.Op == op && f.Path == path) throw new BroFailure(f.Error);
@@ -90,7 +108,11 @@ public sealed class MemoryFileSystem : IFileSystem
                 : throw NotFound(path);
     }
 
-    public void CreateDirectory(string path, bool parentsMustExist) => PutFolder(path);
+    public void CreateDirectory(string path, bool parentsMustExist)
+    {
+        CheckNotFrozen("createDirectory", path);
+        PutFolder(path);
+    }
 
     public void WriteAtomically(string path, byte[] bytes, int mode)
     {
@@ -186,7 +208,49 @@ public sealed class MemoryFileSystem : IFileSystem
         }
     }
 
-    public IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy, Action<MovedItem>? onMoved = null) => throw new NotSupportedException();
+    /// <summary>As the platform file systems do it: each entry of <paramref name="from"/> in turn, a folder merging into a
+    /// folder of the same name (ASCII case ignored), anything else moving under ConflictNamer's name; emptied folders go.</summary>
+    public IReadOnlyList<MovedItem> MoveMerging(string from, string to, MovePolicy policy, Action<MovedItem>? onMoved = null)
+    {
+        if (!Exists(from)) throw NotFound(from);
+        if (!Stat(from).IsDirectory)
+            throw new BroFailure(new BroError("fs.failed", ("operation", JsonValue.Of("move")), ("path", JsonValue.Of(from)), ("reason", JsonValue.Of("it isn't a folder"))));
+        if (!Exists(to)) CreateDirectory(to, parentsMustExist: true);
+        else if (!Stat(to).IsDirectory) throw new BroFailure(new BroError("fs.alreadyExists", ("path", JsonValue.Of(to))));
+        var moved = new List<MovedItem>();
+        Merge(from, to, m =>
+        {
+            moved.Add(m);
+            onMoved?.Invoke(m);
+        });
+        return moved.OrderBy(m => m.From, StringComparer.Ordinal).ToList();
+    }
+
+    void Merge(string source, string target, Action<MovedItem> moved)
+    {
+        foreach (var e in List(source).OrderBy(e => e.Name, StringComparer.Ordinal))
+        {
+            var src = source + "/" + e.Name;
+            var existing = List(target);
+            var same = existing.FirstOrDefault(x => AsciiLower(x.Name) == AsciiLower(e.Name));
+            if (e.IsDirectory && same is { IsDirectory: true })
+            {
+                Merge(src, target + "/" + same.Name, moved);
+                Remove(src);
+                continue;
+            }
+            var dst = target + "/" + Bromelia.Domain.ConflictNamer.Next(e.Name, existing.Select(x => x.Name).ToList(), e.IsDirectory);
+            Rename(src, dst);
+            if (!e.IsDirectory) moved(new MovedItem(src, dst));
+            else
+                lock (_lock)
+                    foreach (var f in _files.Keys.Where(k => k.StartsWith(dst + "/", StringComparison.Ordinal)).OrderBy(k => k, StringComparer.Ordinal).ToList())
+                        moved(new MovedItem(src + f[dst.Length..], f));
+        }
+    }
+
+    static string AsciiLower(string s) => new(s.Select(c => c is >= 'A' and <= 'Z' ? (char)(c + 32) : c).ToArray());
+
     public void MoveToTrash(string path, string trash) => throw new NotSupportedException();
     public void SyncDirectory(string path)
     {

@@ -229,7 +229,7 @@ run_new (BroJsonValue *given)
   run->holds = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   run->r = test_composition_root_new (bro_json_value_get_bool (J (given, "makemkvcon"), TRUE), S (given, "makemkvVersion", NULL),
                                       bro_json_value_get_bool (J (given, "mkvmerge"), TRUE), NULL, 8,
-                                      (guint) bro_json_value_get_integer (J (given, "streamCapacity"), 1024));
+                                      (guint) bro_json_value_get_integer (J (given, "streamCapacity"), 1024), NULL);
   if (!config)
     {
       default_config = bro_json_value_parse (
@@ -1137,7 +1137,7 @@ step (Run *run, BroJsonValue *s)
   if (!strcmp (key, "restart"))
     {
       g_autoptr (BroBroError) error = NULL;
-      if (!test_composition_root_restart (run->r, STOP_PATIENCE, &error))
+      if (!test_composition_root_restart (run->r, STOP_PATIENCE, &error, NULL))
         step_failed (run, "restart: %s", error ? error->code : "never ended");
       return !run->failure;
     }

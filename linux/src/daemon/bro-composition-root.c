@@ -147,7 +147,7 @@ bro_composition_root_build (const BroRootOptions *options, BroBroError **error)
                                                BRO_CATALOG_QUERIES (libraries), BRO_CONFIG_SOURCE (config), BRO_DRIVE_LOOKUP (drives),
                                                BRO_MAKEMKV_SETUP (makemkv_setup), data, BRO_MESSAGE_RENDERER (messages),
                                                BRO_COMPOSITION_ROOT_APP_VERSION);
-  runner = bro_pipeline_runner_new (executor, bus, scheduler, BRO_STORE (store), registry, step_environment, engine_clock);
+  runner = bro_pipeline_runner_new (executor, bus, scheduler, BRO_STORE (store), registry, step_environment, engine_clock, NULL, NULL);
   bro_step_environment_free (step_environment);
   jobs = bro_job_service_new (executor, bus, BRO_STORE (store), scheduler, runner, engine_clock, BRO_ID_GENERATOR (ids), files, data);
   recovery = bro_recovery_service_new (executor, bus, problems, BRO_STORE (store), registry, libraries, BRO_CONFIG_SOURCE (config), engine_clock,

@@ -26,6 +26,9 @@ public final class PipelineRunner {
         var logSeq: Int64 = 0
         /// The log file as an earlier run (or recovery) left it; this run's lines follow.
         var logBefore: [UInt8] = []
+        /// The warnings and errors in `logBefore`, for the job's counts.
+        var warningsBefore = 0
+        var errorsBefore = 0
         var log: [LogLineDto] = []
         var directoryMade = false
         var logRead = false
@@ -43,6 +46,7 @@ public final class PipelineRunner {
     private let registry: StepRegistry
     private let environment: StepEnvironment
     private let clock: EngineClock
+    private let crash: (@Sendable (String) throws(BroError) -> Void)?
     private var coalescer: Coalescer?
     private var live: [Id: Live] = [:]
     /// Set by `shutdown()`: nothing more is stored for any job.
@@ -50,8 +54,13 @@ public final class PipelineRunner {
     /// Who waits in `shutdown()` for no job to be live.
     private var idle: [Resumption<Void>] = []
 
+    /// `crash` is called on the executor at each crash point of a run (the scenario runners' kill; the real roots pass none):
+    /// beforeStep:<kind> before the step asks for its resources (nothing of it is stored yet), afterStep:<kind> once its
+    /// finished row is stored (before stepFinished). What it throws stops the runner as `shutdown()` does, without
+    /// cancelling anything: nothing more is stored for any job, as a killed engine leaves it.
     public init(executor: EngineExecutor, bus: EventBus, scheduler: Scheduler, store: any Store, registry: StepRegistry,
-                environment: StepEnvironment, clock: EngineClock) {
+                environment: StepEnvironment, clock: EngineClock, crash: (@Sendable (String) throws(BroError) -> Void)? = nil) {
+        self.crash = crash
         self.executor = executor
         self.bus = bus
         self.scheduler = scheduler
@@ -106,6 +115,18 @@ public final class PipelineRunner {
         for jobId in Array(live.keys) { cancel(jobId) }
         if live.isEmpty { return }
         await executor.suspend { (r: Resumption<Void>) in idle.append(r) }
+    }
+
+    /// The crash hook at a point: what it throws stops the runner (nothing more is stored for any job) and goes on up,
+    /// ending the run as a shutdown does.
+    private func crashPoint(_ point: String) throws(BroError) {
+        guard let crash else { return }
+        do throws(BroError) {
+            try crash(point)
+        } catch {
+            stopping = true
+            throw error
+        }
     }
 
     private func gone(_ jobId: Id, _ l: Live) {
@@ -178,6 +199,9 @@ public final class PipelineRunner {
         let logFile = jobDirectory(jobId) + "/" + JobLog.fileName
         l.logBefore = try await executor.worker { () throws(BroError) -> [UInt8] in fs.exists(logFile) ? try fs.read(logFile) : [] }
         l.logSeq = Int64(l.logBefore.filter { $0 == UInt8(ascii: "\n") }.count)
+        let before = JobLog.decode(l.logBefore)
+        l.warningsBefore = before.filter { $0.severity == .warning }.count
+        l.errorsBefore = before.filter { $0.severity == .error }.count
         l.logRead = true
         l.directoryMade = !l.logBefore.isEmpty
         let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
@@ -195,6 +219,7 @@ public final class PipelineRunner {
             }
             let kind = l.steps[seq]
             guard let step = registry.step(kind) else { throw PipelineRunner.unexpected("no step \(kind.rawValue)") }
+            try crashPoint("beforeStep:" + kind.rawValue)
             l.seq = seq
             coalescer?.drop(jobId.value) // a new step's first progress goes out at once
             l.progress = ProgressDto(step: kind, stepIndex: seq, stepCount: l.steps.count, fraction: Double(seq) / Double(l.steps.count),
@@ -243,6 +268,7 @@ public final class PipelineRunner {
             let endRecord = StepRecord(jobId: jobId, seq: seq, kind: kind, state: state, attempt: 1, startedAt: started, finishedAt: clock.now(),
                                        output: output, error: error, checkpoint: l.checkpoints[kind])
             try await executor.worker { () async throws(BroError) in try await store.steps().save(endRecord) }
+            try crashPoint("afterStep:" + kind.rawValue)
             bus.publish(.stepFinished, data: .object([("job", .string(jobId.value)), ("seq", .integer(Int64(seq))), ("kind", .string(kind.rawValue)),
                                                       ("state", .string(state.rawValue))]))
             try await writeLog(l)
@@ -343,7 +369,24 @@ public final class PipelineRunner {
         dto.progress = l.progress
         dto.blockedBy = l.blockedBy
         dto.decision = l.decision?.question
+        dto.counts = l.logRead ? Self.totals(l) : nil
         return dto
+    }
+
+    /// The job's counts (dtos.json Job.counts) once its log is read: the files it produced (Seal's, else Acquire's, as
+    /// JobService.job lists them), the read errors of its steps' outputs, and the warnings and errors in its log (an
+    /// earlier run's lines too).
+    private static func totals(_ l: Live) -> JobTotals {
+        let files = if let seal = l.outputs.first(where: { $0.kind == .seal && $0.data["files"] != nil }) {
+            SealOutput.decode(seal.data).files.count
+        } else if let acquire = l.outputs.first(where: { $0.kind == .acquire && $0.data["titles"] != nil }) {
+            AcquireOutput.produced(AcquireOutput.decode(acquire.data)).count
+        } else {
+            0
+        }
+        return JobTotals(files: files, warnings: l.warningsBefore + l.log.filter { $0.severity == .warning }.count,
+                         errors: l.errorsBefore + l.log.filter { $0.severity == .error }.count,
+                         readErrors: l.outputs.reduce(0) { $0 + $1.readErrors })
     }
 
     fileprivate func onProgress(_ l: Live, _ seq: Int, _ fraction: Double, _ operation: BroMessage, _ current: String?) {

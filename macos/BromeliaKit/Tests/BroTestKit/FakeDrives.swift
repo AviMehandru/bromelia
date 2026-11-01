@@ -6,13 +6,28 @@ import Foundation
 /// The operating system's drives, faked (plan §17): what `currentDrives` lists, the events `send` reports to the
 /// monitor's sink, the content `probeContent` finds for a device (video unless `setContent` says otherwise), and the tray
 /// calls, recorded in `calls()` ("eject <device>", "closeTray <device>"). A mount wait answers the drive's mount path at
-/// once. Raw sector reads aren't faked. Thread-safe.
+/// once. Raw sector reads aren't faked. `onEject` and `onCloseTray` hear of each tray call after it is recorded (a
+/// scenario's drive world changes with it). Thread-safe.
 public final class FakeDrives: DeviceMonitor, DriveControl, @unchecked Sendable {
     private let lock = NSLock()
     private var drives: [OsDrive] = []
     private var contents: [String: DiscContent] = [:]
     private var recorded: [String] = []
     private var sink: (@Sendable (DeviceEvent) -> Void)?
+    private var ejectHook: (@Sendable (String) -> Void)?
+    private var closeTrayHook: (@Sendable (String) -> Void)?
+
+    /// Hears of each eject the engine asks for, with its device (outside the lock).
+    public var onEject: (@Sendable (String) -> Void)? {
+        get { lock.withLock { ejectHook } }
+        set { lock.withLock { ejectHook = newValue } }
+    }
+
+    /// Hears of each tray close the engine asks for, with its device (outside the lock).
+    public var onCloseTray: (@Sendable (String) -> Void)? {
+        get { lock.withLock { closeTrayHook } }
+        set { lock.withLock { closeTrayHook = newValue } }
+    }
 
     public init() {}
 
@@ -44,9 +59,21 @@ public final class FakeDrives: DeviceMonitor, DriveControl, @unchecked Sendable 
 
     public func currentDrives() -> [OsDrive] { lock.withLock { drives } }
 
-    public func eject(_ device: String) async throws(BroError) { lock.withLock { recorded.append("eject " + device) } }
+    public func eject(_ device: String) async throws(BroError) {
+        let hook = lock.withLock { () -> (@Sendable (String) -> Void)? in
+            recorded.append("eject " + device)
+            return ejectHook
+        }
+        hook?(device)
+    }
 
-    public func closeTray(_ device: String) async throws(BroError) { lock.withLock { recorded.append("closeTray " + device) } }
+    public func closeTray(_ device: String) async throws(BroError) {
+        let hook = lock.withLock { () -> (@Sendable (String) -> Void)? in
+            recorded.append("closeTray " + device)
+            return closeTrayHook
+        }
+        hook?(device)
+    }
 
     public func waitForMount(_ device: String, timeout: Duration, cancel: CancellationToken) async -> String? {
         lock.withLock { drives.first { $0.device == device }?.mountPath }

@@ -8,7 +8,8 @@ import Foundation
 /// 'open <path> disk|cache'); `put` and `putFolder` (a tool writing, a case's setup) aren't. `setCached` gives what a read
 /// through the cache gives instead of what is on disk; `fail` makes an operation on a path fail before it acts (open,
 /// read, sync, syncDirectory, write, remove, rename: its from path); a rename refuses a path that exists and a folder that
-/// isn't there, as the real ones do; `onOp` hears of each operation before it acts. Paths are keyed by their
+/// isn't there, as the real ones do; `onOp` hears of each operation before it acts. While `freeze()` holds, every call
+/// that changes something fails (fs.failed, reason "frozen"): a killed engine's writes never land. Paths are keyed by their
 /// UTF-8 bytes, as a disk names them: an NFC and an NFD spelling of one name are two files (Swift's `==` on String
 /// would make them one).
 public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
@@ -26,8 +27,21 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     private var readFails: [[UInt8]: BroError] = [:]
     private var _reads: [String: Int] = [:]
     private var _openStreams = 0
+    private var _frozen = false
 
     public init() {}
+
+    /// From now on every call that changes something (write, rename, remove, createDirectory, sync, syncDirectory) fails,
+    /// until `thaw()`. `put` and `putFolder` still work.
+    public func freeze() { lock.withLock { _frozen = true } }
+
+    public func thaw() { lock.withLock { _frozen = false } }
+
+    public var frozen: Bool { lock.withLock { _frozen } }
+
+    private func checkNotFrozen(_ op: String, _ path: String) throws(BroError) {
+        if frozen { throw BroError("fs.failed", [("operation", .string(op)), ("path", .string(path)), ("reason", .string("frozen"))]) }
+    }
 
     public var ops: [String] { lock.withLock { _ops } }
     /// How many pieces of each file were read while `recording` was on.
@@ -75,6 +89,7 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
 
     /// `onOp`, then the failure set for this operation and path, if any.
     private func check(_ op: String, _ path: String) throws(BroError) {
+        if ["write", "rename", "remove", "sync", "syncDirectory"].contains(op) { try checkNotFrozen(op, path) }
         let (hook, error) = lock.withLock { (_onOp, fails.first { $0.op == op && $0.path == path }?.error) }
         hook?(op, path)
         if let error { throw error }
@@ -123,7 +138,10 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
         guard let b else { throw MemoryFileSystem.notFound(path) }
         return b
     }
-    public func createDirectory(_ path: String, parentsMustExist: Bool) throws(BroError) { putFolder(path) }
+    public func createDirectory(_ path: String, parentsMustExist: Bool) throws(BroError) {
+        try checkNotFrozen("createDirectory", path)
+        putFolder(path)
+    }
     public func writeAtomically(_ path: String, bytes: [UInt8], mode: Int) throws(BroError) {
         try check("write", path)
         let folder = MemoryFileSystem.parent(path)
@@ -189,7 +207,50 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
         }
         if let error { throw error }
     }
-    public func moveMerging(_ from: String, to: String, policy: MovePolicy, onMoved: (MovedItem) -> Void) throws(BroError) -> [MovedItem] { fatalError("not used") }
+    /// As the platform file systems do it: each entry of `from` in turn, a folder merging into a folder of the same name
+    /// (ASCII case ignored), anything else moving under ConflictNamer's name; emptied folders go.
+    public func moveMerging(_ from: String, to: String, policy: MovePolicy, onMoved: (MovedItem) -> Void) throws(BroError) -> [MovedItem] {
+        if !exists(from) { throw MemoryFileSystem.notFound(from) }
+        if try !stat(from).isDirectory {
+            throw BroError("fs.failed", [("operation", .string("move")), ("path", .string(from)), ("reason", .string("it isn't a folder"))])
+        }
+        if !exists(to) { try createDirectory(to, parentsMustExist: true) } else if try !stat(to).isDirectory {
+            throw BroError("fs.alreadyExists", [("path", .string(to))])
+        }
+        var moved: [MovedItem] = []
+        try merge(from, to) { m in
+            moved.append(m)
+            onMoved(m)
+        }
+        return moved.sorted { $0.from.utf8.lexicographicallyPrecedes($1.from.utf8) }
+    }
+
+    private func merge(_ source: String, _ target: String, _ moved: (MovedItem) -> Void) throws(BroError) {
+        for e in try list(source) {
+            let src = source + "/" + e.name
+            let existing = try list(target)
+            let lower = MemoryFileSystem.asciiLower(e.name)
+            if e.isDirectory, let same = existing.first(where: { MemoryFileSystem.asciiLower($0.name) == lower }), same.isDirectory {
+                try merge(src, target + "/" + same.name, moved)
+                try remove(src)
+                continue
+            }
+            let dst = target + "/" + ConflictNamer.next(e.name, existing: existing.map(\.name), isFolder: e.isDirectory)
+            try rename(src, to: dst)
+            if !e.isDirectory {
+                moved(MovedItem(from: src, to: dst))
+            } else {
+                let inside = MemoryFileSystem.key(dst + "/")
+                let under = lock.withLock { files.keys.filter { $0.starts(with: inside) }.sorted { $0.lexicographicallyPrecedes($1) } }
+                for f in under {
+                    let rest = String(decoding: f.dropFirst(inside.count - 1), as: UTF8.self)
+                    moved(MovedItem(from: src + rest, to: dst + rest))
+                }
+            }
+        }
+    }
+
+    private static func asciiLower(_ s: String) -> [UInt8] { s.utf8.map { $0 >= 65 && $0 <= 90 ? $0 + 32 : $0 } }
     public func remove(_ path: String) throws(BroError) {
         try check("remove", path)
         let error = lock.withLock { () -> BroError? in

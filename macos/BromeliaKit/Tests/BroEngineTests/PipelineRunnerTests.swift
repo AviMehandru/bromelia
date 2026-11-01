@@ -88,6 +88,14 @@ struct FakeStep: Step {
 
     static func strings(_ j: JsonValue?) -> [String] { (j?.array ?? []).map { $0.string! } }
 
+    /// Log entries: a code (info), or {code, severity}.
+    static func logEntries(_ j: JsonValue?) -> [BroMessage] {
+        (j?.array ?? []).map { e in
+            if let code = e.string { return BroMessage(MessageCode(rawValue: code)!) }
+            return BroMessage(MessageCode(rawValue: e["code"]!.string!)!, [], severity: Severity(rawValue: e["severity"]!.string!)!)
+        }
+    }
+
     static func message(_ j: JsonValue, severity: Severity = .info) -> BroMessage {
         BroMessage(MessageCode(rawValue: j["code"]!.string!)!, j["params"]?.members ?? [], severity: severity)
     }
@@ -102,14 +110,14 @@ struct FakeStep: Step {
 
     func run(_ context: StepContext) async throws(BroError) -> StepReport {
         if let end = context.finishing {
-            for code in FakeStep.strings(behaviour["log"]) { context.log.log(BroMessage(MessageCode(rawValue: code)!)) }
+            for line in FakeStep.logEntries(behaviour["log"]) { context.log.log(line) }
             behaviours.saw(context.job.id, end.outcome.rawValue + " " + (end.error?.code ?? ""))
             return StepReport()
         }
         for p in behaviour["progress"]?.array ?? [] {
             context.progress.report(p.array![0].double!, operation: BroMessage(MessageCode(rawValue: p.array![1].string!)!), current: nil)
         }
-        for code in FakeStep.strings(behaviour["log"]) { context.log.log(BroMessage(MessageCode(rawValue: code)!)) }
+        for line in FakeStep.logEntries(behaviour["log"]) { context.log.log(line) }
         var data = behaviour["output"] ?? .object([])
         if let key = behaviour["config"]?.string { data = .object([(key, context.config.document[key] ?? .null)]) }
         if let echo = behaviour["echo"]?.string { data = context.job.outputs.last { $0.kind.rawValue == echo }!.data }
@@ -151,6 +159,30 @@ struct FakeStep: Step {
     }
 }
 
+/// The runner's crash hook in a case: every point it reaches, in order; at the case's crashAt it throws.
+final class CrashRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let at: String?
+    private var reached: [String] = []
+    private var hit = false
+
+    init(_ at: String?) { self.at = at }
+
+    var crashed: Bool { lock.withLock { hit } }
+
+    func points() -> [String] { lock.withLock { reached } }
+
+    func reach(_ point: String) throws(BroError) {
+        let crash = lock.withLock { () -> Bool in
+            reached.append(point)
+            if point != at { return false }
+            hit = true
+            return true
+        }
+        if crash { throw BroError("internal.unexpected", [("detail", .string("crashed at " + point))]) }
+    }
+}
+
 @EngineActor
 final class PipelineHarness {
     let world = World()
@@ -180,6 +212,10 @@ final class PipelineHarness {
     var announcedUnstored: [String] = []
     /// After a stop op: the jobs' last states no longer say whether they settled.
     var stopped = false
+    /// Every crash point the runner reached, and whether the case's crashAt was reached (the crashed job never finishes).
+    let crashes: CrashRecorder
+    /// The jobs whose run ended with server.stopping (a crash point, a shutdown).
+    var stoppedJobs: Set<String> = []
 
     /// `service`: job-service cases (cancel and decide go through the JobService).
     init(_ given: JsonValue, service: Bool = false) async throws {
@@ -197,8 +233,10 @@ final class PipelineHarness {
         let env = StepEnvironment(tools: ToolSet(makemkv: unused, matroska: unused), fs: fs, clock: world.clock, drives: unused, library: unused,
                                   catalog: unused, config: config, driveLookup: unused, makemkvSetup: unused, dataDirectory: "/data",
                                   messages: Renderer(), appVersion: "test")
+        let crashes = CrashRecorder(given["crashAt"]?.string)
+        self.crashes = crashes
         runner = PipelineRunner(executor: world.executor, bus: bus, scheduler: scheduler, store: store, registry: StepRegistry(steps),
-                                environment: env, clock: world.engineClock)
+                                environment: env, clock: world.engineClock, crash: { (point: String) throws(BroError) in try crashes.reach(point) })
         jobService = JobService(executor: world.executor, bus: bus, store: store, scheduler: scheduler, runner: runner, clock: world.engineClock,
                                 ids: ids, fs: fs, dataDirectory: "/data")
         subscription = bus.subscribe(types: []) { [unowned self] e in self.onEvent(e) }
@@ -237,8 +275,8 @@ final class PipelineHarness {
             if j["intent"]?.bool == true { store.openIntent(id) }
             if let unit = j["unit"]?.string { store.storeUnit(id, UnitState(rawValue: unit)!) }
             if let log = j["log"] {
-                let lines = FakeStep.strings(log).enumerated().map { n, c in
-                    LogLineDto(seq: Int64(n + 1), t: world.clock.now(), severity: .info, code: MessageCode(rawValue: c)!, params: [])
+                let lines = FakeStep.logEntries(log).enumerated().map { n, m in
+                    LogLineDto(seq: Int64(n + 1), t: world.clock.now(), severity: m.severity, code: m.code, params: [])
                 }
                 try fs.createDirectory("/data/jobs/\(id.value)", parentsMustExist: false)
                 try fs.writeAtomically("/data/jobs/\(id.value)/log.jsonl", bytes: JobLog.encode(lines), mode: 0o600)
@@ -271,7 +309,7 @@ final class PipelineHarness {
         let atGate = gates.parked()
         var parked = atGate.count
         var ok = true
-        for (name, id) in jobs where !stopped && started.contains(name) && outcomes[name] == nil {
+        for (name, id) in jobs where !stopped && !crashes.crashed && started.contains(name) && outcomes[name] == nil {
             let last = events.last { ($0.type == .jobChanged || $0.type == .jobFinished) && $0.data["job"]?["id"]?.string == id.value }
             let state = last?.data["job"]?["state"]?.string
             if state == nil && service { continue } // a created job not stored yet (its insert held): the activity tells
@@ -306,7 +344,11 @@ final class PipelineHarness {
             let job = arg.string!, jobId = id(job)
             started.insert(job)
             Task { @EngineActor in
-                if let d = try? await self.runner.run(jobId) { self.outcomes[job] = d }
+                do throws(BroError) {
+                    self.outcomes[job] = try await self.runner.run(jobId)
+                } catch {
+                    if error.code == MessageCode.wire(.serverStopping) { self.stoppedJobs.insert(job) }
+                }
             }
         case "open":
             gates.open(arg.string!)
@@ -572,6 +614,17 @@ struct PipelineRunnerTests {
             for (kind, data) in want.members! {
                 try Fixtures.same(data, steps.last { $0.kind.rawValue == kind }!.output!.data, "output of \(name)'s \(kind)")
             }
+        }
+        if let points = expect["crashPoints"] {
+            try Fixtures.same(FakeStep.strings(points).joined(separator: " | "), h.crashes.points().joined(separator: " | "), "crash points")
+        }
+        if let stopped = expect["stopped"] {
+            try Fixtures.same(FakeStep.strings(stopped).joined(separator: " "), await h.stoppedJobs.sorted().joined(separator: " "), "stopped")
+        }
+        for (name, want) in expect["counts"]?.members ?? [] {
+            let id = await h.id(name).value
+            let last = await h.events.last { ($0.type == .jobChanged || $0.type == .jobFinished) && $0.data["job"]?["id"]?.string == id }
+            try Fixtures.same(Fixtures.sorted(want), Fixtures.sorted(last?.data["job"]?["counts"] ?? .null), "counts of \(name)")
         }
         if let want = expect["events"] { try Fixtures.same(want, JsonValue.array(events), "events") }
         await h.world.executor.stop()

@@ -166,6 +166,10 @@ struct _TestManualClock {
 void test_manual_clock_advance (TestManualClock *self, gint64 ms, void (*settle) (gpointer), gpointer settle_data);
 /* The timers not cancelled yet. */
 int test_manual_clock_pending (TestManualClock *self);
+/* When the next timer not cancelled is due (into @due); FALSE when there is none. */
+gboolean test_manual_clock_next_due (TestManualClock *self, BroInstant *due);
+/* Cancels every timer (a killed engine's: none of them fires any more). */
+void test_manual_clock_cancel_all (TestManualClock *self);
 
 /* ---- files and folders in memory, moved from test-pipeline.inc ------------------------------------------------------ */
 
@@ -174,7 +178,11 @@ typedef void (*TestReadFunc) (const char *path, gpointer data);
 
 /* What the engine's tests need of the FileSystem port. Thread-safe. test_memory_fs_fail makes an operation on a path
  * fail before it acts (open, read, sync, syncDirectory, write, remove, rename: its from path); a rename refuses a path
- * that exists and a folder that isn't there, as the real ones do. move_merging and move_to_trash aren't faked. */
+ * that exists and a folder that isn't there, as the real ones do. move_merging moves as the platform file systems do (a
+ * folder merges into a folder of the same name, ASCII case ignored; anything else takes ConflictNamer's name); move_to_trash
+ * isn't faked. While test_memory_fs_freeze holds, every call that changes something (write, rename, remove,
+ * createDirectory, sync, syncDirectory) fails (fs.failed, reason "frozen"): a killed engine's writes never land;
+ * test_memory_fs_put and test_memory_fs_put_folder still work. */
 #define TEST_TYPE_MEMORY_FS (test_memory_fs_get_type ())
 G_DECLARE_FINAL_TYPE (TestMemoryFs, test_memory_fs, TEST, MEMORY_FS, GObject)
 
@@ -189,11 +197,16 @@ struct _TestMemoryFs {
   BroVolumeInfo *any_volume; /* what volume gives for any path (NULL: fs.notFound); set before use */
   TestReadFunc on_read;      /* set before use */
   gpointer on_read_data;
+  gint frozen;               /* atomic */
 };
 
 /* A file with these bytes, its folders made. */
 void test_memory_fs_put (TestMemoryFs *self, const char *path, const void *bytes, gsize length);
 void test_memory_fs_put_folder (TestMemoryFs *self, const char *path);
+/* Every call that changes something fails from now on, until thaw. */
+void test_memory_fs_freeze (TestMemoryFs *self);
+void test_memory_fs_thaw (TestMemoryFs *self);
+gboolean test_memory_fs_frozen (TestMemoryFs *self);
 /* @op on @path fails with @error (copied) from now on. */
 void test_memory_fs_fail (TestMemoryFs *self, const char *op, const char *path, const BroBroError *error);
 /* No operation fails any more (read_fails stay). */
@@ -218,8 +231,9 @@ BroId bro_test_counted_id (int n);
 
 /* What current_drives lists, the events test_fake_drives_send reports to the monitor's sink, the content probe_content
  * finds for a device (video unless test_fake_drives_set_content says otherwise), and the tray calls ("eject <device>",
- * "closeTray <device>"). A mount wait answers the drive's mount path at once. Raw sector reads aren't faked.
- * Thread-safe. */
+ * "closeTray <device>"). A mount wait answers the drive's mount path at once. Raw sector reads aren't faked. The tray
+ * callbacks (test_fake_drives_on_tray) hear of each tray call after it is recorded (a scenario's drive world changes with
+ * it). Thread-safe. */
 #define TEST_TYPE_FAKE_DRIVES (test_fake_drives_get_type ())
 G_DECLARE_FINAL_TYPE (TestFakeDrives, test_fake_drives, TEST, FAKE_DRIVES, GObject)
 
@@ -233,6 +247,10 @@ void test_fake_drives_send (TestFakeDrives *self, const BroDeviceEvent *event);
 gboolean test_fake_drives_monitoring (TestFakeDrives *self);
 /* The tray calls so far (char *; free the array). */
 GPtrArray *test_fake_drives_calls (TestFakeDrives *self);
+/* Hears of a tray call with its device, outside the lock, on the caller's thread. */
+typedef void (*TestTrayFunc) (const char *device, gpointer data);
+/* @on_eject and @on_close_tray (each nullable) hear of each eject and tray close the engine asks for; set before start. */
+void test_fake_drives_on_tray (TestFakeDrives *self, TestTrayFunc on_eject, TestTrayFunc on_close_tray, gpointer data);
 
 /* ---- secrets in memory ---------------------------------------------------------------------------------------------- */
 

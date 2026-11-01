@@ -2,6 +2,7 @@
 #include "bro-test-composition-root.h"
 #include "bro-english-messages.h"
 #include "bro-makemkv-service.h"
+#include "bro-message-code.h"
 #include "bro-makemkv-tool.h"
 #include "bro-message-text-renderer.h"
 #include "bro-mkv-tool-nix.h"
@@ -92,6 +93,12 @@ root_crash (const char *point, gpointer data, BroBroError **error)
   return !root->crash || root->crash (point, root->crash_data, error);
 }
 
+static gboolean
+root_runner_crash (const char *point, gpointer data, BroBroError **error)
+{
+  return root_crash (point, data, error);
+}
+
 static void
 root_release (gpointer data)
 {
@@ -107,6 +114,7 @@ root_drop (TestCompositionRoot *root)
 {
   g_clear_object (&root->engine);
   g_clear_object (&root->libraries);
+  g_clear_object (&root->jobs);
   g_clear_object (&root->bus);
   g_clear_object (&root->executor);
   if (root->store)
@@ -158,23 +166,24 @@ root_build (TestCompositionRoot *root)
   scheduler = bro_scheduler_new (root->executor, root->bus, limits);
   root->libraries = bro_library_service_new (root->executor, root->bus, problems, scheduler, BRO_CONFIG_SOURCE (config), engine_clock, fs,
                                              bro_store_libraries (store), bro_store_units (store), bro_store_catalog (store), root_crash, root);
-  makemkv = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (root->launcher), fs, BRO_SETTINGS_ISOLATION (root->isolation),
+  makemkv = bro_makemkv_tool_new (root->tool_launcher, fs, BRO_SETTINGS_ISOLATION (root->isolation),
                                   BRO_TOOL_LOCATOR (root->locator));
   drives = bro_drive_service_new (root->executor, root->bus, problems, BRO_CONFIG_SOURCE (config), engine_clock,
                                   BRO_DEVICE_MONITOR (root->drives), BRO_DRIVE_CONTROL (root->drives), BRO_MAKEMKV (makemkv),
                                   bro_store_drives (store));
   makemkv_setup = bro_makemkv_service_new (fs, config, TEST_ROOT "/home/.MakeMKV", NULL, TEST_ROOT "/home");
   registry = bro_step_registry_standard ();
-  matroska = bro_mkv_tool_nix_new (BRO_PROCESS_LAUNCHER (root->launcher), fs, BRO_TOOL_LOCATOR (root->locator), TEST_ROOT_DATA_DIR "/tmp");
+  matroska = bro_mkv_tool_nix_new (root->tool_launcher, fs, BRO_TOOL_LOCATOR (root->locator), TEST_ROOT_DATA_DIR "/tmp");
   tools = bro_tool_set_new (BRO_MAKEMKV (makemkv), BRO_MATROSKA (matroska));
   messages = bro_message_text_renderer_new (bro_english_messages_catalog ());
   environment = bro_step_environment_new (tools, fs, clock, BRO_DRIVE_CONTROL (root->drives), BRO_LIBRARY_PORT (root->libraries),
                                           BRO_CATALOG_QUERIES (root->libraries), BRO_CONFIG_SOURCE (config), BRO_DRIVE_LOOKUP (drives),
                                           BRO_MAKEMKV_SETUP (makemkv_setup), TEST_ROOT_DATA_DIR, BRO_MESSAGE_RENDERER (messages), "test");
-  runner = bro_pipeline_runner_new (root->executor, root->bus, scheduler, store, registry, environment, engine_clock);
+  runner = bro_pipeline_runner_new (root->executor, root->bus, scheduler, store, registry, environment, engine_clock, root_runner_crash, root);
   bro_step_environment_free (environment);
   jobs = bro_job_service_new (root->executor, root->bus, store, scheduler, runner, engine_clock, BRO_ID_GENERATOR (root->ids), fs,
                               TEST_ROOT_DATA_DIR);
+  root->jobs = g_object_ref (jobs);
   recovery_messages = bro_message_text_renderer_new (bro_english_messages_catalog ());
   recovery = bro_recovery_service_new (root->executor, root->bus, problems, store, registry, root->libraries, BRO_CONFIG_SOURCE (config),
                                        engine_clock, fs, BRO_SETTINGS_ISOLATION (root->isolation), BRO_MESSAGE_RENDERER (recovery_messages),
@@ -187,7 +196,7 @@ root_build (TestCompositionRoot *root)
 
 TestCompositionRoot *
 test_composition_root_new (gboolean makemkvcon, const char *makemkvcon_version, gboolean mkvmerge, GHashTable *environment, int cores,
-                           guint stream_capacity)
+                           guint stream_capacity, BroProcessLauncher *launcher)
 {
   TestCompositionRoot *root = g_new0 (TestCompositionRoot, 1);
   g_autoptr (GError) error = NULL;
@@ -203,6 +212,7 @@ test_composition_root_new (gboolean makemkvcon, const char *makemkvcon_version, 
   root->fs->any_volume->fs_type = g_strdup ("apfs");
   root->launcher = g_object_new (TEST_TYPE_SCRIPTED_LAUNCHER, NULL);
   root->launcher->files = g_object_ref (BRO_FILE_SYSTEM (root->fs));
+  root->tool_launcher = launcher ? g_object_ref (launcher) : g_object_ref (BRO_PROCESS_LAUNCHER (root->launcher));
   root->isolation = g_object_new (TEST_TYPE_RECORDING_ISOLATION, NULL);
   root->locator = g_object_new (TEST_TYPE_FIXED_LOCATOR, NULL);
   root->locator->path = makemkvcon ? g_strdup (TEST_ROOT_MAKEMKVCON) : NULL;
@@ -252,16 +262,88 @@ test_composition_root_stop (TestCompositionRoot *root)
 }
 
 gboolean
-test_composition_root_restart (TestCompositionRoot *root, double seconds, BroBroError **error)
+test_composition_root_stop_timed (TestCompositionRoot *root, double seconds)
 {
-  g_autoptr (TestWaiter) stopped = test_composition_root_stop (root);
-  g_autoptr (TestWaiter) started = NULL;
+  gint64 began = g_get_monotonic_time ();
+  g_autoptr (TestWaiter) stopped = NULL;
+  if (root->stopped)
+    return TRUE; /* once: last_stop stays the stop's */
+  stopped = test_composition_root_stop (root);
   if (!test_waiter_wait (stopped, seconds))
     return FALSE;
-  if (stopped->error)
+  root->last_stop = (double) (g_get_monotonic_time () - began) / G_USEC_PER_SEC;
+  return TRUE;
+}
+
+static void
+root_jobs_stopped (const BroBroError *error, gpointer data)
+{
+}
+
+static void
+root_jobs_stop (gpointer data)
+{
+  TestCompositionRoot *root = data;
+  bro_job_service_stop (root->jobs, root_jobs_stopped, NULL, NULL);
+}
+
+BroBroError *
+test_composition_root_kill (TestCompositionRoot *root, const char *point)
+{
+  BroJsonValue *params = bro_json_value_new_object ();
+  test_memory_fs_freeze (root->fs);
+  g_free (root->killed_at);
+  root->killed_at = g_strdup (point);
+  root->killed = TRUE;
+  root->killed_seq = bro_event_bus_last_seq (root->bus);
+  bro_engine_executor_post (root->executor, root_jobs_stop, root, NULL);
+  bro_json_value_set (params, "detail", bro_json_value_new_string (point));
+  return bro_bro_error_new (bro_message_code_wire (BRO_MSG_INTERNAL_UNEXPECTED), params, NULL);
+}
+
+/* Once the killed engine's executor is quiet (at most 10 s): its executor stops, its timers are dropped and the files thaw;
+ * the store closes with the graph (root_build). */
+static gboolean
+root_finish_kill (TestCompositionRoot *root, char **why)
+{
+  gint64 deadline = g_get_monotonic_time () + (gint64) (TEST_ROOT_KILL_CAP * G_USEC_PER_SEC);
+  while (bro_engine_executor_activity (root->executor) > 0)
     {
-      *error = bro_bro_error_copy (stopped->error);
-      return FALSE;
+      if (g_get_monotonic_time () > deadline)
+        {
+          if (why)
+            *why = g_strdup_printf ("the engine killed at %s didn't go quiet within 10 s", root->killed_at);
+          return FALSE;
+        }
+      g_usleep (5000);
+    }
+  bro_engine_executor_stop (root->executor);
+  test_manual_clock_cancel_all (root->clock);
+  test_memory_fs_thaw (root->fs);
+  root->killed = FALSE;
+  root->stopped = TRUE;
+  return TRUE;
+}
+
+gboolean
+test_composition_root_restart (TestCompositionRoot *root, double seconds, BroBroError **error, char **why)
+{
+  g_autoptr (TestWaiter) started = NULL;
+  if (root->killed)
+    {
+      if (!root_finish_kill (root, why))
+        return FALSE;
+    }
+  else
+    {
+      if (!test_composition_root_stop_timed (root, seconds))
+        return FALSE;
+      if (root->last_stop >= TEST_ROOT_STOP_CAP)
+        {
+          if (why)
+            *why = g_strdup_printf ("the stop took %.1f s: it hit the 30 s cap", root->last_stop);
+          return FALSE;
+        }
     }
   root_build (root);
   started = test_composition_root_start (root);
@@ -329,7 +411,9 @@ test_composition_root_free (TestCompositionRoot *root)
 {
   if (!root)
     return;
-  if (!root->stopped)
+  if (root->killed)
+    root_finish_kill (root, NULL);
+  else if (!root->stopped)
     {
       g_autoptr (TestWaiter) w = test_composition_root_stop (root);
       test_waiter_wait (w, 40);
@@ -342,7 +426,9 @@ test_composition_root_free (TestCompositionRoot *root)
   g_object_unref (root->clock);
   g_object_unref (root->fs);
   g_object_unref (root->launcher);
+  g_object_unref (root->tool_launcher);
   g_object_unref (root->isolation);
+  g_free (root->killed_at);
   g_object_unref (root->locator);
   g_object_unref (root->drives);
   g_object_unref (root->keystore);

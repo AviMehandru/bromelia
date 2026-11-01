@@ -71,6 +71,21 @@ public final class ManualClock: Clock, @unchecked Sendable {
     /// The timers not cancelled yet.
     public func pending() -> Int { lock.withLock { timers.filter { !$0.cancelled }.count } }
 
+    /// When the next timer not cancelled is due; nil when there is none.
+    public func nextDue() -> Instant? {
+        lock.withLock {
+            timers.filter { !$0.cancelled }.min { ($0.dueMs, $0.order) < ($1.dueMs, $1.order) }.map { Instant(unixMilliseconds: $0.dueMs) }
+        }
+    }
+
+    /// Cancels every timer (a killed engine's: none of them fires any more).
+    public func cancelAll() {
+        lock.withLock {
+            for t in timers { t.cancel() }
+            timers.removeAll()
+        }
+    }
+
     /// The next due timer's handler, with the time moved to its due time; nil (and the time at target) when none.
     private func nextDue(before target: Int64) -> (@Sendable () -> Void)? {
         lock.withLock {
