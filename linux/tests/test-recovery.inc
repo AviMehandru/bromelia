@@ -450,6 +450,7 @@ recovery_given_units (RecoveryHarness *h, BroJsonValue *given)
       intent->staging = g_strdup (bro_json_value_get_string (bro_json_value_member (x, "staging"), ""));
       intent->destination = g_strdup (bro_json_value_get_string (bro_json_value_member (x, "destination"), ""));
       intent->merge = bro_json_value_get_bool (bro_json_value_member (x, "merge"), FALSE);
+      intent->quarantine = bro_json_value_get_bool (bro_json_value_member (x, "quarantine"), FALSE);
       intent->created_at = bro_clock_now (BRO_CLOCK (h->lib.clock));
       for (guint k = 0; k < bro_json_value_length (items); k++)
         {

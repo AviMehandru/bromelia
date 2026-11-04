@@ -4,7 +4,7 @@
     "LibraryService.stagingFolders",
     "LibraryService.setAside"
   ],
-  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. A next step that is keepApart (running or not started; F8) is resumed the same way, in the processing queue. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job; a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<the name KeepApart gives the job (KeepApartStep.folderName: the Plan output's identity name, else its title, else Probe's listing name, else the source's label, else the job's id; owner H3a-2), or the folder when no job owns it> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], the log copies' names) each rendered by the MessageRenderer, one per line, and the job's logs as Seal copies them (F9, owner 2026-10-25: bromelia-<unit8>-log.txt = its log.jsonl as SealStep.logText, makemkv-<unit8>-log.txt and makemkv-<unit8>-debug-log.txt = its folder's makemkv.txt and makemkv-debug.txt, each when there; unit8 = the first 8 characters of ArchiveFiles.unitId(job); none for a folder no job owns, when the job's Plan output's profile has archive.archiveRecord false, or when one can't be read), written atomically before the move; removed instead when it holds no file, with nothing written). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}], fail [{op, path, error, times}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error, output (its StepOutput's data; {} by default)}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as canonical JSON without its final newline). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
+  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. A next step that is keepApart (running or not started; F8) is resumed the same way, in the processing queue. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job, and when that job finished failed in its Commit or keepApart step it gets the outcome that step gives when it succeeds, JobOutcome.decide of its steps with that step succeeded (owner I1-3 and 2026-11-03: a Commit gives what a committed unit gives, a keepApart cancelled; jobFinished; its finishedAt, step rows and log kept); a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<the name KeepApart gives the job (KeepApartStep.folderName: the Plan output's identity name, else its title, else Probe's listing name, else the source's label, else the job's id; owner H3a-2), or the folder when no job owns it> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], the log copies' names) each rendered by the MessageRenderer, one per line, and the job's logs as Seal copies them (F9, owner 2026-10-25: bromelia-<unit8>-log.txt = its log.jsonl as SealStep.logText, makemkv-<unit8>-log.txt and makemkv-<unit8>-debug-log.txt = its folder's makemkv.txt and makemkv-debug.txt, each when there; unit8 = the first 8 characters of ArchiveFiles.unitId(job); none for a folder no job owns, when the job's Plan output's profile has archive.archiveRecord false, or when one can't be read), written atomically before the move; removed instead when it holds no file, with nothing written). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}], fail [{op, path, error, times}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error, output (its StepOutput's data; {} by default)}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, quarantine (false by default), items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as canonical JSON without its final newline). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
   "cases": [
     {
       "id": "nothing-to-recover",
@@ -2162,6 +2162,1095 @@
           "jobChanged j1 queued"
         ],
         "rule": "I2: nothing is written to a library without its marker; the job's Commit step rolls the intent forward once it is back"
+      }
+    },
+    {
+      "id": "a-failed-job-whose-commit-is-rolled-forward-gets-the-committed-outcome",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/j1/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/.SHA256SUMS.bromelia-tmp-0a1b2c3d": "half a SHA256SUMS"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                false
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded",
+                "readErrors": 2
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                "reason": "EIO"
+              }
+            }
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "succeededWithReadErrors",
+            "error": {
+              "code": "rip.readErrors",
+              "params": {
+                "count": 2
+              }
+            }
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "commit.rolledForward",
+              "params": {
+                "unit": "00000000-0000-4000-8000-000000000101"
+              }
+            }
+          ]
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "eventLines": [
+          "jobFinished j1 succeededWithReadErrors rip.readErrors"
+        ],
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "verifyRips succeeded",
+            "name succeeded",
+            "seal succeeded",
+            "commit failed"
+          ]
+        },
+        "rule": "owner I1-3 (2026-11-02): a job whose Commit failed halfway (fs.failed) ended failed with its intent open; once recovery has rolled the intent forward its unit is committed, so the job gets the outcome a committed unit gives (F9's rule, JobOutcome.decide with its Commit succeeded): here succeededWithReadErrors, the read errors counted; its step rows and log stay (commit-move-fails-halfway)"
+      }
+    },
+    {
+      "id": "a-failed-keep-apart-whose-quarantine-is-rolled-forward-ends-cancelled",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "dirs": [
+          "/lib/.bromelia/staging"
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "_Quarantine/Sample Movie [INCOMPLETE]",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/_Quarantine/Sample Movie [INCOMPLETE]",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                true
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                true
+              ]
+            ],
+            "quarantine": true
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "keepApart"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded",
+                "readErrors": 2
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "keepApart",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "syncDirectory",
+                    "path": "/lib/_Quarantine/Sample Movie [INCOMPLETE]",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "syncDirectory",
+                "path": "/lib/_Quarantine/Sample Movie [INCOMPLETE]",
+                "reason": "EIO"
+              }
+            }
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "keepApart"
+            ],
+            "mediaGeneration": null,
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "commit.rolledForward",
+              "params": {
+                "unit": "00000000-0000-4000-8000-000000000101"
+              }
+            }
+          ]
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "quarantined"
+            }
+          ],
+          "intents": []
+        },
+        "eventLines": [
+          "jobFinished j1 cancelled job.cancelledByUser"
+        ],
+        "steps": {
+          "j1": [
+            "probe succeeded",
+            "identify succeeded",
+            "plan succeeded",
+            "acquire succeeded",
+            "release succeeded",
+            "verifyRips succeeded",
+            "name succeeded",
+            "keepApart failed"
+          ]
+        },
+        "rule": "owner 2026-11-03: a keepApart whose quarantine failed halfway ended failed with its intent open; once recovery has rolled the intent forward its unit is quarantined, so the job ends as a keep-apart that succeeds does: cancelled (job.cancelledByUser), whatever read errors its steps had; its step rows and log stay (keep-apart-move-fails)"
+      }
+    },
+    {
+      "id": "a-failed-keep-apart-that-cannot-roll-forward-stays-failed",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "_Quarantine/Sample Movie [INCOMPLETE]",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/_Quarantine/Sample Movie [INCOMPLETE]",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                true
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                true
+              ]
+            ],
+            "quarantine": true
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "keepApart"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded",
+                "readErrors": 2
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "keepApart",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "syncDirectory",
+                    "path": "/lib/_Quarantine/Sample Movie [INCOMPLETE]",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "syncDirectory",
+                "path": "/lib/_Quarantine/Sample Movie [INCOMPLETE]",
+                "reason": "EIO"
+              }
+            }
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "keepApart"
+            ],
+            "mediaGeneration": null,
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "syncDirectory",
+                "path": "/lib/_Quarantine/Sample Movie [INCOMPLETE]",
+                "reason": "EIO"
+              }
+            }
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "library.offline",
+              "params": {
+                "library": "Library",
+                "path": "/lib"
+              }
+            }
+          ]
+        },
+        "files": {
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "eventLines": [],
+        "rule": "the outcome follows the quarantine: while the intent stays open the job stays failed, and the next start tries again"
+      }
+    },
+    {
+      "id": "a-job-that-failed-in-another-step-keeps-its-outcome-when-its-intent-is-rolled-forward",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/j1/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/.SHA256SUMS.bromelia-tmp-0a1b2c3d": "half a SHA256SUMS"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                false
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                "reason": "EIO"
+              }
+            }
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                "reason": "EIO"
+              }
+            }
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "commit.rolledForward",
+              "params": {
+                "unit": "00000000-0000-4000-8000-000000000101"
+              }
+            }
+          ]
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "eventLines": [],
+        "rule": "owner I1-3 and 2026-11-03 name a Commit and a keepApart: only their failure is what the roll forward finishes"
+      }
+    },
+    {
+      "id": "a-job-cancelled-as-its-commit-failed-keeps-its-outcome-when-its-intent-is-rolled-forward",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/j1/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/.SHA256SUMS.bromelia-tmp-0a1b2c3d": "half a SHA256SUMS"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                false
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "cancelled",
+            "error": {
+              "code": "job.cancelledByUser"
+            }
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "commit.rolledForward",
+              "params": {
+                "unit": "00000000-0000-4000-8000-000000000101"
+              }
+            }
+          ]
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "eventLines": [],
+        "rule": "I5: a cancel that lands while a Commit fails halfway ends the job cancelled with its intent open; owner I1-3 names a failed job, so this one stays cancelled while its unit is committed (I5's question to the owner)"
       }
     },
     {

@@ -117,7 +117,7 @@ public sealed class RecoveryServiceTests
                     "bluray", "BD", false, null, "", null, null, null, null, "", 0, 0, 1, w.Clock.Now());
             foreach (var i in given["intents"]?.AsArray ?? new List<JsonValue>())
                 db.Intents[new Id(i["unit"]!.AsString!)] = new CommitIntent(new Id(i["unit"]!.AsString!), new Id(i["job"]!.AsString!), i["staging"]!.AsString!,
-                    i["destination"]!.AsString!, i["merge"]!.AsBool!.Value, false, w.Clock.Now(), i["items"]!.AsArray!.Select(x => new CommitItem(
+                    i["destination"]!.AsString!, i["merge"]!.AsBool!.Value, i["quarantine"]?.AsBool ?? false, w.Clock.Now(), i["items"]!.AsArray!.Select(x => new CommitItem(
                         (int)x.AsArray![0].AsInteger!.Value, x.AsArray![1].AsString!, x.AsArray![2].AsString!, x.AsArray![3].AsString, x.AsArray![4].AsBool!.Value,
                         x.AsArray![5].AsBool!.Value)).ToList());
             var jobs = (IJobRepository)store.Jobs_;

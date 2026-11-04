@@ -171,15 +171,16 @@ log_line (BroRecoveryService *self, const BroId *job_id, const BroBroMessage *m,
   return ok;
 }
 
+/* The job's event into @publications (published on the executor). */
 static void
-publish_later (Run *r, BroEngineEventType type, const BroJobRecord *record)
+publish_later (GPtrArray *publications, BroEngineEventType type, const BroJobRecord *record)
 {
   Publication *p = g_new0 (Publication, 1);
   g_autoptr (BroJobDto) dto = bro_job_dto_of (record);
   p->type = type;
   p->data = bro_json_value_new_object ();
   bro_json_value_set (p->data, "job", bro_job_dto_json (dto));
-  g_ptr_array_add (r->publications, p);
+  g_ptr_array_add (publications, p);
 }
 
 /* ---- jobs (one worker) ---- */
@@ -204,7 +205,7 @@ requeue (BroRecoveryService *self, Run *r, const BroJobRecord *job, BroQueue que
   if (!bro_job_repository_update (bro_store_jobs (self->store), record, error) || !log_line (self, &job->id, owned, error))
     return FALSE;
   g_hash_table_add (r->unfinished, g_strdup (job->id.value));
-  publish_later (r, BRO_ENGINE_EVENT_TYPE_JOB_CHANGED, record);
+  publish_later (r->publications, BRO_ENGINE_EVENT_TYPE_JOB_CHANGED, record);
   return TRUE;
 }
 
@@ -226,7 +227,7 @@ finish (BroRecoveryService *self, Run *r, const BroJobRecord *job, BroDecided *d
   record->finished_at = bro_engine_clock_now (self->clock);
   if (!bro_job_repository_update (bro_store_jobs (self->store), record, error) || (line && !log_line (self, &job->id, line, error)))
     return FALSE;
-  publish_later (r, BRO_ENGINE_EVENT_TYPE_JOB_FINISHED, record);
+  publish_later (r->publications, BRO_ENGINE_EVENT_TYPE_JOB_FINISHED, record);
   return TRUE;
 }
 
@@ -433,6 +434,7 @@ typedef struct {
   Run *run;
   char *library_id; /* NULL: the data folder */
   char *root;
+  GPtrArray *publications; /* Publication: the jobs a roll forward gave a new outcome */
 } Tidy;
 
 static void
@@ -440,14 +442,59 @@ tidy_free (gpointer data)
 {
   Tidy *t = data;
   run_unref (t->run);
+  g_ptr_array_unref (t->publications);
   g_free (t->library_id);
   g_free (t->root);
   g_free (t);
 }
 
+/* A job that finished failed in its Commit or KeepApart step, whose commit a roll forward has just finished, gets the
+ * outcome that step gives when it succeeds (owner I1-3 and 2026-11-03, F9's rule): bro_job_outcome_decide of its steps with
+ * that step succeeded, so succeeded or succeededWithReadErrors after a Commit, cancelled after a KeepApart. Its finished_at,
+ * step rows and log stay as they were; its jobFinished goes into @publications. */
+static gboolean
+committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publications, BroBroError **error)
+{
+  static const BroOutcomePolicy policy = { 0 };
+  g_autoptr (BroJobRecord) job = bro_job_repository_load (bro_store_jobs (self->store), *job_id, error);
+  g_autoptr (GPtrArray) rows = NULL;
+  g_autoptr (GPtrArray) done = NULL;
+  g_autoptr (GPtrArray) results = NULL;
+  g_autoptr (BroDecided) decided = NULL;
+  BroStepRecord *next = NULL;
+  if (!job)
+    return !error || !*error; /* none: nothing to do */
+  if (job->state != BRO_JOB_STATE_FINISHED || !job->has_outcome || job->outcome != BRO_OUTCOME_FAILED)
+    return TRUE;
+  if (!(rows = bro_step_repository_load (bro_store_steps (self->store), *job_id, error)))
+    return FALSE;
+  done = bro_job_planner_done (rows);
+  for (guint i = 0; i < rows->len; i++)
+    if (((BroStepRecord *) rows->pdata[i])->seq == (int) done->len)
+      next = rows->pdata[i];
+  if (!next || (next->kind != BRO_STEP_KIND_COMMIT && next->kind != BRO_STEP_KIND_KEEP_APART) || next->state != BRO_STEP_STATE_FAILED)
+    return TRUE;
+  results = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_result_free);
+  for (guint i = 0; i < done->len; i++)
+    {
+      BroStepRecord *s = done->pdata[i];
+      add_result (results, s->kind, s->state, s->error);
+      ((BroStepResult *) results->pdata[results->len - 1])->read_errors = s->output ? s->output->read_errors : 0;
+    }
+  add_result (results, next->kind, BRO_STEP_STATE_SUCCEEDED, NULL);
+  decided = bro_job_outcome_decide (results, FALSE, &policy);
+  job->outcome = decided->outcome;
+  bro_bro_error_free (job->error);
+  job->error = bro_bro_error_copy (decided->error);
+  if (!bro_job_repository_update (bro_store_jobs (self->store), job, error))
+    return FALSE;
+  publish_later (publications, BRO_ENGINE_EVENT_TYPE_JOB_FINISHED, job);
+  return TRUE;
+}
+
 /* A failure is logged on its job (or left for the next start); it never stops the others. */
 static void
-roll_forward_all (BroRecoveryService *self, const char *library_id)
+roll_forward_all (BroRecoveryService *self, const char *library_id, GPtrArray *publications)
 {
   g_autoptr (GPtrArray) intents = bro_unit_repository_open_intents (bro_store_units (self->store), NULL);
   for (guint i = 0; intents && i < intents->len; i++)
@@ -463,11 +510,13 @@ roll_forward_all (BroRecoveryService *self, const char *library_id)
         {
           g_autoptr (BroBroMessage) line = message (BRO_MSG_COMMIT_ROLLED_FORWARD, BRO_SEVERITY_WARNING, "unit", intent->unit_id.value);
           log_line (self, &intent->job_id, line, NULL);
-          remove_leftovers (self->fs, intent->destination, FALSE);
+          if (committed (self, &intent->job_id, publications, &e))
+            remove_leftovers (self->fs, intent->destination, FALSE);
         }
-      else if (e) /* no result and no error: the job's Commit finished it meanwhile */
+      if (e) /* the roll forward or the outcome failed (neither: the job's Commit finished it meanwhile) */
         {
-          /* The intent stays: the job's Commit step rolls it forward when it runs again. */
+          /* A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A job whose
+           * new outcome couldn't be stored stays failed with this line in its log; a retry from Commit finds the unit committed. */
           BroMessageCode code = BRO_MSG_INTERNAL_UNEXPECTED;
           g_autoptr (BroBroMessage) line = NULL;
           bro_message_code_parse (e->code, &code);
@@ -550,7 +599,7 @@ tidy_work (gpointer data, BroBroError **error)
       remove_leftovers (self->fs, self->data, TRUE);
       return TRUE;
     }
-  roll_forward_all (self, t->library_id);
+  roll_forward_all (self, t->library_id, t->publications);
   committing = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   open = bro_unit_repository_open_intents (bro_store_units (self->store), NULL);
   for (guint i = 0; open && i < open->len; i++)
@@ -627,6 +676,11 @@ static void
 tidy_done (gpointer data, const BroBroError *error)
 {
   Tidy *t = data;
+  for (guint i = 0; i < t->publications->len; i++)
+    {
+      Publication *p = t->publications->pdata[i];
+      bro_engine_event_unref (bro_event_bus_publish (t->run->self->bus, p->type, p->data));
+    }
   if (--t->run->pending == 0)
     complete (t->run);
 }
@@ -644,6 +698,7 @@ start_tidy (Run *r, const char *library_id, const char *root)
   t->run = run_ref (r);
   t->library_id = g_strdup (library_id);
   t->root = g_strdup (root);
+  t->publications = g_ptr_array_new_with_free_func (publication_free);
   r->pending++;
   bro_engine_executor_worker (r->self->executor, tidy_work, tidy_done, t, tidy_free);
 }

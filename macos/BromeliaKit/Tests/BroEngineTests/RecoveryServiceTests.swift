@@ -137,7 +137,7 @@ struct RecoveryServiceTests {
                            isDir: x.array![4].bool!, moved: x.array![5].bool!)
             }
             db.intents[Id(i["unit"]!.string!)] = CommitIntent(unitId: Id(i["unit"]!.string!), jobId: Id(i["job"]!.string!), staging: i["staging"]!.string!,
-                                                              destination: i["destination"]!.string!, merge: i["merge"]!.bool!, quarantine: false,
+                                                              destination: i["destination"]!.string!, merge: i["merge"]!.bool!, quarantine: i["quarantine"]?.bool == true,
                                                               createdAt: world.clock.now(), items: items)
         }
         for j in given["jobs"]?.array ?? [] {

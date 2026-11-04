@@ -172,6 +172,27 @@ public final class RecoveryService {
         return true
     }
 
+    /// A job that finished failed in its Commit or KeepApart step, whose commit a roll forward has just finished, gets the
+    /// outcome that step gives when it succeeds (owner I1-3 and 2026-11-03, F9's rule): JobOutcome.decide of its steps with
+    /// that step succeeded, so succeeded or succeededWithReadErrors after a Commit, cancelled after a KeepApart. Its finishedAt,
+    /// step rows and log stay as they were.
+    private func committed(_ jobId: Id) async throws(BroError) {
+        let store = store
+        guard let job = try await executor.worker({ () async throws(BroError) -> JobRecord? in try await store.jobs().load(jobId) }),
+              job.state == .finished, job.outcome == .failed else { return }
+        let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
+        let done = JobPlanner.done(rows)
+        guard let next = rows.first(where: { $0.seq == done.count }), next.kind == .commit || next.kind == .keepApart, next.state == .failed else { return }
+        let results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error, readErrors: $0.output?.readErrors ?? 0) }
+            + [StepResult(kind: next.kind, state: .succeeded)]
+        let decided = JobOutcome.decide(results, cancelled: false, policy: .default)
+        var record = job
+        record.outcome = decided.outcome
+        record.error = decided.error
+        try await update(record)
+        bus.publish(.jobFinished, data: .object([("job", JobDto.json(JobDto.of(record)))]))
+    }
+
     private func requeue(_ job: JobRecord, _ queue: Queue, _ line: BroMessage) async throws(BroError) {
         var record = job
         record.state = .queued
@@ -225,8 +246,9 @@ public final class RecoveryService {
 
     // ---- libraries and files ---------------------------------------------------------------------------------------------
 
-    /// One library: its open intents rolled forward, then its staging folders tidied and the ones no job will continue
-    /// set aside. An offline library is left alone (I2). On the executor; the file and store work on workers.
+    /// One library: its open intents rolled forward (a job that failed in that commit then gets the outcome it gives), then
+    /// its staging folders tidied and the ones no job will continue set aside. An offline library is left alone (I2). On the
+    /// executor; the file and store work on workers.
     private func tidy(_ libraryId: String, _ root: String, _ unfinished: Set<String>) async {
         let store = store
         let intents = (try? await executor.worker { () async throws(BroError) -> [CommitIntent] in try await store.units().openIntents() }) ?? []
@@ -237,9 +259,12 @@ public final class RecoveryService {
             do throws(BroError) {
                 if try await library.rollForward(intent) == nil { continue } // the job's Commit finished it meanwhile
                 try? await log(intent.jobId, BroMessage(.commitRolledForward, [("unit", .string(intent.unitId.value))], severity: .warning))
+                try await committed(intent.jobId)
                 await removeLeftovers(intent.destination, recursive: false)
             } catch {
-                // The intent stays: the job's Commit step rolls it forward when it runs again.
+                // A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A job
+                // whose new outcome couldn't be stored stays failed with this line in its log; a retry from Commit finds the unit
+                // committed.
                 try? await log(intent.jobId, BroMessage(MessageCode(rawValue: error.code) ?? .internalUnexpected, error.params, severity: .warning))
             }
         }
