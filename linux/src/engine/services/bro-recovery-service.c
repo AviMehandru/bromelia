@@ -448,9 +448,11 @@ tidy_free (gpointer data)
   g_free (t);
 }
 
-/* A job that finished failed in its Commit or KeepApart step, whose commit a roll forward has just finished, gets the
- * outcome that step gives when it succeeds (owner I1-3 and 2026-11-03, F9's rule): bro_job_outcome_decide of its steps with
- * that step succeeded, so succeeded or succeededWithReadErrors after a Commit, cancelled after a KeepApart. Its finished_at,
+/* A job that finished failed in its Commit or KeepApart step, or cancelled in its Commit step, whose commit a roll forward
+ * has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 and 2026-11-04, F9's rule):
+ * bro_job_outcome_decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a Commit,
+ * cancelled after a KeepApart. That step is the first row not done, failed or cancelled: a cancel stores it cancelled, or
+ * failed when it lands just after the step ended; pending, the job was cancelled before the step ran again. Its finished_at,
  * step rows and log stay as they were; its jobFinished goes into @publications. */
 static gboolean
 committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publications, BroBroError **error)
@@ -464,7 +466,7 @@ committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publication
   BroStepRecord *next = NULL;
   if (!job)
     return !error || !*error; /* none: nothing to do */
-  if (job->state != BRO_JOB_STATE_FINISHED || !job->has_outcome || job->outcome != BRO_OUTCOME_FAILED)
+  if (job->state != BRO_JOB_STATE_FINISHED || !job->has_outcome || (job->outcome != BRO_OUTCOME_FAILED && job->outcome != BRO_OUTCOME_CANCELLED))
     return TRUE;
   if (!(rows = bro_step_repository_load (bro_store_steps (self->store), *job_id, error)))
     return FALSE;
@@ -472,7 +474,9 @@ committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publication
   for (guint i = 0; i < rows->len; i++)
     if (((BroStepRecord *) rows->pdata[i])->seq == (int) done->len)
       next = rows->pdata[i];
-  if (!next || (next->kind != BRO_STEP_KIND_COMMIT && next->kind != BRO_STEP_KIND_KEEP_APART) || next->state != BRO_STEP_STATE_FAILED)
+  if (!next || (next->state != BRO_STEP_STATE_FAILED && next->state != BRO_STEP_STATE_CANCELLED))
+    return TRUE;
+  if (next->kind != BRO_STEP_KIND_COMMIT && !(next->kind == BRO_STEP_KIND_KEEP_APART && job->outcome == BRO_OUTCOME_FAILED))
     return TRUE;
   results = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_result_free);
   for (guint i = 0; i < done->len; i++)
@@ -516,7 +520,8 @@ roll_forward_all (BroRecoveryService *self, const char *library_id, GPtrArray *p
       if (e) /* the roll forward or the outcome failed (neither: the job's Commit finished it meanwhile) */
         {
           /* A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A job whose
-           * new outcome couldn't be stored stays failed with this line in its log; a retry from Commit finds the unit committed. */
+           * new outcome couldn't be stored keeps its old one with this line in its log; a retry from Commit finds the unit
+           * committed. */
           BroMessageCode code = BRO_MSG_INTERNAL_UNEXPECTED;
           g_autoptr (BroBroMessage) line = NULL;
           bro_message_code_parse (e->code, &code);

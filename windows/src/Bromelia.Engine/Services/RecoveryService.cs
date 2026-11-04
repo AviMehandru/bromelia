@@ -162,19 +162,22 @@ public sealed class RecoveryService
         return true;
     }
 
-    /// <summary>A job that finished failed in its Commit or KeepApart step, whose commit a roll forward has just finished, gets
-    /// the outcome that step gives when it succeeds (owner I1-3 and 2026-11-03, F9's rule): JobOutcome.decide of its steps with
-    /// that step succeeded, so succeeded or succeededWithReadErrors after a Commit, cancelled after a KeepApart. Its finishedAt,
+    /// <summary>A job that finished failed in its Commit or KeepApart step, or cancelled in its Commit step, whose commit a roll
+    /// forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 and 2026-11-04, F9's
+    /// rule): JobOutcome.decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a Commit,
+    /// cancelled after a KeepApart. That step is the first row not done, failed or cancelled: a cancel stores it cancelled, or
+    /// failed when it lands just after the step ended; pending, the job was cancelled before the step ran again. Its finishedAt,
     /// step rows and log stay as they were.</summary>
     async Task Committed(Id jobId)
     {
         var job = await _executor.Worker(() => _store.Jobs().Load(jobId));
-        if (job is not { State: JobState.Finished, Outcome: Outcome.Failed }) return;
+        if (job is not { State: JobState.Finished, Outcome: Outcome.Failed or Outcome.Cancelled }) return;
         var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
         var done = JobPlanner.Done(rows);
-        if (rows.FirstOrDefault(r => r.Seq == done.Count) is not { Kind: StepKind.Commit or StepKind.KeepApart, State: StepState.Failed } failed) return;
+        if (rows.FirstOrDefault(r => r.Seq == done.Count) is not { State: StepState.Failed or StepState.Cancelled } stopped) return;
+        if (stopped.Kind != StepKind.Commit && !(stopped.Kind == StepKind.KeepApart && job.Outcome == Outcome.Failed)) return;
         var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error, s.Output?.ReadErrors ?? 0))
-            .Append(new StepResult(failed.Kind, StepState.Succeeded)).ToList();
+            .Append(new StepResult(stopped.Kind, StepState.Succeeded)).ToList();
         var decided = JobOutcome.Decide(results, false, OutcomePolicy.Default);
         var record = job with { Outcome = decided.Outcome, Error = decided.Error };
         await _executor.Worker(() => _store.Jobs().Update(record));
@@ -214,9 +217,9 @@ public sealed class RecoveryService
 
     // ---- libraries and files -------------------------------------------------------------------------------
 
-    /// <summary>One library: its open intents rolled forward (a job that failed in that commit then gets the outcome it gives),
-    /// then its staging folders tidied and the ones no job will continue set aside. An offline library is left alone (I2). On
-    /// the executor; the file and store work on workers.</summary>
+    /// <summary>One library: its open intents rolled forward (a job that failed or was cancelled in that commit then gets the
+    /// outcome it gives), then its staging folders tidied and the ones no job will continue set aside. An offline library is
+    /// left alone (I2). On the executor; the file and store work on workers.</summary>
     async Task Tidy(string libraryId, string root, IReadOnlySet<string> unfinished)
     {
         foreach (var intent in await _executor.Worker(() => _store.Units().OpenIntents()))
@@ -233,8 +236,8 @@ public sealed class RecoveryService
             catch (BroFailure f)
             {
                 // A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A job
-                // whose new outcome couldn't be stored stays failed with this line in its log; a retry from Commit finds the unit
-                // committed.
+                // whose new outcome couldn't be stored keeps its old one with this line in its log; a retry from Commit finds the
+                // unit committed.
                 await Log(intent.JobId, new BroMessage(MessageCode.Parse(f.Error.Code) ?? MessageCode.InternalUnexpected, f.Error.Params, Severity.Warning));
             }
         }
