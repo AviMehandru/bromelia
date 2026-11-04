@@ -1,0 +1,98 @@
+{
+  "title": "Keeping an interrupted rip apart, killed while its files move to _Quarantine, finishes the move at the next start",
+  "phase": 3,
+  "from": [
+    "rearchitecture-plan §22.3, §20.4 (keep-apart's quarantine is a commit; a crash inside 5 rolls forward)",
+    "owner decision 2026-10-25 (keep-apart seals the unit and ends the job cancelled)",
+    "I1 decision 299 (S6): two kills in one scenario"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title"
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "inStep:acquire"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "interrupted"
+        }
+      }
+    },
+    {
+      "keepApart": "job"
+    },
+    {
+      "kill": {
+        "at": "commit.afterMove:1"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "cancelled",
+          "unit": {
+            "state": "quarantined",
+            "status": "incomplete"
+          }
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt",
+            "_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS",
+            "_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv"
+          ],
+          "exclude": [
+            ".bromelia/staging/{jobId}"
+          ]
+        },
+        "sums": {
+          "folder": "library/_Quarantine/Sample Movie [INCOMPLETE]",
+          "ok": true,
+          "files": [
+            "title_t00.mkv"
+          ]
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.keptApart",
+            "commit.rolledForward"
+          ]
+        },
+        "db": {
+          "commit_intents": {
+            "count": 0
+          },
+          "archive_units": {
+            "count": 1,
+            "rows": [
+              {
+                "state": "quarantined",
+                "status": "incomplete"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

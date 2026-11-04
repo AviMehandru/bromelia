@@ -1,0 +1,50 @@
+title: A commit into a shared folder that fails halfway through moving a folder keeps its intent, and the next start finishes it
+phase: 3
+from:
+  - rearchitecture-plan §22.3 (moveMerging; a failure inside 5 keeps the intent), §20.4 (open intents roll forward at startup)
+  - review L3-7 (a moveMerging that fails halfway)
+  - invariants I1, I3, I5
+  - "I1 decision 299 (S7), owner I1-2 and I1-3 (2026-11-02): given.faults; a failed job whose commit is rolled forward gets the committed outcome"
+given:
+  drives:
+    - {id: drive, name: Test drive, identification: "BD-RE TEST DRIVE 1.00 SN1", device: /dev/test0, disc: sample-movie-one-title}
+  profile: {naming: {layout: mediaServer}, mode: {default: backupThenMkv}}
+  tools: {makemkvcon: tools/makemkvcon-backup-two-folders.yaml}
+  units:
+    - folder: "library/Movies/Sample Movie"
+      name: Sample Movie
+      files: ["Sample Movie - Theatrical.mkv", "Backup/Sample Movie - Theatrical - Backup - BR/BDMV/index.bdmv"]
+  faults:
+    - {op: rename, path: "library/.bromelia/staging/*/Backup/*/CERTIFICATE", times: 1, error: EIO}
+steps:
+  - rip: {drive: drive, as: job}
+  - expect:
+      job: {name: job, outcome: failed, error: {code: fs.failed, params: {operation: rename, reason: EIO}}}
+      files:
+        under: library
+        include: ["Movies/Sample Movie/Backup/Sample Movie - Backup - BR/BDMV/index.bdmv", ".bromelia/staging/{jobId}"]
+        exclude: ["_Quarantine", "Movies/Sample Movie/Backup/Sample Movie - Backup - BR/CERTIFICATE"]
+      sums: {folder: "library/Movies/Sample Movie", ok: true, files: ["Sample Movie - Theatrical.mkv", "Backup/Sample Movie - Theatrical - Backup - BR/BDMV/index.bdmv"]}
+      db: {commit_intents: {count: 1}}
+  - restart: {}
+  - expect:
+      job: {name: job, outcome: succeeded, unit: {state: committed}}
+      files:
+        under: library
+        include:
+          - "Movies/Sample Movie/Sample Movie.mkv"
+          - "Movies/Sample Movie/Backup/Sample Movie - Backup - BR/BDMV/index.bdmv"
+          - "Movies/Sample Movie/Backup/Sample Movie - Backup - BR/CERTIFICATE/id.bdmv"
+          - "Movies/Sample Movie/bromelia-{unit8}.json"
+        exclude: ["_Quarantine", ".bromelia/staging/{jobId}"]
+      sums:
+        folder: "library/Movies/Sample Movie"
+        ok: true
+        files:
+          - "Sample Movie - Theatrical.mkv"
+          - "Backup/Sample Movie - Theatrical - Backup - BR/BDMV/index.bdmv"
+          - "Sample Movie.mkv"
+          - "Backup/Sample Movie - Backup - BR/BDMV/index.bdmv"
+          - "Backup/Sample Movie - Backup - BR/CERTIFICATE/id.bdmv"
+      log: {job: job, include: [commit.rolledForward]}
+      db: {commit_intents: {count: 0}, archive_units: {count: 2, rows: [{state: committed}, {state: committed}]}}

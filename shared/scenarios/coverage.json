@@ -1503,7 +1503,15 @@
         "scenario:recovery-interrupted-during-acquire",
         "scenario:recovery-requeued-before-acquire",
         "scenario:recovery-jobs-durable-from-creation",
-        "scenario:recovery-automatic-job-disc-changed"
+        "scenario:recovery-automatic-job-disc-changed",
+        "scenario:recovery-commit-intent-rolled-forward",
+        "scenario:recovery-commit-merge-rolled-forward",
+        "scenario:recovery-commit-before-done-rolled-forward",
+        "scenario:commit-move-fails-halfway",
+        "scenario:recovery-seal-reruns-after-hash",
+        "scenario:recovery-name-renames-resumed",
+        "scenario:recovery-keep-apart-move-rolled-forward",
+        "scenario:keep-apart-move-fails"
       ]
     },
     {

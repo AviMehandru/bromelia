@@ -1,0 +1,80 @@
+{
+  "title": "Sealing killed after every file was hashed, before SHA256SUMS was written, seals again from the start after the restart",
+  "phase": 3,
+  "from": [
+    "rearchitecture-plan §22.3 (a crash between 1 and 3: Seal runs again), §20.4",
+    "I1 decision 299 (S5): the crash point seal.afterHash end to end"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "profile": {
+      "titles": {
+        "skipDuplicates": false
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0,
+          1
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "seal.afterHash"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "unit": {
+            "state": "committed"
+          }
+        },
+        "files": {
+          "under": "library",
+          "exactly": [
+            "Sample Movie/SHA256SUMS",
+            "Sample Movie/Sample Movie - Rip - Playlist 00001 - BR.mkv",
+            "Sample Movie/Sample Movie - Rip - Playlist 00002 - BR.mkv",
+            "Sample Movie/bromelia-{unit8}.json",
+            "Sample Movie/bromelia-{unit8}-log.txt",
+            "Sample Movie/makemkv-{unit8}-log.txt"
+          ]
+        },
+        "sums": {
+          "folder": "library/Sample Movie",
+          "ok": true,
+          "files": [
+            "Sample Movie - Rip - Playlist 00001 - BR.mkv",
+            "Sample Movie - Rip - Playlist 00002 - BR.mkv"
+          ]
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.resumed"
+          ],
+          "exclude": [
+            "archive.unlisted"
+          ]
+        },
+        "db": {
+          "commit_intents": {
+            "count": 0
+          }
+        }
+      }
+    }
+  ]
+}

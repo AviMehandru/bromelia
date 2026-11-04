@@ -91,6 +91,13 @@ Unless `given` says otherwise:
 - **Libraries.** `given.libraries` replaces the default library: `{id, path, marker}` (`marker: false` = a folder
   without `.bromelia-library`, so the library is offline).
 - **Free space.** `given.freeBytes` is what the fake FileSystem reports for every volume (default: 1 TB).
+- **Faults.** `given.faults` makes file operations fail (owner I1-2): `[{op: rename | write | sync | remove, path, times,
+  error}]`. The first `times` (default 1) times the engine does `op` on a path matching `path` (relative to the root,
+  `*` within one component, `**` across; a rename by its from path), the operation fails before it acts with
+  `fs.failed {operation: <op>, path: <the path>, reason: <error>}`, as the fake FileSystem's failure rules fail. A
+  write is any write of a file (an atomic one by its final path), a sync a file's sync (not a folder's). The setup above
+  (`files`, `units`, the libraries) and the scripted tools' writes are never faulted; faults hold across a `restart` until
+  used up.
 - **Platform.** `given.platform` makes the platform-specific fakes behave like that OS (`linux`: logind is
   unreachable unless the test root provides a bus); default: the platform running the scenario.
 
@@ -125,8 +132,12 @@ so far has settled* (finished, blocked, or awaiting a decision), unless it names
 **Crash points** are named places where the test root can stop the engine: `beforeStep:<kind>`, `inStep:<kind>` (once the
 step's first process has started), `inStep:<kind>:<n>` (once the step's n-th process has started; `inStep:<kind>:1`
 is `inStep:<kind>`), `afterStep:<kind>` (after its result is stored),
-`commit.afterIntent`, `commit.afterMove:<n>`, `commit.beforeDone`, `seal.afterHash`. Every platform defines all of
-them; a `kill` or `stop` at a point that is never reached fails the scenario.
+`commit.afterIntent`, `commit.afterMove:<n>`, `commit.beforeDone`, `seal.afterHash` (while Seal runs, every file
+hashed, before its first write into the job's staging: nothing of SHA256SUMS, the record or the logs written),
+`name.afterRename:<n>` (while Name runs, once its n-th rename in the job's staging has landed; a rename through a free
+name on the way counts as two; owner I1-1). Every platform defines all of them; a `kill` or `stop` at a point that is
+never reached fails the scenario. The points of the steps after a `restart` are armed anew, so one scenario may kill
+the engine more than once.
 
 ### Expectations
 

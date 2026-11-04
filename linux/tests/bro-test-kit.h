@@ -176,9 +176,17 @@ void test_manual_clock_cancel_all (TestManualClock *self);
 /* Hears of a whole-file read before it reads (a read that is slow, say). Any thread. */
 typedef void (*TestReadFunc) (const char *path, gpointer data);
 
+/* Hears of a file operation (@op, @path) before it acts. FALSE with @error set: the call fails with it. Any thread. */
+typedef gboolean (*TestOpFunc) (const char *op, const char *path, gpointer data, BroBroError **error);
+
+/* Hears of a rename (by its from path) once it has landed, outside the lock (a scenario's crash points). FALSE with @error
+ * set: the call fails with it. Any thread. */
+typedef gboolean (*TestRenamedFunc) (const char *from, gpointer data, BroBroError **error);
+
 /* What the engine's tests need of the FileSystem port. Thread-safe. test_memory_fs_fail makes an operation on a path
  * fail before it acts (open, read, sync, syncDirectory, write, remove, rename: its from path); a rename refuses a path
- * that exists and a folder that isn't there, as the real ones do. move_merging moves as the platform file systems do (a
+ * that exists and a folder that isn't there, as the real ones do; on_op and on_renamed hear of the operations.
+ * move_merging moves as the platform file systems do (a
  * folder merges into a folder of the same name, ASCII case ignored; anything else takes ConflictNamer's name); move_to_trash
  * isn't faked. While test_memory_fs_freeze holds, every call that changes something (write, rename, remove,
  * createDirectory, sync, syncDirectory) fails (fs.failed, reason "frozen"): a killed engine's writes never land;
@@ -197,6 +205,9 @@ struct _TestMemoryFs {
   BroVolumeInfo *any_volume; /* what volume gives for any path (NULL: fs.notFound); set before use */
   TestReadFunc on_read;      /* set before use */
   gpointer on_read_data;
+  TestOpFunc on_op;          /* set before use */
+  TestRenamedFunc on_renamed; /* set before use */
+  gpointer on_op_data;       /* both hooks' */
   gint frozen;               /* atomic */
 };
 

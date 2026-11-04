@@ -1,0 +1,84 @@
+{
+  "title": "Naming killed after its first rename in staging finishes the renames after the restart, leaving no MakeMKV name behind",
+  "phase": 3,
+  "from": [
+    "rearchitecture-plan §20.1 (Name), §20.4 (after Release: resumes automatically)",
+    "I1 decision 299 (S4), owner I1-1 (2026-11-02): the crash point name.afterRename:<n>"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "profile": {
+      "titles": {
+        "skipDuplicates": false
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0,
+          1
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "name.afterRename:1"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "unit": {
+            "state": "committed"
+          }
+        },
+        "files": {
+          "under": "library",
+          "exactly": [
+            "Sample Movie/SHA256SUMS",
+            "Sample Movie/Sample Movie - Rip - Playlist 00001 - BR.mkv",
+            "Sample Movie/Sample Movie - Rip - Playlist 00002 - BR.mkv",
+            "Sample Movie/bromelia-{unit8}.json",
+            "Sample Movie/bromelia-{unit8}-log.txt",
+            "Sample Movie/makemkv-{unit8}-log.txt"
+          ]
+        },
+        "sums": {
+          "folder": "library/Sample Movie",
+          "ok": true,
+          "files": [
+            "Sample Movie - Rip - Playlist 00001 - BR.mkv",
+            "Sample Movie - Rip - Playlist 00002 - BR.mkv"
+          ]
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.resumed"
+          ]
+        },
+        "calls": {
+          "makemkvcon": {
+            "counts": {
+              " mkv ": 1
+            }
+          }
+        },
+        "db": {
+          "commit_intents": {
+            "count": 0
+          }
+        }
+      }
+    }
+  ]
+}

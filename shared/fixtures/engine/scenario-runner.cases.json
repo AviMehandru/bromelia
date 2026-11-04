@@ -191,6 +191,142 @@
       "expect": {
         "failure": "archived-automatic-skip step 2 (expect): the record in library/Sample Movie"
       }
+    },
+    {
+      "id": "a-name-rename-never-reached",
+      "given": {
+        "scenario": "recovery-name-renames-resumed",
+        "pointer": "/steps/1/kill/at",
+        "value": "name.afterRename:9"
+      },
+      "expect": {
+        "failure": "recovery-name-renames-resumed step 2 (kill): the engine to reach name.afterRename:9 / it never did"
+      }
+    },
+    {
+      "id": "seal-after-hash-only-in-seal",
+      "given": {
+        "scenario": "recovery-interrupted-kept-apart",
+        "pointer": "/steps/5",
+        "value": {
+          "kill": {
+            "at": "seal.afterHash"
+          }
+        }
+      },
+      "expect": {
+        "failure": "recovery-interrupted-kept-apart step 6 (kill): the engine to reach seal.afterHash / it never did"
+      }
+    },
+    {
+      "id": "a-second-kill-point-never-reached",
+      "given": {
+        "scenario": "recovery-keep-apart-move-rolled-forward",
+        "pointer": "/steps/5/kill/at",
+        "value": "commit.afterMove:9"
+      },
+      "expect": {
+        "failure": "recovery-keep-apart-move-rolled-forward step 6 (kill): the engine to reach commit.afterMove:9 / it never did"
+      }
+    },
+    {
+      "id": "no-fault",
+      "given": {
+        "scenario": "commit-move-fails-halfway",
+        "pointer": "/given/faults",
+        "value": []
+      },
+      "expect": {
+        "failure": "commit-move-fails-halfway step 2 (expect): job job outcome \"failed\" / \"succeeded\""
+      }
+    },
+    {
+      "id": "a-fault-that-outlasts-the-restart",
+      "given": {
+        "scenario": "commit-move-fails-halfway",
+        "pointer": "/given/faults/0/times",
+        "value": 2
+      },
+      "expect": {
+        "failure": "commit-move-fails-halfway step 4 (expect): job job outcome \"succeeded\" / \"failed\""
+      }
+    },
+    {
+      "id": "a-name-rename-is-counted-each-time",
+      "given": {
+        "scenario": "recovery-name-renames-resumed",
+        "pointer": "/steps",
+        "value": [
+          {
+            "rip": {
+              "iso": true,
+              "titles": [
+                0,
+                1
+              ],
+              "as": "job"
+            }
+          },
+          {
+            "kill": {
+              "at": "name.afterRename:2"
+            }
+          },
+          {
+            "restart": {}
+          },
+          {
+            "expect": {
+              "job": {
+                "name": "job",
+                "outcome": "failed"
+              }
+            }
+          }
+        ]
+      },
+      "expect": {
+        "failure": "recovery-name-renames-resumed step 4 (expect): job job outcome \"failed\" / \"succeeded\""
+      }
+    },
+    {
+      "id": "name-after-rename-only-in-name",
+      "given": {
+        "scenario": "recovery-commit-merge-rolled-forward",
+        "pointer": "/steps/1/kill/at",
+        "value": "name.afterRename:5"
+      },
+      "expect": {
+        "failure": "recovery-commit-merge-rolled-forward step 2 (kill): the engine to reach name.afterRename:5 / it never did"
+      }
+    },
+    {
+      "id": "seal-after-hash-comes-after-every-sync",
+      "given": {
+        "scenario": "recovery-seal-reruns-after-hash",
+        "pointer": "/given/faults",
+        "value": [
+          {
+            "op": "sync",
+            "path": "library/.bromelia/staging/*/*00002*",
+            "error": "EIO"
+          }
+        ]
+      },
+      "expect": {
+        "failure": "recovery-seal-reruns-after-hash step 2 (kill): the engine to reach seal.afterHash / it never did"
+      }
+    },
+    {
+      "id": "a-fault-with-an-unknown-op",
+      "given": {
+        "scenario": "commit-move-fails-halfway",
+        "pointer": "/given/faults/0/op",
+        "value": "chmod"
+      },
+      "expect": {
+        "failure": "given.faults[].op rename, write, sync or remove / chmod"
+      }
     }
   ]
 }

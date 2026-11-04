@@ -10,7 +10,8 @@ namespace Bromelia.TestKit;
 /// writing, a case's setup) aren't. <see cref="Cached"/> is what a read through the cache gives instead of what is on disk;
 /// <see cref="Fails"/> makes an operation on a path fail before it acts (open, read, sync, syncDirectory, write, remove,
 /// rename: its from path); a rename refuses a path that exists and a folder that isn't there, as the real ones do;
-/// <see cref="OnOp"/> hears of each operation before it acts. While <see cref="Freeze"/> holds, every call that changes something
+/// <see cref="OnOp"/> hears of each operation before it acts, <see cref="OnRenamed"/> of each rename (its from path) once it has
+/// landed (a scenario's crash points). While <see cref="Freeze"/> holds, every call that changes something
 /// fails (fs.failed, reason "frozen"): a killed engine's writes never land.</summary>
 public sealed class MemoryFileSystem : IFileSystem
 {
@@ -29,6 +30,9 @@ public sealed class MemoryFileSystem : IFileSystem
     public readonly Dictionary<string, byte[]> Cached = new();
     public readonly List<(string Op, string Path, BroError Error)> Fails = new();
     public Action<string, string>? OnOp;
+    /// <summary>Hears of each rename (by its from path) after it has landed, outside the lock; what it throws, the call
+    /// throws.</summary>
+    public Action<string>? OnRenamed;
     /// <summary>Hears of each whole-file <see cref="Read"/> before it reads (a read that is slow, say).</summary>
     public Action<string>? OnRead;
     /// <summary>How many pieces of each file were read while <see cref="Recording"/> was on.</summary>
@@ -178,6 +182,7 @@ public sealed class MemoryFileSystem : IFileSystem
             else throw NotFound(from);
             Record($"rename {from} {to}");
         }
+        OnRenamed?.Invoke(from);
     }
 
     public void Remove(string path)

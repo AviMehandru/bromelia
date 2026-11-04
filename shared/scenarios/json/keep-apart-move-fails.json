@@ -1,0 +1,134 @@
+{
+  "title": "A keep-apart whose move to _Quarantine fails keeps its intent, and the next start finishes it and ends the job cancelled",
+  "phase": 3,
+  "from": [
+    "rearchitecture-plan §22.3 (keep-apart's quarantine is a commit; a failure inside 5 keeps the intent), §20.4 (open intents roll forward at startup)",
+    "owner decision 2026-10-25 (keep-apart seals the unit and ends the job cancelled)",
+    "owner 2026-11-03, I2's open item 1: a failed keepApart whose quarantine is rolled forward ends the job cancelled"
+  ],
+  "given": {
+    "disc": "sample-movie-one-title",
+    "faults": [
+      {
+        "op": "rename",
+        "path": "library/.bromelia/staging/*",
+        "times": 1,
+        "error": "EIO"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "inStep:acquire"
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "interrupted"
+        }
+      }
+    },
+    {
+      "keepApart": "job"
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "failed",
+          "error": {
+            "code": "fs.failed",
+            "params": {
+              "operation": "rename",
+              "reason": "EIO"
+            }
+          }
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            ".bromelia/staging/{jobId}/title_t00.mkv",
+            ".bromelia/staging/{jobId}/SHA256SUMS",
+            ".bromelia/staging/{jobId}/INCOMPLETE.txt"
+          ],
+          "exclude": [
+            "_Quarantine/Sample Movie [INCOMPLETE]"
+          ]
+        },
+        "db": {
+          "commit_intents": {
+            "count": 1
+          }
+        }
+      }
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "cancelled",
+          "error": {
+            "code": "job.cancelledByUser"
+          },
+          "unit": {
+            "state": "quarantined",
+            "status": "incomplete"
+          }
+        },
+        "files": {
+          "under": "library",
+          "include": [
+            "_Quarantine/Sample Movie [INCOMPLETE]/INCOMPLETE.txt",
+            "_Quarantine/Sample Movie [INCOMPLETE]/SHA256SUMS",
+            "_Quarantine/Sample Movie [INCOMPLETE]/title_t00.mkv"
+          ],
+          "exclude": [
+            ".bromelia/staging/{jobId}"
+          ]
+        },
+        "sums": {
+          "folder": "library/_Quarantine/Sample Movie [INCOMPLETE]",
+          "ok": true,
+          "files": [
+            "title_t00.mkv"
+          ]
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "commit.rolledForward"
+          ]
+        },
+        "db": {
+          "commit_intents": {
+            "count": 0
+          },
+          "archive_units": {
+            "count": 1,
+            "rows": [
+              {
+                "state": "quarantined",
+                "status": "incomplete"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

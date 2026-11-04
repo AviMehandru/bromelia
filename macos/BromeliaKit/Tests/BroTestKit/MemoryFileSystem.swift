@@ -8,7 +8,8 @@ import Foundation
 /// 'open <path> disk|cache'); `put` and `putFolder` (a tool writing, a case's setup) aren't. `setCached` gives what a read
 /// through the cache gives instead of what is on disk; `fail` makes an operation on a path fail before it acts (open,
 /// read, sync, syncDirectory, write, remove, rename: its from path); a rename refuses a path that exists and a folder that
-/// isn't there, as the real ones do; `onOp` hears of each operation before it acts. While `freeze()` holds, every call
+/// isn't there, as the real ones do; `onOp` hears of each operation before it acts (what it throws, the call throws),
+/// `onRenamed` of each rename (its from path) once it has landed (a scenario's crash points). While `freeze()` holds, every call
 /// that changes something fails (fs.failed, reason "frozen"): a killed engine's writes never land. Paths are keyed by their
 /// UTF-8 bytes, as a disk names them: an NFC and an NFD spelling of one name are two files (Swift's `==` on String
 /// would make them one).
@@ -21,7 +22,8 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     private var _recording = false
     private var cached: [[UInt8]: [UInt8]] = [:]
     private var fails: [(op: String, path: String, error: BroError)] = []
-    private var _onOp: (@Sendable (String, String) -> Void)?
+    private var _onOp: (@Sendable (String, String) throws(BroError) -> Void)?
+    private var _onRenamed: (@Sendable (String) throws(BroError) -> Void)?
     private var _onRead: (@Sendable (String) -> Void)?
     private var _anyVolume: VolumeInfo?
     private var readFails: [[UInt8]: BroError] = [:]
@@ -48,9 +50,30 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     public var reads: [String: Int] { lock.withLock { _reads } }
     /// The streams `openForReading` gave that aren't closed yet.
     public var openStreams: Int { lock.withLock { _openStreams } }
-    public var onOp: (@Sendable (String, String) -> Void)? {
-        get { lock.withLock { _onOp } }
-        set { lock.withLock { _onOp = newValue } }
+    public var onOp: (@Sendable (String, String) throws(BroError) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onOp
+        }
+        set {
+            lock.lock()
+            _onOp = newValue
+            lock.unlock()
+        }
+    }
+    /// Hears of each rename (by its from path) after it has landed, outside the lock; what it throws, the call throws.
+    public var onRenamed: (@Sendable (String) throws(BroError) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onRenamed
+        }
+        set {
+            lock.lock()
+            _onRenamed = newValue
+            lock.unlock()
+        }
     }
     /// Hears of each whole-file `read` before it reads (a read that is slow, say).
     public var onRead: (@Sendable (String) -> Void)? {
@@ -90,8 +113,9 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
     /// `onOp`, then the failure set for this operation and path, if any.
     private func check(_ op: String, _ path: String) throws(BroError) {
         if ["write", "rename", "remove", "sync", "syncDirectory"].contains(op) { try checkNotFrozen(op, path) }
-        let (hook, error) = lock.withLock { (_onOp, fails.first { $0.op == op && $0.path == path }?.error) }
-        hook?(op, path)
+        let hook = onOp
+        let error = lock.withLock { fails.first { $0.op == op && $0.path == path }?.error }
+        try hook?(op, path)
         if let error { throw error }
     }
 
@@ -206,6 +230,7 @@ public final class MemoryFileSystem: FileSystem, @unchecked Sendable {
             return nil
         }
         if let error { throw error }
+        try onRenamed?(from)
     }
     /// As the platform file systems do it: each entry of `from` in turn, a folder merging into a folder of the same name
     /// (ASCII case ignored), anything else moving under ConflictNamer's name; emptied folders go.

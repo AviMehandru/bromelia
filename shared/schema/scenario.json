@@ -239,6 +239,39 @@
             ]
           }
         },
+        "faults": {
+          "description": "File operations that fail (owner I1-2): the first `times` (default 1) times the engine does `op` on a path matching `path` (a glob relative to the root: `*` within one component, `**` across), it fails before acting with fs.failed {operation: op, path, reason: error}.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "enum": [
+                  "rename",
+                  "write",
+                  "sync",
+                  "remove"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "times": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "path",
+              "error"
+            ]
+          }
+        },
         "libraries": {
           "type": "array",
           "items": {
@@ -787,7 +820,7 @@
                 "properties": {
                   "at": {
                     "type": "string",
-                    "pattern": "^(beforeStep|afterStep):[a-zA-Z]+$|^inStep:[a-zA-Z]+(:[1-9][0-9]*)?$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$"
+                    "pattern": "^(beforeStep|afterStep):[a-zA-Z]+$|^inStep:[a-zA-Z]+(:[1-9][0-9]*)?$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$|^name\\.afterRename:[1-9][0-9]*$"
                   }
                 },
                 "required": [
@@ -823,7 +856,7 @@
                 "properties": {
                   "at": {
                     "type": "string",
-                    "pattern": "^(beforeStep|afterStep):[a-zA-Z]+$|^inStep:[a-zA-Z]+(:[1-9][0-9]*)?$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$"
+                    "pattern": "^(beforeStep|afterStep):[a-zA-Z]+$|^inStep:[a-zA-Z]+(:[1-9][0-9]*)?$|^commit\\.(afterIntent|beforeDone|afterMove:[0-9]+)$|^seal\\.afterHash$|^name\\.afterRename:[1-9][0-9]*$"
                   }
                 },
                 "required": [

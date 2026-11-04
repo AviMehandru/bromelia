@@ -33,6 +33,22 @@ public sealed class ScenarioRun : IDisposable
     string? _holdAt;
     readonly ManualResetEventSlim _held = new();
     readonly ManualResetEventSlim _release = new();
+    readonly object _stepLock = new();
+    /// <summary>The step kind between its beforeStep and afterStep points; whether Seal has written into staging in it yet; how
+    /// many renames in staging Name has made in it.</summary>
+    string? _running;
+    bool _sealWrote;
+    int _renames;
+    /// <summary>given.faults, each with the times it has still to fail.</summary>
+    readonly List<Fault> _faults = new();
+
+    sealed class Fault
+    {
+        public string Op = "";
+        public string Path = "";
+        public int Left;
+        public string Reason = "";
+    }
 
     public ScenarioRun(string id, JsonValue scenario)
     {
@@ -44,6 +60,14 @@ public sealed class ScenarioRun : IDisposable
         World.Prepare(Root);
         Root.Crash = Point;
         Tools.Crash = Point;
+        foreach (var f in World.Given["faults"]?.AsArray ?? new List<JsonValue>())
+        {
+            var op = f["op"]?.AsString ?? "";
+            if (op is not ("rename" or "write" or "sync" or "remove")) throw new ScenarioFailure("given.faults[].op rename, write, sync or remove", op);
+            _faults.Add(new Fault { Op = op, Path = f["path"]!.AsString!, Left = (int)(f["times"]?.AsInteger ?? 1), Reason = f["error"]!.AsString! });
+        }
+        Root.Fs.OnOp = BeforeOp;
+        Root.Fs.OnRenamed = AfterRename;
     }
 
     /// <summary>The root takes its launcher before the tools exist (they need its clock and files): this hands each start on.</summary>
@@ -484,8 +508,8 @@ public sealed class ScenarioRun : IDisposable
     /// until the stop has begun.</summary>
     void Point(string point)
     {
-        if (point.StartsWith("beforeStep:", StringComparison.Ordinal)) Tools.StepBegins(point[11..]);
-        else if (point.StartsWith("afterStep:", StringComparison.Ordinal)) Tools.StepBegins(null);
+        if (point.StartsWith("beforeStep:", StringComparison.Ordinal)) Running(point[11..]);
+        else if (point.StartsWith("afterStep:", StringComparison.Ordinal)) Running(null);
         if (_killAt != null && _killed == null && Normal(point) == Normal(_killAt))
         {
             _killed = point;
@@ -500,6 +524,59 @@ public sealed class ScenarioRun : IDisposable
             _held.Set();
             _release.Wait(TimeSpan.FromSeconds(60));
         }
+    }
+
+    /// <summary>A step begins (its kind) or has ended (null): the tools' processes and the file operations from now on are its.</summary>
+    void Running(string? kind)
+    {
+        Tools.StepBegins(kind);
+        lock (_stepLock)
+        {
+            _running = kind;
+            _sealWrote = false;
+            _renames = 0;
+        }
+    }
+
+    static bool InStaging(string path) => path.Contains("/.bromelia/staging/", StringComparison.Ordinal);
+
+    /// <summary>The kit's hook before each file operation of the engine (decision 298; a tool's or the setup's writes don't
+    /// come here). A given fault fails it before it acts (owner I1-2), as the kit's failure rules fail; Seal's first write into
+    /// staging is seal.afterHash: every file is synced and hashed by then, and nothing of SHA256SUMS, the record or the logs is
+    /// written.</summary>
+    void BeforeOp(string op, string path)
+    {
+        lock (_faults)
+        {
+            var relative = path.StartsWith(TestCompositionRoot.Root + "/", StringComparison.Ordinal) ? path[(TestCompositionRoot.Root.Length + 1)..] : path;
+            if (_faults.FirstOrDefault(f => f.Left > 0 && f.Op == op && ScenarioExpect.Glob(f.Path, relative)) is { } fault)
+            {
+                fault.Left--;
+                throw new BroFailure(new BroError("fs.failed", ("operation", JsonValue.Of(op)), ("path", JsonValue.Of(path)),
+                    ("reason", JsonValue.Of(fault.Reason))));
+            }
+        }
+        if (op != "write" || !InStaging(path)) return;
+        lock (_stepLock)
+        {
+            if (_running != "seal" || _sealWrote) return;
+            _sealWrote = true;
+        }
+        Point("seal.afterHash");
+    }
+
+    /// <summary>The kit's hook once a rename has landed: Name's n-th rename in staging is name.afterRename:&lt;n&gt; (owner I1-1; a
+    /// rename through a free name on the way is two).</summary>
+    void AfterRename(string from)
+    {
+        if (!InStaging(from)) return;
+        int n;
+        lock (_stepLock)
+        {
+            if (_running != "name") return;
+            n = ++_renames;
+        }
+        Point("name.afterRename:" + n);
     }
 
     /// <summary>H1-6: the engine is held at the point, LocalEngine.stop begins, the point is released, the stop ends. A
@@ -558,7 +635,7 @@ public sealed class ScenarioRun : IDisposable
         _killed = null;
         _held.Reset();
         _release.Reset();
-        Tools.StepBegins(null);
+        Running(null);
         await OpenFeed(after);
         Arm(StepNumber);
     }

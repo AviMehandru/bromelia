@@ -72,6 +72,28 @@ final class ScenarioRun: @unchecked Sendable {
     private let release = Gate()
     private(set) var stepNumber = 0
     private(set) var stepKind = "start"
+    private let stepLock = NSLock()
+    /// The step kind between its beforeStep and afterStep points; whether Seal has written into staging in it yet; how many
+    /// renames in staging Name has made in it.
+    private var runningKind: String?
+    private var sealWrote = false
+    private var renames = 0
+    /// given.faults, each with the times it has still to fail.
+    private var faults: [Fault] = []
+
+    private final class Fault {
+        let op: String
+        let path: String
+        var left: Int
+        let reason: String
+
+        init(op: String, path: String, left: Int, reason: String) {
+            self.op = op
+            self.path = path
+            self.left = left
+            self.reason = reason
+        }
+    }
 
     private init(id: String, scenario: JsonValue, world: ScenarioWorld, tools: ScenarioTools, root: TestCompositionRoot) {
         self.id = id
@@ -105,6 +127,13 @@ final class ScenarioRun: @unchecked Sendable {
             let run = ScenarioRun(id: id, scenario: scenario, world: world, tools: tools, root: root)
             root.crash = { [unowned run] (point: String) throws(BroError) in try run.point(point) }
             tools.crash = { [unowned run] (point: String) throws(BroError) in try run.point(point) }
+            for f in world.given["faults"]?.array ?? [] {
+                let op = f["op"]?.string ?? ""
+                if !["rename", "write", "sync", "remove"].contains(op) { throw ScenarioFailure("given.faults[].op rename, write, sync or remove", op) }
+                run.faults.append(Fault(op: op, path: f["path"]?.string ?? "", left: Int(f["times"]?.int ?? 1), reason: f["error"]?.string ?? ""))
+            }
+            root.fs.onOp = { [unowned run] (op: String, path: String) throws(BroError) in try run.beforeOp(op, path) }
+            root.fs.onRenamed = { [unowned run] (from: String) throws(BroError) in try run.afterRename(from) }
             return run
         } catch {
             await root.dispose()
@@ -525,9 +554,9 @@ final class ScenarioRun: @unchecked Sendable {
     /// the stop has begun.
     private func point(_ point: String) throws(BroError) {
         if point.hasPrefix("beforeStep:") {
-            tools.stepBegins(String(point.dropFirst(11)))
+            running(String(point.dropFirst(11)))
         } else if point.hasPrefix("afterStep:") {
-            tools.stepBegins(nil)
+            running(nil)
         }
         let (kill, hold) = lock.withLock { () -> (Bool, Bool) in
             if let at = killAt, killedAt == nil, Self.normal(point) == Self.normal(at) {
@@ -551,6 +580,54 @@ final class ScenarioRun: @unchecked Sendable {
             held.set()
             release.wait(seconds: 60)
         }
+    }
+
+    /// A step begins (its kind) or has ended (nil): the tools' processes and the file operations from now on are its.
+    private func running(_ kind: String?) {
+        tools.stepBegins(kind)
+        stepLock.withLock {
+            runningKind = kind
+            sealWrote = false
+            renames = 0
+        }
+    }
+
+    private static func inStaging(_ path: String) -> Bool { path.contains("/.bromelia/staging/") }
+
+    /// The kit's hook before each file operation of the engine (decision 298; a tool's or the setup's writes don't come
+    /// here). A given fault fails it before it acts (owner I1-2), as the kit's failure rules fail; Seal's first write into
+    /// staging is seal.afterHash: every file is synced and hashed by then, and nothing of SHA256SUMS, the record or the logs
+    /// is written.
+    private func beforeOp(_ op: String, _ path: String) throws(BroError) {
+        let prefix = TestCompositionRoot.root + "/"
+        let relative = path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
+        let fault = stepLock.withLock { () -> Fault? in
+            guard let f = faults.first(where: { $0.left > 0 && $0.op == op && ScenarioExpect.glob($0.path, relative) }) else { return nil }
+            f.left -= 1
+            return f
+        }
+        if let fault {
+            throw BroError("fs.failed", [("operation", .string(op)), ("path", .string(path)), ("reason", .string(fault.reason))])
+        }
+        if op != "write" || !Self.inStaging(path) { return }
+        let first = stepLock.withLock { () -> Bool in
+            if runningKind != "seal" || sealWrote { return false }
+            sealWrote = true
+            return true
+        }
+        if first { try point("seal.afterHash") }
+    }
+
+    /// The kit's hook once a rename has landed: Name's n-th rename in staging is name.afterRename:<n> (owner I1-1; a rename
+    /// through a free name on the way is two).
+    private func afterRename(_ from: String) throws(BroError) {
+        if !Self.inStaging(from) { return }
+        let n = stepLock.withLock { () -> Int? in
+            if runningKind != "name" { return nil }
+            renames += 1
+            return renames
+        }
+        if let n { try point("name.afterRename:\(n)") }
     }
 
     /// H1-6: the engine is held at the point, LocalEngine.stop begins, the point is released, the stop ends. A point never
@@ -626,7 +703,7 @@ final class ScenarioRun: @unchecked Sendable {
         }
         held.reset()
         release.reset()
-        tools.stepBegins(nil)
+        running(nil)
         try await openFeed(after: after)
         arm(from: stepNumber)
     }

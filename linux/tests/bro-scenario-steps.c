@@ -629,6 +629,123 @@ same_point (const char *a, const char *b)
   return strcmp (x, y) == 0;
 }
 
+/* A step begins (its kind) or has ended (NULL): the tools' processes and the file operations from now on are its. */
+static void
+running (BroScenarioRun *run, const char *kind)
+{
+  bro_scenario_tools_step_begins (run->tools, kind);
+  g_mutex_lock (&run->step_lock);
+  g_free (run->running);
+  run->running = g_strdup (kind);
+  run->seal_wrote = FALSE;
+  run->renames = 0;
+  g_mutex_unlock (&run->step_lock);
+}
+
+/* One of given.faults: @op on a path @path (a glob relative to the root) fails with @reason, @left more times. */
+typedef struct {
+  char *op;
+  char *path;
+  char *reason;
+  int left;
+} ScenarioFault;
+
+static void
+fault_free (ScenarioFault *f)
+{
+  g_free (f->op);
+  g_free (f->path);
+  g_free (f->reason);
+  g_free (f);
+}
+
+static gboolean
+in_staging (const char *path)
+{
+  return strstr (path, "/.bromelia/staging/") != NULL;
+}
+
+/* The kit's hook before each file operation of the engine (decision 298; a tool's or the setup's writes don't come here).
+ * A given fault fails it before it acts (owner I1-2), as the kit's failure rules fail; Seal's first write into staging is
+ * seal.afterHash: every file is synced and hashed by then, and nothing of SHA256SUMS, the record or the logs is written.
+ * Any thread. */
+static gboolean
+before_op (const char *op, const char *path, gpointer data, BroBroError **error)
+{
+  BroScenarioRun *run = data;
+  const char *relative = g_str_has_prefix (path, TEST_ROOT "/") ? path + strlen (TEST_ROOT "/") : path;
+  ScenarioFault *fault = NULL;
+  gboolean first;
+  g_mutex_lock (&run->step_lock);
+  for (guint i = 0; i < run->faults->len && !fault; i++)
+    {
+      ScenarioFault *f = run->faults->pdata[i];
+      if (f->left > 0 && strcmp (f->op, op) == 0 && bro_scenario_expect_glob (f->path, relative))
+        fault = f;
+    }
+  if (fault)
+    fault->left--;
+  g_mutex_unlock (&run->step_lock);
+  if (fault)
+    {
+      BroJsonValue *params = bro_json_value_new_object ();
+      bro_json_value_set (params, "operation", bro_json_value_new_string (op));
+      bro_json_value_set (params, "path", bro_json_value_new_string (path));
+      bro_json_value_set (params, "reason", bro_json_value_new_string (fault->reason));
+      bro_bro_error_set (error, "fs.failed", params);
+      return FALSE;
+    }
+  if (strcmp (op, "write") != 0 || !in_staging (path))
+    return TRUE;
+  g_mutex_lock (&run->step_lock);
+  first = g_strcmp0 (run->running, "seal") == 0 && !run->seal_wrote;
+  if (first)
+    run->seal_wrote = TRUE;
+  g_mutex_unlock (&run->step_lock);
+  return !first || run_point ("seal.afterHash", run, error);
+}
+
+/* The kit's hook once a rename has landed: Name's n-th rename in staging is name.afterRename:<n> (owner I1-1; a rename
+ * through a free name on the way is two). Any thread. */
+static gboolean
+after_rename (const char *from, gpointer data, BroBroError **error)
+{
+  BroScenarioRun *run = data;
+  g_autofree char *point = NULL;
+  if (!in_staging (from))
+    return TRUE;
+  g_mutex_lock (&run->step_lock);
+  if (g_strcmp0 (run->running, "name") == 0)
+    point = g_strdup_printf ("name.afterRename:%d", ++run->renames);
+  g_mutex_unlock (&run->step_lock);
+  return !point || run_point (point, run, error);
+}
+
+/* given.faults into run->faults, and the kit's hooks set; FALSE (a failure) for an op that isn't one. */
+static gboolean
+arm_faults (BroScenarioRun *run)
+{
+  BroJsonValue *faults = J (J (run->scenario, "given"), "faults");
+  for (guint i = 0; i < bro_json_value_length (faults); i++)
+    {
+      BroJsonValue *f = bro_json_value_at (faults, i);
+      const char *op = S (f, "op", "");
+      ScenarioFault *fault;
+      if (strcmp (op, "rename") != 0 && strcmp (op, "write") != 0 && strcmp (op, "sync") != 0 && strcmp (op, "remove") != 0)
+        return bro_scenario_run_fail (run, "given.faults[].op rename, write, sync or remove", op);
+      fault = g_new0 (ScenarioFault, 1);
+      fault->op = g_strdup (op);
+      fault->path = g_strdup (S (f, "path", ""));
+      fault->reason = g_strdup (S (f, "error", ""));
+      fault->left = (int) bro_json_value_get_integer (J (f, "times"), 1);
+      g_ptr_array_add (run->faults, fault);
+    }
+  run->root->fs->on_op_data = run;
+  run->root->fs->on_op = before_op;
+  run->root->fs->on_renamed = after_rename;
+  return TRUE;
+}
+
 /* Every crash point the engine (or a tool start) reaches: a kill there kills the engine; a stop there holds it until the
  * stop has begun. Any thread. */
 static gboolean
@@ -637,9 +754,9 @@ run_point (const char *point, gpointer data, BroBroError **error)
   BroScenarioRun *run = data;
   gboolean kill, hold;
   if (g_str_has_prefix (point, "beforeStep:"))
-    bro_scenario_tools_step_begins (run->tools, point + 11);
+    running (run, point + 11);
   else if (g_str_has_prefix (point, "afterStep:"))
-    bro_scenario_tools_step_begins (run->tools, NULL);
+    running (run, NULL);
   g_mutex_lock (&run->lock);
   kill = run->kill_at && !run->killed && same_point (point, run->kill_at);
   hold = !kill && run->hold_at && same_point (point, run->hold_at);
@@ -810,7 +927,7 @@ restart (BroScenarioRun *run)
   run->held = FALSE;
   run->released = FALSE;
   g_mutex_unlock (&run->lock);
-  bro_scenario_tools_step_begins (run->tools, NULL);
+  running (run, NULL);
   if (!open_feed (run, TRUE, after))
     return FALSE;
   arm (run, (guint) run->step_number);
@@ -1232,6 +1349,8 @@ run_new (const char *id, BroJsonValue *scenario)
   run->step_kind = g_strdup ("start");
   g_mutex_init (&run->lock);
   g_cond_init (&run->cond);
+  g_mutex_init (&run->step_lock);
+  run->faults = g_ptr_array_new_with_free_func ((GDestroyNotify) fault_free);
   run->world = bro_scenario_world_new (scenario);
   deferred->run = run;
   run->root = test_composition_root_new (bro_scenario_world_installed (run->world, "makemkvcon"), NULL,
@@ -1272,6 +1391,9 @@ run_free (BroScenarioRun *run)
   g_free (run->hold_at);
   g_free (run->step_kind);
   g_free (run->failure);
+  g_free (run->running);
+  g_ptr_array_unref (run->faults);
+  g_mutex_clear (&run->step_lock);
   g_mutex_clear (&run->lock);
   g_cond_clear (&run->cond);
   g_free (run);
@@ -1282,7 +1404,7 @@ play_all (BroScenarioRun *run)
 {
   BroJsonValue *steps = J (run->scenario, "steps");
   run->step_number = -1; /* the given */
-  if (!bro_scenario_world_prepare (run->world, run->root, &run->failure))
+  if (!bro_scenario_world_prepare (run->world, run->root, &run->failure) || !arm_faults (run))
     return FALSE;
   run->step_number = 0;
   {

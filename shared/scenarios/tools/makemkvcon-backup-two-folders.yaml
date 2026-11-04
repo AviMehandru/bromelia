@@ -1,0 +1,11 @@
+tool: makemkvcon
+note: As makemkvcon-saves, but a backup writes a Blu-ray folder with two folders at its top (BDMV and CERTIFICATE), so moving it into a library by merging renames two entries, one after the other.
+rules:
+  - when: {command: info}
+    print: [listing]
+  - when: {command: mkv}
+    writeTitles: {content: "mkv data {title}"}
+    print: [saved]
+  - when: {command: backup}
+    writeFolder: {"BDMV/index.bdmv": "INDX0200", "CERTIFICATE/id.bdmv": "BDID0200"}
+    print: [saved]

@@ -787,7 +787,6 @@ test_manual_clock_pending (TestManualClock *self)
 static void memory_fs_iface_init (BroFileSystemInterface *iface);
 G_DEFINE_FINAL_TYPE_WITH_CODE (TestMemoryFs, test_memory_fs, G_TYPE_OBJECT, G_IMPLEMENT_INTERFACE (BRO_TYPE_FILE_SYSTEM, memory_fs_iface_init))
 
-/* FALSE (and @error) when a test made @op on @path fail. */
 /* FALSE (and @error: fs.failed, reason "frozen") while the files are frozen. */
 static gboolean
 fs_not_frozen (TestMemoryFs *self, const char *op, const char *path, BroBroError **error)
@@ -803,6 +802,7 @@ fs_not_frozen (TestMemoryFs *self, const char *op, const char *path, BroBroError
   return FALSE;
 }
 
+/* FALSE (and @error) when the files are frozen, on_op fails the call or a test made @op on @path fail. */
 static gboolean
 fs_check (TestMemoryFs *self, const char *op, const char *path, BroBroError **error)
 {
@@ -811,6 +811,8 @@ fs_check (TestMemoryFs *self, const char *op, const char *path, BroBroError **er
   if ((strcmp (op, "write") == 0 || strcmp (op, "rename") == 0 || strcmp (op, "remove") == 0 || strcmp (op, "sync") == 0
        || strcmp (op, "syncDirectory") == 0)
       && !fs_not_frozen (self, op, path, error))
+    return FALSE;
+  if (self->on_op && !self->on_op (op, path, self->on_op_data, error))
     return FALSE;
   g_mutex_lock (&self->lock);
   for (guint i = 0; i < self->fails->len && !found; i++)
@@ -1132,7 +1134,7 @@ fs_rename (BroFileSystem *fs, const char *from, const char *to, BroBroError **er
       return FALSE;
     }
   g_mutex_unlock (&self->lock);
-  return TRUE;
+  return !self->on_renamed || self->on_renamed (from, self->on_op_data, error);
 }
 
 static gboolean

@@ -1,0 +1,26 @@
+title: A commit killed right after its intent was stored, before anything moved, is rolled forward whole at startup
+phase: 3
+from:
+  - rearchitecture-plan §22.3 (a crash between 4 and 5 rolls forward)
+  - invariants I1, I3, I5
+  - "I1 decision 299 (S1): the crash point commit.afterIntent end to end"
+given:
+  disc: sample-movie
+  profile: {titles: {skipDuplicates: false}}
+steps:
+  - rip: {iso: true, titles: [0, 1], as: job}
+  - kill: {at: commit.afterIntent}
+  - restart: {}
+  - expect:
+      job: {name: job, outcome: succeeded, unit: {state: committed}}
+      files:
+        under: library
+        include:
+          - "Sample Movie/Sample Movie - Rip - Playlist 00001 - BR.mkv"
+          - "Sample Movie/Sample Movie - Rip - Playlist 00002 - BR.mkv"
+          - "Sample Movie/SHA256SUMS"
+          - "Sample Movie/bromelia-{unit8}.json"
+        exclude: [".bromelia/staging/{jobId}", "_Quarantine"]
+      sums: {folder: "library/Sample Movie", ok: true, files: ["Sample Movie - Rip - Playlist 00001 - BR.mkv", "Sample Movie - Rip - Playlist 00002 - BR.mkv"]}
+      log: {job: job, include: [recovery.resumed, commit.rolledForward]}
+      db: {commit_intents: {count: 0}, archive_units: {count: 1, rows: [{state: committed}]}}

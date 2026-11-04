@@ -39,6 +39,11 @@ struct _BroScenarioRun {
   int step_number;
   char *step_kind;
   char *failure;        /* "<expected> / <found>" of the step that failed */
+  GMutex step_lock;     /* running, seal_wrote, renames and the faults' counts */
+  char *running;        /* the step kind between its beforeStep and afterStep points (nullable) */
+  gboolean seal_wrote;  /* whether Seal has written into staging in it yet */
+  int renames;          /* how many renames in staging Name has made in it */
+  GPtrArray *faults;    /* given.faults, each with the times it has still to fail */
 };
 
 /* Plays the scenario; FALSE with *@failure (the full text) when it fails. */
