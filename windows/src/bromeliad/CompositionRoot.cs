@@ -47,10 +47,11 @@ public static class CompositionRoot
             options.SystemTools ? PlatformToolPaths.Candidates(options.Home) : new Dictionary<ToolKind, IReadOnlyList<string>>(),
             PlatformToolPaths.Names(), options.SystemTools ? SearchPath(options.Environment) : Array.Empty<string>(), options.Home);
         var isolation = new RegistrySwapIsolation(fs, new CurrentUserMakemkvRegistry(), CatalogKeys(), Path.Combine(data, "run", "makemkv-registry.json"));
-        var makemkv = new MakemkvTool(launcher, fs, isolation, locator);
+        var tool = new MakemkvTool(launcher, fs, isolation, locator);
+        IMakemkv makemkv = options.Drives ? tool : new NoDriveScan(tool);
         var mkvtoolnix = new MkvToolNix(launcher, fs, locator, Path.Combine(data, "tmp"));
-        var monitor = new PlatformDeviceMonitor(clock);
-        var control = new PlatformDriveControl(clock);
+        IDeviceMonitor monitor = options.Drives ? new PlatformDeviceMonitor(clock) : new NoDeviceMonitor();
+        IDriveControl control = options.Drives ? new PlatformDriveControl(clock) : new NoDriveControl();
         var ids = new RandomIdGenerator();
         var renderer = new MessageTextRenderer(EnglishMessages.Catalog);
         var log = new FileEngineLog(fs, clock, Path.Combine(data, "logs", "engine.log"));

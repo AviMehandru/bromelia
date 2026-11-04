@@ -27,5 +27,8 @@ test('engine', executable('test-engine', 'test-engine.c', dependencies: [bro_tes
 test('scenarios', executable('test-scenarios', 'test-scenarios.c', 'bro-test-composition-root.c', 'bro-scenario-catalog.c',
   'bro-scenario-world.c', 'bro-scenario-tools.c', 'bro-scenario-steps.c', 'bro-scenario-expect.c',
   dependencies: [bro_test_support_dep, bro_test_kit_dep, bro_engine_dep, bro_adapters_dep]), env: test_env, timeout: 900)
-# The hosts layer: the real composition root's smoke test (no makemkvcon, no system keystore, a temporary data folder).
-test('hosts', executable('test-hosts', 'test-hosts.c', dependencies: [bro_test_kit_dep, bro_host_dep]), env: test_env, timeout: 120)
+# The hosts layer: the real composition root's smoke test (no makemkvcon, no system keystore, a temporary data folder), and
+# the realDisc scenarios through it, each skipped unless its variable is set (a real rip takes minutes; the cap is 60).
+test_hosts = executable('test-hosts', 'test-hosts.c', dependencies: [bro_test_kit_dep, bro_host_dep, bro_test_support_dep])
+test('hosts', test_hosts, args: ['-p', '/hosts'], env: test_env, timeout: 120)
+test('hosts-real-disc', test_hosts, args: ['-p', '/real-disc'], env: test_env, timeout: 3900)

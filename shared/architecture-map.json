@@ -18532,9 +18532,10 @@
             "home",
             "systemKeystore",
             "systemTools",
+            "drives",
             "environment"
           ],
-          "doc": "What the graph is built for: the data folder (required in phase 3: the platform default is today's app's folder), config.json (null: <data>/config.json), the user's home (MakeMKV's folder, ~ in paths), whether the system keystore is used (false in tests), whether the tools are looked for where they are usually installed and on PATH (false in tests: no tool is found, so nothing runs makemkvcon), the process's environment (the host passes it: ConfigService gets its BROMELIA_SECRET_* entries, the locator its PATH).",
+          "doc": "What the graph is built for: the data folder (required in phase 3: the platform default is today's app's folder), config.json (null: <data>/config.json), the user's home (MakeMKV's folder, ~ in paths), whether the system keystore is used (false in tests), whether the tools are looked for where they are usually installed and on PATH (false in tests: no tool is found, so nothing runs makemkvcon), whether the optical drives are used (false in tests: no device monitor, no drive control, no MakeMKV drive scan; real hosts pass true), the process's environment (the host passes it: ConfigService gets its BROMELIA_SECRET_* entries, the locator its PATH).",
           "swift": {
             "name": "RootOptions",
             "file": "macos/bromeliad/RootOptions.swift"

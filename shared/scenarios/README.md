@@ -182,6 +182,14 @@ when that variable is set, with the real makemkvcon, mkvmerge, ffmpeg and tesser
 `iso: true` is the image, and `drive: realdisc` is the image attached as a device (macOS `hdiutil attach -nomount`,
 Linux a loop device, Windows the file itself). Their expectations are what today's integration tests check.
 
+The scenario runners leave them out: `RealDiscScenarioTests` in each host's test unit plays them through the real
+composition root, in a fresh world under the temporary folder with an empty home, no system keystore and no drives
+(`RootOptions.drives` false). It supports only what the phase 3 ones use (`given.profile`, `rip {iso, as}`, `expect {job,
+jobs, log, calls, files, sums}`, with `calls` read from the job's `makemkv.txt`) and fails any other key as "not
+supported in a real world: <key>". A set variable means a failure is a failure; when it isn't set the scenario is
+reported as skipped, with the reason. Every run also checks that no makemkvcon run named a drive, that the home stayed
+empty, and that every `SHA256SUMS` in the library holds when hashed again from disk.
+
 ## Discs (`discs/*.yaml`)
 
 ```yaml

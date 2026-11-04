@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The hosts layer's tests: the real composition root's smoke test. Windows only (the root builds the Windows
+  <!-- The hosts layer's tests: the real composition root's smoke test and its startup recovery. Windows only (the root builds the Windows
        adapters); run on the Windows VM or in CI. -->
   <PropertyGroup>
     <TargetFramework>$(BromeliaTargetFramework)</TargetFramework>
@@ -25,6 +25,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\bromeliad\bromeliad.csproj" />
+    <!-- Killed while it holds the registry swap (decision 301), as in the adapter's CrashTests. -->
+    <ProjectReference Include="..\Bromelia.TestProbe\Bromelia.TestProbe.csproj" />
   </ItemGroup>
 
 </Project>

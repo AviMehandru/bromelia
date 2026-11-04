@@ -247,6 +247,9 @@ end-to-end tests that run a real disc image through the complete pipeline when p
 The data-disc tests image a random file standing in for a drive; with `BROMELIA_TEST_DVD_ISO` set they copy that
 image instead and compare hashes.
 
+The same variables also play the engine's real-disc scenarios through each platform's real composition root, with no drive
+scanned and nothing of your own read ([`shared/scenarios/README.md`](shared/scenarios/README.md)).
+
 ```bash
 # macOS
 cd macos && xcodebuild -project Bromelia.xcodeproj -scheme Bromelia -derivedDataPath build/DerivedData test

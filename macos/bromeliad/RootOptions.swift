@@ -12,16 +12,21 @@ public struct RootOptions: Sendable {
     /// Whether the tools are looked for where they are usually installed and on PATH (false in tests: no tool is found,
     /// so nothing runs makemkvcon).
     public var systemTools: Bool
+    /// Whether the optical drives are used (false in tests: no device monitor, no drive control, no MakeMKV drive scan, so
+    /// nothing asks a drive anything; real hosts pass true).
+    public var drives: Bool
     /// The process's environment (the host passes it): ConfigService gets its BROMELIA_SECRET_* entries, the tool locator
     /// its PATH.
     public var environment: [String: String]
 
-    public init(dataDir: String, configPath: String?, home: String, systemKeystore: Bool, systemTools: Bool, environment: [String: String]) {
+    public init(dataDir: String, configPath: String?, home: String, systemKeystore: Bool, systemTools: Bool, drives: Bool,
+                environment: [String: String]) {
         self.dataDir = dataDir
         self.configPath = configPath
         self.home = home
         self.systemKeystore = systemKeystore
         self.systemTools = systemTools
+        self.drives = drives
         self.environment = environment
     }
 }

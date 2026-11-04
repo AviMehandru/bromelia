@@ -8,6 +8,7 @@
 #include "bro-makemkv-tool.h"
 #include "bro-message-text-renderer.h"
 #include "bro-mkv-tool-nix.h"
+#include "bro-no-drives.h"
 #include "bro-platform-device-monitor.h"
 #include "bro-platform-drive-control.h"
 #include "bro-platform-file-system.h"
@@ -80,10 +81,11 @@ bro_composition_root_build (const BroRootOptions *options, BroBroError **error)
   g_autoptr (BroSqliteStore) store = NULL;
   g_autoptr (BroSystemToolLocator) locator = NULL;
   g_autoptr (BroHomeDirIsolation) isolation = NULL;
-  g_autoptr (BroMakemkvTool) makemkv = NULL;
+  g_autoptr (BroMakemkvTool) tool = NULL;
+  g_autoptr (BroMakemkv) makemkv = NULL;
   g_autoptr (BroMkvToolNix) matroska = NULL;
-  g_autoptr (BroPlatformDeviceMonitor) monitor = NULL;
-  g_autoptr (BroPlatformDriveControl) control = NULL;
+  g_autoptr (BroDeviceMonitor) monitor = NULL;
+  g_autoptr (BroDriveControl) control = NULL;
   g_autoptr (BroRandomIdGenerator) ids = NULL;
   g_autoptr (BroMessageTextRenderer) messages = NULL;
   g_autoptr (BroFileEngineLog) log = NULL;
@@ -118,10 +120,12 @@ bro_composition_root_build (const BroRootOptions *options, BroBroError **error)
     }
   locator = bro_system_tool_locator_new (files, configured, candidates, names, (const char *const *) search_path, options->home);
   isolation = bro_home_dir_isolation_new (files, BRO_HOME_LAYOUT_LINUX);
-  makemkv = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), files, BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
+  tool = bro_makemkv_tool_new (BRO_PROCESS_LAUNCHER (launcher), files, BRO_SETTINGS_ISOLATION (isolation), BRO_TOOL_LOCATOR (locator));
+  makemkv = options->drives ? BRO_MAKEMKV (g_object_ref (tool)) : bro_no_drive_scan_new (BRO_MAKEMKV (tool));
   matroska = bro_mkv_tool_nix_new (BRO_PROCESS_LAUNCHER (launcher), files, BRO_TOOL_LOCATOR (locator), tmp);
-  monitor = bro_platform_device_monitor_new (BRO_CLOCK (clock), 0);
-  control = bro_platform_drive_control_new (BRO_PROCESS_LAUNCHER (launcher), BRO_CLOCK (clock));
+  monitor = options->drives ? BRO_DEVICE_MONITOR (bro_platform_device_monitor_new (BRO_CLOCK (clock), 0)) : bro_no_device_monitor_new ();
+  control = options->drives ? BRO_DRIVE_CONTROL (bro_platform_drive_control_new (BRO_PROCESS_LAUNCHER (launcher), BRO_CLOCK (clock)))
+                            : bro_no_drive_control_new ();
   ids = bro_random_id_generator_new ();
   messages = bro_message_text_renderer_new (bro_english_messages_catalog ());
   log = bro_file_engine_log_new (files, BRO_CLOCK (clock), engine_log);
@@ -137,13 +141,13 @@ bro_composition_root_build (const BroRootOptions *options, BroBroError **error)
   libraries = bro_library_service_new (executor, bus, problems, scheduler, BRO_CONFIG_SOURCE (config), engine_clock, files,
                                        bro_store_libraries (BRO_STORE (store)), bro_store_units (BRO_STORE (store)),
                                        bro_store_catalog (BRO_STORE (store)), NULL, NULL);
-  drives = bro_drive_service_new (executor, bus, problems, BRO_CONFIG_SOURCE (config), engine_clock, BRO_DEVICE_MONITOR (monitor),
-                                  BRO_DRIVE_CONTROL (control), BRO_MAKEMKV (makemkv), bro_store_drives (BRO_STORE (store)));
+  drives = bro_drive_service_new (executor, bus, problems, BRO_CONFIG_SOURCE (config), engine_clock, monitor, control, makemkv,
+                                  bro_store_drives (BRO_STORE (store)));
   /* Today's paths (Bromelia.Core MakeMKV.cs): MakeMKV's folder and the settings.conf that holds its key. */
   makemkv_setup = bro_makemkv_service_new (files, config, makemkv_folder, user_settings, options->home);
   registry = bro_step_registry_standard ();
-  tools = bro_tool_set_new (BRO_MAKEMKV (makemkv), BRO_MATROSKA (matroska));
-  step_environment = bro_step_environment_new (tools, files, BRO_CLOCK (clock), BRO_DRIVE_CONTROL (control), BRO_LIBRARY_PORT (libraries),
+  tools = bro_tool_set_new (makemkv, BRO_MATROSKA (matroska));
+  step_environment = bro_step_environment_new (tools, files, BRO_CLOCK (clock), control, BRO_LIBRARY_PORT (libraries),
                                                BRO_CATALOG_QUERIES (libraries), BRO_CONFIG_SOURCE (config), BRO_DRIVE_LOOKUP (drives),
                                                BRO_MAKEMKV_SETUP (makemkv_setup), data, BRO_MESSAGE_RENDERER (messages),
                                                BRO_COMPOSITION_ROOT_APP_VERSION);
