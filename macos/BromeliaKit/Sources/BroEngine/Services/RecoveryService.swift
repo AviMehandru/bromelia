@@ -172,23 +172,22 @@ public final class RecoveryService {
         return true
     }
 
-    /// A job that finished failed in its Commit or KeepApart step, or cancelled in its Commit step or before a retried Commit
-    /// ran, whose commit a roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3,
-    /// 2026-11-03 and 2026-11-04, F9's rule): JobOutcome.decide of its steps with that step succeeded, so succeeded or
-    /// succeededWithReadErrors after a Commit, cancelled after a KeepApart. That step is the first row not done, failed or
-    /// cancelled: a cancel stores it cancelled, or failed when it lands just after the step ended; or pending in a cancelled job:
-    /// a retry stored it, and the cancel came before the step ran again. Any other job with a pending row keeps its outcome. Its
-    /// finishedAt, step rows and log stay as they were.
+    /// A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose commit a
+    /// roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 to 2026-11-05,
+    /// F9's rule): JobOutcome.decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a
+    /// Commit, cancelled after a KeepApart. That step is the first row not done. In a cancelled job a Commit row counts in any
+    /// state, as however it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after a
+    /// retry, running after a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending or
+    /// running one keeps its outcome. Its finishedAt, step rows and log stay as they were.
     private func committed(_ jobId: Id) async throws(BroError) {
         let store = store
         guard let job = try await executor.worker({ () async throws(BroError) -> JobRecord? in try await store.jobs().load(jobId) }),
               job.state == .finished, job.outcome == .failed || job.outcome == .cancelled else { return }
         let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
         let done = JobPlanner.done(rows)
-        guard let next = rows.first(where: { $0.seq == done.count }),
-              next.state == .failed || next.state == .cancelled || next.state == .pending else { return }
-        guard next.state != .pending || job.outcome == .cancelled else { return }
-        guard next.kind == .commit || (next.kind == .keepApart && job.outcome == .failed) else { return }
+        guard let next = rows.first(where: { $0.seq == done.count }) else { return }
+        let ended = (next.state == .failed || next.state == .cancelled) && (next.kind == .commit || next.kind == .keepApart)
+        guard job.outcome == .cancelled ? next.kind == .commit : ended else { return }
         let results = done.map { StepResult(kind: $0.kind, state: $0.state, error: $0.error, readErrors: $0.output?.readErrors ?? 0) }
             + [StepResult(kind: next.kind, state: .succeeded)]
         let decided = JobOutcome.decide(results, cancelled: false, policy: .default)
@@ -252,9 +251,9 @@ public final class RecoveryService {
 
     // ---- libraries and files ---------------------------------------------------------------------------------------------
 
-    /// One library: its open intents rolled forward (a job that failed or was cancelled in that commit, or cancelled before
-    /// it ran again, then gets the outcome it gives), then its staging folders tidied and the ones no job will continue set
-    /// aside. An offline library is left alone (I2). On the executor; the file and store work on workers.
+    /// One library: its open intents rolled forward (a job that failed in that commit, or was cancelled with it unfinished,
+    /// then gets the outcome it gives), then its staging folders tidied and the ones no job will continue set aside. An
+    /// offline library is left alone (I2). On the executor; the file and store work on workers.
     private func tidy(_ libraryId: String, _ root: String, _ unfinished: Set<String>) async {
         let store = store
         let intents = (try? await executor.worker { () async throws(BroError) -> [CommitIntent] in try await store.units().openIntents() }) ?? []

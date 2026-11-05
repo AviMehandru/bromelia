@@ -162,22 +162,22 @@ public sealed class RecoveryService
         return true;
     }
 
-    /// <summary>A job that finished failed in its Commit or KeepApart step, or cancelled in its Commit step or before a retried
-    /// Commit ran, whose commit a roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3,
-    /// 2026-11-03 and 2026-11-04, F9's rule): JobOutcome.decide of its steps with that step succeeded, so succeeded or
-    /// succeededWithReadErrors after a Commit, cancelled after a KeepApart. That step is the first row not done, failed or
-    /// cancelled: a cancel stores it cancelled, or failed when it lands just after the step ended; or pending in a cancelled job:
-    /// a retry stored it, and the cancel came before the step ran again. Any other job with a pending row keeps its outcome. Its
-    /// finishedAt, step rows and log stay as they were.</summary>
+    /// <summary>A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose
+    /// commit a roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 to
+    /// 2026-11-05, F9's rule): JobOutcome.decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors
+    /// after a Commit, cancelled after a KeepApart. That step is the first row not done. In a cancelled job a Commit row counts
+    /// in any state, as however it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after
+    /// a retry, running after a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending or
+    /// running one keeps its outcome. Its finishedAt, step rows and log stay as they were.</summary>
     async Task Committed(Id jobId)
     {
         var job = await _executor.Worker(() => _store.Jobs().Load(jobId));
         if (job is not { State: JobState.Finished, Outcome: Outcome.Failed or Outcome.Cancelled }) return;
         var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
         var done = JobPlanner.Done(rows);
-        if (rows.FirstOrDefault(r => r.Seq == done.Count) is not { State: StepState.Failed or StepState.Cancelled or StepState.Pending } stopped) return;
-        if (stopped.State == StepState.Pending && job.Outcome != Outcome.Cancelled) return;
-        if (stopped.Kind != StepKind.Commit && !(stopped.Kind == StepKind.KeepApart && job.Outcome == Outcome.Failed)) return;
+        if (rows.FirstOrDefault(r => r.Seq == done.Count) is not { } stopped) return;
+        var ended = stopped.State is StepState.Failed or StepState.Cancelled && stopped.Kind is StepKind.Commit or StepKind.KeepApart;
+        if (!(job.Outcome == Outcome.Cancelled ? stopped.Kind == StepKind.Commit : ended)) return;
         var results = done.Select(s => new StepResult(s.Kind, s.State, s.Error, s.Output?.ReadErrors ?? 0))
             .Append(new StepResult(stopped.Kind, StepState.Succeeded)).ToList();
         var decided = JobOutcome.Decide(results, false, OutcomePolicy.Default);
@@ -219,9 +219,9 @@ public sealed class RecoveryService
 
     // ---- libraries and files -------------------------------------------------------------------------------
 
-    /// <summary>One library: its open intents rolled forward (a job that failed or was cancelled in that commit, or cancelled
-    /// before it ran again, then gets the outcome it gives), then its staging folders tidied and the ones no job will continue
-    /// set aside. An offline library is left alone (I2). On the executor; the file and store work on workers.</summary>
+    /// <summary>One library: its open intents rolled forward (a job that failed in that commit, or was cancelled with it
+    /// unfinished, then gets the outcome it gives), then its staging folders tidied and the ones no job will continue set
+    /// aside. An offline library is left alone (I2). On the executor; the file and store work on workers.</summary>
     async Task Tidy(string libraryId, string root, IReadOnlySet<string> unfinished)
     {
         foreach (var intent in await _executor.Worker(() => _store.Units().OpenIntents()))

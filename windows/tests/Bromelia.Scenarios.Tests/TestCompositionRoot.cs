@@ -197,11 +197,16 @@ public sealed class TestCompositionRoot : IDisposable
     }
 
     /// <summary>The library folder's volume goes away (its files are kept aside), and LibraryService checks at once
-    /// (owner answer 10: no OS event reports a library's volume).</summary>
+    /// (owner answer 10: no OS event reports a library's volume). After a kill the volume goes while no engine runs: the files
+    /// stay frozen for the killed one, which the kill step has settled, and the next start finds the library offline.</summary>
     public Task Unmount(string path)
     {
+        var killed = Fs.Frozen;
+        if (killed) Fs.Thaw();
         Fs.Rename(path, Root + "/.unmounted" + path.Replace('/', '_'));
-        return Check();
+        if (!killed) return Check();
+        Fs.Freeze();
+        return Task.CompletedTask;
     }
 
     /// <summary>The volume comes back, and LibraryService checks at once.</summary>

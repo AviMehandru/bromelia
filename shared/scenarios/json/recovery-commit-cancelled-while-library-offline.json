@@ -1,0 +1,137 @@
+{
+  "title": "A job cancelled while its resumed commit waits for an offline library ends with the committed outcome once the commit rolls forward",
+  "phase": 3,
+  "from": [
+    "rearchitecture-plan §20.4 (Cancelled with its Commit step unfinished, however it got there, with its intent open)",
+    "rearchitecture-plan §22.3 (a crash between 4 and 6 rolls forward), invariants I1, I2, I3, I5",
+    "owner 2026-11-05, I8-1: a job cancelled before its resumed Commit ran gets the committed outcome"
+  ],
+  "given": {
+    "disc": "sample-movie",
+    "profile": {
+      "titles": {
+        "skipDuplicates": false
+      }
+    }
+  },
+  "steps": [
+    {
+      "rip": {
+        "iso": true,
+        "titles": [
+          0,
+          1
+        ],
+        "as": "job"
+      }
+    },
+    {
+      "kill": {
+        "at": "commit.afterMove:1"
+      }
+    },
+    {
+      "unmount": "lib"
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "state": "blocked",
+          "blockedBy": {
+            "code": "library.offline"
+          }
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "recovery.resumed",
+            "library.offline"
+          ]
+        }
+      }
+    },
+    {
+      "cancel": "job"
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "cancelled",
+          "error": {
+            "code": "job.cancelledByUser"
+          },
+          "unit": {
+            "state": "committing"
+          }
+        },
+        "db": {
+          "commit_intents": {
+            "count": 1
+          },
+          "archive_units": {
+            "count": 1,
+            "rows": [
+              {
+                "state": "committing"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "mount": "lib"
+    },
+    {
+      "restart": {}
+    },
+    {
+      "expect": {
+        "job": {
+          "name": "job",
+          "outcome": "succeeded",
+          "unit": {
+            "state": "committed"
+          }
+        },
+        "files": {
+          "under": "library/Sample Movie",
+          "include": [
+            "Sample Movie - Rip - Playlist 00001 - BR.mkv",
+            "Sample Movie - Rip - Playlist 00002 - BR.mkv",
+            "SHA256SUMS",
+            "bromelia-{unit8}.json"
+          ]
+        },
+        "sums": {
+          "folder": "library/Sample Movie",
+          "ok": true
+        },
+        "log": {
+          "job": "job",
+          "include": [
+            "commit.rolledForward"
+          ]
+        },
+        "db": {
+          "commit_intents": {
+            "count": 0
+          },
+          "archive_units": {
+            "count": 1,
+            "rows": [
+              {
+                "state": "committed"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

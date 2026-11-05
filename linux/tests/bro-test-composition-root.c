@@ -390,12 +390,20 @@ aside (const char *path)
   return g_strconcat (TEST_ROOT "/.unmounted", flat, NULL);
 }
 
+/* After a kill the volume goes while no engine runs: the files stay frozen for the killed one, which the kill step has
+ * settled, and the next start finds the library offline. */
 gboolean
 test_composition_root_unmount (TestCompositionRoot *root, const char *path, double seconds)
 {
   g_autofree char *to = aside (path);
+  gboolean killed = test_memory_fs_frozen (root->fs);
+  if (killed)
+    test_memory_fs_thaw (root->fs);
   g_assert_true (bro_file_system_rename (BRO_FILE_SYSTEM (root->fs), path, to, NULL));
-  return root_check_now (root, seconds);
+  if (!killed)
+    return root_check_now (root, seconds);
+  test_memory_fs_freeze (root->fs);
+  return TRUE;
 }
 
 gboolean

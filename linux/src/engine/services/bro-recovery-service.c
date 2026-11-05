@@ -448,13 +448,14 @@ tidy_free (gpointer data)
   g_free (t);
 }
 
-/* A job that finished failed in its Commit or KeepApart step, or cancelled in its Commit step or before a retried Commit
- * ran, whose commit a roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3,
- * 2026-11-03 and 2026-11-04, F9's rule): bro_job_outcome_decide of its steps with that step succeeded, so succeeded or
- * succeededWithReadErrors after a Commit, cancelled after a KeepApart. That step is the first row not done, failed or
- * cancelled: a cancel stores it cancelled, or failed when it lands just after the step ended; or pending in a cancelled job:
- * a retry stored it, and the cancel came before the step ran again. Any other job with a pending row keeps its outcome. Its
- * finished_at, step rows and log stay as they were; its jobFinished goes into @publications. */
+/* A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose commit a
+ * roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 to 2026-11-05,
+ * F9's rule): bro_job_outcome_decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a
+ * Commit, cancelled after a KeepApart. That step is the first row not done. In a cancelled job a Commit row counts in any
+ * state, as however it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after a
+ * retry, running after a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending or
+ * running one keeps its outcome. Its finished_at, step rows and log stay as they were; its jobFinished goes into
+ * @publications. */
 static gboolean
 committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publications, BroBroError **error)
 {
@@ -465,6 +466,7 @@ committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publication
   g_autoptr (GPtrArray) results = NULL;
   g_autoptr (BroDecided) decided = NULL;
   BroStepRecord *next = NULL;
+  gboolean ended;
   if (!job)
     return !error || !*error; /* none: nothing to do */
   if (job->state != BRO_JOB_STATE_FINISHED || !job->has_outcome || (job->outcome != BRO_OUTCOME_FAILED && job->outcome != BRO_OUTCOME_CANCELLED))
@@ -475,11 +477,11 @@ committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publication
   for (guint i = 0; i < rows->len; i++)
     if (((BroStepRecord *) rows->pdata[i])->seq == (int) done->len)
       next = rows->pdata[i];
-  if (!next || (next->state != BRO_STEP_STATE_FAILED && next->state != BRO_STEP_STATE_CANCELLED && next->state != BRO_STEP_STATE_PENDING))
+  if (!next)
     return TRUE;
-  if (next->state == BRO_STEP_STATE_PENDING && job->outcome != BRO_OUTCOME_CANCELLED)
-    return TRUE;
-  if (next->kind != BRO_STEP_KIND_COMMIT && !(next->kind == BRO_STEP_KIND_KEEP_APART && job->outcome == BRO_OUTCOME_FAILED))
+  ended = (next->state == BRO_STEP_STATE_FAILED || next->state == BRO_STEP_STATE_CANCELLED)
+          && (next->kind == BRO_STEP_KIND_COMMIT || next->kind == BRO_STEP_KIND_KEEP_APART);
+  if (!(job->outcome == BRO_OUTCOME_CANCELLED ? next->kind == BRO_STEP_KIND_COMMIT : ended))
     return TRUE;
   results = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_result_free);
   for (guint i = 0; i < done->len; i++)

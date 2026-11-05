@@ -232,10 +232,13 @@ final class TestCompositionRoot: @unchecked Sendable {
     }
 
     /// The library folder's volume goes away (its files are kept aside), and LibraryService checks at once (owner answer
-    /// 10: no OS event reports a library's volume).
+    /// 10: no OS event reports a library's volume). After a kill the volume goes while no engine runs: the files stay frozen
+    /// for the killed one, which the kill step has settled, and the next start finds the library offline.
     func unmount(_ path: String) async throws {
+        let killed = fs.frozen
+        if killed { fs.thaw() }
         try fs.rename(path, to: Self.root + "/.unmounted" + path.replacingOccurrences(of: "/", with: "_"))
-        await check()
+        if killed { fs.freeze() } else { await check() }
     }
 
     /// The volume comes back, and LibraryService checks at once.

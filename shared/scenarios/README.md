@@ -122,7 +122,7 @@ so far has settled* (finished, blocked, or awaiting a decision), unless it names
 | `mounted: {drive, after}` | The OS mounts the drive's disc (after that many seconds of the fake clock). |
 | `cancelCountdown: {drive}` | Stop an automatic rip's countdown. |
 | `testStep: {step, unit, as}` / `testNotification: {target}` | `EngineAPI.testStep` / `testNotification`. |
-| `unmount: <library>` / `mount: <library>` | The library's folder goes away / comes back (`unmount` moves it aside, so the marker is gone). |
+| `unmount: <library>` / `mount: <library>` | The library's folder goes away / comes back (`unmount` moves it aside, so the marker is gone). `unmount` after a `kill` happens while no engine runs: the next `restart` finds the library offline. |
 | `write: {path, text \| bytes}` / `flip: {path, byte}` / `delete: <path>` | Change files (fault injection). `flip` XORs one byte with 1. |
 | `config: <merge patch>` | `updateConfig` with the patch applied to the current document. |
 | `tools: {<tool>: <script>}` | Change a tool's script from now on. |
