@@ -448,12 +448,13 @@ tidy_free (gpointer data)
   g_free (t);
 }
 
-/* A job that finished failed in its Commit or KeepApart step, or cancelled in its Commit step, whose commit a roll forward
- * has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 and 2026-11-04, F9's rule):
- * bro_job_outcome_decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a Commit,
- * cancelled after a KeepApart. That step is the first row not done, failed or cancelled: a cancel stores it cancelled, or
- * failed when it lands just after the step ended; pending, the job was cancelled before the step ran again. Its finished_at,
- * step rows and log stay as they were; its jobFinished goes into @publications. */
+/* A job that finished failed in its Commit or KeepApart step, or cancelled in its Commit step or before a retried Commit
+ * ran, whose commit a roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3,
+ * 2026-11-03 and 2026-11-04, F9's rule): bro_job_outcome_decide of its steps with that step succeeded, so succeeded or
+ * succeededWithReadErrors after a Commit, cancelled after a KeepApart. That step is the first row not done, failed or
+ * cancelled: a cancel stores it cancelled, or failed when it lands just after the step ended; or pending in a cancelled job:
+ * a retry stored it, and the cancel came before the step ran again. Any other job with a pending row keeps its outcome. Its
+ * finished_at, step rows and log stay as they were; its jobFinished goes into @publications. */
 static gboolean
 committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publications, BroBroError **error)
 {
@@ -474,7 +475,9 @@ committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publication
   for (guint i = 0; i < rows->len; i++)
     if (((BroStepRecord *) rows->pdata[i])->seq == (int) done->len)
       next = rows->pdata[i];
-  if (!next || (next->state != BRO_STEP_STATE_FAILED && next->state != BRO_STEP_STATE_CANCELLED))
+  if (!next || (next->state != BRO_STEP_STATE_FAILED && next->state != BRO_STEP_STATE_CANCELLED && next->state != BRO_STEP_STATE_PENDING))
+    return TRUE;
+  if (next->state == BRO_STEP_STATE_PENDING && job->outcome != BRO_OUTCOME_CANCELLED)
     return TRUE;
   if (next->kind != BRO_STEP_KIND_COMMIT && !(next->kind == BRO_STEP_KIND_KEEP_APART && job->outcome == BRO_OUTCOME_FAILED))
     return TRUE;
