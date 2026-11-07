@@ -2850,6 +2850,19 @@
           "c": "bro_conflict_namer_next"
         },
         {
+          "name": "ConflictNamer.same",
+          "params": [
+            "a",
+            "_:b"
+          ],
+          "returns": "Bool",
+          "doc": "Whether two names are one name here: the same but for ASCII case, as some file systems have it.",
+          "phase": 3,
+          "swift": "ConflictNamer.same(_:_:)",
+          "cs": "ConflictNamer.Same",
+          "c": "bro_conflict_namer_same"
+        },
+        {
           "name": "ArgumentSplitter.split",
           "params": [
             "text"
