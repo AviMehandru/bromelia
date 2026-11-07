@@ -18,7 +18,7 @@ gboolean bro_archive_files_is_own_file (const char *name);
 BroId bro_archive_files_unit_id (const BroId *job_id);
 
 /* What a write that was stopped leaves behind: .<name>.bromelia-tmp-<id> (FileSystem.writeAtomically) and
- * .<name>.part-<id> (DataImager). Startup recovery removes them (review L3-3). */
+ * .<name>.part-<id> (DataImager). Startup recovery removes them. */
 gboolean bro_archive_files_is_leftover (const char *name);
 
 /* Files written for media servers, which SHA256SUMS doesn't list (servers may rewrite them): .nfo files and

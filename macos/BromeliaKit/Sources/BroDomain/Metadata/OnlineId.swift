@@ -1,3 +1,4 @@
+import BroFoundation
 import Foundation
 
 /// A movie or show chosen by its id: a TMDb id (`603`, `tmdb:603`, `movie/603`, `tv/1668`, a themoviedb.org address;
@@ -14,7 +15,7 @@ public enum OnlineId: Sendable, Equatable {
 
     /// The id in `text` (case and surrounding space ignored); nil when there is none.
     public static func parse(_ text: String) -> OnlineId? {
-        let t = MessageCatalog.asciiLower(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let t = asciiLower(text.trimmingCharacters(in: .whitespacesAndNewlines))
         if let m = firstMatch(#"tt\d{5,10}"#, t) { return .imdb(id: m[0]!) }
         func kind(_ g: String?) -> MediaKind? { g.map { $0 == "tv" ? .tv : .movie } }
         if let u = firstMatch(#"themoviedb\.org/(movie|tv)/(\d+)"#, t) {

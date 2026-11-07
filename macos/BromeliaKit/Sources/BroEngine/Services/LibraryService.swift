@@ -4,24 +4,23 @@ import BroPorts
 import Foundation
 
 /// The libraries of the configuration (plan §11.1, §22). A library is online while its folder holds the
-/// .bromelia-library marker it was attached with (I2): the markers are checked at start, every 30 s and on `check()`
-/// (mount events), each on its own worker; an offline library is blocked in the scheduler and raised as a problem. A
-/// check that hasn't come back by the next tick (a share that froze, review L3-9) counts as offline and isn't started
-/// again until it comes back. As the `LibraryPort` of the steps it gives staging folders and runs the commit protocol
-/// (§22.3 steps 4–6) and its roll forward (§15.8) on workers, one at a time per unit: a commit waits while a roll forward
-/// of its unit runs (recovery's may outlast its 30 s at startup on a slow share). State is touched only on the executor;
-/// the steps read a snapshot. As the `CatalogQueries` of the steps it asks the catalogue on a worker. Paths are compared
-/// and split by their UTF-8 bytes, as a disk names them. shared/fixtures/engine/library-service.cases.json.
+/// .bromelia-library marker it was attached with: the markers are checked at start, every 30 s and on `check()` (mount
+/// events), each on its own worker; an offline library is blocked in the scheduler and raised as a problem. A check
+/// that hasn't come back by the next tick (a share that froze) counts as offline and isn't started again until it comes
+/// back. As the `LibraryPort` of the steps it gives staging folders and runs the commit protocol (§22.3 steps 4–6) and
+/// its roll forward (§15.8) on workers, one at a time per unit: a commit waits while a roll forward of its unit runs
+/// (recovery's may outlast its 30 s at startup on a slow share). State is touched only on the executor; the steps read
+/// a snapshot. As the `CatalogQueries` of the steps it asks the catalogue on a worker. Paths are compared and split by
+/// their UTF-8 bytes, as a disk names them. shared/fixtures/engine/library-service.cases.json.
 @EngineActor
 public final class LibraryService: LibraryPort, CatalogQueries {
     private nonisolated static let fileMode = 0o644
     private nonisolated static let staging = ".bromelia"
     private nonisolated static let quarantineFolder = "_Quarantine"
     private nonisolated static let incompleteNote = "INCOMPLETE.txt"
-    /// The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore files (owner,
-    /// 2026-10-22).
+    /// The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore files.
     private nonisolated static let backupFolder = "Backup"
-    /// .plexignore for Plex, .ignore for Jellyfin and Emby, as today's apps wrote them.
+    /// .plexignore for Plex, .ignore for Jellyfin and Emby.
     private nonisolated static let ignoreFiles: [(name: String, text: String)] = [(".plexignore", "*\n"), (".ignore", "")]
     private nonisolated static let slash = UInt8(ascii: "/")
     private nonisolated static let reasonCodes: [MessageCode] = [.libraryOffline, .libraryNotAttached, .libraryMarkerMismatch]
@@ -166,9 +165,9 @@ public final class LibraryService: LibraryPort, CatalogQueries {
         return Self.dto(e)
     }
 
-    /// Takes back an `attach` whose configuration save failed (LocalEngine's attachLibrary, decision 166): the marker in
-    /// the stored library's folder is removed while it is still the one the row names (another marker stays), and the
-    /// library is forgotten unless the configuration lists it. Nothing when there is no stored row.
+    /// Takes back an `attach` whose configuration save failed (LocalEngine's attachLibrary): the marker in the stored
+    /// library's folder is removed while it is still the one the row names (another marker stays), and the library is
+    /// forgotten unless the configuration lists it. Nothing when there is no stored row.
     public func removeMarker(_ libraryId: String) async throws(BroError) {
         let (fs, repository) = (self.fs, self.rows)
         try await executor.worker { () async throws(BroError) in
@@ -252,10 +251,9 @@ public final class LibraryService: LibraryPort, CatalogQueries {
     }
 
     /// A staging folder no job will continue goes to <library>/_Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with
-    /// `note` as INCOMPLETE.txt and `logs` (the job's log copies, by name; owner, 2026-10-25) next to it, each written
-    /// atomically before the move, so the folder arrives marked (I1); never reused or deleted (review L3-3, P1-3); one that
-    /// holds no file is removed instead (nil), and nothing is written into it. The folders are synced. Any thread but the
-    /// executor.
+    /// `note` as INCOMPLETE.txt and `logs` (the job's log copies, by name) next to it, each written atomically before
+    /// the move, so the folder arrives marked; never reused or deleted; one that holds no file is removed instead
+    /// (nil), and nothing is written into it. The folders are synced. Any thread but the executor.
     public nonisolated func setAside(_ libraryId: String, folder: String, name: String, note: [UInt8],
                                      logs: [(String, [UInt8])]) async throws(BroError) -> String? {
         let lib = try await configured(libraryId)
@@ -274,7 +272,7 @@ public final class LibraryService: LibraryPort, CatalogQueries {
             let dest = quarantine + "/" + ConflictNamer.next(name + " [INCOMPLETE]", existing: try fs.list(quarantine).map(\.name), isFolder: true)
             try fs.rename(staging, to: dest)
             try fs.syncDirectory(quarantine)
-            try fs.syncDirectory(Self.parent(staging))
+            try fs.syncDirectory(parentFolder(of: staging))
             return dest
         }
     }
@@ -497,7 +495,7 @@ public final class LibraryService: LibraryPort, CatalogQueries {
     }
 
     /// Nothing is written unless every item is in staging with SHA256SUMS, and nothing at the destination is in the
-    /// way (I5).
+    /// way.
     private nonisolated func precheck(_ intent: CommitIntent) throws(BroError) {
         guard try isFolder(intent.staging) else { throw Self.notFound(intent.staging) }
         guard fs.exists(intent.staging + "/" + Sha256Sums.fileName) else { throw Self.notFound(intent.staging + "/" + Sha256Sums.fileName) }
@@ -507,11 +505,25 @@ public final class LibraryService: LibraryPort, CatalogQueries {
             return
         }
         for item in intent.items {
-            var targets = [intent.destination + "/" + item.toPath]
-            if item.isDir { targets = try walk(intent.staging + "/" + item.fromPath).map { intent.destination + "/" + item.toPath + "/" + $0 } }
-            for t in targets where fs.exists(t) {
-                if !(try fs.stat(t).isDirectory) { throw Self.alreadyExists(t) }
+            let to = intent.destination + "/" + item.toPath
+            if item.isDir {
+                try checkMerge(intent.staging + "/" + item.fromPath, to)
+            } else if fs.exists(to) {
+                throw Self.alreadyExists(to)
             }
+        }
+    }
+
+    /// Refuses what moveMerging would put under another name than SHA256SUMS lists: it matches names ignoring ASCII case
+    /// and renames whatever then clashes, so every entry of that kind is in the way, a folder spelled another way too.
+    private nonisolated func checkMerge(_ source: String, _ target: String) throws(BroError) {
+        guard fs.exists(target) else { return }
+        guard try isFolder(target) else { throw Self.alreadyExists(target) }
+        let there = try fs.list(target)
+        for e in try fs.list(source).sorted(by: { $0.name.utf8.lexicographicallyPrecedes($1.name.utf8) }) {
+            guard let same = there.first(where: { ConflictNamer.same($0.name, e.name) }) else { continue }
+            if !e.isDirectory || !same.name.utf8.elementsEqual(e.name.utf8) { throw Self.alreadyExists(target + "/" + same.name) }
+            try checkMerge(source + "/" + e.name, target + "/" + e.name)
         }
     }
 
@@ -522,7 +534,7 @@ public final class LibraryService: LibraryPort, CatalogQueries {
         let stagingThere = try isFolder(intent.staging)
         let whole = !intent.merge && !pending.isEmpty && stagingThere && !fs.exists(intent.destination)
         if whole {
-            try ensureFolders(root, Self.parent(intent.destination))
+            try ensureFolders(root, parentFolder(of: intent.destination))
             try fs.rename(intent.staging, to: intent.destination)
         }
         for item in pending {
@@ -536,9 +548,9 @@ public final class LibraryService: LibraryPort, CatalogQueries {
         if fs.exists(stagingSums) {
             try ensureFolders(root, intent.destination)
             if intent.merge || fs.exists(sums) {
-                let existing = fs.exists(sums) ? String(decoding: try fs.read(sums), as: UTF8.self) : ""
+                let existing = fs.exists(sums) ? try fs.read(sums) : []
                 let merged = Sha256Sums.merge(existing, entries: Sha256Sums.parse(String(decoding: try fs.read(stagingSums), as: UTF8.self)))
-                try fs.writeAtomically(sums, bytes: Array(merged.utf8), mode: Self.fileMode)
+                try fs.writeAtomically(sums, bytes: merged, mode: Self.fileMode)
                 try fs.remove(stagingSums)
             } else {
                 try fs.rename(stagingSums, to: sums)
@@ -548,6 +560,8 @@ public final class LibraryService: LibraryPort, CatalogQueries {
         try removeEmpty(intent.staging)
         var unitFiles = files ?? []
         if files == nil { unitFiles = try fromSums(intent) }
+        // Whatever happened on the way, a unit never ends committed naming a file that isn't there: the intent stays open.
+        for f in unitFiles where !fs.exists(intent.destination + "/" + f.path) { throw Self.notFound(intent.destination + "/" + f.path) }
         for folder in Self.synced(root, intent, unitFiles) { try fs.syncDirectory(folder) }
         try crash?("commit.beforeDone")
         guard var record = try await units.get(intent.unitId) else { throw Self.message(.unitNotFound).toError() }
@@ -565,7 +579,7 @@ public final class LibraryService: LibraryPort, CatalogQueries {
         let (there, arrived) = (fs.exists(from), fs.exists(to))
         if item.isDir {
             if there {
-                try ensureFolders(root, Self.parent(to))
+                try ensureFolders(root, parentFolder(of: to))
                 _ = try fs.moveMerging(from, to: to, policy: .neverReplace)
             } else if !arrived {
                 throw Self.notFound(from)
@@ -573,7 +587,7 @@ public final class LibraryService: LibraryPort, CatalogQueries {
             return
         }
         if there && !arrived {
-            try ensureFolders(root, Self.parent(to))
+            try ensureFolders(root, parentFolder(of: to))
             try fs.rename(from, to: to)
         } else if !there && arrived {
             if let sha = item.sha256, try hash(to) != sha { throw Self.alreadyExists(to) }
@@ -584,9 +598,9 @@ public final class LibraryService: LibraryPort, CatalogQueries {
         }
     }
 
-    /// A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing (owner,
-    /// 2026-10-22): outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from the intent
-    /// alone (an item under Backup/ of a shared folder), so a roll forward writes them too.
+    /// A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing:
+    /// outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from the intent alone (an
+    /// item under Backup/ of a shared folder), so a roll forward writes them too.
     private nonisolated func ignored(_ intent: CommitIntent) throws(BroError) {
         guard intent.items.contains(where: { Self.starts($0.toPath, Self.backupFolder + "/") }) else { return }
         let folder = intent.destination + "/" + Self.backupFolder
@@ -599,16 +613,30 @@ public final class LibraryService: LibraryPort, CatalogQueries {
     /// The unit's lines of the destination's SHA256SUMS (a roll forward has no file list of its own).
     private nonisolated func fromSums(_ intent: CommitIntent) throws(BroError) -> [UnitFile] {
         let sums = Sha256Sums.parse(String(decoding: try fs.read(intent.destination + "/" + Sha256Sums.fileName), as: UTF8.self))
+        let recorded = try recordedFiles(intent)
         var files: [UnitFile] = []
         for s in sums where intent.items.contains(where: { $0.isDir ? Self.starts(s.path, $0.toPath + "/") : Self.same(s.path, $0.toPath) }) {
-            files.append(UnitFile(path: s.path, size: try fs.stat(intent.destination + "/" + s.path).size, sha256: s.sha256, role: "title"))
+            let file = recorded[Array(s.path.utf8)]
+            files.append(UnitFile(path: s.path, size: try fs.stat(intent.destination + "/" + s.path).size, sha256: s.sha256,
+                                  role: file?["role"]?.string ?? "", title: file?["title"]?.int.map { Int($0) }))
+        }
+        return files
+    }
+
+    /// The files of the unit's archive record, by path; none when it isn't there or doesn't read.
+    private nonisolated func recordedFiles(_ intent: CommitIntent) throws(BroError) -> [[UInt8]: JsonValue] {
+        let record = intent.destination + "/bromelia-" + String(intent.unitId.value.prefix(8)) + ".json"
+        guard fs.exists(record) else { return [:] }
+        var files: [[UInt8]: JsonValue] = [:]
+        for file in JsonValue.parse(try fs.read(record))?["files"]?.array ?? [] {
+            if let path = file["path"]?.string { files[Array(path.utf8)] = file }
         }
         return files
     }
 
     /// Every folder from the library's root down to each committed file, and the staging folder's parent.
     private nonisolated static func synced(_ root: String, _ intent: CommitIntent, _ files: [UnitFile]) -> [String] {
-        var folders: Set<[UInt8]> = [Array(parent(intent.staging).utf8)]
+        var folders: Set<[UInt8]> = [Array(parentFolder(of: intent.staging).utf8)]
         for f in files {
             var folder = root
             folders.insert(Array(folder.utf8))
@@ -726,10 +754,6 @@ public final class LibraryService: LibraryPort, CatalogQueries {
     /// The parts of `path` below `root` (`path` is inside it), split at each '/'.
     private nonisolated static func below(_ root: String, _ path: String) -> [String] {
         path.utf8.dropFirst(root.utf8.count + 1).split(separator: slash, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
-    }
-
-    private nonisolated static func parent(_ path: String) -> String {
-        String(decoding: path.utf8[..<path.utf8.lastIndex(of: slash)!], as: UTF8.self)
     }
 
     private nonisolated static func lastPart(_ path: String) -> String {

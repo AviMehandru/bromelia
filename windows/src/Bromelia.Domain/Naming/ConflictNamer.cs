@@ -7,6 +7,9 @@ namespace Bromelia.Domain;
 /// <summary>Names that don't collide.</summary>
 public static class ConflictNamer
 {
+    /// <summary>Whether two names are one name here: the same but for ASCII case, as some file systems have it.</summary>
+    public static bool Same(string a, string b) => MessageCatalog.AsciiLower(a) == MessageCatalog.AsciiLower(b);
+
     /// <summary><paramref name="name"/> when no entry of <paramref name="existing"/> has it (ignoring ASCII case,
     /// as some file systems do), else "Name (2)", "Name (3)" … before the extension of a file.</summary>
     public static string Next(string name, IReadOnlyCollection<string> existing, bool isFolder = false)

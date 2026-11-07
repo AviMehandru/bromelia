@@ -11,8 +11,8 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Bromelia.Adapters.Windows;
 
-/// <summary>DeviceMonitor on Windows (plan §10.3): today's media signature, polled. The CD/DVD/BD drive letters
-/// (DriveInfo), whether each is ready (media) and its root when it is (mounted), and the drive's vendor and product from
+/// <summary>DeviceMonitor on Windows (plan §10.3): a media signature, polled. The CD/DVD/BD drive letters (DriveInfo),
+/// whether each is ready (media) and its root when it is (mounted), and the drive's vendor and product from
 /// IOCTL_STORAGE_QUERY_PROPERTY; DrivePoller turns changes into events.</summary>
 public sealed class PlatformDeviceMonitor : IDeviceMonitor
 {

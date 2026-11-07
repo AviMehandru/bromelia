@@ -4,9 +4,10 @@ using Bromelia.Foundation;
 
 namespace Bromelia.Domain;
 
-/// <summary>A configuration, version 3 (shared/schema/config-3.json): the document as decoded (keys in schema
-/// order, defaults filled outside profiles, unknown keys dropped) and the issues decoding found. Typed views of
-/// its entries: <see cref="Profiles"/>, <see cref="Drives"/>, <see cref="Libraries"/>, <see cref="Steps"/>, <see cref="Rules"/>.</summary>
+/// <summary>A configuration, version 3 (shared/schema/config-3.json): the document as decoded (keys in schema order,
+/// defaults filled outside profiles, unknown keys dropped) and the issues decoding found. Typed views of its entries:
+/// <see cref="Profiles"/>, <see cref="Drives"/>, <see cref="Libraries"/>, <see cref="Steps"/>, <see
+/// cref="Rules"/>.</summary>
 public sealed record Config(JsonValue Document, IReadOnlyList<Issue> Issues)
 {
     private IReadOnlyList<JsonValue> List(string key) => Document[key]?.AsArray ?? new List<JsonValue>();

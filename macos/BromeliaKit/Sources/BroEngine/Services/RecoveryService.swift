@@ -3,16 +3,23 @@ import BroFoundation
 import BroPorts
 import Foundation
 
-/// Runs once at startup, before the libraries start (plan §11.1, §15.1, §20.4, §15.8; review L3-3, L3-9). It sorts out
-/// the jobs the last engine left unfinished by where each stopped and what its step can do after a stop (its
-/// Resumability), rolls open commit intents forward, sets aside staging folders no job will continue (a failed or cancelled
-/// job's with its logs: owner, 2026-10-25), and removes the temporary files a stopped write leaves. Library work runs per
-/// library and may take at most 30 s of the startup: a share that doesn't answer can't keep the engine from starting, and
-/// its work goes on.
-/// shared/fixtures/engine/recovery-service.cases.json.
+/// Runs once at startup, before the libraries start (plan §11.1, §15.1, §20.4, §15.8). It sorts out the jobs the last
+/// engine left unfinished by where each stopped and what its step can do after a stop (its Resumability), rolls open
+/// commit intents forward, sets aside staging folders no job will continue (a failed or cancelled job's with its logs),
+/// and removes the temporary files a stopped write leaves. Library work runs per library and may take at most 30 s of
+/// the startup: a share that doesn't answer can't keep the engine from starting, and its work goes on, but no longer on
+/// what a live job may be using. shared/fixtures/engine/recovery-service.cases.json.
 @EngineActor
 public final class RecoveryService {
     private static let patience: Int64 = 30_000
+
+    /// Whether recover stopped waiting for its libraries, so jobs may be live.
+    private final class Late: @unchecked Sendable {
+        private let lock = NSLock()
+        private var late = false
+        var now: Bool { lock.withLock { late } }
+        func set() { lock.withLock { late = true } }
+    }
 
     private let executor: EngineExecutor
     private let bus: EventBus
@@ -27,6 +34,7 @@ public final class RecoveryService {
     private let renderer: any MessageRenderer
     private let data: String
     private let logLock = NSLock()
+    private let late = Late()
 
     /// `dataDirectory`: the engine's data folder; a job's folder is <data>/jobs/<id>.
     public init(executor: EngineExecutor, bus: EventBus, problems: ProblemService, store: any Store, registry: StepRegistry,
@@ -82,7 +90,10 @@ public final class RecoveryService {
                 pending -= 1
                 if pending == 0 { finish() }
             }
-            timer = clock.timer(.at(instant: Instant(unixMilliseconds: started + Self.patience))) { finish() }
+            timer = clock.timer(.at(instant: Instant(unixMilliseconds: started + Self.patience))) { [late] in
+                late.set()
+                finish()
+            }
             for lib in libraries {
                 executor.spawn { [self] in
                     await tidy(lib.id, lib.path, unfinishedNow)
@@ -142,8 +153,8 @@ public final class RecoveryService {
             return true
         }
 
-        // Before Acquire. A media generation doesn't outlive the engine (owner, 2026-10-14): an automatic job can't know
-        // its disc is still there (the new run's insert starts a fresh job), and a manual one reads the drive again.
+        // Before Acquire. A media generation doesn't outlive the engine: an automatic job can't know its disc is still
+        // there (the new run's insert starts a fresh job), and a manual one reads the drive again.
         var job = job
         if job.request.driveId != nil && job.request.automatic {
             if var row, started {
@@ -172,13 +183,13 @@ public final class RecoveryService {
         return true
     }
 
-    /// A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose commit a
-    /// roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 to 2026-11-05,
-    /// F9's rule): JobOutcome.decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a
-    /// Commit, cancelled after a KeepApart. That step is the first row not done. In a cancelled job a Commit row counts in any
-    /// state, as however it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after a
-    /// retry, running after a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending or
-    /// running one keeps its outcome. Its finishedAt, step rows and log stay as they were.
+    /// A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose
+    /// commit a roll forward has just finished, gets the outcome that step gives when it succeeds: JobOutcome.decide of
+    /// its steps with that step succeeded, so succeeded or succeededWithReadErrors after a Commit, cancelled after a
+    /// KeepApart. That step is the first row not done. In a cancelled job a Commit row counts in any state, as however
+    /// it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after a retry,
+    /// running after a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending
+    /// or running one keeps its outcome. Its finishedAt, step rows and log stay as they were.
     private func committed(_ jobId: Id) async throws(BroError) {
         let store = store
         guard let job = try await executor.worker({ () async throws(BroError) -> JobRecord? in try await store.jobs().load(jobId) }),
@@ -251,15 +262,23 @@ public final class RecoveryService {
 
     // ---- libraries and files ---------------------------------------------------------------------------------------------
 
-    /// One library: its open intents rolled forward (a job that failed in that commit, or was cancelled with it unfinished,
-    /// then gets the outcome it gives), then its staging folders tidied and the ones no job will continue set aside. An
-    /// offline library is left alone (I2). On the executor; the file and store work on workers.
+    /// One library: its open intents rolled forward (a job that failed in that commit, or was cancelled with it
+    /// unfinished, then gets the outcome it gives), then its staging folders tidied and the ones no job will continue
+    /// set aside. An offline library is left alone, and so is the staging of one whose store reads fail: a read that
+    /// fails can't say what is open or whose a folder is, and the next start tries again. On the executor; the file and
+    /// store work on workers.
     private func tidy(_ libraryId: String, _ root: String, _ unfinished: Set<String>) async {
+        do throws(BroError) {
+            try await rollForwards(libraryId)
+            try await setAsides(libraryId, root, unfinished)
+        } catch {}
+    }
+
+    private func rollForwards(_ libraryId: String) async throws(BroError) {
         let store = store
-        let intents = (try? await executor.worker { () async throws(BroError) -> [CommitIntent] in try await store.units().openIntents() }) ?? []
-        for intent in intents {
+        for intent in try await executor.worker({ () async throws(BroError) -> [CommitIntent] in try await store.units().openIntents() }) {
             let unitId = intent.unitId
-            let unit = try? await executor.worker { () async throws(BroError) -> UnitRecord? in try await store.units().get(unitId) }
+            let unit = try await executor.worker { () async throws(BroError) -> UnitRecord? in try await store.units().get(unitId) }
             guard unit?.libraryId == libraryId else { continue }
             do throws(BroError) {
                 if try await library.rollForward(intent) == nil { continue } // the job's Commit finished it meanwhile
@@ -267,43 +286,51 @@ public final class RecoveryService {
                 try await committed(intent.jobId)
                 await removeLeftovers(intent.destination, recursive: false)
             } catch {
-                // A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A job
-                // whose new outcome couldn't be stored keeps its old one with this line in its log; a retry from Commit finds the
-                // unit committed.
+                // A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs
+                // again. A job whose new outcome couldn't be stored keeps its old one with this line in its log; a
+                // retry from Commit finds the unit committed.
                 try? await log(intent.jobId, BroMessage(MessageCode(rawValue: error.code) ?? .internalUnexpected, error.params, severity: .warning))
             }
         }
-        let open = (try? await executor.worker { () async throws(BroError) -> [CommitIntent] in try await store.units().openIntents() }) ?? []
-        let committing = Set(open.map(\.staging))
-        guard let folders = try? await library.stagingFolders(libraryId) else { return }
-        for folder in folders {
+    }
+
+    private func setAsides(_ libraryId: String, _ root: String, _ unfinished: Set<String>) async throws(BroError) {
+        let store = store
+        // By job, not by staging path: an intent's paths are absolute, and the library's root may have moved since.
+        let open = try await executor.worker { () async throws(BroError) -> [CommitIntent] in try await store.units().openIntents() }
+        let committing = Set(open.map(\.jobId.value))
+        for folder in try await library.stagingFolders(libraryId) {
             let path = root + "/.bromelia/staging/" + folder
+            // Read after the listing, and a job's row is stored before its folder is made: no row means no job.
+            let job = try await executor.worker { () async throws(BroError) -> JobRecord? in try await store.jobs().load(Id(folder)) }
+            var rows: [StepRecord] = []
+            if let jobId = job?.id {
+                rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
+            }
             await removeLeftovers(path, recursive: true)
-            if unfinished.contains(folder) || committing.contains(path) { continue }
-            let job = try? await executor.worker { () async throws(BroError) -> JobRecord? in try await store.jobs().load(Id(folder)) }
-            if job?.outcome == .interrupted { continue } // kept so it can be continued (owner, 2026-10-03)
-            let copies = if let job { await logs(job) } else { [(String, [UInt8])]() }
+            if unfinished.contains(folder) || committing.contains(folder) { continue }
+            if job?.outcome == .interrupted { continue } // kept so it can be continued
+            let copies = if let job { await logs(job, rows) } else { [(String, [UInt8])]() }
             let lines = Notes.render(Id(folder), outcome: job?.outcome ?? .interrupted, error: job?.error, readErrors: [], logs: copies.map(\.0),
                                      fullLog: job.map { jobDirectory($0.id) + "/" + JobLog.fileName })
             let note = Array(lines.map { renderer.render($0) + "\n" }.joined().utf8)
             var name = folder
             if let job {
-                let rows = (try? await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(job.id) }) ?? []
                 let outputs = rows.filter { $0.state == .succeeded && $0.output != nil }.sorted { $0.seq < $1.seq }.compactMap(\.output)
                 name = KeepApartStep.folderName(JobSnapshot(id: job.id, request: job.request, plan: job.plan, outputs: outputs))
             }
+            if job != nil && late.now { continue } // live, or live after a retry at any moment; the next start sees
             _ = try? await library.setAside(libraryId, folder: folder, name: name, note: note, logs: copies)
             // a failure leaves it hidden in staging; the next start tries again
         }
     }
 
     /// The job's logs as Seal copies them (SealStep.copyLogs: its log as text, MakeMKV's transcripts, each when the job
-    /// folder has it; none when its Plan's profile has archive.archiveRecord false), by name; on a worker. When they can't
-    /// be read, the files are set aside without them.
-    private func logs(_ job: JobRecord) async -> [(String, [UInt8])] {
-        let store = store, fs = fs, renderer = renderer, jobId = job.id, directory = jobDirectory(job.id)
-        let copies = try? await executor.worker { () async throws(BroError) -> [(String, [UInt8])] in
-            let rows = try await store.steps().load(jobId)
+    /// folder has it; none when its Plan's profile, in `rows`, has archive.archiveRecord false), by name; on a worker. When
+    /// they can't be read, the files are set aside without them.
+    private func logs(_ job: JobRecord, _ rows: [StepRecord]) async -> [(String, [UInt8])] {
+        let fs = fs, renderer = renderer, jobId = job.id, directory = jobDirectory(job.id)
+        let copies = try? await executor.worker { () throws(BroError) -> [(String, [UInt8])] in
             let data = rows.last(where: { $0.kind == .plan && $0.state == .succeeded })?.output?.data
             let plan = data.flatMap { $0.members != nil ? PlanOutput.decode($0) : nil }
             var copies: [(String, [UInt8])] = []
@@ -316,18 +343,20 @@ public final class RecoveryService {
         return copies ?? []
     }
 
-    /// Removes what a stopped write leaves (ArchiveFiles.isLeftover) from the folder, and its subfolders when `recursive`.
+    /// Removes what a stopped write leaves (ArchiveFiles.isLeftover) from the folder, and its subfolders when `recursive`. A
+    /// listing that answers once jobs may be live can't tell that from what they are writing, so nothing it gives goes; one
+    /// that answered before that can only name leftovers.
     private func removeLeftovers(_ folder: String, recursive: Bool) async {
-        let fs = fs
-        _ = try? await executor.worker { () throws(BroError) in Self.removeLeftoversNow(fs, folder, recursive) }
+        let fs = fs, late = late
+        _ = try? await executor.worker { () throws(BroError) in Self.removeLeftoversNow(fs, late, folder, recursive) }
     }
 
-    private nonisolated static func removeLeftoversNow(_ fs: any FileSystem, _ folder: String, _ recursive: Bool) {
-        guard fs.exists(folder), let entries = try? fs.list(folder) else { return }
+    private nonisolated static func removeLeftoversNow(_ fs: any FileSystem, _ late: Late, _ folder: String, _ recursive: Bool) {
+        guard fs.exists(folder), let entries = try? fs.list(folder), !late.now else { return }
         for e in entries.sorted(by: { Array($0.name.utf8).lexicographicallyPrecedes(Array($1.name.utf8)) }) {
             let path = folder + "/" + e.name
             if e.isDirectory {
-                if recursive { removeLeftoversNow(fs, path, true) }
+                if recursive { removeLeftoversNow(fs, late, path, true) }
             } else if ArchiveFiles.isLeftover(e.name) {
                 try? fs.remove(path)
             }

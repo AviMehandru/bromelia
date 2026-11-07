@@ -4,7 +4,8 @@ using Bromelia.Foundation;
 
 namespace Bromelia.Engine;
 
-/// <summary>What ReconcileStep found: each chosen title of the opened listing → its number in the listing read now.</summary>
+/// <summary>What ReconcileStep found: each chosen title of the opened listing → its number in the listing read
+/// now.</summary>
 public sealed record ReconcileOutput(IReadOnlyDictionary<int, int> TitleMap)
 {
     /// <summary><c>{"titleMap": [[opened, now], …]}</c>, by the opened number.</summary>

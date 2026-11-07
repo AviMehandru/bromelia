@@ -76,7 +76,7 @@ struct MediaArgsTests {
                 try Fixtures.same(expect["arguments"], stringsJson(args), "arguments")
                 return true
             }
-            if id == "simple-chapters" {
+            if id.hasPrefix("simple-chapters") {
                 let starts = SimpleChapters.parse(given["text"]?.string ?? "")
                 let want = expect["starts"]?.array ?? []
                 try Fixtures.check(want.count == starts.count, "count")

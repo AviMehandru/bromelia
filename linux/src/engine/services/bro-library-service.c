@@ -15,11 +15,10 @@
 #define INCOMPLETE_NOTE "INCOMPLETE.txt"
 #define CHECK_EVERY_SECONDS 30
 #define SUMS "SHA256SUMS"
-/* The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore files (owner,
- * 2026-10-22). */
+/* The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore files. */
 #define BACKUP_FOLDER "Backup"
 
-/* .plexignore for Plex, .ignore for Jellyfin and Emby, as today's apps wrote them. */
+/* .plexignore for Plex, .ignore for Jellyfin and Emby. */
 static const struct {
   const char *name;
   const char *text;
@@ -1292,8 +1291,45 @@ walk (BroLibraryService *self, const char *folder, const char *prefix, GPtrArray
   return TRUE;
 }
 
-/* Nothing is written unless every item is in staging with SHA256SUMS, and nothing at the destination is in the way
- * (I5). */
+/* Refuses what moveMerging would put under another name than SHA256SUMS lists: it matches names ignoring ASCII case and
+ * renames whatever then clashes, so every entry of that kind is in the way, a folder spelled another way too. */
+static gboolean
+check_merge (BroLibraryService *self, const char *source, const char *target, BroBroError **error)
+{
+  g_autoptr (GPtrArray) there = NULL;
+  g_autoptr (GPtrArray) entries = NULL;
+  g_autoptr (GPtrArray) names = NULL;
+  if (!bro_file_system_exists (self->fs, target))
+    return TRUE;
+  if (!is_folder (self, target))
+    return fail_path (error, BRO_MSG_FS_ALREADY_EXISTS, target);
+  if (!(there = bro_file_system_list (self->fs, target, error)) || !(entries = bro_file_system_list (self->fs, source, error)))
+    return FALSE;
+  names = g_ptr_array_new ();
+  for (guint i = 0; i < entries->len; i++)
+    g_ptr_array_add (names, entries->pdata[i]);
+  g_ptr_array_sort (names, by_name);
+  for (guint i = 0; i < names->len; i++)
+    {
+      BroDirectoryEntry *e = names->pdata[i];
+      BroDirectoryEntry *same = NULL;
+      for (guint j = 0; j < there->len && !same; j++)
+        if (bro_conflict_namer_same (((BroDirectoryEntry *) there->pdata[j])->name, e->name))
+          same = there->pdata[j];
+      if (same)
+        {
+          g_autofree char *to = g_strconcat (target, "/", same->name, NULL);
+          g_autofree char *from = g_strconcat (source, "/", e->name, NULL);
+          if (!e->is_directory || strcmp (same->name, e->name) != 0)
+            return fail_path (error, BRO_MSG_FS_ALREADY_EXISTS, to);
+          if (!check_merge (self, from, to, error))
+            return FALSE;
+        }
+    }
+  return TRUE;
+}
+
+/* Nothing is written unless every item is in staging with SHA256SUMS, and nothing at the destination is in the way. */
 static gboolean
 precheck (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **error)
 {
@@ -1314,22 +1350,15 @@ precheck (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **
   for (guint i = 0; i < intent->items->len; i++)
     {
       BroCommitItem *item = intent->items->pdata[i];
-      g_autoptr (GPtrArray) targets = g_ptr_array_new_with_free_func (g_free);
       g_autofree char *to = g_strconcat (intent->destination, "/", item->to_path, NULL);
       if (item->is_dir)
         {
-          g_autoptr (GPtrArray) files = g_ptr_array_new_with_free_func (g_free);
           g_autofree char *from = g_strconcat (intent->staging, "/", item->from_path, NULL);
-          if (!walk (self, from, "", files, error))
+          if (!check_merge (self, from, to, error))
             return FALSE;
-          for (guint j = 0; j < files->len; j++)
-            g_ptr_array_add (targets, g_strconcat (to, "/", (char *) files->pdata[j], NULL));
         }
-      else
-        g_ptr_array_add (targets, g_strdup (to));
-      for (guint j = 0; j < targets->len; j++)
-        if (bro_file_system_exists (self->fs, targets->pdata[j]) && !is_folder (self, targets->pdata[j]))
-          return fail_path (error, BRO_MSG_FS_ALREADY_EXISTS, targets->pdata[j]);
+      else if (bro_file_system_exists (self->fs, to))
+        return fail_path (error, BRO_MSG_FS_ALREADY_EXISTS, to);
     }
   return TRUE;
 }
@@ -1401,9 +1430,9 @@ move_item (BroLibraryService *self, const char *root, const BroCommitIntent *int
   return fail_path (error, BRO_MSG_FS_NOT_FOUND, from);
 }
 
-/* A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing (owner,
- * 2026-10-22): outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from the intent
- * alone (an item under Backup/ of a shared folder), so a roll forward writes them too. */
+/* A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing: outside
+ * the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from the intent alone (an item under
+ * Backup/ of a shared folder), so a roll forward writes them too. */
 static gboolean
 ignored (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **error)
 {
@@ -1429,6 +1458,36 @@ ignored (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **e
   return TRUE;
 }
 
+/* The files of the unit's archive record, by path (@files: path → a member of @record); none when it isn't there or
+ * doesn't read. */
+static gboolean
+recorded_files (BroLibraryService *self, const BroCommitIntent *intent, BroJsonValue **record, GHashTable **files, BroBroError **error)
+{
+  g_autofree char *unit8 = g_strndup (intent->unit_id.value, 8);
+  g_autofree char *path = g_strconcat (intent->destination, "/bromelia-", unit8, ".json", NULL);
+  BroJsonValue *listed;
+  *files = g_hash_table_new (g_str_hash, g_str_equal);
+  if (!bro_file_system_exists (self->fs, path))
+    return TRUE;
+  {
+    g_autoptr (GBytes) bytes = bro_file_system_read (self->fs, path, error);
+    g_autofree char *text = NULL;
+    if (!bytes)
+      return FALSE;
+    text = text_of (bytes);
+    *record = bro_json_value_parse (text, -1);
+  }
+  listed = *record ? bro_json_value_member (*record, "files") : NULL;
+  for (guint i = 0; listed && i < bro_json_value_length (listed); i++)
+    {
+      BroJsonValue *file = bro_json_value_at (listed, i);
+      const char *name = bro_json_value_get_string (bro_json_value_member (file, "path"), NULL);
+      if (name)
+        g_hash_table_insert (*files, (gpointer) name, file);
+    }
+  return TRUE;
+}
+
 /* The unit's lines of the destination's SHA256SUMS (a roll forward has no file list of its own). */
 static GPtrArray *
 from_sums (BroLibraryService *self, const BroCommitIntent *intent, BroBroError **error)
@@ -1437,11 +1496,15 @@ from_sums (BroLibraryService *self, const BroCommitIntent *intent, BroBroError *
   g_autoptr (GBytes) bytes = bro_file_system_read (self->fs, sums_path, error);
   g_autofree char *text = NULL;
   g_autoptr (GPtrArray) sums = NULL;
+  g_autoptr (BroJsonValue) record = NULL;
+  g_autoptr (GHashTable) recorded = NULL;
   GPtrArray *files;
   if (!bytes)
     return NULL;
   text = text_of (bytes);
   sums = bro_sha256_sums_parse (text);
+  if (!recorded_files (self, intent, &record, &recorded, error))
+    return NULL;
   files = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_unit_file_free);
   for (guint i = 0; i < sums->len; i++)
     {
@@ -1458,16 +1521,22 @@ from_sums (BroLibraryService *self, const BroCommitIntent *intent, BroBroError *
           g_autofree char *full = g_strconcat (intent->destination, "/", s->path, NULL);
           g_autoptr (BroFileInfo) info = bro_file_system_stat (self->fs, full, error);
           BroUnitFile *f;
+          BroJsonValue *file, *title;
           if (!info)
             {
               g_ptr_array_unref (files);
               return NULL;
             }
+          file = g_hash_table_lookup (recorded, s->path);
+          title = file ? bro_json_value_member (file, "title") : NULL;
+          title = title && title->kind == BRO_JSON_VALUE_INTEGER ? title : NULL;
           f = bro_unit_file_new ();
           f->path = g_strdup (s->path);
           f->size = info->size;
           f->sha256 = g_strdup (s->sha256);
-          f->role = g_strdup ("title");
+          f->role = g_strdup (file ? bro_json_value_get_string (bro_json_value_member (file, "role"), "") : "");
+          f->has_title = title != NULL;
+          f->title = title ? (int) bro_json_value_get_integer (title, 0) : 0;
           g_ptr_array_add (files, f);
         }
     }
@@ -1593,19 +1662,15 @@ complete (BroLibraryService *self, const char *root, const BroCommitIntent *inte
         {
           g_autoptr (GBytes) existing = bro_file_system_exists (self->fs, sums) ? bro_file_system_read (self->fs, sums, error) : g_bytes_new ("", 0);
           g_autoptr (GBytes) staged = existing ? bro_file_system_read (self->fs, staging_sums, error) : NULL;
-          g_autofree char *old_text = NULL;
           g_autofree char *new_text = NULL;
-          g_autofree char *merged = NULL;
           g_autoptr (GPtrArray) entries = NULL;
-          g_autoptr (GBytes) bytes = NULL;
+          g_autoptr (GBytes) merged = NULL;
           if (!existing || !staged)
             return NULL;
-          old_text = text_of (existing);
           new_text = text_of (staged);
           entries = bro_sha256_sums_parse (new_text);
-          merged = bro_sha256_sums_merge (old_text, entries);
-          bytes = g_bytes_new (merged, strlen (merged));
-          if (!bro_file_system_write_atomically (self->fs, sums, bytes, FILE_MODE, error) || !bro_file_system_remove (self->fs, staging_sums, error))
+          merged = bro_sha256_sums_merge (existing, entries);
+          if (!bro_file_system_write_atomically (self->fs, sums, merged, FILE_MODE, error) || !bro_file_system_remove (self->fs, staging_sums, error))
             return NULL;
         }
       else if (!bro_file_system_rename (self->fs, staging_sums, sums, error))
@@ -1618,6 +1683,16 @@ complete (BroLibraryService *self, const char *root, const BroCommitIntent *inte
   unit_files = files ? copy_files (files) : from_sums (self, intent, error);
   if (!unit_files)
     return NULL;
+  /* Whatever happened on the way, a unit never ends committed naming a file that isn't there: the intent stays open. */
+  for (guint i = 0; i < unit_files->len; i++)
+    {
+      g_autofree char *path = g_strconcat (intent->destination, "/", ((BroUnitFile *) unit_files->pdata[i])->path, NULL);
+      if (!bro_file_system_exists (self->fs, path))
+        {
+          fail_path (error, BRO_MSG_FS_NOT_FOUND, path);
+          return NULL;
+        }
+    }
   folders = synced (root, intent, unit_files);
   for (guint i = 0; i < folders->len; i++)
     if (!bro_file_system_sync_directory (self->fs, folders->pdata[i], error))

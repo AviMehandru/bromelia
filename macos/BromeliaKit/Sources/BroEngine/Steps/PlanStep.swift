@@ -1,21 +1,16 @@
 import BroDomain
 import BroFoundation
 
-/// Step 6 (plan §20.1): decides what the job makes and appends the rest of its steps.
-/// - The profile: ProfileResolver.resolve with the identity's facts (name, label, format code, kind), the drive entry and
-///   whether the rip is automatic; the chosen profile and library are its session layer (the chosen profile's fields,
-///   then the chosen library): a session's choices, else the request's options.profile and options.library.
-/// - The mode: the request's (options.mode); MKV when titles were chosen by hand; else ModeChooser by the disc's format.
-/// - A mode that makes MKV files needs the listing (disc.noInformation) and titles: the session's ticked titles
-///   (numbered as Reconcile found them; titles.noneChosenExist when none is on the disc), else TitleRules.select (each
-///   title logged; its error, titles.manualRequired, titles.noneMatched), then OnePass.plan and the space they need
-///   (SpaceEstimate.forPlan).
-/// - The library: the profile's, else defaultLibrary, else the first (library.none; library.notFound). An offline one
-///   doesn't fail the job: Decide waits for it, blocked, then checks the archive and the space.
-/// - Archived before (not for infoOnly): ArchiveCheck. skip ends the job (disc.alreadyArchived); ask appends Decide.
-/// - The space is reserved here when no Decide follows (SpaceCheck).
-/// - Appends [Decide?], Acquire, Release, VerifyRips (archive.verifyRips, not for infoOnly), Name, Seal, Commit, Notify.
-///   Its report's plan has the mode, profile and library.
+/// Step 6 (plan §20.1): decides what the job makes and appends the rest of its steps: the profile
+/// (ProfileResolver.resolve; a session's choices, else the request's options), the mode (the request's; MKV when titles
+/// were chosen by hand; else ModeChooser by the disc's format), the titles (the session's ticked ones, numbered as
+/// Reconcile found them, else TitleRules.select), the library and the space.
+///
+/// A mode that makes MKV files needs the listing and titles. An offline library doesn't fail the job: Decide waits for
+/// it, blocked, then checks the archive and the space. A disc archived before ends the job under skip and appends
+/// Decide under ask; the space is reserved here only when no Decide follows.
+///
+/// Appends [Decide?], Acquire, Release, VerifyRips (archive.verifyRips, not for infoOnly), Name, Seal, Commit, Notify.
 /// Data: PlanOutput.
 public struct PlanStep: Step {
     public init() {}

@@ -1,6 +1,6 @@
 /* bro-config-source.h: BroConfigSource: where the runner gets the configuration a job runs with (implemented by
  * ConfigService). It is read once, on the executor, when the job starts, and every step of that run sees the same
- * snapshot (owner, 2026-10-11). */
+ * snapshot. */
 #pragma once
 
 #include "bro-config.h"

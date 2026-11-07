@@ -10,22 +10,20 @@ using Bromelia.Ports;
 namespace Bromelia.Engine;
 
 /// <summary>Step 13 (plan §20.1; §22.3 steps 1–3): makes the job's staging folder a sealed unit, so the commit only
-/// moves it. What it seals is the produced items by name (review L3-1: the lists, never a count): Name's output, else
-/// Acquire's names as they are. An item that isn't in staging, or holds no file (an empty folder, a hidden path, a path
-/// through '..'; owner, 2026-10-21), fails with archive.fileMissing before anything is touched, a visible file no step
-/// made with archive.unlisted (owner, 2026-10-20), and leftovers of a stopped write are removed. Then, in order:
-/// 1. every file is synced to disk, then every folder from staging down to each file (archive.synced): a folder that
-///    holds only folders (a backup's) is synced too, so each entry on the way to a file is durable;
-/// 2. every file is hashed read back from disk (archive.hashFromDisk, on by default: the cache is bypassed), with
-///    archive.hashing progress; a file that can't be read fails with archive.hashFailed;
-/// 3. SHA256SUMS, the logs (the job's log.jsonl rendered line by line, MakeMKV's transcripts as they are), the READ
-///    ERRORS note when MakeMKV reported read errors, and the record are written, each atomically; a write that fails
-///    fails with archive.writeFailed. Bromelia's own files from an earlier attempt that this one doesn't write go.
-/// SHA256SUMS and the record are always written; archive.checksums: false is ignored (archive.checksumsRequired) and
-/// archive.archiveRecord: false leaves out only the logs (owner, 2026-10-20). Nothing is trusted from an earlier attempt:
-/// a rerun syncs and hashes everything again and writes the same files. Read errors give the unit the tag "READ ERRORS"
-/// (Commit puts it in _Quarantine/&lt;name&gt; [READ ERRORS], plan §22.2) and the record's status errors. Data: SealOutput.
-/// Skipped when Plan or Acquire hasn't run.</summary>
+/// moves it. It seals the produced items by name, never by a count: Name's output, else Acquire's names as they are. An
+/// item that isn't in staging or holds no file (an empty folder, a hidden path, a path through '..') fails before
+/// anything is touched, and so does a visible file no step made; leftovers of a stopped write are removed.
+///
+/// In order: every file is synced, then every folder from staging down to each file, so each entry on the way to a file
+/// is durable; every file is hashed read back from disk (archive.hashFromDisk, on by default); then SHA256SUMS, the
+/// logs, the READ ERRORS note and the record are written, each atomically. Read back from disk goes past the system
+/// cache only on Windows: macOS and Linux ask the cache to stay out of the way, and a page still in it can answer
+/// (FileSystem.openForReading).
+///
+/// SHA256SUMS and the record are always written: archive.checksums: false is ignored and archive.archiveRecord: false
+/// leaves out only the logs. Nothing is trusted from an earlier attempt: a rerun syncs and hashes everything again and
+/// writes the same files. Read errors tag the unit "READ ERRORS", so Commit puts it in _Quarantine/&lt;name&gt; [READ
+/// ERRORS] (plan §22.2). Data: SealOutput. Skipped when Plan or Acquire hasn't run.</summary>
 public sealed class SealStep : IStep
 {
     public const string ReadErrorsTag = "READ ERRORS";
@@ -62,7 +60,7 @@ public sealed class SealStep : IStep
         var named = NameOutput.Of(job)?.Files ?? NameOutput.FromAcquire(acquired);
         var walked = FileTree.Files(fs, staging);
         // An item that isn't there or holds no file (an empty folder, a hidden path, a path through '..') would seal
-        // nothing for itself (owner, 2026-10-21): refused before anything is touched.
+        // nothing for itself: refused before anything is touched.
         foreach (var item in named)
             if (!ArchiveFiles.Expand(new[] { item.Path }, walked).Any(f => !f.EndsWith('/')))
                 throw Failure(MessageCode.ArchiveFileMissing, ("file", JsonValue.Of(item.Path)));
@@ -98,7 +96,7 @@ public sealed class SealStep : IStep
         {
             Cancelled(context);
             context.Progress.Report((double)done / total, new BroMessage(MessageCode.ArchiveHashing), files[i]);
-            var (hash, size) = Hash(context, staging + "/" + files[i], files[i], hashFromDisk);
+            var (hash, size) = Hash(context, staging + "/" + files[i], files[i], hashFromDisk, sizes[i]);
             var item = ItemOf(files[i]);
             entries.Add(new UnitFile(files[i], size, hash, item.Role ?? "", item.Title));
             done += sizes[i];
@@ -135,8 +133,7 @@ public sealed class SealStep : IStep
 
         var record = "bromelia-" + unit8 + ".json";
         var document = SealRecord.Build(job, plan, acquired, unitId, entries, log, logs, context.Clock.Now(), context.AppVersion, context.Messages);
-        Write(record, ArchiveRecordCodec.EncodeV3(new ArchiveRecord(3, document, "", "", "", "", "", null, null, null, null, null, null,
-            new List<int>(), new List<SumEntry>())));
+        Write(record, ArchiveRecordCodec.EncodeV3(new ArchiveRecord(document)));
         context.Log.Log(new BroMessage(MessageCode.ArchiveRecordWritten, Severity.Info, ("file", JsonValue.Of(record))));
 
         // An earlier attempt's own files that this one didn't write (a note, a log no longer there).
@@ -155,8 +152,8 @@ public sealed class SealStep : IStep
     internal static (IReadOnlyList<LogLineDto> Log, List<string> Logs) CopyLogs(StepContext context, string unit8, bool copy, Action<string, byte[]> write) =>
         CopyLogs(context.Fs, context.JobDirectory, context.Messages, unit8, copy, write);
 
-    /// <summary>CopyLogs from the job folder <paramref name="jobDirectory"/>, outside a step: RecoveryService's set-aside
-    /// copies a failed or cancelled job's logs the same way (owner, 2026-10-25).</summary>
+    /// <summary>CopyLogs from the job folder <paramref name="jobDirectory"/>, outside a step: RecoveryService's
+    /// set-aside copies a failed or cancelled job's logs the same way.</summary>
     internal static (IReadOnlyList<LogLineDto> Log, List<string> Logs) CopyLogs(IFileSystem fs, string jobDirectory, IMessageRenderer messages, string unit8,
         bool copy, Action<string, byte[]> write)
     {
@@ -178,7 +175,8 @@ public sealed class SealStep : IStep
         return (log, logs);
     }
 
-    /// <summary>Writes one of Bromelia's own files atomically (0644); archive.writeFailed {path, reason} when it can't.</summary>
+    /// <summary>Writes one of Bromelia's own files atomically (0644); archive.writeFailed {path, reason} when it
+    /// can't.</summary>
     internal static void WriteOwn(StepContext context, string path, byte[] bytes)
     {
         try
@@ -192,9 +190,11 @@ public sealed class SealStep : IStep
         }
     }
 
-    /// <summary>A file's SHA-256 and size, read through the FileSystem port (from disk when <paramref name="fromDisk"/>);
-    /// archive.hashFailed when it can't be read; job.cancelled between two pieces.</summary>
-    internal static (string Hash, long Size) Hash(StepContext context, string path, string file, bool fromDisk)
+    /// <summary>A file's SHA-256 and size, read through the FileSystem port (from disk when <paramref
+    /// name="fromDisk"/>); archive.hashFailed when it can't be read, archive.sizeMismatch when the bytes read aren't
+    /// the <paramref name="expected"/> the file's stat gave: a hash of part of a file must never be recorded.
+    /// job.cancelled between two pieces.</summary>
+    internal static (string Hash, long Size) Hash(StepContext context, string path, string file, bool fromDisk, long expected)
     {
         IByteStream stream;
         try
@@ -225,6 +225,8 @@ public sealed class SealStep : IStep
                 hasher.Update(piece);
                 size += piece.Length;
             }
+            if (size != expected)
+                throw Failure(MessageCode.ArchiveSizeMismatch, ("file", JsonValue.Of(file)), ("size", JsonValue.Of(expected)), ("hashed", JsonValue.Of(size)));
             return (hasher.Finish(), size);
         }
         finally

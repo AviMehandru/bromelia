@@ -1,8 +1,7 @@
-/* bro-event-feed.h: BroEventFeed: what bro_engine_api_events gives (decision 168): the snapshot event first when it was
- * opened without a replayable after, then the deltas; after a gap (the stream's resync) a new snapshot instead of the
- * missed deltas; jobLog events only for the jobs asked for. Read from any thread, one reader at a time; stop closes it.
- * Each next waits for its event on a thread of its own, so a feed nobody reads adds nothing to the executor's
- * activity. */
+/* bro-event-feed.h: BroEventFeed: what bro_engine_api_events gives: the snapshot event first when it was opened without
+ * a replayable after, then the deltas; after a gap (the stream's resync) a new snapshot instead of the missed deltas;
+ * jobLog events only for the jobs asked for. Read from any thread, one reader at a time; stop closes it. Each next
+ * waits for its event on a thread of its own, so a feed nobody reads adds nothing to the executor's activity. */
 #pragma once
 
 #include "bro-engine-event.h"

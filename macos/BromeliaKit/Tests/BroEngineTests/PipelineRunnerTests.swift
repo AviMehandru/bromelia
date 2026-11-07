@@ -286,6 +286,12 @@ final class PipelineHarness {
                 try fs.writeAtomically("/data/jobs/\(id.value)/log.jsonl", bytes: Array(text.utf8), mode: 0o600)
             }
         }
+        let logWritesToFail = Box(given["failLogWrites"]?.int ?? 0)
+        fs.onOp = { (op, path) throws(BroError) in
+            guard op == "write", path.hasSuffix("/log.jsonl"), logWritesToFail.value > 0 else { return }
+            logWritesToFail.value -= 1
+            throw BroError("fs.failed", [("operation", .string("write")), ("path", .string(path)), ("reason", .string("EIO"))])
+        }
     }
 
     func id(_ name: String) -> Id { jobs.first { $0.name == name }?.id ?? Id("00000000-0000-4000-8000-0000000000ff") }

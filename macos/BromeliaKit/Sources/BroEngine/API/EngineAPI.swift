@@ -2,17 +2,17 @@ import BroDomain
 import BroFoundation
 
 /// The one interface between the engine and anything outside it (plan §13.1): DTOs in and out, never live objects.
-/// LocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of the phases built so far (G1
-/// owner question 1): it grows with each phase. Every operation fails with a BroError carrying the error the route lists;
-/// server.stopping once the engine stops.
+/// LocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of the phases built so far: it
+/// grows with each phase. Every operation fails with a BroError carrying the error the route lists; server.stopping
+/// once the engine stops.
 public protocol EngineAPI: Sendable {
     // MARK: System
 
     /// Versions, MakeMKV, tools, problems, libraries, configuration version, last event seq.
     func system() async throws -> SystemStatusDto
 
-    /// The stop order (decision 170): running jobs are left as a killed engine would leave them, for the next start's
-    /// recovery. server.stopping when stopping already.
+    /// The stop order: running jobs are left as a killed engine would leave them, for the next start's recovery.
+    /// server.stopping when stopping already.
     func stop() async throws
 
     // MARK: Drives

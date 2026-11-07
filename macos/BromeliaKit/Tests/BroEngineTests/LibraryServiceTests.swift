@@ -305,13 +305,37 @@ final class Db: LibraryRepository, UnitRepository, CatalogRepository, @unchecked
         }
     }
 
-    func openIntents() async throws(BroError) -> [CommitIntent] { open() }
+    /// Of these reads, after `after` of them, the next `times` fail with store.failed (times below 0: all the rest).
+    var intentReadFault: (after: Int, times: Int)?
+    var unitReadFault: (after: Int, times: Int)?
+
+    private func read(_ fault: inout (after: Int, times: Int)?) throws(BroError) {
+        let failed = lock.withLock { () -> Bool in
+            guard let f = fault else { return false }
+            if f.after > 0 {
+                fault = (f.after - 1, f.times)
+                return false
+            }
+            if f.times == 0 { return false }
+            fault = (0, f.times - 1)
+            return true
+        }
+        if failed { throw BroError("store.failed", [("operation", .string("read")), ("reason", .string("disk I/O error"))]) }
+    }
+
+    func openIntents() async throws(BroError) -> [CommitIntent] {
+        try read(&intentReadFault)
+        return open()
+    }
 
     func open() -> [CommitIntent] {
         lock.withLock { intents.values.sorted { ($0.createdAt.unixMilliseconds, $0.unitId.value) < ($1.createdAt.unixMilliseconds, $1.unitId.value) } }
     }
 
-    func get(_ unitId: Id) async throws(BroError) -> UnitRecord? { lock.withLock { units[unitId.value] } }
+    func get(_ unitId: Id) async throws(BroError) -> UnitRecord? {
+        try read(&unitReadFault)
+        return lock.withLock { units[unitId.value] }
+    }
     func query(_ query: UnitQuery) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func leastRecentlyVerified(_ limit: Int) async throws(BroError) -> [UnitRecord] { fatalError("not used") }
     func markMissing(_ unitId: Id) async throws(BroError) { fatalError("not used") }
@@ -664,7 +688,9 @@ struct LibraryServiceTests {
             if let intents = want["intents"] { try Fixtures.same(intents, intentsJson(db.open()), "db intents") }
             if let uf = want["unitFiles"] {
                 let got = JsonValue.object(db.files.map { key, files in
-                    (key, .array(files.map { .array([.string($0.path), .integer($0.size), .string($0.sha256), .string($0.role)]) }))
+                    (key, .array(files.map { f in
+                        .array([.string(f.path), .integer(f.size), .string(f.sha256), .string(f.role)] + (f.title.map { [.integer(Int64($0))] } ?? []))
+                    }))
                 })
                 try Fixtures.same(Fixtures.sorted(uf), Fixtures.sorted(got), "db unit files")
             }

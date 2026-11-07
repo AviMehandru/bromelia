@@ -1,8 +1,8 @@
-/* bro-archive-record.h: an archive record (bromelia-<unit8>.json, version 3; today's bromelia.json, version 2):
- * the document as read (key order kept) and the fields Bromelia reads back: status, name, kind, the disc's label
- * and place in its set (-1: not in the record), its fingerprint, the unit's id (version 3), the episodes' numbers
- * and the files SHA256SUMS lists. Fields with the same meaning have the same path in both versions
- * (archive-record-3.json). */
+/* bro-archive-record.h: an archive record (bromelia-<unit8>.json, version 3; bromelia.json in older archives, version
+ * 2): the document as read (key order kept) and the fields Bromelia reads back: status, name, kind, the disc's label
+ * and place in its set (-1: not in the record), its fingerprint, the unit's id (version 3), the episodes' numbers and
+ * the files SHA256SUMS lists. Fields with the same meaning have the same path in both versions (archive-record-3.json).
+ * */
 #pragma once
 
 #include "bro-json-value.h"

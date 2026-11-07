@@ -1,12 +1,33 @@
 import BroDomain
 import BroFoundation
 import BroPorts
+import Foundation
 
-/// The only code that moves a job between states (plan §12.3), on the executor. Today's JobRunner.run()/execute()
-/// becomes JobPlanner (which steps), the step types (what each does), JobOutcome.decide (the result) and this loop
-/// (the order, the resources, and the durable record of every step). shared/fixtures/engine/pipeline-runner.cases.json.
+/// The only code that moves a job between states (plan §12.3), on the executor. JobPlanner says which steps, the step
+/// types what each does, JobOutcome.decide the result; this loop owns the order, the resources and the durable record
+/// of every step. shared/fixtures/engine/pipeline-runner.cases.json.
 @EngineActor
 public final class PipelineRunner {
+    private static let logInterval = Duration(seconds: 2)
+
+    /// A job's log.jsonl as this run writes it, whole, from workers: the writes never overlap, and one that was overtaken
+    /// by a later one is dropped, so the file never goes back.
+    fileprivate final class LogFile: @unchecked Sendable {
+        private let lock = NSLock()
+        private var written = 0
+        var directoryMade = false
+
+        func write(_ fs: any FileSystem, _ directory: String, lines: Int, bytes: [UInt8]) throws(BroError) {
+            lock.lock()
+            defer { lock.unlock() }
+            if lines <= written { return }
+            if !directoryMade { try fs.createDirectory(directory, parentsMustExist: false) }
+            directoryMade = true
+            try fs.writeAtomically(directory + "/" + JobLog.fileName, bytes: bytes, mode: 0o600)
+            written = lines
+        }
+    }
+
     /// A job while it runs.
     @EngineActor
     final class Live {
@@ -30,7 +51,7 @@ public final class PipelineRunner {
         var warningsBefore = 0
         var errorsBefore = 0
         var log: [LogLineDto] = []
-        var directoryMade = false
+        fileprivate let file = LogFile()
         var logRead = false
         var config: Config?
         /// The outputs of the steps done so far, for the Release step at the end.
@@ -48,16 +69,17 @@ public final class PipelineRunner {
     private let clock: EngineClock
     private let crash: (@Sendable (String) throws(BroError) -> Void)?
     private var coalescer: Coalescer?
+    private var logCoalescer: Coalescer?
     private var live: [Id: Live] = [:]
     /// Set by `shutdown()`: nothing more is stored for any job.
     private var stopping = false
     /// Who waits in `shutdown()` for no job to be live.
     private var idle: [Resumption<Void>] = []
 
-    /// `crash` is called on the executor at each crash point of a run (the scenario runners' kill; the real roots pass none):
-    /// beforeStep:<kind> before the step asks for its resources (nothing of it is stored yet), afterStep:<kind> once its
-    /// finished row is stored (before stepFinished). What it throws stops the runner as `shutdown()` does, without
-    /// cancelling anything: nothing more is stored for any job, as a killed engine leaves it.
+    /// `crash` is called on the executor at each crash point of a run (the scenario runners' kill; the real roots pass
+    /// none): beforeStep:<kind> before the step asks for its resources (nothing of it is stored yet), afterStep:<kind>
+    /// once its finished row is stored (before stepFinished). What it throws stops the runner as `shutdown()` does,
+    /// without cancelling anything: nothing more is stored for any job, as a killed engine leaves it.
     public init(executor: EngineExecutor, bus: EventBus, scheduler: Scheduler, store: any Store, registry: StepRegistry,
                 environment: StepEnvironment, clock: EngineClock, crash: (@Sendable (String) throws(BroError) -> Void)? = nil) {
         self.crash = crash
@@ -69,6 +91,7 @@ public final class PipelineRunner {
         self.environment = environment
         self.clock = clock
         coalescer = Coalescer(clock: clock, interval: Duration(seconds: 0.1)) { [unowned self] key, _ in self.emitProgress(Id(key)) }
+        logCoalescer = Coalescer(clock: clock, interval: Self.logInterval) { [unowned self] key, _ in self.keepLog(Id(key)) }
     }
 
     // MARK: Commands
@@ -98,6 +121,7 @@ public final class PipelineRunner {
         if !stopping { await releaseAtEnd(l, decided) }
         if stopping {
             coalescer?.drop(jobId.value)
+            logCoalescer?.drop(jobId.value)
             gone(jobId, l)
             throw Self.stoppingError()
         }
@@ -106,8 +130,8 @@ public final class PipelineRunner {
         return decided
     }
 
-    /// At engine stop (decision 170): every live job's waiting request and question are dropped and its running step's
-    /// token cancelled, and from now on the runner stores nothing more for any job (no step row, plan, outcome or
+    /// At engine stop: every live job's waiting request and question are dropped and its running step's token
+    /// cancelled, and from now on the runner stores nothing more for any job (no step row, plan, outcome or
     /// jobFinished), so what is stored is what a killed engine leaves and the next start's recovery takes each job up.
     /// Returns once no job is live.
     public func shutdown() async {
@@ -203,7 +227,7 @@ public final class PipelineRunner {
         l.warningsBefore = before.filter { $0.severity == .warning }.count
         l.errorsBefore = before.filter { $0.severity == .error }.count
         l.logRead = true
-        l.directoryMade = !l.logBefore.isEmpty
+        l.file.directoryMade = !l.logBefore.isEmpty
         let rows = try await executor.worker { () async throws(BroError) -> [StepRecord] in try await store.steps().load(jobId) }
         for row in rows.sorted(by: { $0.seq < $1.seq }) { if let checkpoint = row.checkpoint { l.checkpoints[row.kind] = checkpoint } }
         let done = JobPlanner.done(rows)
@@ -222,6 +246,7 @@ public final class PipelineRunner {
             try crashPoint("beforeStep:" + kind.rawValue)
             l.seq = seq
             coalescer?.drop(jobId.value) // a new step's first progress goes out at once
+            logCoalescer?.drop(jobId.value) // and its first log line
             l.progress = ProgressDto(step: kind, stepIndex: seq, stepCount: l.steps.count, fraction: Double(seq) / Double(l.steps.count),
                                      currentFraction: nil, operation: BroMessage(.jobOpStarting))
             var snapshotPlan = plan
@@ -300,9 +325,9 @@ public final class PipelineRunner {
         return JobOutcome.decide(results, cancelled: cancelled || l.cancel.token.isCancelled, policy: OutcomePolicy())
     }
 
-    /// A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped, cancelled) runs
-    /// the Release step once more, with its outcome as the context's finishing: the step decides whether the disc comes out
-    /// (owner, 2026-10-18). Nothing is stored for it but its log lines; what it throws is ignored.
+    /// A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped, cancelled)
+    /// runs the Release step once more, with its outcome as the context's finishing: the step decides whether the disc
+    /// comes out. Nothing is stored for it but its log lines; what it throws is ignored.
     private func releaseAtEnd(_ l: Live, _ decided: Decided) async {
         guard let record = l.loaded, l.logRead, let release = registry.step(.release),
               scheduler.leases().drives.contains(where: { $0.job == record.id }) else { return }
@@ -331,6 +356,7 @@ public final class PipelineRunner {
         // The job has ended either way; what the store couldn't keep, recovery will see as unfinished.
         try? await executor.worker { () async throws(BroError) in try await store.jobs().update(finished) }
         coalescer?.drop(jobId.value)
+        logCoalescer?.drop(jobId.value)
         scheduler.finish(jobId)
         bus.publish(.jobFinished, data: .object([("job", JobDto.json(dto(l)))]))
     }
@@ -409,6 +435,7 @@ public final class PipelineRunner {
         let line = LogLineDto(seq: l.logSeq, t: clock.now(), severity: message.severity, code: message.code, params: message.params)
         l.log.append(line)
         bus.publish(.jobLog, data: .object([("jobId", .string(l.record.id.value)), ("lines", .array([LogLineDto.json(line)]))]))
+        logCoalescer?.offer(l.record.id.value, value: .null)
     }
 
     fileprivate func reserve(_ l: Live, _ volume: String, _ path: String, _ need: Int64, _ free: Int64) -> Result<Void, BroError> {
@@ -430,18 +457,23 @@ public final class PipelineRunner {
     }
 
     /// jobs/<id>/log.jsonl (JobLog): what was there when the job started, then this run's lines, written whole after each
-    /// step.
+    /// step and, through `keepLog`, while one runs.
     private func writeLog(_ l: Live) async throws(BroError) {
         if l.log.isEmpty { return }
         let directory = jobDirectory(l.record.id)
+        let lines = l.log.count
         let bytes = l.logBefore + JobLog.encode(l.log)
-        let makeDirectory = !l.directoryMade
-        l.directoryMade = true
-        let fs = environment.fs
-        try await executor.worker { () throws(BroError) in
-            if makeDirectory { try fs.createDirectory(directory, parentsMustExist: false) }
-            try fs.writeAtomically(directory + "/" + JobLog.fileName, bytes: bytes, mode: 0o600)
-        }
+        let fs = environment.fs, file = l.file
+        try await executor.worker { () throws(BroError) in try file.write(fs, directory, lines: lines, bytes: bytes) }
+    }
+
+    /// A running step's lines reach the file too, a step's first at once and later ones every `logInterval`, so a crash
+    /// in a long Acquire keeps them. The file is rewritten each time, so not per line. A write that fails here is left
+    /// to the next one; a step's end reports it. Never under Seal or KeepApart, which copy it into the unit: on Windows
+    /// a file being replaced can read as not there, and they would take that for a job without a log.
+    private func keepLog(_ jobId: Id) {
+        guard !stopping, let l = live[jobId], l.steps[l.seq] != .seal, l.steps[l.seq] != .keepApart else { return }
+        executor.spawn { try? await self.writeLog(l) }
     }
 
     private func jobDirectory(_ jobId: Id) -> String { environment.dataDirectory + "/jobs/" + jobId.value }

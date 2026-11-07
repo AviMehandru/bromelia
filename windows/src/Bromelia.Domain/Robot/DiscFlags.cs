@@ -9,7 +9,8 @@ public readonly record struct DiscFlags(int Raw)
     public bool AacsFiles => (Raw & 8) != 0;
     public bool BdsvmFiles => (Raw & 16) != 0;
 
-    /// <summary>MakeMKV's disc type: <c>Blu-ray (AACS)</c>, <c>Blu-ray</c>, <c>HD DVD</c>, <c>DVD</c> or <c>Disc</c>.</summary>
+    /// <summary>MakeMKV's disc type: <c>Blu-ray (AACS)</c>, <c>Blu-ray</c>, <c>HD DVD</c>, <c>DVD</c> or
+    /// <c>Disc</c>.</summary>
     public static string TypeText(DiscFlags flags)
     {
         if (flags.BlurayFiles) return flags.AacsFiles ? "Blu-ray (AACS)" : "Blu-ray";

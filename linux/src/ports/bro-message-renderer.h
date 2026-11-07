@@ -1,6 +1,6 @@
 /* bro-message-renderer.h: BroMessageRenderer: the text of a message in the configured language (plan §16:
  * shared/messages/en.json, rendered by the host's adapter): for what the engine writes for people to read, such as the
- * INCOMPLETE.txt note (owner, 2026-10-14). */
+ * INCOMPLETE.txt note. */
 #pragma once
 
 #include "bro-bro-message.h"

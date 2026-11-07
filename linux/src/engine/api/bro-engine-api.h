@@ -1,9 +1,8 @@
 /* bro-engine-api.h: BroEngineAPI: the one interface between the engine and anything outside it (plan §13.1): DTOs in
  * and out, never live objects. BroLocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of
- * the phases built so far (G1 owner question 1): it grows with each phase. Every operation answers once through @done,
- * on the engine's executor (decision 167), with what the route lists on failure, server.stopping once the engine
- * stops; a call the executor no longer takes answers server.stopping on the caller's thread. The results are
- * borrowed; @destroy frees @data afterwards. */
+ * the phases built so far: it grows with each phase. Every operation answers once through @done, on the engine's
+ * executor, with what the route lists on failure, server.stopping once the engine stops; a call the executor no longer
+ * takes answers server.stopping on the caller's thread. The results are borrowed; @destroy frees @data afterwards. */
 #pragma once
 
 #include "bro-config-envelope.h"
@@ -69,8 +68,8 @@ struct _BroEngineAPIInterface {
 /* Versions, MakeMKV, tools, problems, libraries, configuration version, last event seq. */
 void bro_engine_api_system (BroEngineAPI *self, BroSystemStatusDone done, gpointer data, GDestroyNotify destroy);
 
-/* The stop order (decision 170): running jobs are left as a killed engine would leave them, for the next start's
- * recovery. server.stopping when stopping already. */
+/* The stop order: running jobs are left as a killed engine would leave them, for the next start's recovery.
+ * server.stopping when stopping already. */
 void bro_engine_api_stop (BroEngineAPI *self, BroEngineDone done, gpointer data, GDestroyNotify destroy);
 
 /* DriveService's drives: BroDriveDto *. */

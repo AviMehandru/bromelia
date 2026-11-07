@@ -32,6 +32,10 @@ public class FoundationTests
         {
             var v = JsonValue.Parse(json.AsString!);
             Same(expect["canonical"]!.AsString, v is null ? null : Encoding.UTF8.GetString(JsonValue.EncodeCanonical(v)), "canonical");
+            if (given["member"] is { } member)
+                Same(expect["memberCanonical"]!.AsString, v?[member.AsString!] is { } m ? Encoding.UTF8.GetString(JsonValue.EncodeCanonical(m)) : null, "member");
+            if (given["other"] is { } other)
+                Same(expect["same"]!.AsBool, Equals(v, JsonValue.Parse(other.AsString!)), "same");
             return true;
         }
         return false;

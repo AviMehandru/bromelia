@@ -3,29 +3,23 @@ import BroFoundation
 import BroPorts
 
 /// Step 12 (plan §20.1): decides the unit's folder in the library and every produced item's name in it, and renames
-/// inside staging so staging is laid out exactly as the unit's folder will be (Seal hashes it so, Commit moves it).
-/// - The names: Layouts (the profile's naming) with the identity's tokens, the date tokens in local time at the job's
-///   start (Clock.localTime of JobSnapshot.startedAt, as today's apps use the rip's time); a title's hand-given name is its
-///   own template. A backup is named by the file name template, inside the backup subfolder when the job is
-///   backupThenMkv (owner H3b-1).
-///   disc-info.json and the files no title owns keep their names.
-/// - A folder backup's BDMV/index.bdmv (or VIDEO_TS) gives the disc's format when it differs from the identity's (a UHD
-///   disc read without a listing looks like a Blu-ray; name.formatFromBackup): the names use it and NameOutput carries the
-///   corrected identity for Seal's record; the backup's new name is logged as backup.renamed too (today's apps did so).
-/// - Nothing is overwritten (I5): a folder of its own takes a free name ("Name (2)"; conflictPolicy skip fails with
-///   library.folderExists); a shared folder (media server layout, conflictPolicy merge) is merged item by item, so an item
-///   whose name is taken there takes a free one. Names in staging never collide either, and an item never takes another
-///   item's Acquire name.
-/// - An item whose place holds a target (its own too, ASCII case ignored: Acquire's "backup" and a media server's
-///   "Backup/") first goes to a free name at staging's root; an item inside another item's target fails with
-///   name.unusable.
-/// - A name that would hold no file (empty, a component starting with '.', one of Bromelia's own file names at the unit's
-///   root) fails with name.unusable, an empty folder with name.noFolder, before anything is renamed.
-/// Idempotent: the decisions (folder, and per item where it is and where it goes) are saved as the "names" checkpoint
-/// before the first rename, so an attempt after a crash or a retry finds each item where it is and keeps the names
-/// already given, unless one is now taken in the library; a checkpoint for other items than Acquire's (Acquire ran again) is
-/// ignored. Names compare byte for byte (decision 79). Data: NameOutput.
-/// Skipped when Plan or Acquire hasn't run.
+/// inside staging so staging is laid out exactly as the unit's folder will be: Seal hashes it so, Commit moves it.
+///
+/// Names come from Layouts with the identity's tokens, date tokens in local time at the job's start; a title's
+/// hand-given name is its own template. disc-info.json and the files no title owns keep their names. A folder backup's
+/// BDMV/index.bdmv or VIDEO_TS can correct the disc's format (a UHD disc read without a listing looks like a Blu-ray):
+/// NameOutput then carries the corrected identity for Seal's record.
+///
+/// Nothing is overwritten: a folder of its own takes a free name ("Name (2)"), a shared folder is merged item by item,
+/// and an item whose name is taken takes a free one. An item whose place holds a target, ASCII case ignored (Acquire's
+/// "backup" and a media server's "Backup/"), first goes to a free name at staging's root. A name that would hold no
+/// file (empty, a component starting with '.', one of Bromelia's own file names at the unit's root) fails before
+/// anything is renamed.
+///
+/// Idempotent: the decisions are saved as the "names" checkpoint before the first rename, so an attempt after a crash
+/// or a retry finds each item where it is and keeps the names given, unless one is now taken in the library. A
+/// checkpoint for other items than Acquire's (Acquire ran again) is ignored. Data: NameOutput. Skipped when Plan or
+/// Acquire hasn't run. Names compare byte for byte.
 public struct NameStep: Step {
     public static let namesCheckpoint = "names"
 
@@ -51,8 +45,8 @@ public struct NameStep: Step {
         let items = NameOutput.fromAcquire(acquired)
         var saved: JsonValue?
         if let s = context.checkpoint.saved, s.members != nil, s["kind"]?.string == NameStep.namesCheckpoint { saved = s }
-        // A checkpoint made for other items than Acquire's is no guide: Acquire ran again since (a retry from it or Plan), and
-        // removed whatever Name had renamed, so every item is under Acquire's name.
+        // A checkpoint made for other items than Acquire's is no guide: Acquire ran again since (a retry from it or
+        // Plan), and removed whatever Name had renamed, so every item is under Acquire's name.
         if let s = saved, Set((s["files"]?.array ?? []).map { Array(($0["from"]?.string ?? "").utf8) }) != Set(items.map { Array($0.path.utf8) }) {
             saved = nil
         }
@@ -61,9 +55,10 @@ public struct NameStep: Step {
             if let from = f["from"]?.string, savedFiles[Array(from.utf8)] == nil { savedFiles[Array(from.utf8)] = f }
         }
 
-        // 1. Where each produced item is now: where an earlier attempt sent it (its target, or the free name it went to on the
-        // way), else where that attempt found it, else under Acquire's name. In that order: a folder made for a target may
-        // be where an item was (ASCII case aside), but nothing but the item is ever at its target or its way.
+        // 1. Where each produced item is now: where an earlier attempt sent it (its target, or the free name it went to
+        // on the way), else where that attempt found it, else under Acquire's name. In that order: a folder made for a
+        // target may be where an item was (ASCII case aside), but nothing but the item is ever at its target or its
+        // way.
         var at: [String] = []
         for item in items {
             let was = savedFiles[Array(item.path.utf8)]
@@ -90,7 +85,7 @@ public struct NameStep: Step {
         // 3. The unit's folder.
         let wanted = Layouts.folder(naming, values: values)
         if wanted.isEmpty { throw NameStep.failure(.nameNoFolder, []) }
-        if NameStep.asciiLower(NameStep.first(wanted)) == "_quarantine" { throw NameStep.failure(.nameUnusable, [("path", .string(wanted))]) }
+        if asciiLower(NameStep.first(wanted)) == "_quarantine" { throw NameStep.failure(.nameUnusable, [("path", .string(wanted))]) }
         let merge = naming.layout == .mediaServer || naming.conflictPolicy == .merge
         var folder = wanted
         if !merge {
@@ -99,8 +94,8 @@ public struct NameStep: Step {
                 folder = kept
             } else if try NameStep.taken(fs, library, wanted) {
                 if naming.conflictPolicy == .skip { throw NameStep.failure(.libraryFolderExists, [("path", .string(library + "/" + wanted))]) }
-                folder = NameStep.join(NameStep.parent(wanted), ConflictNamer.next(NameStep.last(wanted),
-                                                                                  existing: try NameStep.names(fs, NameStep.join(library, NameStep.parent(wanted))),
+                folder = NameStep.join(parentFolder(of: wanted), ConflictNamer.next(NameStep.last(wanted),
+                                                                                  existing: try NameStep.names(fs, NameStep.join(library, parentFolder(of: wanted))),
                                                                                   isFolder: true))
             }
         }
@@ -109,9 +104,9 @@ public struct NameStep: Step {
         // staging holds, nor another item's Acquire name (where a retry from Acquire puts that item again).
         func inStaging(_ i: Int, _ dir: String) throws(BroError) -> [String] {
             // The item's own location isn't in the way of its new name.
-            let own = NameStep.same(NameStep.parent(at[i]), dir)
+            let own = NameStep.same(parentFolder(of: at[i]), dir)
             return try NameStep.names(fs, NameStep.join(staging, dir)).filter { !(own && NameStep.same($0, NameStep.last(at[i]))) }
-                + items.indices.filter { $0 != i && NameStep.same(NameStep.parent(items[$0].path), dir) }.map { NameStep.last(items[$0].path) }
+                + items.indices.filter { $0 != i && NameStep.same(parentFolder(of: items[$0].path), dir) }.map { NameStep.last(items[$0].path) }
         }
         let desired = try NameStep.desired(items, plan, acquired, probe.listing, naming, values, wanted)
         var to = [String?](repeating: nil, count: items.count)
@@ -121,14 +116,14 @@ public struct NameStep: Step {
             }
         }
         for i in items.indices where to[i] == nil {
-            let dir = NameStep.parent(desired[i])
+            let dir = parentFolder(of: desired[i])
             var taken = try inStaging(i, dir)
-            taken += to.compactMap { $0 }.filter { NameStep.same(NameStep.parent($0), dir) }.map(NameStep.last)
+            taken += to.compactMap { $0 }.filter { NameStep.same(parentFolder(of: $0), dir) }.map(NameStep.last)
             if merge { taken += try NameStep.names(fs, NameStep.join(library + "/" + folder, dir)) }
             let free = NameStep.join(dir, ConflictNamer.next(NameStep.last(desired[i]), existing: taken,
                                                               isFolder: try fs.stat(staging + "/" + at[i]).isDirectory))
             // A case-insensitive disk can't rename to a case alone.
-            to[i] = NameStep.same(NameStep.asciiLower(free), NameStep.asciiLower(at[i])) ? at[i] : free
+            to[i] = NameStep.same(asciiLower(free), asciiLower(at[i])) ? at[i] : free
         }
         let targets = to.map { $0! }
         // No item goes inside another item's target. An item whose place holds a target (its own too, ASCII case ignored: a
@@ -170,7 +165,7 @@ public struct NameStep: Step {
     private static func rename(_ context: StepContext, _ staging: String, _ from: String, _ to: String) throws(BroError) {
         try cancelled(context)
         var parent = staging
-        for part in NameStep.parent(to).split(separator: "/") {
+        for part in parentFolder(of: to).split(separator: "/") {
             parent += "/" + part
             if !context.fs.exists(parent) { try context.fs.createDirectory(parent, parentsMustExist: true) }
         }
@@ -271,7 +266,7 @@ public struct NameStep: Step {
 
     /// Whether `relative` is taken under `root`, ignoring ASCII case as ConflictNamer does.
     private static func taken(_ fs: any FileSystem, _ root: String, _ relative: String) throws(BroError) -> Bool {
-        !same(ConflictNamer.next(last(relative), existing: try names(fs, join(root, parent(relative)))), last(relative))
+        !same(ConflictNamer.next(last(relative), existing: try names(fs, join(root, parentFolder(of: relative)))), last(relative))
     }
 
     /// The names in a folder; none when it isn't there.
@@ -287,11 +282,6 @@ public struct NameStep: Step {
 
     /// Byte for byte: an NFC and an NFD spelling are two names on disk.
     private static func same(_ a: String, _ b: String) -> Bool { a.utf8.elementsEqual(b.utf8) }
-
-    private static func parent(_ path: String) -> String {
-        guard let i = path.utf8.lastIndex(of: UInt8(ascii: "/")) else { return "" }
-        return String(path[..<i])
-    }
 
     private static func last(_ path: String) -> String {
         guard let i = path.utf8.lastIndex(of: UInt8(ascii: "/")) else { return path }
@@ -329,11 +319,6 @@ public struct NameStep: Step {
         let bytes = Array(s.utf8)
         guard let start = bytes.firstIndex(where: { !space($0) }), let end = bytes.lastIndex(where: { !space($0) }) else { return "" }
         return String(decoding: bytes[start...end], as: UTF8.self)
-    }
-
-    /// Upper-case ASCII letters lowered, as ConflictNamer compares names.
-    private static func asciiLower(_ s: String) -> String {
-        String(String.UnicodeScalarView(s.unicodeScalars.map { $0.value >= 65 && $0.value <= 90 ? Unicode.Scalar($0.value + 32)! : $0 }))
     }
 
     private static func cancelled(_ context: StepContext) throws(BroError) {

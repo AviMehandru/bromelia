@@ -1,6 +1,5 @@
-/* bro-root-options.h: BroRootOptions: what the graph is built for. Phase 3 has no defaults (HostOptions gives them in
- * phase 4): the platform's data folder is today's app's, with the real config.json and secrets, so a test always passes
- * its own. The fields are borrowed for the call. */
+/* bro-root-options.h: BroRootOptions: what the graph is built for. There are no defaults: the platform's data folder
+ * holds the real config.json and secrets, so a test always passes its own. The fields are borrowed for the call. */
 #pragma once
 
 #include <glib.h>

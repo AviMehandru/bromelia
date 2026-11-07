@@ -244,7 +244,7 @@ seal (const BroStepContext *c, const BroPlanOutput *plan, const char *staging, c
       if (_bro_seal_cancelled (c, error))
         return FALSE;
       bro_progress_reporter_report (c->progress, (double) done / total, operation, file);
-      if (!(digest = _bro_seal_hash (c, path, file, hash_from_disk, &size, error)))
+      if (!(digest = _bro_seal_hash (c, path, file, hash_from_disk, g_array_index (sizes, gint64, i), &size, error)))
         return FALSE;
       entry = bro_unit_file_new ();
       entry->path = g_strdup (file);

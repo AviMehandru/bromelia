@@ -18,7 +18,8 @@ namespace Bromelia.Engine;
 /// </summary>
 public sealed class LocalEngine : IEngineAPI
 {
-    /// <summary>How long stop waits for the jobs to settle and the executor to go idle; the host exits anyway after it.</summary>
+    /// <summary>How long stop waits for the jobs to settle and the executor to go idle; the host exits anyway after
+    /// it.</summary>
     static readonly TimeSpan SettleCap = TimeSpan.FromSeconds(30);
     /// <summary>The finished jobs a snapshot carries, newest first.</summary>
     const int FinishedInSnapshot = 50;
@@ -65,9 +66,9 @@ public sealed class LocalEngine : IEngineAPI
 
     // ---- start and stop ----
 
-    /// <summary>The startup order (plan §15.1, decision 169): the configuration (a failed load fails start, and nothing
-    /// else has started), recovery (recovery.summary into the engine log), the configuration's limits to the Scheduler
-    /// (and on every configChanged), the libraries, the drives, then the jobs recovery left queued.</summary>
+    /// <summary>The startup order (plan §15.1): the configuration (a failed load fails start, and nothing else has
+    /// started), recovery (recovery.summary into the engine log), the configuration's limits to the Scheduler (and on
+    /// every configChanged), the libraries, the drives, then the jobs recovery left queued.</summary>
     public Task Start() => On(async () =>
     {
         _startedAt = _clock.Now();
@@ -81,10 +82,10 @@ public sealed class LocalEngine : IEngineAPI
         return true;
     });
 
-    /// <summary>The stop order (decision 170): from now on every call answers server.stopping; the feeds close and the
-    /// intake stops (drives, libraries); the runner shuts every live job down storing nothing more, so the store is what
-    /// a killed engine leaves; then, once no job is live and the executor is idle (at most 30 s), the executor stops and
-    /// the root's release runs.</summary>
+    /// <summary>The stop order: from now on every call answers server.stopping; the feeds close and the intake stops
+    /// (drives, libraries); the runner shuts every live job down storing nothing more, so the store is what a killed
+    /// engine leaves; then, once no job is live and the executor is idle (at most 30 s), the executor stops and the
+    /// root's release runs.</summary>
     public async Task Stop()
     {
         var shutdown = await On(() =>
@@ -105,8 +106,8 @@ public sealed class LocalEngine : IEngineAPI
         _release();
     }
 
-    /// <summary>A phase 3 door outside EngineAPI (G1 owner question 5): a job for the request (an ISO or a folder needs
-    /// SessionService otherwise), for the scenario runner and the real-ISO test. Retired when openSession/ripSession come.</summary>
+    /// <summary>A door outside EngineAPI: a job for the request (an ISO or a folder needs SessionService otherwise),
+    /// for the scenario runner and the real-ISO test. Retired when openSession/ripSession come.</summary>
     public Task<JobDto> StartJob(JobRequest request) => On(() => _jobs.Create(request));
 
     // ---- system ----
@@ -196,11 +197,11 @@ public sealed class LocalEngine : IEngineAPI
     public Task<IReadOnlyList<LibraryDto>> Libraries() => On(() => Task.FromResult(_libraries.Libraries()));
 
     /// <summary>The id is the name (else the folder's last part) made into an EntryId, with -2, -3 … when the
-    /// configuration has it already (decision 187). LibraryService writes the marker, then the configuration gets
-    /// {id, name, path} at its current version; if that save fails the marker is removed and the save's error
-    /// returned, so a retry doesn't meet library.alreadyAttached. The path of a library the configuration already has
-    /// (the user confirming a folder without its marker, H1-7): the marker is written under that library's id and name,
-    /// and the configuration is left as it is.</summary>
+    /// configuration has it already. LibraryService writes the marker, then the configuration gets {id, name, path} at
+    /// its current version; if that save fails the marker is removed and the save's error returned, so a retry doesn't
+    /// meet library.alreadyAttached. The path of a library the configuration already has (the user confirming a folder
+    /// without its marker): the marker is written under that library's id and name, and the configuration is left as it
+    /// is.</summary>
     public Task<LibraryDto> AttachLibrary(string path, string name) => On(async () =>
     {
         var current = _config.Current();
@@ -246,10 +247,9 @@ public sealed class LocalEngine : IEngineAPI
 
     // ---- events ----
 
-    /// <summary>Decision 168, 186: with <paramref name="after"/> the feed replays from it (one the bus can't replay
-    /// starts with a resync, which the feed answers with a snapshot); without it the first event is a snapshot whose seq
-    /// is the last event's before the snapshot was gathered, and the events published while it was gathered follow it as
-    /// deltas.</summary>
+    /// <summary>With <paramref name="after"/> the feed replays from it (one the bus can't replay starts with a resync,
+    /// which the feed answers with a snapshot); without it the first event is a snapshot whose seq is the last event's
+    /// before the snapshot was gathered, and the events published while it was gathered follow it as deltas.</summary>
     public Task<EventFeed> Events(long? after, IReadOnlyCollection<Id> jobLog) => On(async () =>
     {
         EventStream stream;

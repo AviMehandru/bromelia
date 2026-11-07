@@ -5,7 +5,7 @@ public enum Notes {
     /// The note's lines: the job and its outcome, a warning that the files are not a finished archive, the error, the
     /// read errors MakeMKV reported, and the log files copied into the folder (`logs`: the job's log, then MakeMKV's,
     /// when it was copied), then where the job's full log is (`fullLog`, its log.jsonl in the data folder; none for a
-    /// folder no job owns), as today's apps end the note (owner H3b-6).
+    /// folder no job owns).
     public static func render(_ jobId: Id, outcome: Outcome, error: BroError?, readErrors: [RobotMessage], logs: [String],
                               fullLog: String?) -> [BroMessage] {
         var lines = [BroMessage(.archiveNoteTitle, [("jobId", .string(jobId.value)), ("outcome", .string(outcome.rawValue))]),

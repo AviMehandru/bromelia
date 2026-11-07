@@ -21,9 +21,9 @@ public final class MakemkvSink: RunSink, @unchecked Sendable {
     }
 
     /// MakeMKV starts its debug log (app_ShowDebug, named by message 1004) afresh at every start, so after each run the
-    /// steps add it to the job folder's makemkv-debug.txt (SealStep.debugTranscript), after a line "==== <its path> after
-    /// $ makemkvcon <command>" (the subcommand: info, mkv, backup), as today's apps do. Nothing when the run named none or
-    /// it is empty; a file that can't be read or written is left out (the run's result stands).
+    /// steps add it to the job folder's makemkv-debug.txt (SealStep.debugTranscript), after a line "==== <its path>
+    /// after $ makemkvcon <command>" (the subcommand: info, mkv, backup). Nothing when the run named none or it is
+    /// empty; a file that can't be read or written is left out (the run's result stands).
     public static func keepDebugLog(_ context: StepContext, _ outcome: RunOutcome, command: String) {
         guard let path = outcome.debugLog, !path.isEmpty else { return }
         let fs = context.fs

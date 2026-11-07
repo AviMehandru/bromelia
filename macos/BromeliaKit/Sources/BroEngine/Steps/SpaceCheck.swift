@@ -1,7 +1,7 @@
 import BroDomain
 import BroFoundation
 
-/// Room for a plan on its library's volume (plan §21; today's checkFreeSpace).
+/// Room for a plan on its library's volume (plan §21).
 public enum SpaceCheck {
     /// Logs space.report {free, need}, then keeps `need` plus the margin (SpaceEstimate.required) on the volume of
     /// `libraryRoot`: space.insufficient fails the job before anything is written.

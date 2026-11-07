@@ -427,6 +427,38 @@
       "expect": {
         "next": "Disc (3)"
       }
+    },
+    {
+      "id": "conflict-namer-two-spellings-are-two-names",
+      "from": [
+        "names differing only in normalization are two files on a share",
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "name": "café.mkv",
+        "existing": [
+          "café.mkv"
+        ]
+      },
+      "expect": {
+        "next": "café.mkv"
+      }
+    },
+    {
+      "id": "conflict-namer-a-dot-before-a-combining-mark-is-a-dot",
+      "from": [
+        "a dot and a combining mark are one Character in Swift",
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "name": "a.́mkv",
+        "existing": [
+          "a.́mkv"
+        ]
+      },
+      "expect": {
+        "next": "a (2).́mkv"
+      }
     }
   ]
 }

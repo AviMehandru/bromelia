@@ -3,11 +3,17 @@
 
 #include <string.h>
 
+gboolean
+bro_conflict_namer_same (const char *a, const char *b)
+{
+  return g_ascii_strcasecmp (a, b) == 0;
+}
+
 static gboolean
 taken (const char *name, const char *const *existing)
 {
   for (int i = 0; existing && existing[i]; i++)
-    if (g_ascii_strcasecmp (existing[i], name) == 0)
+    if (bro_conflict_namer_same (existing[i], name))
       return TRUE;
   return FALSE;
 }

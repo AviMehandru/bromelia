@@ -1,4 +1,5 @@
-/* bro-progress-reporter.h: BroProgressReporter: How a step reports its progress, from its worker. The runner coalesces it (one update per 100 ms). */
+/* bro-progress-reporter.h: BroProgressReporter: How a step reports its progress, from its worker. The runner coalesces
+ * it (one update per 100 ms). */
 #pragma once
 
 #include "bro-bro-message.h"

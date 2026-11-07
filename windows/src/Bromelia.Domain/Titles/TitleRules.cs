@@ -7,7 +7,7 @@ using Bromelia.Foundation;
 
 namespace Bromelia.Domain;
 
-/// <summary>Which titles of a listing to rip (today's TitleSelector).</summary>
+/// <summary>Which titles of a listing to rip.</summary>
 public static class TitleRules
 {
     /// <summary>Filters, then duplicates (same segment map, length and angle), then the strategy, then

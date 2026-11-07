@@ -9,12 +9,14 @@ using Bromelia.Ports;
 namespace Bromelia.Engine;
 
 /// <summary>
-/// The only code that moves a job between states (plan §12.3), on the executor. Today's JobRunner.run()/execute()
-/// becomes JobPlanner (which steps), the step classes (what each does), JobOutcome.Decide (the result) and this loop
-/// (the order, the resources, and the durable record of every step). shared/fixtures/engine/pipeline-runner.cases.json.
+/// The only code that moves a job between states (plan §12.3), on the executor. JobPlanner says which steps, the step
+/// classes what each does, JobOutcome.Decide the result; this loop owns the order, the resources and the durable record
+/// of every step. shared/fixtures/engine/pipeline-runner.cases.json.
 /// </summary>
 public sealed class PipelineRunner
 {
+    static readonly Duration LogInterval = new(2);
+
     readonly EngineExecutor _executor;
     readonly EventBus _bus;
     readonly Scheduler _scheduler;
@@ -23,12 +25,34 @@ public sealed class PipelineRunner
     readonly StepEnvironment _env;
     readonly EngineClock _clock;
     readonly Coalescer _progress;
+    readonly Coalescer _logs;
     readonly Action<string>? _crash;
     readonly Dictionary<Id, Live> _live = new();
     /// <summary>Set by <see cref="Shutdown"/>: nothing more is stored for any job.</summary>
     bool _stopping;
     /// <summary>Completes when no job is live once <see cref="Shutdown"/> has been called.</summary>
     TaskCompletionSource<bool>? _idle;
+
+    /// <summary>A job's log.jsonl as this run writes it, whole, from workers: the writes never overlap, and one that was
+    /// overtaken by a later one is dropped, so the file never goes back.</summary>
+    sealed class LogFile
+    {
+        readonly object _lock = new();
+        int _written;
+        public bool DirectoryMade;
+
+        public void Write(IFileSystem fs, string directory, int lines, byte[] bytes)
+        {
+            lock (_lock)
+            {
+                if (lines <= _written) return;
+                if (!DirectoryMade) fs.CreateDirectory(directory, parentsMustExist: false);
+                DirectoryMade = true;
+                fs.WriteAtomically(directory + "/" + JobLog.FileName, bytes, 0x180); // 0600
+                _written = lines;
+            }
+        }
+    }
 
     /// <summary>A job while it runs. Touched on the executor only.</summary>
     sealed class Live
@@ -48,19 +72,21 @@ public sealed class PipelineRunner
         /// <summary>The warnings and errors in <see cref="LogBefore"/>, for the job's counts.</summary>
         public int WarningsBefore, ErrorsBefore;
         public readonly List<LogLineDto> Log = new();
-        public bool DirectoryMade;
+        public readonly LogFile Writer = new();
         public bool LogRead;
         public Config? Config;
         /// <summary>The outputs of the steps done so far, for the Release step at the end.</summary>
         public List<StepOutput> Outputs = new();
-        /// <summary>Each step kind's latest checkpoint (ICheckpointer): from the stored rows, then what this run saves.</summary>
+        /// <summary>Each step kind's latest checkpoint (ICheckpointer): from the stored rows, then what this run
+        /// saves.</summary>
         public readonly Dictionary<StepKind, JsonValue> Checkpoints = new();
     }
 
-    /// <param name="crash">Called on the executor at each crash point of a run (the scenario runners' kill; the real roots pass
-    /// none): beforeStep:&lt;kind&gt; before the step asks for its resources (nothing of it is stored yet), afterStep:&lt;kind&gt;
-    /// once its finished row is stored (before stepFinished). What it throws stops the runner as <see cref="Shutdown"/> does,
-    /// without cancelling anything: nothing more is stored for any job, as a killed engine leaves it.</param>
+    /// <param name="crash">Called on the executor at each crash point of a run (the scenario runners' kill; the real
+    /// roots pass none): beforeStep:&lt;kind&gt; before the step asks for its resources (nothing of it is stored yet),
+    /// afterStep:&lt;kind&gt; once its finished row is stored (before stepFinished). What it throws stops the runner as
+    /// <see cref="Shutdown"/> does, without cancelling anything: nothing more is stored for any job, as a killed engine
+    /// leaves it.</param>
     public PipelineRunner(EngineExecutor executor, EventBus bus, Scheduler scheduler, IStore store, StepRegistry registry,
         StepEnvironment environment, EngineClock clock, Action<string>? crash = null)
     {
@@ -73,6 +99,7 @@ public sealed class PipelineRunner
         _env = environment;
         _clock = clock;
         _progress = new Coalescer(clock, new Duration(0.1), (key, _) => EmitProgress(new Id(key)));
+        _logs = new Coalescer(clock, LogInterval, (key, _) => KeepLog(new Id(key)));
     }
 
     // ---- commands ----
@@ -112,6 +139,7 @@ public sealed class PipelineRunner
         if (_stopping)
         {
             _progress.Drop(jobId.Value);
+            _logs.Drop(jobId.Value);
             Gone(jobId, live);
             throw Stopping();
         }
@@ -120,8 +148,8 @@ public sealed class PipelineRunner
         return decided;
     }
 
-    /// <summary>At engine stop (decision 170): every live job's waiting request and question are dropped and its running
-    /// step's token cancelled, and from now on the runner stores nothing more for any job (no step row, plan, outcome or
+    /// <summary>At engine stop: every live job's waiting request and question are dropped and its running step's token
+    /// cancelled, and from now on the runner stores nothing more for any job (no step row, plan, outcome or
     /// jobFinished), so what is stored is what a killed engine leaves and the next start's recovery takes each job up.
     /// Completes once no job is live.</summary>
     public Task Shutdown()
@@ -156,7 +184,8 @@ public sealed class PipelineRunner
         if (_live.Count == 0) _idle?.TrySetResult(true);
     }
 
-    /// <summary>Cancels a running job: a waiting request or a decision ends at once, a running step sees its token.</summary>
+    /// <summary>Cancels a running job: a waiting request or a decision ends at once, a running step sees its
+    /// token.</summary>
     public void Cancel(Id jobId)
     {
         if (!_live.TryGetValue(jobId, out var live)) return;
@@ -213,7 +242,7 @@ public sealed class PipelineRunner
         live.WarningsBefore = before.Count(l => l.Severity == Severity.Warning);
         live.ErrorsBefore = before.Count(l => l.Severity == Severity.Error);
         live.LogRead = true;
-        live.DirectoryMade = live.LogBefore.Length > 0;
+        live.Writer.DirectoryMade = live.LogBefore.Length > 0;
         var rows = await _executor.Worker(() => _store.Steps().Load(jobId));
         foreach (var row in rows.Where(r => r.Checkpoint != null).OrderBy(r => r.Seq)) live.Checkpoints[row.Kind] = row.Checkpoint!;
         var done = JobPlanner.Done(rows);
@@ -233,6 +262,7 @@ public sealed class PipelineRunner
             CrashPoint("beforeStep:" + EnumWire.Name(kind));
             live.Seq = seq;
             _progress.Drop(jobId.Value); // a new step's first progress goes out at once
+            _logs.Drop(jobId.Value); // and its first log line
             live.Progress = new ProgressDto(kind, seq, live.Steps.Count, (double)seq / live.Steps.Count, null,
                 new BroMessage(MessageCode.JobOpStarting));
             var snapshot = new JobSnapshot(jobId, live.Record.Request, plan with { Steps = live.Steps.ToList() }, outputs.ToList(), live.Record.StartedAt);
@@ -311,8 +341,8 @@ public sealed class PipelineRunner
     }
 
     /// <summary>A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped,
-    /// cancelled) runs the Release step once more, with its outcome as the context's Finishing: the step decides whether
-    /// the disc comes out (owner, 2026-10-18). Nothing is stored for it but its log lines; what it throws is ignored.</summary>
+    /// cancelled) runs the Release step once more, with its outcome as the context's Finishing: the step decides
+    /// whether the disc comes out. Nothing is stored for it but its log lines; what it throws is ignored.</summary>
     async Task ReleaseAtEnd(Live live, Decided decided)
     {
         if (live.Record == null || !live.LogRead || _registry.Step(StepKind.Release) is not { } release) return;
@@ -349,6 +379,7 @@ public sealed class PipelineRunner
             // The job has ended either way; what the store couldn't keep, recovery will see as unfinished.
         }
         _progress.Drop(jobId.Value);
+        _logs.Drop(jobId.Value);
         _scheduler.Finish(jobId);
         _bus.Publish(EngineEventType.JobFinished, JsonValue.Of(("job", JobDto.Json(Dto(live)))));
     }
@@ -424,6 +455,7 @@ public sealed class PipelineRunner
         live.Log.Add(line);
         _bus.Publish(EngineEventType.JobLog, JsonValue.Of(("jobId", JsonValue.Of(live.Record.Id.Value)),
             ("lines", JsonValue.Of(new[] { LogLineDto.Json(line) }))));
+        _logs.Offer(live.Record.Id.Value, JsonValue.Null.Instance);
     }
 
     void OnAsk(Live live, DecisionDto question, TaskCompletionSource<string> answer)
@@ -438,20 +470,40 @@ public sealed class PipelineRunner
     }
 
     /// <summary>jobs/&lt;id&gt;/log.jsonl (JobLog): what was there when the job started, then this run's lines, written
-    /// whole after each step.</summary>
+    /// whole after each step and, through <see cref="KeepLog"/>, while one runs.</summary>
     async Task WriteLog(Live live)
     {
         if (live.Log.Count == 0) return;
         var directory = JobDirectory(live.Record.Id);
+        var lines = live.Log.Count;
         var bytes = live.LogBefore.Concat(JobLog.Encode(live.Log)).ToArray();
-        var makeDirectory = !live.DirectoryMade;
-        live.DirectoryMade = true;
         await _executor.Worker(() =>
         {
-            if (makeDirectory) _env.Fs.CreateDirectory(directory, parentsMustExist: false);
-            _env.Fs.WriteAtomically(directory + "/" + JobLog.FileName, bytes, 0x180); // 0600
+            live.Writer.Write(_env.Fs, directory, lines, bytes);
             return true;
         });
+    }
+
+    /// <summary>A running step's lines reach the file too, a step's first at once and later ones every
+    /// <see cref="LogInterval"/>, so a crash in a long Acquire keeps them. The file is rewritten each time, so not per line.
+    /// Never under Seal or KeepApart, which copy it into the unit: on Windows a file being replaced can read as not there,
+    /// and they would take that for a job without a log.</summary>
+    void KeepLog(Id jobId)
+    {
+        if (_stopping || !_live.TryGetValue(jobId, out var live) || live.Steps[live.Seq] is StepKind.Seal or StepKind.KeepApart) return;
+        _ = WriteLogQuietly(live);
+    }
+
+    /// <summary>A write that fails here is left to the next one; a step's end reports it.</summary>
+    async Task WriteLogQuietly(Live live)
+    {
+        try
+        {
+            await WriteLog(live);
+        }
+        catch (BroFailure)
+        {
+        }
     }
 
     string JobDirectory(Id jobId) => _env.DataDirectory + "/jobs/" + jobId.Value;

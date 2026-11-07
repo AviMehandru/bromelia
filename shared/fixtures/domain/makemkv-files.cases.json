@@ -459,6 +459,21 @@
       "expect": {
         "mayReplace": false
       }
+    },
+    {
+      "id": "settings-parse-crlf",
+      "from": [
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "text": "app_ExpertMode = \"1\"\r\ndvd_MinimumTitleLength = \"120\"\r\n"
+      },
+      "expect": {
+        "parse": {
+          "app_ExpertMode": "1",
+          "dvd_MinimumTitleLength": "120"
+        }
+      }
     }
   ]
 }

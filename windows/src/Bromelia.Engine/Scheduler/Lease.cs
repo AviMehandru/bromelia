@@ -3,8 +3,9 @@ using Bromelia.Foundation;
 
 namespace Bromelia.Engine;
 
-/// <summary>What one acquire gave a step; numbered in grant order. <see cref="Scheduler.Release"/> gives it back, except its drives: they stay
-/// with the job until <see cref="Scheduler.ReleaseDrives"/> or <see cref="Scheduler.Finish"/>.</summary>
+/// <summary>What one acquire gave a step; numbered in grant order. <see cref="Scheduler.Release"/> gives it back,
+/// except its drives: they stay with the job until <see cref="Scheduler.ReleaseDrives"/> or <see
+/// cref="Scheduler.Finish"/>.</summary>
 public sealed class Lease
 {
     internal readonly List<(string Key, int Count)> Counted;

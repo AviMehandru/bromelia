@@ -2,8 +2,8 @@ import BroDomain
 import BroFoundation
 
 /// Step 7 (plan §20.1), appended by Plan only when needed. It holds the plan's library for writing, so while that
-/// library is offline the Scheduler keeps the job blocked (library.offline) and it goes on by itself when the library is
-/// back (owner, 2026-10-18). Then:
+/// library is offline the Scheduler keeps the job blocked (library.offline) and it goes on by itself when the library
+/// is back. Then:
 /// - When the library was offline at Plan: the archive check Plan couldn't make (ArchiveCheck: skip ends the job, ask
 ///   asks).
 /// - An archived disc under automation.alreadyArchived ask: decision.archivedBefore {folder, day}, answers ripAgain

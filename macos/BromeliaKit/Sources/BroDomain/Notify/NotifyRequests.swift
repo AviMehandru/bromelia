@@ -29,14 +29,14 @@ public enum NotifyRequests {
         } else if let colon = host.firstIndex(of: ":") {
             host = host[..<colon]
         }
-        return (MessageCatalog.asciiLower(String(host)), path)
+        return (asciiLower(String(host)), path)
     }
 
     /// How `url` is reached for a notification with this title, body and status; nil for an empty or malformed URL.
     public static func build(_ url: String, title: String, body: String, status: StatusWord) -> Delivery? {
         let raw = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let sep = raw.range(of: "://"), sep.lowerBound > raw.startIndex else { return nil }
-        let scheme = MessageCatalog.asciiLower(String(raw[..<sep.lowerBound]))
+        let scheme = asciiLower(String(raw[..<sep.lowerBound]))
         let rest = String(raw[sep.upperBound...])
         let success = status == .success
         let ntfyHeaders: [(name: String, value: String)] = [("Title", title), ("Tags", success ? "white_check_mark" : "warning")]

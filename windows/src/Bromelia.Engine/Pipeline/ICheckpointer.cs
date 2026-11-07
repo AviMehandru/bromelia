@@ -8,7 +8,8 @@ namespace Bromelia.Engine;
 /// resumeFrom step after a restart only from a checkpoint of the kind the step names (IStep.ResumeCheckpoint).</summary>
 public interface ICheckpointer
 {
-    /// <summary>What an earlier attempt of the step saved in this job (before a restart, or a retry); null when none.</summary>
+    /// <summary>What an earlier attempt of the step saved in this job (before a restart, or a retry); null when
+    /// none.</summary>
     JsonValue? Saved { get; }
 
     /// <summary>Stores <paramref name="checkpoint"/> with the step's row; done once it is stored. Any thread.</summary>

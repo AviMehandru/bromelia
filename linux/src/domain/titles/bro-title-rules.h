@@ -1,4 +1,4 @@
-/* bro-title-rules.h: BroTitleRules, which titles of a listing to rip (today's TitleSelector). */
+/* bro-title-rules.h: BroTitleRules, which titles of a listing to rip. */
 #pragma once
 
 #include "bro-listing.h"

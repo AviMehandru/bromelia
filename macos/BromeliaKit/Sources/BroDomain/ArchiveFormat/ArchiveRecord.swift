@@ -1,8 +1,8 @@
 import BroFoundation
 
-/// An archive record (bromelia-<unit8>.json, version 3; today's bromelia.json, version 2): the document as read
-/// (`document`, key order kept) and the fields Bromelia reads back: status, name, kind, the disc's label and place in
-/// its set (nil: not in the record), its fingerprint, the unit's id (version 3), the episodes' numbers and the files
+/// An archive record (bromelia-<unit8>.json, version 3; bromelia.json in older archives, version 2): the document as
+/// read (`document`, key order kept) and the fields Bromelia reads back: status, name, kind, the disc's label and place
+/// in its set (nil: not in the record), its fingerprint, the unit's id (version 3), the episodes' numbers and the files
 /// SHA256SUMS lists. Fields with the same meaning have the same path in both versions (archive-record-3.json).
 public struct ArchiveRecord: Sendable, Equatable {
     public var version: Int
@@ -38,5 +38,11 @@ public struct ArchiveRecord: Sendable, Equatable {
         self.unitId = unitId
         self.episodes = episodes
         self.files = files
+    }
+
+    /// A record to write: `ArchiveRecordCodec.encodeV3` only reads the document.
+    public init(document: JsonValue) {
+        self.init(version: 3, document: document, status: "", name: "", kind: "", label: "", volumeName: "", season: nil, part: nil,
+                  volume: nil, disc: nil, fingerprint: nil, unitId: nil, episodes: [], files: [])
     }
 }

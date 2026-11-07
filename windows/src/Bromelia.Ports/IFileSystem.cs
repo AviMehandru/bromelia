@@ -49,7 +49,9 @@ public interface IFileSystem
     /// <summary>Syncs a folder after a rename in it; succeeds when the file system can't sync folders at all.</summary>
     void SyncDirectory(string path);
 
-    /// <summary>F_NOCACHE / NO_BUFFERING / fadvise when bypassCache.</summary>
+    /// <summary>bypassCache: Windows reads past the system cache (FILE_FLAG_NO_BUFFERING). macOS (F_NOCACHE) only keeps
+    /// the reads out of the cache, so a page already there can answer; Linux drops the file's clean pages first
+    /// (posix_fadvise DONTNEED), which is a hint.</summary>
     IByteStream OpenForReading(string path, bool bypassCache);
 
     VolumeInfo Volume(string path);

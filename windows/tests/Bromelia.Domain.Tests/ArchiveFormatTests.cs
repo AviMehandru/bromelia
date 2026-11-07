@@ -21,7 +21,10 @@ public class ArchiveFormatTests
     public void ArchiveFormatCases() => RunCases("domain/archive-format.cases.json", (id, given, expect) =>
     {
         if (given["bytes"] is { } bytes) Same(expect["sha256"]!.AsString, Sha256Sums.Hash(Encoding.UTF8.GetBytes(bytes.AsString!)), "sha256");
-        else if (given["existing"] is { } existing) Same(expect["text"]!.AsString, Sha256Sums.Merge(existing.AsString!, EntriesOf(given["entries"]!)), "merged");
+        else if (given["existing"] is { } existing)
+            Same(expect["text"]!.AsString, Encoding.UTF8.GetString(Sha256Sums.Merge(Encoding.UTF8.GetBytes(existing.AsString!), EntriesOf(given["entries"]!))), "merged");
+        else if (given["existingHex"] is { } hex)
+            Same(expect["hex"]!.AsString, Convert.ToHexString(Sha256Sums.Merge(Convert.FromHexString(hex.AsString!), EntriesOf(given["entries"]!))).ToLowerInvariant(), "merged");
         else if (given["entries"] is { } entries) Same(expect["text"]!.AsString, Sha256Sums.Render(EntriesOf(entries)), "text");
         else if (given["text"] is { } text) Same(expect["entries"], EntriesJson(Sha256Sums.Parse(text.AsString!)), "entries");
         else if (given["produced"] is { } produced)

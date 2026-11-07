@@ -1705,7 +1705,7 @@
         "staging": {
           "title_t00.mkv": {
             "disk": "the first title's bytes",
-            "cache": "what the cache still holds"
+            "cache": "the cache's older bytes"
           },
           "title_t01.mkv": "half of the second ti"
         }
@@ -1750,7 +1750,7 @@
               "volume": null,
               "disc": null,
               "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)",
-              "bytes": 47,
+              "bytes": 44,
               "fileCount": 2,
               "attempts": 1,
               "createdAt": "2026-10-20T10:00:00.000Z",
@@ -1769,7 +1769,7 @@
                   0,
                   "title_t00.mkv",
                   "title_t00.mkv",
-                  "ffc375a400ab5198b68e35267c2dda3f6c84a6c40d8c1907209986bd9bd5fcf7",
+                  "739164a7d9eaaa4140f41dd29f0f73277d27b5d312c373355b618732d27a941a",
                   false,
                   false
                 ],
@@ -1818,8 +1818,8 @@
             "files": [
               [
                 "title_t00.mkv",
-                26,
-                "ffc375a400ab5198b68e35267c2dda3f6c84a6c40d8c1907209986bd9bd5fcf7",
+                23,
+                "739164a7d9eaaa4140f41dd29f0f73277d27b5d312c373355b618732d27a941a",
                 "",
                 null
               ],
@@ -5758,6 +5758,122 @@
           "params": {
             "file": "title_t01.mkv",
             "reason": "fs.failed operation=open path=/lib/.bromelia/staging/00000000-0000-4000-8000-000000000001/title_t01.mkv reason=Input/output error"
+          }
+        },
+        "calls": [],
+        "checkpoint": null
+      }
+    },
+    {
+      "id": "keep-apart-a-read-that-ends-before-the-stat-size-fails-naming-the-file",
+      "given": {
+        "step": "keepApart",
+        "request": {
+          "kind": "videoDisc",
+          "title": "SAMPLE_MOVIE",
+          "details": {
+            "source": {
+              "iso": "/rips/sample-movie.iso"
+            }
+          }
+        },
+        "outputs": [
+          {
+            "kind": "probe",
+            "data": {
+              "listing": {
+                "name": "Sample Movie",
+                "volumeName": "SAMPLE_MOVIE",
+                "type": "bd",
+                "typeText": "Blu-ray disc",
+                "reportedTitleCount": 1,
+                "titles": [
+                  {
+                    "index": 0,
+                    "sourceTitleId": 1,
+                    "sourceFile": "00001.mpls",
+                    "duration": "1:40:00",
+                    "durationSeconds": 6000,
+                    "chapters": 16,
+                    "sizeBytes": 30000000000,
+                    "segmentMap": "1,2"
+                  }
+                ]
+              },
+              "fingerprint": "v1:0123456789abcdef0123456789abcdef",
+              "libreDrive": null,
+              "fromSession": false,
+              "makemkvVersion": "MakeMKV v1.18.1 darwin(arm64-release)"
+            }
+          },
+          {
+            "kind": "plan",
+            "data": {
+              "mode": "mkv",
+              "profileId": "default",
+              "profile": {
+                "id": "default",
+                "name": "Default",
+                "archive": {
+                  "hashFromDisk": false
+                }
+              },
+              "libraryId": "lib",
+              "libraryOffline": false,
+              "titles": [],
+              "onePass": null,
+              "spaceNeed": null,
+              "spaceReserved": false,
+              "askArchived": null,
+              "identity": {
+                "name": "Sample Movie",
+                "kind": "movie",
+                "format": "bluray",
+                "formatCode": "BR",
+                "encrypted": false,
+                "label": {
+                  "title": "Sample Movie",
+                  "season": null,
+                  "part": null,
+                  "volume": null,
+                  "disc": null,
+                  "set": "",
+                  "looksLikeSeries": false
+                },
+                "reason": {
+                  "code": "identity.reason.chosen"
+                }
+              }
+            }
+          }
+        ],
+        "startedAt": "2026-10-20T09:00:00.000Z",
+        "now": "2026-10-20T10:00:00.000Z",
+        "appVersion": "3.0.0-test",
+        "libraries": {
+          "lib": {
+            "path": "/lib"
+          }
+        },
+        "job": {
+          "log.jsonl": "{\"t\": \"2026-10-20T09:00:01.000Z\",\"severity\": \"info\",\"code\": \"disc.found\",\"params\": {\"name\": \"Sample Movie\"}}\n{\"t\": \"2026-10-20T09:00:02.500Z\",\"severity\": \"warning\",\"code\": \"ripcheck.note\",\"params\": {\"file\": \"title_t00.mkv\"}}\n{\"t\": \"2026-10-20T09:10:00.000Z\",\"severity\": \"error\",\"code\": \"recovery.interrupted\",\"params\": {\"step\": \"acquire\"}}\n",
+          "makemkv.txt": "MSG:1005,0,1,\"MakeMKV v1.18.1 darwin(arm64-release) started\"\n"
+        },
+        "staging": {
+          "title_t00.mkv": {
+            "disk": "the first title's bytes",
+            "cache": "the first "
+          },
+          "title_t01.mkv": "half of the second ti"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "archive.sizeMismatch",
+          "params": {
+            "file": "title_t00.mkv",
+            "size": 23,
+            "hashed": 10
           }
         },
         "calls": [],

@@ -1,3 +1,5 @@
+import BroFoundation
+
 /// The values of the template tokens.
 public enum TokenRegistry {
     /// The tokens shared by every file of a job: name, kind, format, rip, discLabel, discNumber, season, part,
@@ -41,7 +43,7 @@ public enum TokenRegistry {
     /// "Title 11" for DVD titles, "Playlist 00800" for Blu-ray playlists, else MakeMKV's title number.
     public static func trackLabel(_ title: Title) -> String {
         let src = title.sourceFile
-        if MessageCatalog.asciiLower(src).hasSuffix(".mpls") {
+        if asciiLower(src).hasSuffix(".mpls") {
             let file = src.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? src
             return "Playlist " + file.dropLast(5)
         }

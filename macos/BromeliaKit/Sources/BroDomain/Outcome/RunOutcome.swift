@@ -83,11 +83,11 @@ public struct RunOutcome: Sendable, Equatable {
     public static func products(_ product: RunProduct, newNames: [String]) -> [String] {
         switch product {
         case .titles:
-            return newNames.filter { !hidden($0) && ArchiveFiles.endsWith(MessageCatalog.asciiLower($0), ".mkv") }
+            return newNames.filter { !hidden($0) && ArchiveFiles.endsWith(asciiLower($0), ".mkv") }
         case .backup:
             return newNames.filter { n in
-                !hidden(n) && (["bdmv", "video_ts", "hvdvd_ts"].contains { $0.utf8.elementsEqual(MessageCatalog.asciiLower(n).utf8) }
-                               || ArchiveFiles.endsWith(MessageCatalog.asciiLower(n), ".iso"))
+                !hidden(n) && (["bdmv", "video_ts", "hvdvd_ts"].contains { $0.utf8.elementsEqual(asciiLower(n).utf8) }
+                               || ArchiveFiles.endsWith(asciiLower(n), ".iso"))
             }
         case .image:
             return newNames.filter { !hidden($0) }

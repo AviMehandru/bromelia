@@ -1,4 +1,5 @@
-/* bro-job-logger.h: BroJobLogger: How a step logs, from its worker: a jobLog event at once; jobs/<id>/log.jsonl when the step ends. */
+/* bro-job-logger.h: BroJobLogger: How a step logs, from its worker: a jobLog event at once; jobs/<id>/log.jsonl soon
+ * after, and when the step ends. */
 #pragma once
 
 #include "bro-bro-message.h"

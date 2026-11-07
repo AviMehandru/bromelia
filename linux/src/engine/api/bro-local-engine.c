@@ -351,10 +351,9 @@ stop_settle (gpointer data)
   return G_SOURCE_REMOVE;
 }
 
-/* The stop order (decision 170): from now on every call answers server.stopping; the feeds close and the intake stops
- * (drives, libraries); the runner shuts every live job down storing nothing more, so the store is what a killed engine
- * leaves; then, once no job is live and the executor is idle (at most 30 s), the executor stops and the root's release
- * runs. */
+/* The stop order: from now on every call answers server.stopping; the feeds close and the intake stops (drives,
+ * libraries); the runner shuts every live job down storing nothing more, so the store is what a killed engine leaves;
+ * then, once no job is live and the executor is idle (at most 30 s), the executor stops and the root's release runs. */
 static void
 work_stop (Call *c)
 {
@@ -603,7 +602,7 @@ gather_page (const BroJobPageDto *page, const BroBroError *error, gpointer data)
   build_status (g->self, gather_status, g);
 }
 
-/* The snapshot event (never published): its seq is the last event's when gathering began (decision 186). */
+/* The snapshot event (never published): its seq is the last event's when gathering began. */
 static void
 gather (BroLocalEngine *self, GatherReady ready, gpointer data)
 {
@@ -1122,10 +1121,10 @@ attach_marked (BroLibraryDto *library, const BroBroError *error, gpointer data)
 }
 
 /* The id is the name (else the folder's last part) made into an EntryId, with -2, -3 … when the configuration has it
- * already (decision 187). LibraryService writes the marker, then the configuration gets {id, name, path} at its
- * current version; if that save fails the marker is removed and the save's error returned, so a retry doesn't meet
- * library.alreadyAttached. The path of a library the configuration already has (the user confirming a folder without
- * its marker, H1-7): the marker is written under that library's id and name, and the configuration is left as it is. */
+ * already. LibraryService writes the marker, then the configuration gets {id, name, path} at its current version; if
+ * that save fails the marker is removed and the save's error returned, so a retry doesn't meet library.alreadyAttached.
+ * The path of a library the configuration already has (the user confirming a folder without its marker): the marker is
+ * written under that library's id and name, and the configuration is left as it is. */
 static void
 work_attach_library (Call *c)
 {
@@ -1289,9 +1288,9 @@ events_gathered (BroEngineEvent *event, const BroBroError *error, gpointer data)
   events_open (c, bro_event_bus_stream (c->self->bus, TRUE, event->seq, NULL, 0), event);
 }
 
-/* Decision 168, 186: with an after the feed replays from it (one the bus can't replay starts with a resync, which the
- * feed answers with a snapshot); without one the first event is a snapshot whose seq is the last event's before the
- * snapshot was gathered, and the events published while it was gathered follow it as deltas. */
+/* With an after the feed replays from it (one the bus can't replay starts with a resync, which the feed answers with a
+ * snapshot); without one the first event is a snapshot whose seq is the last event's before the snapshot was gathered,
+ * and the events published while it was gathered follow it as deltas. */
 static void
 work_events (Call *c)
 {

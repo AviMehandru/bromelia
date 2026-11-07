@@ -15,7 +15,8 @@ public sealed class RunAccumulator
     private readonly string _expectedDevice;
 
     /// <param name="readsData">The run reads the disc's data (a rip or backup): its errors count as read errors.</param>
-    /// <param name="expectedIndex">The MakeMKV drive index the run uses, with its device, to catch renumbered drives.</param>
+    /// <param name="expectedIndex">The MakeMKV drive index the run uses, with its device, to catch renumbered
+    /// drives.</param>
     public RunAccumulator(bool readsData = false, int? expectedIndex = null, string expectedDevice = "")
     {
         _readsData = readsData;

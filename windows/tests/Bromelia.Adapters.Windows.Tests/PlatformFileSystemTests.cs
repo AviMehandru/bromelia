@@ -132,6 +132,23 @@ public sealed class PlatformFileSystemTests : IDisposable
         });
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AReadThatFailsIsABroFailure(bool bypassCache)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_root);
+        var path = P("locked.bin");
+        File.WriteAllBytes(path, new byte[1 << 16]);
+        using var holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        holder.Lock(0, 1 << 16);
+        var stream = _fs.OpenForReading(path, bypassCache);
+        var failure = Assert.Throws<BroFailure>(() => stream.Read(1 << 16));
+        Assert.Equal("fs.failed", failure.Error.Code);
+        stream.Close();
+    }
+
     [Fact] // file-system-durable-write, file-system-read-uncached
     public void WritesAreDurableAndReadsCanBypassTheCache()
     {

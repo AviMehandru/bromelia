@@ -8,7 +8,9 @@ shared/architecture-map.json. For every source file in a layer folder:
                                domain/ includes only GLib's core (<glib.h>, not gio); domain/ and engine/ use
                                none of the banned calls (g_file_*, g_spawn*, g_get_*time, fopen, getenv, …).
   Swift (BromeliaKit/Sources/) every `import Bro…` must be an allowed layer; BroDomain and BroEngine use none
-                               of the banned APIs (FileManager, Process, Date(), URLSession, DispatchQueue, …).
+                               of the banned APIs (FileManager, Process, Date(), URLSession, DispatchQueue, …);
+                               no layer splits a String into lines by Character: "\\r\\n" is one Character, so a CRLF
+                               line is never cut (BroFoundation's lines(of:) cuts by scalars).
   C# (windows/src/*/)          every <ProjectReference> must be an allowed layer; Bromelia.Domain has no
                                package references; Domain and Engine use none of the banned APIs (System.IO.File,
                                Directory, Process, HttpClient, DateTime.Now, Environment, Registry). The build
@@ -34,16 +36,18 @@ C_DOMAIN_ONLY = [r"\bg_thread_\w+\s*\(", r"\bg_main_context_\w+\s*\(", r"\bg_idl
 SWIFT_BANNED = [r"\bFileManager\b", r"\bProcess\s*\(", r"\bProcessInfo\b", r"\bDate\s*\(\s*\)", r"\bURLSession\b", r"\bDispatchQueue\b",
                 r"\bThread\b", r"\bFileHandle\b", r"\bgetenv\s*\(", r"\bUserDefaults\b", r"\bUUID\s*\(\s*\)", r"\.random\s*\("]
 SWIFT_DOMAIN_ONLY = [r"\bTask\s*\{", r"\bTask\.sleep\b"]
+SWIFT_LINE_SPLIT = [r'(?<!unicodeScalars\.)(?<!utf8\.)(?<!utf16\.)\bsplit\s*\(\s*(?:maxSplits:[^,)]*,\s*)?'
+                    r'(?:separator:\s*(?:Character\(\s*)?"\\[nr]|whereSeparator:\s*\{\s*\$0\s*==\s*"\\[nr])']
 CS_BANNED = [r"\bSystem\.IO\.File\b", r"\bFile\.\w+\s*\(", r"\bDirectory\.\w+\s*\(", r"\bProcess\.Start\b", r"\bnew\s+Process\s*\(", r"\bHttpClient\b",
              r"\bDateTime\.(Utc)?Now\b", r"\bDateTimeOffset\.(Utc)?Now\b", r"\bEnvironment\.\w+", r"\bRegistry\b", r"\bGuid\.NewGuid\s*\(", r"\bnew\s+Random\s*\("]
 CS_DOMAIN_ONLY = [r"\bTask\.Run\b", r"\bnew\s+Thread\s*\(", r"\bThreadPool\b"]
 ENGINE_INTERNALS = r"\b(\w+Service|Scheduler|PipelineRunner|EventBus|EngineExecutor|StepRegistry|JobPlanner)\b"
 
 
-def strip_comments(text, c_like=True):
+def strip_comments(text, c_like=True, keep_strings=False):
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     text = re.sub(r"//[^\n]*", "", text)
-    return re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
+    return text if keep_strings else re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
 
 
 class Layers:
@@ -139,6 +143,7 @@ class Layers:
                     if mod in targets and targets[mod] not in self.allowed(name):
                         self.errors.append(f"{rel}: imports {mod} ({targets[mod]}), which {name} may not use")
                 text = strip_comments(raw)
+                self.banned(strip_comments(raw, keep_strings=True), SWIFT_LINE_SPLIT, rel, f"{name} (a Character split: use lines(of:))")
                 if name in ("domain", "engine"):
                     self.banned(text, SWIFT_BANNED + (SWIFT_DOMAIN_ONLY if name == "domain" else []), rel, name)
                 if name in ("server", "client", "ui"):

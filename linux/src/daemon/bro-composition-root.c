@@ -130,7 +130,7 @@ bro_composition_root_build (const BroRootOptions *options, BroBroError **error)
   messages = bro_message_text_renderer_new (bro_english_messages_catalog ());
   log = bro_file_engine_log_new (files, BRO_CLOCK (clock), engine_log);
 
-  /* No unexpected handler to wire: the C executor's actions can't throw (decision 208). */
+  /* No unexpected handler to wire: the C executor's actions can't throw. */
   executor = bro_engine_executor_new ("bromelia-engine");
   bus = bro_event_bus_new (BRO_CLOCK (clock), 1, 1024, 1024);
   engine_clock = bro_engine_clock_new (BRO_CLOCK (clock), executor);
@@ -143,7 +143,7 @@ bro_composition_root_build (const BroRootOptions *options, BroBroError **error)
                                        bro_store_catalog (BRO_STORE (store)), NULL, NULL);
   drives = bro_drive_service_new (executor, bus, problems, BRO_CONFIG_SOURCE (config), engine_clock, monitor, control, makemkv,
                                   bro_store_drives (BRO_STORE (store)));
-  /* Today's paths (Bromelia.Core MakeMKV.cs): MakeMKV's folder and the settings.conf that holds its key. */
+  /* MakeMKV's folder and the settings.conf that holds its key. */
   makemkv_setup = bro_makemkv_service_new (files, config, makemkv_folder, user_settings, options->home);
   registry = bro_step_registry_standard ();
   tools = bro_tool_set_new (makemkv, BRO_MATROSKA (matroska));

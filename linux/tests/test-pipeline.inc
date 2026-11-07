@@ -27,6 +27,8 @@ struct _TestMemoryStore {
   int held;         /* inserts waiting */
   GHashTable *hold_loads; /* job ids whose record loads wait until released (a run that is slow to load) */
   int held_loads;         /* loads waiting */
+  GHashTable *fail_job_loads;  /* job ids whose record reads fail with store.failed */
+  GHashTable *fail_step_loads; /* job ids whose step rows reads fail with store.failed */
 };
 
 static void store_iface_init (BroStoreInterface *iface);
@@ -237,11 +239,28 @@ job_count (BroJobRepository *repo, const BroJobQuery *q, int *count, BroBroError
   return TRUE;
 }
 
+static void
+store_read_failed (BroBroError **error)
+{
+  BroJsonValue *params = bro_json_value_new_object ();
+  bro_json_value_set (params, "operation", bro_json_value_new_string ("read"));
+  bro_json_value_set (params, "reason", bro_json_value_new_string ("disk I/O error"));
+  if (error)
+    *error = bro_bro_error_new ("store.failed", params, NULL);
+  else
+    bro_json_value_unref (params);
+}
+
 static BroJobRecord *
 job_load (BroJobRepository *repo, BroId job_id, BroBroError **error)
 {
   TestMemoryStore *self = TEST_MEMORY_STORE (repo);
   BroJobRecord *r;
+  if (g_hash_table_contains (self->fail_job_loads, job_id.value))
+    {
+      store_read_failed (error);
+      return NULL;
+    }
   g_mutex_lock (&self->lock);
   if (g_hash_table_contains (self->hold_loads, job_id.value))
     {
@@ -310,6 +329,11 @@ step_completed (BroStepRepository *repo, BroId job_id, BroBroError **error)
 static GPtrArray *
 step_load (BroStepRepository *repo, BroId job_id, BroBroError **error)
 {
+  if (g_hash_table_contains (TEST_MEMORY_STORE (repo)->fail_step_loads, job_id.value))
+    {
+      store_read_failed (error);
+      return NULL;
+    }
   return steps_of (TEST_MEMORY_STORE (repo), job_id.value, FALSE);
 }
 
@@ -390,6 +414,8 @@ test_memory_store_finalize (GObject *object)
   g_ptr_array_unref (self->order);
   g_hash_table_unref (self->steps);
   g_hash_table_unref (self->hold_loads);
+  g_hash_table_unref (self->fail_job_loads);
+  g_hash_table_unref (self->fail_step_loads);
   g_ptr_array_unref (self->intents);
   g_hash_table_unref (self->unit_states);
   g_clear_object (&self->units);
@@ -414,6 +440,8 @@ test_memory_store_init (TestMemoryStore *self)
   self->order = g_ptr_array_new_with_free_func (g_free);
   self->steps = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) bro_step_record_free);
   self->hold_loads = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->fail_job_loads = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->fail_step_loads = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   self->intents = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_commit_intent_free);
   self->unit_states = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 }
@@ -1514,10 +1542,23 @@ pipe_crash (const char *point, gpointer data, BroBroError **error)
   return FALSE;
 }
 
+/* given.failLogWrites: that many writes of a log file fail. Log writes never overlap, so the count needs no lock. */
+static gboolean
+fail_log_writes (const char *op, const char *path, gpointer data, BroBroError **error)
+{
+  gint64 *left = data;
+  if (strcmp (op, "write") != 0 || !g_str_has_suffix (path, "/" BRO_JOB_LOG_FILE_NAME) || *left <= 0)
+    return TRUE;
+  --*left;
+  bro_bro_error_set (error, bro_message_code_wire (BRO_MSG_FS_FAILED), NULL);
+  return FALSE;
+}
+
 static gboolean
 pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures, gboolean service)
 {
   PipeHarness h = { 0 };
+  gint64 log_writes_to_fail;
   BroJsonValue *steps_given = bro_json_value_member (given, "steps"), *jobs = bro_json_value_member (given, "jobs"), *ops, *v;
   g_autoptr (GPtrArray) steps = g_ptr_array_new_with_free_func (g_object_unref);
   g_autoptr (BroStepRegistry) registry = NULL;
@@ -1536,6 +1577,9 @@ pipe_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray 
   h.scheduler = bro_scheduler_new (h.w.executor, h.bus, &limits);
   h.store = g_object_new (TEST_TYPE_MEMORY_STORE, NULL);
   h.fs = g_object_new (TEST_TYPE_MEMORY_FS, NULL);
+  log_writes_to_fail = bro_json_value_get_integer (bro_json_value_member (given, "failLogWrites"), 0);
+  h.fs->on_op = fail_log_writes;
+  h.fs->on_op_data = &log_writes_to_fail;
   h.config = g_object_new (TEST_TYPE_CASE_CONFIG, NULL);
   if ((v = bro_json_value_member (given, "config")))
     {

@@ -1,3 +1,4 @@
+import BroFoundation
 import Foundation
 
 /// Whether a rule's conditions hold for a disc (was PluginMatcher).
@@ -24,8 +25,8 @@ public enum RuleMatcher {
     }
 
     static func formatMatches(_ format: String, _ code: String) -> Bool {
-        let c = MessageCatalog.asciiLower(code)
-        if format.hasSuffix("*") { return c.hasPrefix(MessageCatalog.asciiLower(String(format.dropLast()))) }
-        return MessageCatalog.asciiLower(format) == c
+        let c = asciiLower(code)
+        if format.hasSuffix("*") { return c.hasPrefix(asciiLower(String(format.dropLast()))) }
+        return asciiLower(format) == c
     }
 }

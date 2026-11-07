@@ -4,7 +4,7 @@ using Bromelia.Foundation;
 
 namespace Bromelia.Engine;
 
-/// <summary>Room for a plan on its library's volume (plan §21; today's checkFreeSpace).</summary>
+/// <summary>Room for a plan on its library's volume (plan §21).</summary>
 public static class SpaceCheck
 {
     /// <summary>Logs space.report {free, need}, then keeps <paramref name="need"/> plus the margin

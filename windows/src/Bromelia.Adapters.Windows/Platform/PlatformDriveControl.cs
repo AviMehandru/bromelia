@@ -11,10 +11,10 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 
 namespace Bromelia.Adapters.Windows;
 
-/// <summary>DriveControl on Windows (plan §10.3; shared/fixtures/adapters/drive-control.cases.json), today's
-/// WindowsDeviceServices: IOCTL_STORAGE_EJECT_MEDIA and IOCTL_STORAGE_LOAD_MEDIA for the tray, the drive letter's
-/// readiness for the mount, a mounted DVD / Blu-ray structure or the table of contents for the content, and raw reads of
-/// \\.\E: (only a bare drive letter is a device: any other path is read as the file it is).</summary>
+/// <summary>DriveControl on Windows (plan §10.3; shared/fixtures/adapters/drive-control.cases.json):
+/// IOCTL_STORAGE_EJECT_MEDIA and IOCTL_STORAGE_LOAD_MEDIA for the tray, the drive letter's readiness for the mount, a
+/// mounted DVD / Blu-ray structure or the table of contents for the content, and raw reads of \\.\E: (only a bare drive
+/// letter is a device: any other path is read as the file it is).</summary>
 public sealed class PlatformDriveControl : IDriveControl
 {
     const int Sector = 2048;

@@ -50,8 +50,8 @@ public static class Layouts
         return MediaServerOther;
     }
 
-    /// <summary>The file name template's path (empty: the original name); a backup with a backup subfolder (backupThenMkv) goes
-    /// inside it under that name, as today's apps put it (owner H3b-1), or is the subfolder itself when the name is empty.</summary>
+    /// <summary>The file name template's path (empty: the original name); a backup with a backup subfolder
+    /// (backupThenMkv) goes inside it under that name, or is the subfolder itself when the name is empty.</summary>
     private static string TemplatesFile(NamingSettings naming, PlannedOutput o, IReadOnlyDictionary<string, string> v)
     {
         var file = naming.FileNameTemplate.Length == 0

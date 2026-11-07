@@ -3,26 +3,22 @@ import BroFoundation
 import BroPorts
 
 /// The step JobService.keepApart puts in place of the step an interrupted, failed or cancelled job stopped at and what
-/// follows (owner, 2026-10-03 and 2026-10-25; plan §20.1, §20.4): the job isn't continued, and what it left in staging
-/// becomes a sealed unit in <library>/_Quarantine/<name> [INCOMPLETE] with a quarantined row of status incomplete.
-/// 1. Sealed as Seal seals, but with no produced lists (Acquire never finished): every visible file in staging (none hidden
-///    by its first byte, not one of Bromelia's own at the top; leftovers of a stopped write removed) is synced, then each
-///    folder down to it (archive.synced), and hashed read back from disk (archive.hashFromDisk) with archive.hashing
-///    progress. SHA256SUMS, the logs as Seal copies them, INCOMPLETE.txt (the note recovery writes, with the logs, for the
-///    outcome and error of the "outcome" checkpoint JobService stores with the step: interrupted without one) and the record
-///    (status incomplete, no titles acquired) are written atomically; an earlier attempt's own files that this one doesn't
-///    write go. Staging with no such file (a job that stopped before Acquire has an empty one) holds nothing to keep: its
-///    empty folders are removed and no unit is made.
-/// 2. The checkpoint "sealed" (the files and Bromelia's own files) is saved before the unit is handed to the library: a
-///    rerun with it doesn't seal again (staging may already be moving) and hands over the same unit.
-/// 3. library.quarantine(unit, intent, files, "INCOMPLETE"): the intent's items are staging's top-level entries that hold
-///    the files (a file with its SHA-256, a folder without), then the record, the logs and the note; LibraryService picks
-///    the free name, finishes an open intent and gives a unit quarantined already its result again, so a rerun rolls
-///    forward. recovery.keptApart {path} (warning).
-/// <name>: Plan's identity name, else the request's title, else the listing's name, else the source's label, else the job
-/// id, the first that stays non-empty as a path component. Holds the library write; idempotent. Data: CommitOutput
-/// (quarantined). Skipped without Plan's output. JobOutcome makes the job cancelled once the step succeeded. Paths compare
-/// by their bytes.
+/// follows (plan §20.1, §20.4): the job isn't continued, and what it left in staging becomes a sealed unit in
+/// <library>/_Quarantine/<name> [INCOMPLETE] with a quarantined row of status incomplete. JobOutcome makes the job
+/// cancelled once the step succeeded.
+///
+/// Sealed as Seal seals, but with no produced lists, since Acquire never finished: every visible file in staging, plus
+/// INCOMPLETE.txt for the outcome and error of the "outcome" checkpoint JobService stores with the step. Staging with
+/// no such file (a job that stopped before Acquire has an empty one) holds nothing to keep: its empty folders are
+/// removed and no unit is made.
+///
+/// The checkpoint "sealed" is saved before the unit is handed to the library: a rerun with it doesn't seal again,
+/// because staging may already be moving, and hands over the same unit. LibraryService picks the free name, finishes an
+/// open intent and gives a unit quarantined already its result again, so a rerun rolls forward.
+///
+/// <name>: Plan's identity name, else the request's title, the listing's name, the source's label or the job id, the
+/// first that stays non-empty as a path component. Holds the library write. Data: CommitOutput (quarantined). Skipped
+/// without Plan's output. Paths compare by their bytes.
 public struct KeepApartStep: Step {
     public static let tag = "INCOMPLETE"
     public static let note = "INCOMPLETE.txt"
@@ -41,9 +37,9 @@ public struct KeepApartStep: Step {
         return ResourceSet(libraryWrites: [plan.libraryId])
     }
 
-    /// The job's name in _Quarantine, before " [INCOMPLETE]" and ConflictNamer: the Plan output's identity name, else the
-    /// job's title, else Probe's listing name, else the source's label, else the job's id (Sanitizer.component).
-    /// RecoveryService sets a failed job's staging aside under it too (owner H3a-2).
+    /// The job's name in _Quarantine, before " [INCOMPLETE]" and ConflictNamer: the Plan output's identity name, else
+    /// the job's title, else Probe's listing name, else the source's label, else the job's id (Sanitizer.component).
+    /// RecoveryService sets a failed job's staging aside under it too.
     public static func folderName(_ job: JobSnapshot) -> String {
         let probe = JobSnapshot.output(job, .probe).flatMap { $0.members != nil ? ProbeOutput.decode($0) : nil }
         let source = DiscRequest.decode(job.request)?.source
@@ -96,8 +92,8 @@ public struct KeepApartStep: Step {
         return StepReport(data: CommitOutput.encode(CommitOutput(unitId: unitId, library: plan.libraryId, path: kept, merged: false, quarantined: true)))
     }
 
-    /// The checkpoint JobService.keepApart stores with the step: the outcome the job had (interrupted, failed, cancelled) and
-    /// its error, which the note names.
+    /// The checkpoint JobService.keepApart stores with the step: the outcome the job had (interrupted, failed,
+    /// cancelled) and its error, which the note names.
     public static func kept(_ outcome: Outcome, error: BroError?) -> JsonValue {
         var members: [(key: String, value: JsonValue)] = [("kind", .string(outcomeCheckpoint)), ("outcome", .string(outcome.rawValue))]
         if let error { members.append(("error", JsonDto.error(error))) }
@@ -141,7 +137,7 @@ public struct KeepApartStep: Step {
         for (i, path) in paths.enumerated() {
             try SealStep.cancelled(context)
             context.progress.report(Double(done) / Double(total), operation: BroMessage(.archiveHashing), current: path)
-            let (hash, size) = try SealStep.hashOf(context, staging + "/" + path, path, fromDisk: hashFromDisk)
+            let (hash, size) = try SealStep.hashOf(context, staging + "/" + path, path, fromDisk: hashFromDisk, expected: sizes[i])
             files.append(UnitFile(path: path, size: size, sha256: hash, role: ""))
             done += sizes[i]
         }
@@ -166,9 +162,7 @@ public struct KeepApartStep: Step {
         let acquired = AcquireOutput(titles: [], others: [], backup: nil, discInfo: nil, readErrors: [])
         let document = SealRecord.build(context.job, plan: plan, acquired: acquired, unitId: unitId, files: files, log: log, logs: logs,
                                         finishedAt: context.clock.now(), appVersion: context.appVersion, messages: context.messages, status: "incomplete")
-        try write(record, ArchiveRecordCodec.encodeV3(ArchiveRecord(version: 3, document: document, status: "", name: "", kind: "", label: "",
-                                                                    volumeName: "", season: nil, part: nil, volume: nil, disc: nil, fingerprint: nil,
-                                                                    unitId: nil, episodes: [], files: [])))
+        try write(record, ArchiveRecordCodec.encodeV3(ArchiveRecord(document: document)))
         context.log.log(BroMessage(.archiveRecordWritten, [("file", .string(record))]))
         for f in tree where ArchiveFiles.isTop(f) && ArchiveFiles.isOwnFile(f) && !written.contains(where: { $0.utf8.elementsEqual(f.utf8) }) {
             try fs.remove(staging + "/" + f)

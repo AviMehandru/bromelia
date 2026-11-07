@@ -3,11 +3,11 @@ import BroFoundation
 import BroPorts
 
 /// Everything a step may use from its worker (plan §12.2); all of it is Sendable. The job is a snapshot: its request,
-/// its plan and the outputs of the steps before this one. The configuration is the one the job started with. `checkpoint`
-/// keeps what a resumable step saved between its attempts. `finishing` is set only when the runner runs the Release step
-/// at the end of a job that stopped before it (the job's outcome): the step then decides whether the disc comes out.
-/// `messages` gives a message's text for what a step writes for people to read (Seal's log copy and notes; owner,
-/// 2026-10-19), and `appVersion` is the app's version for the archive record (owner, 2026-10-20).
+/// its plan and the outputs of the steps before this one. The configuration is the one the job started with.
+/// `checkpoint` keeps what a resumable step saved between its attempts. `finishing` is set only when the runner runs
+/// the Release step at the end of a job that stopped before it (the job's outcome): the step then decides whether the
+/// disc comes out. `messages` gives a message's text for what a step writes for people to read (Seal's log copy and
+/// notes), and `appVersion` is the app's version for the archive record.
 public struct StepContext: Sendable {
     public var job: JobSnapshot
     public var cancel: CancellationToken

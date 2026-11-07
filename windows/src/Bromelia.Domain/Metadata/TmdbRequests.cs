@@ -17,7 +17,8 @@ public static class TmdbRequests
         return new HttpRequestSpec("GET", url, new List<KeyValuePair<string, string>> { new("Authorization", "Bearer " + k) });
     }
 
-    /// <summary>The search for <paramref name="name"/>, optionally released (or first aired) in <paramref name="year"/>.</summary>
+    /// <summary>The search for <paramref name="name"/>, optionally released (or first aired) in <paramref
+    /// name="year"/>.</summary>
     public static HttpRequestSpec Search(string name, MediaKind kind, int? year, string key, string language) =>
         Get("search/" + (kind == MediaKind.Tv ? "tv" : "movie"),
             "query=" + Escape(name) + (year is { } y ? "&" + (kind == MediaKind.Tv ? "first_air_date_year" : "year") + "=" + Num(y) : ""), key, language);
@@ -29,7 +30,8 @@ public static class TmdbRequests
     /// <summary>The movie or show with IMDb id <paramref name="imdbId"/>.</summary>
     public static HttpRequestSpec Find(string imdbId, string key, string language) => Get("find/" + Escape(imdbId), "external_source=imdb_id", key, language);
 
-    /// <summary>The episodes of <paramref name="season"/> of the show <paramref name="match"/> (null without a TMDb id).</summary>
+    /// <summary>The episodes of <paramref name="season"/> of the show <paramref name="match"/> (null without a TMDb
+    /// id).</summary>
     public static HttpRequestSpec? Season(Candidate match, int season, string key, string language) =>
         match.TmdbId is { } id ? Get("tv/" + Num(id) + "/season/" + Num(season), "", key, language) : null;
 

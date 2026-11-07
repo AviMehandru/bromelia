@@ -12,9 +12,9 @@ using Bromelia.Ports;
 
 namespace Bromeliad;
 
-/// <summary>Builds the real object graph (plan §17, decision 175): ports → adapters → services → LocalEngine; nothing else
-/// constructs adapters or services. TestCompositionRoot (Bromelia.Scenarios.Tests) builds the same graph over fakes.
-/// Nothing runs until LocalEngine.Start; LocalEngine closes the store once it has stopped.</summary>
+/// <summary>Builds the real object graph (plan §17): ports → adapters → services → LocalEngine; nothing else constructs
+/// adapters or services. TestCompositionRoot (Bromelia.Scenarios.Tests) builds the same graph over fakes. Nothing runs
+/// until LocalEngine.Start; LocalEngine closes the store once it has stopped.</summary>
 public static class CompositionRoot
 {
     /// <summary>The app version: this project's &lt;Version&gt;.</summary>
@@ -67,7 +67,7 @@ public static class CompositionRoot
         var scheduler = new Scheduler(executor, bus, new SchedulerLimits());
         var libraries = new LibraryService(executor, bus, problems, scheduler, config, engineClock, fs, store.Libraries(), store.Units(), store.Catalog());
         var drives = new DriveService(executor, bus, problems, config, engineClock, monitor, control, makemkv, store.Drives());
-        // Today's paths (Bromelia.Core MakeMKV.cs): MakeMKV keeps its settings in the registry on Windows.
+        // MakeMKV keeps its settings in the registry on Windows: no folder or settings.conf to give it.
         var makemkvSetup = new MakemkvService(fs, config, "", null, options.Home);
         var registry = StepRegistry.Standard();
         var environment = new StepEnvironment(new ToolSet(makemkv, mkvtoolnix), fs, clock, control, libraries, libraries, config, drives,

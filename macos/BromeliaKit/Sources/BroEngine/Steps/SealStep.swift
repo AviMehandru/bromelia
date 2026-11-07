@@ -2,23 +2,21 @@ import BroDomain
 import BroFoundation
 import BroPorts
 
-/// Step 13 (plan §20.1; §22.3 steps 1–3): makes the job's staging folder a sealed unit, so the commit only moves it.
-/// What it seals is the produced items by name (review L3-1: the lists, never a count): Name's output, else Acquire's
-/// names as they are. An item that isn't in staging, or holds no file (an empty folder, a hidden path, a path through
-/// '..'; owner, 2026-10-21), fails with archive.fileMissing before anything is touched, a visible file no step made
-/// with archive.unlisted (owner, 2026-10-20), and leftovers of a stopped write are removed. Then, in order:
-/// 1. every file is synced to disk, then every folder from staging down to each file (archive.synced): a folder that
-///    holds only folders (a backup's) is synced too, so each entry on the way to a file is durable;
-/// 2. every file is hashed read back from disk (archive.hashFromDisk, on by default: the cache is bypassed), with
-///    archive.hashing progress; a file that can't be read fails with archive.hashFailed;
-/// 3. SHA256SUMS, the logs (the job's log.jsonl rendered line by line, MakeMKV's transcripts as they are), the READ ERRORS
-///    note when MakeMKV reported read errors, and the record are written, each atomically; a write that fails fails with
-///    archive.writeFailed. Bromelia's own files from an earlier attempt that this one doesn't write go.
-/// SHA256SUMS and the record are always written; archive.checksums: false is ignored (archive.checksumsRequired) and
-/// archive.archiveRecord: false leaves out only the logs (owner, 2026-10-20). Nothing is trusted from an earlier attempt:
-/// a rerun syncs and hashes everything again and writes the same files. Read errors give the unit the tag "READ ERRORS"
-/// (Commit puts it in _Quarantine/<name> [READ ERRORS], plan §22.2) and the record's status errors. Data: SealOutput.
-/// Skipped when Plan or Acquire hasn't run.
+/// Step 13 (plan §20.1; §22.3 steps 1–3): makes the job's staging folder a sealed unit, so the commit only moves it. It
+/// seals the produced items by name, never by a count: Name's output, else Acquire's names as they are. An item that
+/// isn't in staging or holds no file (an empty folder, a hidden path, a path through '..') fails before anything is
+/// touched, and so does a visible file no step made; leftovers of a stopped write are removed.
+///
+/// In order: every file is synced, then every folder from staging down to each file, so each entry on the way to a file
+/// is durable; every file is hashed read back from disk (archive.hashFromDisk, on by default); then SHA256SUMS, the
+/// logs, the READ ERRORS note and the record are written, each atomically. Read back from disk goes past the system
+/// cache only on Windows: macOS and Linux ask the cache to stay out of the way, and a page still in it can answer
+/// (FileSystem.openForReading).
+///
+/// SHA256SUMS and the record are always written: archive.checksums: false is ignored and archive.archiveRecord: false
+/// leaves out only the logs. Nothing is trusted from an earlier attempt: a rerun syncs and hashes everything again and
+/// writes the same files. Read errors tag the unit "READ ERRORS", so Commit puts it in _Quarantine/<name> [READ ERRORS]
+/// (plan §22.2). Data: SealOutput. Skipped when Plan or Acquire hasn't run.
 public struct SealStep: Step {
     public static let readErrorsTag = "READ ERRORS"
     public static let readErrorsNote = "READ ERRORS.txt"
@@ -55,7 +53,7 @@ public struct SealStep: Step {
         let named = NameOutput.of(job)?.files ?? NameOutput.fromAcquire(acquired)
         let walked = try FileTree.files(fs, root: staging)
         // An item that isn't there or holds no file (an empty folder, a hidden path, a path through '..') would seal
-        // nothing for itself (owner, 2026-10-21): refused before anything is touched.
+        // nothing for itself: refused before anything is touched.
         for item in named where !ArchiveFiles.expand([item.path], tree: walked).contains(where: { !ArchiveFiles.isFolder($0) }) {
             throw failure(.archiveFileMissing, [("file", .string(item.path))])
         }
@@ -100,7 +98,7 @@ public struct SealStep: Step {
         for (i, file) in files.enumerated() {
             try cancelled(context)
             context.progress.report(Double(done) / Double(total), operation: BroMessage(.archiveHashing), current: file)
-            let (hash, size) = try hashOf(context, staging + "/" + file, file, fromDisk: hashFromDisk)
+            let (hash, size) = try hashOf(context, staging + "/" + file, file, fromDisk: hashFromDisk, expected: sizes[i])
             let item = itemOf(file)
             entries.append(UnitFile(path: file, size: size, sha256: hash, role: item.role ?? "", title: item.title))
             done += sizes[i]
@@ -134,9 +132,7 @@ public struct SealStep: Step {
         let record = "bromelia-" + unit8 + ".json"
         let document = SealRecord.build(job, plan: plan, acquired: acquired, unitId: unitId, files: entries, log: log, logs: logs,
                                         finishedAt: context.clock.now(), appVersion: context.appVersion, messages: context.messages)
-        try write(record, ArchiveRecordCodec.encodeV3(ArchiveRecord(version: 3, document: document, status: "", name: "", kind: "", label: "",
-                                                                    volumeName: "", season: nil, part: nil, volume: nil, disc: nil, fingerprint: nil,
-                                                                    unitId: nil, episodes: [], files: [])))
+        try write(record, ArchiveRecordCodec.encodeV3(ArchiveRecord(document: document)))
         context.log.log(BroMessage(.archiveRecordWritten, [("file", .string(record))]))
 
         // An earlier attempt's own files that this one didn't write (a note, a log no longer there).
@@ -155,8 +151,8 @@ public struct SealStep: Step {
         try copyLogs(context.fs, jobDirectory: context.jobDirectory, messages: context.messages, unit8: unit8, copy: copy, write: write)
     }
 
-    /// copyLogs from the job folder `jobDirectory`, outside a step: RecoveryService's set-aside copies a failed or cancelled
-    /// job's logs the same way (owner, 2026-10-25).
+    /// copyLogs from the job folder `jobDirectory`, outside a step: RecoveryService's set-aside copies a failed or
+    /// cancelled job's logs the same way.
     static func copyLogs(_ fs: any FileSystem, jobDirectory: String, messages: any MessageRenderer, unit8: String, copy: Bool,
                          write: (String, [UInt8]) throws(BroError) -> Void) throws(BroError) -> ([LogLineDto], [String]) {
         let logFile = jobDirectory + "/" + JobLog.fileName
@@ -186,8 +182,9 @@ public struct SealStep: Step {
     }
 
     /// A file's SHA-256 and size, read through the FileSystem port (from disk when `fromDisk`); archive.hashFailed when it
-    /// can't be read; job.cancelled between two pieces.
-    static func hashOf(_ context: StepContext, _ path: String, _ file: String, fromDisk: Bool) throws(BroError) -> (String, Int64) {
+    /// can't be read, archive.sizeMismatch when the bytes read aren't the `expected` the file's stat gave: a hash of part of
+    /// a file must never be recorded. job.cancelled between two pieces.
+    static func hashOf(_ context: StepContext, _ path: String, _ file: String, fromDisk: Bool, expected: Int64) throws(BroError) -> (String, Int64) {
         let stream: any ByteStream
         do {
             stream = try context.fs.openForReading(path, bypassCache: fromDisk)
@@ -208,6 +205,9 @@ public struct SealStep: Step {
             if piece.isEmpty { break }
             hasher.update(piece)
             size += Int64(piece.count)
+        }
+        if size != expected {
+            throw failure(.archiveSizeMismatch, [("file", .string(file)), ("size", .integer(expected)), ("hashed", .integer(size))])
         }
         return (hasher.finish(), size)
     }

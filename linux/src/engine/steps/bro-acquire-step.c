@@ -363,7 +363,7 @@ is_cancelled (Run *r)
   return bro_cancellation_token_is_cancelled (r->c->cancel);
 }
 
-/* What a stopped run wrote: unreadable (P2-14), so removed; kept when the process may still be writing. */
+/* What a stopped run wrote: unreadable, so removed; kept when the process may still be writing. */
 static gboolean
 remove_partial (Run *r, GPtrArray *names, gboolean abandoned, BroBroError **error)
 {
@@ -684,6 +684,19 @@ rip (Run *r, const BroMakemkvSource *source, const BroListing *listing, GHashTab
                 for (guint k = 0; k < outcome->produced->len; k++)
                   if (*name && strcmp (outcome->produced->pdata[k], name) == 0)
                     g_ptr_array_add (a->files, g_strdup (name));
+                if (a->files->len == 0)
+                  {
+                    BroBroMessage *missing = bro_bro_message_new (BRO_MSG_RIP_TITLE_MISSING, _bro_param ("file", bro_json_value_new_string (name)),
+                                                                  BRO_SEVERITY_ERROR);
+                    g_autofree char *number = g_strdup_printf ("%d", t->index);
+                    BroJsonValue *params = _bro_param ("title", bro_json_value_new_string (number));
+                    bro_json_value_set (params, "reason", bro_bro_message_to_json (missing));
+                    _bro_step_log (r->c, BRO_MSG_RIP_TITLE_FAILED, params, BRO_SEVERITY_ERROR);
+                    g_ptr_array_add (failure_titles, GINT_TO_POINTER (t->index + 1));
+                    g_ptr_array_add (failure_reasons, missing);
+                    bro_acquired_title_free (a);
+                    continue;
+                  }
                 for (guint k = 0; wanted->len == 1 && k < outcome->read_errors->len; k++)
                   g_ptr_array_add (a->read_errors, g_strdup (((BroRobotMessage *) outcome->read_errors->pdata[k])->text));
                 g_ptr_array_add (made, a);
@@ -696,7 +709,7 @@ rip (Run *r, const BroMakemkvSource *source, const BroListing *listing, GHashTab
                 if (!owned)
                   g_ptr_array_add (r->others, g_strdup (outcome->produced->pdata[k]));
               }
-            for (guint k = 0; wanted->len > 1 && k < outcome->read_errors->len; k++)
+            for (guint k = 0; (wanted->len > 1 || made->len == 0) && k < outcome->read_errors->len; k++)
               g_ptr_array_add (r->read_errors, g_strdup (((BroRobotMessage *) outcome->read_errors->pdata[k])->text));
           }
         else

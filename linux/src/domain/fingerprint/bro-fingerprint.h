@@ -5,9 +5,9 @@
 
 G_BEGIN_DECLS
 
-/* v1, byte for byte as today: "v1:" and 32 hex digits of SHA-256 over the volume name (else the name), the
- * title count and, sorted, each title's source title id, length in seconds, segment map and size in bytes. NULL
- * for a listing without titles. Free with g_free. */
+/* v1, byte for byte as archives already record it: "v1:" and 32 hex digits of SHA-256 over the volume name (else the
+ * name), the title count and, sorted, each title's source title id, length in seconds, segment map and size in bytes.
+ * NULL for a listing without titles. Free with g_free. */
 char *bro_fingerprint_of (const BroListing *listing);
 
 G_END_DECLS

@@ -27,8 +27,8 @@ GHashTable *bro_isolation_lease_environment (BroIsolationLease *self);
 char *bro_isolation_lease_profile_path (BroIsolationLease *self);
 
 /* Why the run's settings may not hold, known once they are in place: makemkv.guiRunning (Windows: the MakeMKV GUI was
- * open while the registry held the run's values, and it may write its own back), or NULL (owner, 2026-10-15, review
- * L3-5). Free with bro_bro_message_free. */
+ * open while the registry held the run's values, and it may write its own back), or NULL. Free with
+ * bro_bro_message_free. */
 BroBroMessage *bro_isolation_lease_warning (BroIsolationLease *self);
 
 /* makemkvcon has read its settings (its first output line). */

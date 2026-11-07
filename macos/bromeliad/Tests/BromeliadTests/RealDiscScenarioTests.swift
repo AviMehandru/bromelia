@@ -329,7 +329,7 @@ final class RealDiscRun {
     /// The makemkvcon runs of the job (decision 304): each run's "==== … $ <command>" header in its makemkv.txt.
     private func calls(_ job: Id) -> [String] {
         guard let text = try? String(contentsOfFile: data + "/jobs/" + job.value + "/" + SealStep.transcript, encoding: .utf8) else { return [] }
-        return text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+        return text.unicodeScalars.split(separator: "\n").map { String($0) }.compactMap { line in
             guard line.hasPrefix("==== "), let at = line.range(of: " $ ") else { return nil }
             return String(line[at.upperBound...])
         }

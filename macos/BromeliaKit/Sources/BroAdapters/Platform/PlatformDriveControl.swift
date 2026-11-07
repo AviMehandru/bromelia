@@ -5,11 +5,11 @@ import DiskArbitration
 import Foundation
 import IOKit
 
-/// DriveControl on macOS (plan §10.3; shared/fixtures/adapters/drive-control.cases.json), today's DiscEjector,
-/// DriveControl and DiscContentProbe. A drive is its IORegistry path (PlatformDeviceMonitor); its disc is the BSD disk
-/// below it (a /dev/diskN path works too). Eject: DiskArbitration (unmount, then eject), else diskutil. Close tray:
-/// drutil, by the drive's product name (macOS has no per-device tray call). Content: cddafs is an audio CD, a DVD /
-/// Blu-ray structure is video, other optical media data. Raw reads: /dev/rdiskN, or a disc image file.
+/// DriveControl on macOS (plan §10.3; shared/fixtures/adapters/drive-control.cases.json), DriveControl and
+/// DiscContentProbe. A drive is its IORegistry path (PlatformDeviceMonitor); its disc is the BSD disk below it (a
+/// /dev/diskN path works too). Eject: DiskArbitration (unmount, then eject), else diskutil. Close tray: drutil, by the
+/// drive's product name (macOS has no per-device tray call). Content: cddafs is an audio CD, a DVD / Blu-ray structure
+/// is video, other optical media data. Raw reads: /dev/rdiskN, or a disc image file.
 public final class PlatformDriveControl: DriveControl, @unchecked Sendable {
     private static let sector = 2048
     private let launcher: any ProcessLauncher

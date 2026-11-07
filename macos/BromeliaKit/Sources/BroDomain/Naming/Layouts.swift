@@ -36,8 +36,8 @@ public enum Layouts {
         return mediaServerOther
     }
 
-    /// The file name template's path (empty: the original name); a backup with a backup subfolder (backupThenMkv) goes inside
-    /// it under that name, as today's apps put it (owner H3b-1), or is the subfolder itself when the name is empty.
+    /// The file name template's path (empty: the original name); a backup with a backup subfolder (backupThenMkv) goes
+    /// inside it under that name, or is the subfolder itself when the name is empty.
     static func templatesFile(_ naming: NamingSettings, _ o: PlannedOutput, _ v: [String: String]) -> String {
         let file = naming.fileNameTemplate.isEmpty ? Sanitizer.component(v["original"] ?? "")
             : TemplateEngine.renderPath(naming.fileNameTemplate, values: v)

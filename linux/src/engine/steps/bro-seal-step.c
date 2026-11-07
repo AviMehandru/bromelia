@@ -99,9 +99,11 @@ with_reason (const BroStepContext *c, BroMessageCode code, const char *key, BroJ
 /* ---- hashing ---- */
 
 /* A file's SHA-256 (g_free it) and size, read through the FileSystem port (from disk when @from_disk);
- * archive.hashFailed when it can't be read; job.cancelled between two pieces. NULL and @error set on failure. */
+ * archive.hashFailed when it can't be read, archive.sizeMismatch when the bytes read aren't the @expected the file's
+ * stat gave: a hash of part of a file must never be recorded. job.cancelled between two pieces. NULL and @error set on
+ * failure. */
 char *
-_bro_seal_hash (const BroStepContext *c, const char *path, const char *file, gboolean from_disk, gint64 *size, BroBroError **error)
+_bro_seal_hash (const BroStepContext *c, const char *path, const char *file, gboolean from_disk, gint64 expected, gint64 *size, BroBroError **error)
 {
   BroBroError *cause = NULL;
   g_autoptr (BroByteStream) stream = bro_file_system_open_for_reading (c->fs, path, from_disk, &cause);
@@ -127,7 +129,15 @@ _bro_seal_hash (const BroStepContext *c, const char *path, const char *file, gbo
       bytes = g_bytes_get_data (piece, &n);
       if (n == 0)
         {
-          digest = bro_sha256_hasher_finish (hasher);
+          if (*size == expected)
+            {
+              digest = bro_sha256_hasher_finish (hasher);
+              break;
+            }
+          BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
+          bro_json_value_set (params, "size", bro_json_value_new_integer (expected));
+          bro_json_value_set (params, "hashed", bro_json_value_new_integer (*size));
+          *error = failure (BRO_MSG_ARCHIVE_SIZE_MISMATCH, params, NULL);
           break;
         }
       bro_sha256_hasher_update (hasher, bytes, n);
@@ -408,7 +418,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   if (!(walked = bro_file_tree_files (fs, staging, error)))
     return NULL;
   /* An item that isn't there or holds no file (an empty folder, a hidden path, a path through '..') would seal nothing
-   * for itself (owner, 2026-10-21): refused before anything is touched. */
+   * for itself: refused before anything is touched. */
   g_ptr_array_add (walked, NULL);
   for (guint i = 0; i < named->len; i++)
     {
@@ -502,7 +512,7 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
       if (_bro_seal_cancelled (c, error))
         return NULL;
       bro_progress_reporter_report (c->progress, (double) done / total, operation, file);
-      if (!(digest = _bro_seal_hash (c, path, file, hash_from_disk, &size, error)))
+      if (!(digest = _bro_seal_hash (c, path, file, hash_from_disk, g_array_index (sizes, gint64, i), &size, error)))
         return NULL;
       item = item_of (named, file);
       entry = bro_unit_file_new ();

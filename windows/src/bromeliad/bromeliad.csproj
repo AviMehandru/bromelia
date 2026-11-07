@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- L5 Hosts (rearchitecture plan §4, §17; decision 167): the composition root, the one place that builds the real
+  <!-- L5 Hosts (rearchitecture plan §4, §17): the composition root, the one place that builds the real
        graph. A class library in phase 3; phase 4 makes it the bromeliad executable (main, HostOptions, EngineLock).
        <Version> is the app version the engine reports and writes into archive records. Windows only, as the
        Windows adapters it builds. -->

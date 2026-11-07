@@ -60,7 +60,7 @@ public final class MakemkvTool: Makemkv {
         _ = try MakemkvArgs.backup(source, decrypt: decrypt, destination: destination, options: invocation.options)
         guard case let .drive(index, device) = source else { throw BroMessage(.backupNeedsDrive, severity: .error).toError() }
         if fs.exists(destination) { throw BroMessage(.fsAlreadyExists, [("path", .string(destination))], severity: .error).toError() }
-        let args = { (options: MakemkvOptions) in (try? MakemkvArgs.backup(source, decrypt: decrypt, destination: destination, options: options)) ?? [] }
+        let args = { (options: MakemkvOptions) throws(BroError) in try MakemkvArgs.backup(source, decrypt: decrypt, destination: destination, options: options) }
         return try await isolated(invocation, accumulator: RunAccumulator(readsData: true, expectedIndex: index, expectedDevice: device),
                                   product: .backup, destination: destination, sink: sink, cancel: cancel, arguments: args, also: nil)
     }
@@ -72,7 +72,7 @@ public final class MakemkvTool: Makemkv {
     }
 
     private func isolated(_ invocation: MakemkvInvocation, accumulator start: RunAccumulator, product: RunProduct, destination: String?, sink: any RunSink,
-                          cancel: CancellationToken, arguments: (MakemkvOptions) -> [String],
+                          cancel: CancellationToken, arguments: (MakemkvOptions) throws(BroError) -> [String],
                           also: ((RobotEvent) -> Void)?) async throws(BroError) -> MakemkvRun {
         if cancel.isCancelled { throw BroError(MessageCode.jobCancelled.rawValue) }
         let exe = try executable()
@@ -83,7 +83,7 @@ public final class MakemkvTool: Makemkv {
         defer { if !released { lease.release() } }
         var options = invocation.options
         options.profilePath = lease.profilePath() ?? options.profilePath
-        let spec = ProcessSpec(executable: exe, arguments: arguments(options), environment: lease.environment(),
+        let spec = ProcessSpec(executable: exe, arguments: try arguments(options), environment: lease.environment(),
                                workingDirectory: invocation.settings.workDirectory, stopPolicy: .terminateFirst,
                                stallTimeout: invocation.stallTimeout, transcript: invocation.transcript)
         var accumulator = start

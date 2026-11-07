@@ -1,8 +1,8 @@
 import BroPorts
 import Foundation
 
-/// Where each tool is usually installed on macOS, and its program names (today's candidate lists, Homebrew on Apple
-/// silicon and Intel, the app bundles, MKVToolNix's versioned bundles).
+/// Where each tool is usually installed on macOS, and its program names ( Homebrew on Apple silicon and Intel, the app
+/// bundles, MKVToolNix's versioned bundles).
 public enum PlatformToolPaths {
     public static func candidates(_ home: String) -> [ToolKind: [String]] {
         let brew = ["/opt/homebrew/bin", "/usr/local/bin"]

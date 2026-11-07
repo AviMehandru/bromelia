@@ -648,6 +648,12 @@ tree_fs_iface (BroFileSystemInterface *iface)
 #define TEST_TYPE_LIBRARY_DB (test_library_db_get_type ())
 G_DECLARE_FINAL_TYPE (TestLibraryDb, test_library_db, TEST, LIBRARY_DB, GObject)
 
+/* Of these reads, after @after of them, the next @times fail with store.failed (@times below 0: all the rest). */
+typedef struct {
+  int after;
+  int times;
+} DbReadFault;
+
 struct _TestLibraryDb {
   GObject parent;
   GMutex lock;
@@ -655,6 +661,8 @@ struct _TestLibraryDb {
   GHashTable *units;     /* id → BroUnitRecord */
   GHashTable *intents;   /* unit id → BroCommitIntent */
   GHashTable *files;     /* unit id → GPtrArray of BroUnitFile */
+  DbReadFault intent_reads;
+  DbReadFault unit_reads;
 };
 
 static void db_libraries_iface (BroLibraryRepositoryInterface *iface);
@@ -827,11 +835,41 @@ intent_by_age (gconstpointer a, gconstpointer b)
   return strcmp (x->unit_id.value, y->unit_id.value);
 }
 
+/* The lock held. */
+static gboolean
+db_read (DbReadFault *fault, BroBroError **error)
+{
+  BroJsonValue *params;
+  if (fault->after > 0)
+    {
+      fault->after--;
+      return TRUE;
+    }
+  if (fault->times == 0)
+    return TRUE;
+  fault->times--;
+  params = bro_json_value_new_object ();
+  bro_json_value_set (params, "operation", bro_json_value_new_string ("read"));
+  bro_json_value_set (params, "reason", bro_json_value_new_string ("disk I/O error"));
+  if (error)
+    *error = bro_bro_error_new ("store.failed", params, NULL);
+  else
+    bro_json_value_unref (params);
+  return FALSE;
+}
+
 static GPtrArray *
 db_open_intents (BroUnitRepository *repo, BroBroError **error)
 {
   TestLibraryDb *db = TEST_LIBRARY_DB (repo);
-  GPtrArray *all = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_commit_intent_free);
+  GPtrArray *all;
+  gboolean read;
+  g_mutex_lock (&db->lock);
+  read = db_read (&db->intent_reads, error);
+  g_mutex_unlock (&db->lock);
+  if (!read)
+    return NULL;
+  all = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_commit_intent_free);
   GHashTableIter it;
   gpointer value;
   g_mutex_lock (&db->lock);
@@ -847,10 +885,13 @@ static BroUnitRecord *
 db_unit_get (BroUnitRepository *repo, BroId unit_id, BroBroError **error)
 {
   TestLibraryDb *db = TEST_LIBRARY_DB (repo);
-  BroUnitRecord *u;
+  BroUnitRecord *u = NULL;
   g_mutex_lock (&db->lock);
-  u = g_hash_table_lookup (db->units, unit_id.value);
-  u = u ? bro_unit_record_copy (u) : NULL;
+  if (db_read (&db->unit_reads, error))
+    {
+      u = g_hash_table_lookup (db->units, unit_id.value);
+      u = u ? bro_unit_record_copy (u) : NULL;
+    }
   g_mutex_unlock (&db->lock);
   return u;
 }
@@ -1678,6 +1719,8 @@ db_files_json (TestLibraryDb *db)
           bro_json_value_append (row, bro_json_value_new_integer (f->size));
           bro_json_value_append (row, bro_json_value_new_string (f->sha256));
           bro_json_value_append (row, bro_json_value_new_string (f->role));
+          if (f->has_title)
+            bro_json_value_append (row, bro_json_value_new_integer (f->title));
           bro_json_value_append (a, row);
         }
       bro_json_value_set (o, key, a);

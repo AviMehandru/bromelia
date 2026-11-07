@@ -5,9 +5,9 @@ namespace Bromelia.Domain;
 /// <summary>Ready-made profiles.</summary>
 public static class ConfigTemplates
 {
-    /// <summary>Archive everything (today's preset, now a profile any drive can use): a decrypted backup then MKV
-    /// of every title, keeping the backup and the unsplit play-all title, with every archive file. Without an id:
-    /// the caller gives it one when adding it.</summary>
+    /// <summary>Archive everything (a profile any drive can use): a decrypted backup then MKV of every title, keeping
+    /// the backup and the unsplit play-all title, with every archive file. Without an id: the caller gives it one when
+    /// adding it.</summary>
     public static Profile ArchiveEverything() => new(JsonValue.Parse("""
         {"name": "Archive everything",
          "mode": {"default": "backupThenMkv"},

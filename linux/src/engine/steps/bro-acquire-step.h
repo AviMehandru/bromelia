@@ -1,29 +1,25 @@
-/* bro-acquire-step.h: BroAcquireStep: Step 8 (plan §20.1, §12.4): makes what Plan decided in the job's staging folder
- * (bro_library_port_staging_directory), holding the drive, an acquisition slot and the library (LibraryWrite). It names,
- * hashes and moves nothing.
- * - Space: the plan's need is reserved again (reservations don't outlive the engine), less what an earlier attempt kept.
- * - infoOnly: disc-info.json, the listing Probe read (bro_listing_encode; rip.discInfoWritten).
- * - mkv: the plan's titles from the source (and disc-info.json under archive.writeDiscInfo). One makemkvcon run for every
- *   title of the listing ("all"; rip.ripping), or with Plan's one-pass minimum length when a listing read with it holds
- *   exactly the titles (rip.onePassListing, then rip.onePass or rip.onePassMismatch); else title by title
- *   (rip.rippingTitle), hand-picked tracks with +sel:all. A failed title (rip.titleFailed) leaves its files under
- *   MakeMKV's names (rip.keptUnderMakemkvName) and the others are still ripped; the step then fails (rip.failed,
- *   rip.titlesFailed) with the MakeMKV notice that explains it. A run that was stopped (drive.renumbered,
- *   space.makemkvWarning, makemkv.stalled) fails the step with that reason at once.
- * - backup, backupDecrypted: the disc as a folder or an image (profile backup.format), named backup or backup.iso; an
- *   image MakeMKV made for a folder gets .iso (backup.imageForFolder), a folder made for an image loses it
- *   (backup.folderInsteadOfIso); backup.saved, or backup.failed (a stopped run: its reason; a folder without a disc
- *   structure, which counts as nothing produced: backup.checkFailed).
- * - backupThenMkv: a decrypted backup, its structure checked (backup.checkFailed), then the titles from the backup (mapped
- *   from Probe's listing to the backup's), and the backup removed unless backup.keepAfterMkv (backup.removed).
- * Read errors are counted per title (title by title) or per run (report read_errors); Release and Commit act on them. A
- * cancel removes what the stopped run wrote (rip.partialRemoved: makemkvcon leaves an unreadable file, P2-14) unless the
- * process was abandoned after KILL (process.abandoned {tool} is logged for any run whose process was: it may still be
- * writing, and JobService keeps the job's files where they are until a restart). After each title (its files synced) and after a checked backup, a checkpoint holds
- * the disc's fingerprint and what is finished: "backup" once a backup-then-MKV job has its backup (recovery resumes from
- * it by itself, plan §15.8: recovery.resumedFromBackup), else "titles". A later attempt of the step (a retry or a
- * continue) with the same disc keeps those titles (rip.continued) and removes anything else in staging
- * (rip.leftoverRemoved; owner 2026-10-18). Data: BroAcquireOutput. */
+/* bro-acquire-step.h: BroAcquireStep: Step 8 (plan §20.1, §12.4): makes what Plan decided in the job's staging folder,
+ * holding the drive, an acquisition slot and the library. It names, hashes and moves nothing. The plan's need is
+ * reserved again, less what an earlier attempt kept: reservations don't outlive the engine.
+ *
+ * mkv: one run for every title of the listing, or with Plan's one-pass minimum length when a listing read with it holds
+ * exactly the titles; else title by title. A failed title leaves its files under MakeMKV's names, the others are still
+ * ripped, and the step then fails. In a run for all titles a listed file that didn't appear fails its title too:
+ * MakeMKV's counts only say how many files it saved. A file the listing doesn't name goes to others. A stopped run
+ * fails the step at once with its reason.
+ *
+ * backup: the disc as a folder or an image, named backup or backup.iso after what MakeMKV really made (it can make an
+ * image for a folder, or the reverse). A folder without a disc structure counts as nothing produced. backupThenMkv rips
+ * the titles from the checked backup, mapped from Probe's listing to the backup's, then removes it unless
+ * backup.keepAfterMkv.
+ *
+ * Read errors are counted per title or per run; Release and Commit act on them. A cancel removes what the stopped run
+ * wrote, since makemkvcon leaves an unreadable file, unless the process was abandoned after KILL: it may still be
+ * writing, so JobService keeps the job's files where they are until a restart.
+ *
+ * After each title (its files synced) and after a checked backup, a checkpoint holds the disc's fingerprint and what is
+ * finished: "backup" lets recovery resume by itself (plan §15.8), else "titles". A later attempt with the same disc
+ * keeps those and removes anything else in staging. Data: AcquireOutput. */
 #pragma once
 
 #include "bro-step.h"

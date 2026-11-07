@@ -1,4 +1,5 @@
-/* bro-decision-port.h: BroDecisionPort: How a step asks the user, from its worker: the job is awaitingDecision until one of the answers is given. */
+/* bro-decision-port.h: BroDecisionPort: How a step asks the user, from its worker: the job is awaitingDecision until
+ * one of the answers is given. */
 #pragma once
 
 #include "bro-bro-error.h"
@@ -15,7 +16,8 @@ struct _BroDecisionPortInterface {
   char *(*ask) (BroDecisionPort *self, const BroDecisionDto *decision, BroBroError **error);
 };
 
-/* Waits for one of the answers and returns its id (g_free); NULL and @error set (job.cancelled) when the job is cancelled first. */
+/* Waits for one of the answers and returns its id (g_free); NULL and @error set (job.cancelled) when the job is
+ * cancelled first. */
 char *bro_decision_port_ask (BroDecisionPort *self, const BroDecisionDto *decision, BroBroError **error);
 
 G_END_DECLS

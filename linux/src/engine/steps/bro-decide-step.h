@@ -1,10 +1,10 @@
 /* bro-decide-step.h: BroDecideStep: Step 7 (plan §20.1), appended by Plan only when needed. It holds the plan's library
  * for writing, so while that library is offline the Scheduler keeps the job blocked (library.offline) and it goes on by
- * itself when the library is back (owner, 2026-10-18). Then: when the library was offline at Plan, the archive check
- * Plan couldn't make (BroArchiveCheck: skip ends the job, ask asks); an archived disc under
- * automation.alreadyArchived ask: decision.archivedBefore {folder, day}, answers ripAgain (logs disc.archivedBefore),
- * skip and eject (both end the job with disc.alreadyArchivedAsk; Release at the end ejects the disc for eject); the space
- * Plan didn't reserve (BroSpaceCheck). Data: {answer} (null when nothing was asked). */
+ * itself when the library is back. Then: when the library was offline at Plan, the archive check Plan couldn't make
+ * (BroArchiveCheck: skip ends the job, ask asks); an archived disc under automation.alreadyArchived ask:
+ * decision.archivedBefore {folder, day}, answers ripAgain (logs disc.archivedBefore), skip and eject (both end the job
+ * with disc.alreadyArchivedAsk; Release at the end ejects the disc for eject); the space Plan didn't reserve
+ * (BroSpaceCheck). Data: {answer} (null when nothing was asked). */
 #pragma once
 
 #include "bro-step.h"

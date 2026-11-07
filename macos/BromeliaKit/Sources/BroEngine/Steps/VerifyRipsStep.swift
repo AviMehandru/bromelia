@@ -1,13 +1,12 @@
 import BroDomain
 import BroFoundation
 
-/// Step 10 (plan §20.1; today's verify): checks what Acquire made before anything is named, hashed or moved. A kept
-/// backup first (BackupCheck: backup.checkFailed). Then each title's MKV files, in plan order, against Probe's listing
-/// title of the same index (MkvToolNix.probe, then RipCheck.check; ripcheck.checking): its notes as ripcheck.note
-/// warnings, then ripcheck.checked and, with fewer tracks than the disc, ripcheck.trackSubset; a file mkvmerge can't read
-/// (ripcheck.unreadable) or that doesn't match (ripcheck.mismatch) is rip.checkFailed, every title is still checked, and
-/// the step fails with rip.failed or rip.titlesFailed. Without mkvmerge: ripcheck.cannotCheck and no MKV is checked, as
-/// today. Skipped when Acquire left nothing. Data: {checked: [the names that passed]}.
+/// Step 10 (plan §20.1): checks what Acquire made before anything is named, hashed or moved. A kept backup first
+/// (BackupCheck), then each title's MKV files, in plan order, against Probe's listing title of the same index
+/// (MkvToolNix.probe, then RipCheck.check). A file mkvmerge can't read or that doesn't match fails the step, but every
+/// title is still checked. The files no title owns are sealed too, so they come last, with nothing to compare them
+/// with: readable and holding a track. Without mkvmerge no MKV is checked (ripcheck.cannotCheck). Skipped when Acquire
+/// left nothing. Data: {checked: [the names that passed]}.
 public struct VerifyRipsStep: Step {
     public init() {}
 
@@ -28,8 +27,9 @@ public struct VerifyRipsStep: Step {
             }
             passed.append(backup)
         }
-        let files = acquired.titles.flatMap { t in t.files.map { (index: t.index, file: $0) } }
-        var failures: [(title: Int, problem: BroMessage)] = []
+        let files = acquired.titles.flatMap { t in t.files.map { (index: Optional(t.index), file: $0) } }
+            + acquired.others.map { (index: Int?.none, file: $0) }
+        var failures: [(title: Int?, problem: BroMessage)] = []
         for (i, entry) in files.enumerated() {
             let file = entry.file
             context.progress.report(Double(i) / Double(files.count), operation: BroMessage(.ripcheckChecking, [("file", .string(file))]), current: nil)
@@ -51,9 +51,12 @@ public struct VerifyRipsStep: Step {
                 if !result.problems.isEmpty {
                     failure = BroMessage(.ripcheckMismatch, [("file", .string(file)), ("problems", .array(result.problems.map { $0.toJson() }))])
                 }
+            } else if entry.index == nil, let probe, probe.tracks.isEmpty {
+                failure = BroMessage(.ripcheckMismatch, [("file", .string(file)), ("problems", .array([BroMessage(.ripcheckNoTracks).toJson()]))])
             }
             if let failure {
-                context.log.log(BroMessage(.ripCheckFailed, [("title", .integer(Int64(entry.index))), ("problem", failure.toJson())], severity: .error))
+                context.log.log(entry.index.map { BroMessage(.ripCheckFailed, [("title", .integer(Int64($0))), ("problem", failure.toJson())], severity: .error) }
+                    ?? BroMessage(.ripOtherCheckFailed, [("problem", failure.toJson())], severity: .error))
                 failures.append((entry.index, failure))
                 continue
             }
@@ -67,8 +70,9 @@ public struct VerifyRipsStep: Step {
             passed.append(file)
         }
         if failures.isEmpty { return done(passed) }
-        func reason(_ f: (title: Int, problem: BroMessage)) -> JsonValue {
-            BroMessage(.ripTitleReason, [("title", .string(String(f.title))), ("reason", f.problem.toJson())]).toJson()
+        func reason(_ f: (title: Int?, problem: BroMessage)) -> JsonValue {
+            guard let title = f.title else { return f.problem.toJson() }
+            return BroMessage(.ripTitleReason, [("title", .string(String(title))), ("reason", f.problem.toJson())]).toJson()
         }
         return failed(passed, failures.count == 1
             ? BroMessage(.ripFailed, [("reason", reason(failures[0]))], severity: .error)

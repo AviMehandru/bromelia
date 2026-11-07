@@ -275,6 +275,23 @@ public sealed class LibraryServiceTests
         public readonly Dictionary<Id, CommitIntent> Intents = new();
         public readonly SortedDictionary<string, IReadOnlyList<UnitFile>> Files = new(StringComparer.Ordinal);
 
+        /// <summary>Of these reads, after After of them, the next Times fail with store.failed (Times below 0: all the rest).</summary>
+        public (int After, int Times)? IntentReadFault, UnitReadFault;
+
+        void Read(ref (int After, int Times)? fault)
+        {
+            lock (_lock)
+            {
+                if (fault is not { } f) return;
+                if (f.After > 0) fault = (f.After - 1, f.Times);
+                else if (f.Times != 0)
+                {
+                    fault = (0, f.Times - 1);
+                    throw new BroFailure(new BroError("store.failed", ("operation", JsonValue.Of("read")), ("reason", JsonValue.Of("disk I/O error"))));
+                }
+            }
+        }
+
         public Task<IReadOnlyList<LibraryRecord>> All()
         {
             lock (_lock) return Task.FromResult<IReadOnlyList<LibraryRecord>>(Libraries.Values.ToList());
@@ -333,6 +350,7 @@ public sealed class LibraryServiceTests
 
         public Task<IReadOnlyList<CommitIntent>> OpenIntents()
         {
+            Read(ref IntentReadFault);
             lock (_lock)
                 return Task.FromResult<IReadOnlyList<CommitIntent>>(Intents.Values.OrderBy(i => i.CreatedAt.UnixMilliseconds)
                     .ThenBy(i => i.UnitId.Value, StringComparer.Ordinal).ToList());
@@ -340,6 +358,7 @@ public sealed class LibraryServiceTests
 
         Task<UnitRecord?> IUnitRepository.Get(Id unitId)
         {
+            Read(ref UnitReadFault);
             lock (_lock) return Task.FromResult(Units.GetValueOrDefault(unitId.Value));
         }
 
@@ -392,7 +411,8 @@ public sealed class LibraryServiceTests
     static Lease Granted(Task<Lease> lease) => lease.Result;
 
     static JsonValue FileRows(IEnumerable<UnitFile> files) => JsonValue.Of(files.Select(f =>
-        JsonValue.Of(new[] { JsonValue.Of(f.Path), JsonValue.Of(f.Size), JsonValue.Of(f.Sha256), JsonValue.Of(f.Role) })));
+        JsonValue.Of(new[] { JsonValue.Of(f.Path), JsonValue.Of(f.Size), JsonValue.Of(f.Sha256), JsonValue.Of(f.Role) }
+            .Concat(f.Title is { } title ? new[] { JsonValue.Of(title) } : Array.Empty<JsonValue>()))));
 
     static JsonValue ResultJson(CommitResult r) => JsonValue.Of(("unitId", JsonValue.Of(r.UnitId.Value)), ("destination", JsonValue.Of(r.Destination)),
         ("files", JsonValue.Of(r.Files.Select(f => f.Path).OrderBy(p => p, StringComparer.Ordinal).Select(JsonValue.Of))), ("merged", JsonValue.Of(r.Merged)));

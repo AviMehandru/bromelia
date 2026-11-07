@@ -8,13 +8,12 @@ using Bromelia.Foundation;
 
 namespace Bromelia.Engine;
 
-/// <summary>Step 10 (plan §20.1; today's verify): checks what Acquire made before anything is named, hashed or moved. A
-/// kept backup first (BackupCheck: backup.checkFailed). Then each title's MKV files, in plan order, against Probe's
-/// listing title of the same index (MkvToolNix.probe, then RipCheck.check; ripcheck.checking): its notes as
-/// ripcheck.note warnings, then ripcheck.checked and, with fewer tracks than the disc, ripcheck.trackSubset; a file
-/// mkvmerge can't read (ripcheck.unreadable) or that doesn't match (ripcheck.mismatch) is rip.checkFailed, every title
-/// is still checked, and the step fails with rip.failed or rip.titlesFailed. Without mkvmerge: ripcheck.cannotCheck and
-/// no MKV is checked, as today. Skipped when Acquire left nothing. Data: {checked: [the names that passed]}.</summary>
+/// <summary>Step 10 (plan §20.1): checks what Acquire made before anything is named, hashed or moved. A kept backup
+/// first (BackupCheck), then each title's MKV files, in plan order, against Probe's listing title of the same index
+/// (MkvToolNix.probe, then RipCheck.check). A file mkvmerge can't read or that doesn't match fails the step, but every
+/// title is still checked. The files no title owns are sealed too, so they come last, with nothing to compare them
+/// with: readable and holding a track. Without mkvmerge no MKV is checked (ripcheck.cannotCheck). Skipped when Acquire
+/// left nothing. Data: {checked: [the names that passed]}.</summary>
 public sealed class VerifyRipsStep : IStep
 {
     public StepKind Kind => StepKind.VerifyRips;
@@ -36,8 +35,9 @@ public sealed class VerifyRipsStep : IStep
                 return Failed(passed, new BroMessage(MessageCode.BackupCheckFailed, Severity.Error, ("problem", problem.ToJson())));
             passed.Add(backup);
         }
-        var files = acquired.Titles.SelectMany(t => t.Files.Select(f => (t.Index, File: f))).ToList();
-        var failures = new List<(int Title, BroMessage Problem)>();
+        var files = acquired.Titles.SelectMany(t => t.Files.Select(f => ((int?)t.Index, File: f)))
+            .Concat(acquired.Others.Select(f => ((int?)null, File: f))).ToList();
+        var failures = new List<(int? Title, BroMessage Problem)>();
         for (int i = 0; i < files.Count; i++)
         {
             var (index, file) = files[i];
@@ -64,9 +64,14 @@ public sealed class VerifyRipsStep : IStep
                     failure = new BroMessage(MessageCode.RipcheckMismatch, Severity.Info, ("file", JsonValue.Of(file)),
                         ("problems", JsonValue.Of(result.Problems.Select(p => p.ToJson()))));
             }
+            else if (index == null && probe.Tracks.Count == 0)
+                failure = new BroMessage(MessageCode.RipcheckMismatch, Severity.Info, ("file", JsonValue.Of(file)),
+                    ("problems", JsonValue.Of(new[] { new BroMessage(MessageCode.RipcheckNoTracks).ToJson() })));
             if (failure != null)
             {
-                context.Log.Log(new BroMessage(MessageCode.RipCheckFailed, Severity.Error, ("title", JsonValue.Of(index)), ("problem", failure.ToJson())));
+                context.Log.Log(index is { } owner
+                    ? new BroMessage(MessageCode.RipCheckFailed, Severity.Error, ("title", JsonValue.Of(owner)), ("problem", failure.ToJson()))
+                    : new BroMessage(MessageCode.RipOtherCheckFailed, Severity.Error, ("problem", failure.ToJson())));
                 failures.Add((index, failure));
                 continue;
             }
@@ -79,8 +84,10 @@ public sealed class VerifyRipsStep : IStep
             passed.Add(file);
         }
         if (failures.Count == 0) return Done(passed);
-        JsonValue Reason((int Title, BroMessage Problem) f) => new BroMessage(MessageCode.RipTitleReason, Severity.Info,
-            ("title", JsonValue.Of(f.Title.ToString(CultureInfo.InvariantCulture))), ("reason", f.Problem.ToJson())).ToJson();
+        JsonValue Reason((int? Title, BroMessage Problem) f) => f.Title is { } t
+            ? new BroMessage(MessageCode.RipTitleReason, Severity.Info, ("title", JsonValue.Of(t.ToString(CultureInfo.InvariantCulture))),
+                ("reason", f.Problem.ToJson())).ToJson()
+            : f.Problem.ToJson();
         return Failed(passed, failures.Count == 1
             ? new BroMessage(MessageCode.RipFailed, Severity.Error, ("reason", Reason(failures[0])))
             : new BroMessage(MessageCode.RipTitlesFailed, Severity.Error, ("count", JsonValue.Of(failures.Count)),

@@ -1,9 +1,8 @@
 import BroDomain
 import BroFoundation
 
-/// The three queues, the resources steps ask for, and space reservations (plan §21), on the executor. Replaces
-/// today's queue pump (one running job per drive lane, maxConcurrentJobs) and the background queue
-/// (backgroundJobs at once). shared/fixtures/engine/scheduler.cases.json.
+/// The three queues, the resources steps ask for, and space reservations (plan §21), on the executor.
+/// shared/fixtures/engine/scheduler.cases.json.
 ///
 /// - A drive has room for one job, and a job keeps a drive it was given until `releaseDrives` or `finish`; a step's
 ///   other resources go back on `release`.

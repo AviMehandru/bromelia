@@ -81,6 +81,11 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository, IUn
         get { lock (_lock) return _heldLoads.Count; }
     }
 
+    /// <summary>Reads of these jobs' records and step rows fail with store.failed.</summary>
+    public readonly HashSet<Id> FailJobLoads = new(), FailStepLoads = new();
+
+    static BroFailure ReadFailed() => new(new BroError("store.failed", ("operation", JsonValue.Of("read")), ("reason", JsonValue.Of("disk I/O error"))));
+
     Task IJobRepository.Insert(JobRecord job)
     {
         lock (_lock)
@@ -106,12 +111,15 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository, IUn
     {
         Task? held = null;
         lock (_lock)
+        {
+            if (FailJobLoads.Contains(jobId)) throw ReadFailed();
             if (_holdLoads.Contains(jobId))
             {
                 var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 _heldLoads.Add(done);
                 held = done.Task;
             }
+        }
         if (held != null) await held;
         lock (_lock) return _jobs.GetValueOrDefault(jobId);
     }
@@ -157,6 +165,7 @@ internal sealed class MemoryStore : IStore, IJobRepository, IStepRepository, IUn
 
     Task<IReadOnlyList<StepRecord>> IStepRepository.Load(Id jobId)
     {
+        if (FailStepLoads.Contains(jobId)) throw ReadFailed();
         lock (_lock) return Task.FromResult<IReadOnlyList<StepRecord>>(_steps.Values.Where(s => s.JobId == jobId).OrderBy(s => s.Seq).ToList());
     }
 

@@ -10,13 +10,12 @@ using Bromelia.Ports;
 namespace Bromelia.Engine;
 
 /// <summary>
-/// Runs once at startup, before the libraries start (plan §11.1, §15.1, §20.4, §15.8; review L3-3, L3-9). It sorts out
-/// the jobs the last engine left unfinished by where each stopped and what its step can do after a stop (its
-/// Resumability), rolls open commit intents forward, sets aside staging folders no job will continue (a failed or cancelled
-/// job's with its logs: owner, 2026-10-25), and removes the temporary files a stopped write leaves. Library work runs on a
-/// worker per library and may take at most 30 s of the startup: a share that doesn't answer can't keep the engine from
-/// starting, and its work goes on.
-/// shared/fixtures/engine/recovery-service.cases.json.
+/// Runs once at startup, before the libraries start (plan §11.1, §15.1, §20.4, §15.8). It sorts out the jobs the last
+/// engine left unfinished by where each stopped and what its step can do after a stop (its Resumability), rolls open
+/// commit intents forward, sets aside staging folders no job will continue (a failed or cancelled job's with its logs),
+/// and removes the temporary files a stopped write leaves. Library work runs on a worker per library and may take at
+/// most 30 s of the startup: a share that doesn't answer can't keep the engine from starting, and its work goes on, but
+/// no longer on what a live job may be using. shared/fixtures/engine/recovery-service.cases.json.
 /// </summary>
 public sealed class RecoveryService
 {
@@ -35,6 +34,9 @@ public sealed class RecoveryService
     readonly IMessageRenderer _renderer;
     readonly string _data;
     readonly object _logLock = new();
+
+    /// <summary>Recover stopped waiting for its libraries, so jobs may be live.</summary>
+    volatile bool _late;
 
     /// <param name="dataDirectory">The engine's data folder: a job's folder is &lt;data&gt;/jobs/&lt;id&gt;.</param>
     public RecoveryService(EngineExecutor executor, EventBus bus, ProblemService problems, IStore store, StepRegistry registry,
@@ -55,7 +57,8 @@ public sealed class RecoveryService
         _data = dataDirectory;
     }
 
-    /// <summary>On the executor. recovery.summary{count} when the last engine left jobs unfinished; null otherwise.</summary>
+    /// <summary>On the executor. recovery.summary{count} when the last engine left jobs unfinished; null
+    /// otherwise.</summary>
     public async Task<BroMessage?> Recover()
     {
         var jobs = await _executor.Worker(() => _store.Jobs().Active());
@@ -81,13 +84,17 @@ public sealed class RecoveryService
         {
             if (--pending == 0) finished.TrySetResult();
         }
-        async void Track(Task work) // a failure that isn't a BroFailure is a bug, and reaches the executor's handler
+        async void Track(Task work) // Tidy and RemoveLeftovers catch their own BroFailures; anything else is a bug and reaches the executor's handler
         {
             try { await work; }
             finally { OneDone(); }
         }
         var timer = _clock.Timer(new TimerSchedule.At(new Instant(_clock.Now().UnixMilliseconds + (long)(Patience.Seconds * 1000))),
-            () => finished.TrySetResult());
+            () =>
+            {
+                _late = true;
+                finished.TrySetResult();
+            });
         foreach (var l in libraries) Track(Tidy(l.Id, l.Path, unfinished));
         Track(RemoveLeftovers(_data, recursive: true));
         await finished.Task; // what is still out goes on by itself
@@ -143,8 +150,8 @@ public sealed class RecoveryService
             return true;
         }
 
-        // Before Acquire. A media generation doesn't outlive the engine (owner, 2026-10-14): an automatic job can't know
-        // its disc is still there (the new run's insert starts a fresh job), and a manual one reads the drive again.
+        // Before Acquire. A media generation doesn't outlive the engine: an automatic job can't know its disc is still
+        // there (the new run's insert starts a fresh job), and a manual one reads the drive again.
         if (job.Request.DriveId != null && job.Request.Automatic)
         {
             if (started) await SaveStep(row! with { State = StepState.Interrupted });
@@ -162,13 +169,13 @@ public sealed class RecoveryService
         return true;
     }
 
-    /// <summary>A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose
-    /// commit a roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 to
-    /// 2026-11-05, F9's rule): JobOutcome.decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors
-    /// after a Commit, cancelled after a KeepApart. That step is the first row not done. In a cancelled job a Commit row counts
-    /// in any state, as however it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after
-    /// a retry, running after a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending or
-    /// running one keeps its outcome. Its finishedAt, step rows and log stay as they were.</summary>
+    /// <summary>A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step
+    /// unfinished, whose commit a roll forward has just finished, gets the outcome that step gives when it succeeds:
+    /// JobOutcome.decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a Commit,
+    /// cancelled after a KeepApart. That step is the first row not done. In a cancelled job a Commit row counts in any
+    /// state, as however it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending
+    /// after a retry, running after a crash. In a failed job the row must be failed or cancelled: the step ended there,
+    /// and a pending or running one keeps its outcome. Its finishedAt, step rows and log stay as they were.</summary>
     async Task Committed(Id jobId)
     {
         var job = await _executor.Worker(() => _store.Jobs().Load(jobId));
@@ -217,12 +224,31 @@ public sealed class RecoveryService
         });
     }
 
+    /// <summary>For a line about work that is already done or kept: the line can be lost, the work's result can't.</summary>
+    async Task LogIfPossible(Id jobId, BroMessage message)
+    {
+        try { await Log(jobId, message); }
+        catch (BroFailure) { }
+    }
+
     // ---- libraries and files -------------------------------------------------------------------------------
 
-    /// <summary>One library: its open intents rolled forward (a job that failed in that commit, or was cancelled with it
-    /// unfinished, then gets the outcome it gives), then its staging folders tidied and the ones no job will continue set
-    /// aside. An offline library is left alone (I2). On the executor; the file and store work on workers.</summary>
+    /// <summary>One library: its open intents rolled forward (a job that failed in that commit, or was cancelled with
+    /// it unfinished, then gets the outcome it gives), then its staging folders tidied and the ones no job will
+    /// continue set aside. An offline library is left alone, and so is the staging of one whose store reads fail: a
+    /// read that fails can't say what is open or whose a folder is, and the next start tries again. On the executor;
+    /// the file and store work on workers.</summary>
     async Task Tidy(string libraryId, string root, IReadOnlySet<string> unfinished)
+    {
+        try
+        {
+            await RollForwards(libraryId);
+            await SetAsides(libraryId, root, unfinished);
+        }
+        catch (BroFailure) { }
+    }
+
+    async Task RollForwards(string libraryId)
     {
         foreach (var intent in await _executor.Worker(() => _store.Units().OpenIntents()))
         {
@@ -231,50 +257,54 @@ public sealed class RecoveryService
             try
             {
                 if (await _library.RollForward(intent) == null) continue; // the job's Commit finished it meanwhile
-                await Log(intent.JobId, new BroMessage(MessageCode.CommitRolledForward, Severity.Warning, ("unit", JsonValue.Of(intent.UnitId.Value))));
+                await LogIfPossible(intent.JobId, new BroMessage(MessageCode.CommitRolledForward, Severity.Warning, ("unit", JsonValue.Of(intent.UnitId.Value))));
                 await Committed(intent.JobId);
                 await RemoveLeftovers(intent.Destination, recursive: false);
             }
             catch (BroFailure f)
             {
-                // A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A job
-                // whose new outcome couldn't be stored keeps its old one with this line in its log; a retry from Commit finds the
-                // unit committed.
-                await Log(intent.JobId, new BroMessage(MessageCode.Parse(f.Error.Code) ?? MessageCode.InternalUnexpected, f.Error.Params, Severity.Warning));
+                // A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs
+                // again. A job whose new outcome couldn't be stored keeps its old one with this line in its log; a
+                // retry from Commit finds the unit committed.
+                await LogIfPossible(intent.JobId, new BroMessage(MessageCode.Parse(f.Error.Code) ?? MessageCode.InternalUnexpected, f.Error.Params, Severity.Warning));
             }
         }
-        var committing = (await _executor.Worker(() => _store.Units().OpenIntents())).Select(i => i.Staging).ToHashSet(StringComparer.Ordinal);
-        IReadOnlyList<string> folders;
-        try { folders = await _library.StagingFolders(libraryId); }
-        catch (BroFailure) { return; }
-        foreach (var folder in folders)
+    }
+
+    async Task SetAsides(string libraryId, string root, IReadOnlySet<string> unfinished)
+    {
+        // By job, not by staging path: an intent's paths are absolute, and the library's root may have moved since.
+        var committing = (await _executor.Worker(() => _store.Units().OpenIntents())).Select(i => i.JobId.Value).ToHashSet(StringComparer.Ordinal);
+        foreach (var folder in await _library.StagingFolders(libraryId))
         {
             var path = root + "/.bromelia/staging/" + folder;
-            await RemoveLeftovers(path, recursive: true);
-            if (unfinished.Contains(folder) || committing.Contains(path)) continue;
+            // Read after the listing, and a job's row is stored before its folder is made: no row means no job.
             var job = await _executor.Worker(() => _store.Jobs().Load(new Id(folder)));
-            if (job?.Outcome == Outcome.Interrupted) continue; // kept so it can be continued (owner, 2026-10-03)
-            var copies = job == null ? new List<(string, byte[])>() : await Logs(job);
+            var rows = job == null ? Array.Empty<StepRecord>() : await _executor.Worker(() => _store.Steps().Load(job.Id));
+            await RemoveLeftovers(path, recursive: true);
+            if (unfinished.Contains(folder) || committing.Contains(folder)) continue;
+            if (job?.Outcome == Outcome.Interrupted) continue; // kept so it can be continued
+            var copies = job == null ? new List<(string, byte[])>() : await Logs(job, rows);
             var lines = Notes.Render(new Id(folder), job?.Outcome ?? Outcome.Interrupted, job?.Error, Array.Empty<RobotMessage>(),
                 copies.Select(c => c.Item1).ToList(), job == null ? null : JobDirectory(job.Id) + "/" + JobLog.FileName);
             var note = Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => _renderer.Render(l) + "\n")));
-            var name = job == null ? folder : await _executor.Worker(async () => KeepApartStep.FolderName(new JobSnapshot(job.Id, job.Request, job.Plan,
-                (await _store.Steps().Load(job.Id)).Where(r => r.State == StepState.Succeeded && r.Output != null).OrderBy(r => r.Seq)
-                .Select(r => r.Output!).ToList())));
+            var name = job == null ? folder : KeepApartStep.FolderName(new JobSnapshot(job.Id, job.Request, job.Plan,
+                rows.Where(r => r.State == StepState.Succeeded && r.Output != null).OrderBy(r => r.Seq).Select(r => r.Output!).ToList()));
+            if (job != null && _late) continue; // live, or live after a retry at any moment; the next start sees
             try { await _library.SetAside(libraryId, folder, name, note, copies); }
             catch (BroFailure) { } // left hidden in staging; the next start tries again
         }
     }
 
-    /// <summary>The job's logs as Seal copies them (SealStep.copyLogs: its log as text, MakeMKV's transcripts, each when the
-    /// job folder has it; none when its Plan's profile has archive.archiveRecord false), by name; on a worker. When they
-    /// can't be read, the files are set aside without them.</summary>
-    Task<List<(string, byte[])>> Logs(JobRecord job) => _executor.Worker(async () =>
+    /// <summary>The job's logs as Seal copies them (SealStep.copyLogs: its log as text, MakeMKV's transcripts, each
+    /// when the job folder has it; none when its Plan's profile, in <paramref name="rows"/>, has archive.archiveRecord
+    /// false), by name; on a worker. When they can't be read, the files are set aside without them.</summary>
+    Task<List<(string, byte[])>> Logs(JobRecord job, IReadOnlyList<StepRecord> rows) => _executor.Worker(() =>
     {
         var copies = new List<(string, byte[])>();
         try
         {
-            var plan = (await _store.Steps().Load(job.Id)).LastOrDefault(r => r.Kind == StepKind.Plan && r.State == StepState.Succeeded)?.Output
+            var plan = rows.LastOrDefault(r => r.Kind == StepKind.Plan && r.State == StepState.Succeeded)?.Output
                 is { Data: JsonValue.Object data } ? PlanOutput.Decode(data) : null;
             bool copy = plan?.Profile["archive"]?["archiveRecord"]?.AsBool ?? true;
             SealStep.CopyLogs(_fs, JobDirectory(job.Id), _renderer, ArchiveFiles.UnitId(job.Id).Value[..8], copy, (name, bytes) => copies.Add((name, bytes)));
@@ -293,13 +323,16 @@ public sealed class RecoveryService
     });
 
     /// <summary>Removes what a stopped write leaves (ArchiveFiles.isLeftover) from the folder, and its subfolders when
-    /// <paramref name="recursive"/>.</summary>
+    /// <paramref name="recursive"/>. A listing that answers once jobs may be live can't tell that from what they are
+    /// writing, so nothing it gives goes; one that answered before that can only name leftovers.</summary>
     void RemoveLeftoversNow(string folder, bool recursive)
     {
         try
         {
             if (!_fs.Exists(folder)) return;
-            foreach (var e in _fs.List(folder).OrderBy(e => e.Name, StringComparer.Ordinal))
+            var entries = _fs.List(folder);
+            if (_late) return;
+            foreach (var e in entries.OrderBy(e => e.Name, StringComparer.Ordinal))
             {
                 var path = folder + "/" + e.Name;
                 if (e.IsDirectory)

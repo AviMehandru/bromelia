@@ -5,13 +5,13 @@ import BroPorts
 /// The archive record SealStep writes (bromelia-<unit8>.json, shared/schema/archive-record-3.json), from what the job's
 /// steps found. Messages are kept as codes with parameters and as text in the configured language.
 public enum SealRecord {
-    /// A version 3 record. status: `status` when given (KeepApartStep's incomplete), else errors when MakeMKV reported read
-    /// errors, else success. disc: the listing Probe read and
-    /// the identity Plan resolved (Name's when it corrected it). acquisition: the mode, "Backup" for a backup else "Rip", the job's source as the request
-    /// gives it (drive:<id>, iso:<path>, folder:<path>, file:<path>), the drive, the profile, MakeMKV's version line and the
-    /// app's. titles: each title Acquire ripped that the listing has, with its read errors. files: `files`, as SHA256SUMS
-    /// lists them. attempts: this job's. counts: the warnings and errors in the job's log (`log`). problems: each read error
-    /// (makemkv.message), then rip.readErrors. logs: the log files copied into the folder.
+    /// A version 3 record. status: `status` when given (KeepApartStep's incomplete), else errors when MakeMKV reported
+    /// read errors, else success. disc: the listing Probe read and the identity Plan resolved (Name's when it corrected
+    /// it). acquisition: the mode, "Backup" for a backup else "Rip", the job's source as the request gives it
+    /// (drive:<id>, iso:<path>, folder:<path>, file:<path>), the drive, the profile, MakeMKV's version line and the
+    /// app's. titles: each title Acquire ripped that the listing has, with its read errors. files: `files`, as
+    /// SHA256SUMS lists them. attempts: this job's. counts: the warnings and errors in the job's log (`log`). problems:
+    /// each read error (makemkv.message), then rip.readErrors. logs: the log files copied into the folder.
     public static func build(_ job: JobSnapshot, plan: PlanOutput, acquired: AcquireOutput, unitId: Id, files: [UnitFile], log: [LogLineDto],
                              logs: [String], finishedAt: Instant, appVersion: String, messages: any MessageRenderer,
                              status: String? = nil) -> JsonValue {

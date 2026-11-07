@@ -236,56 +236,45 @@ public sealed class PlatformFileSystem : IFileSystem
 
     sealed class CachedStream : IByteStream
     {
+        readonly string _path;
         readonly FileStream _f;
-        public CachedStream(string path) { _f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan); }
 
-        public byte[] Read(int maxBytes)
+        public CachedStream(string path)
+        {
+            _path = path;
+            _f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+        }
+
+        public byte[] Read(int maxBytes) => Guard("read", _path, () =>
         {
             var buffer = new byte[maxBytes];
             int n = _f.Read(buffer, 0, maxBytes);
             return n == maxBytes ? buffer : buffer[..n];
-        }
+        });
 
         public void Close() => _f.Dispose();
     }
 
-    /// <summary>FILE_FLAG_NO_BUFFERING: every read is a multiple of the sector size into an aligned buffer, served
-    /// to the caller from there.</summary>
-    sealed unsafe class UncachedStream : IByteStream
+    /// <summary>FILE_FLAG_NO_BUFFERING, through <see cref="AlignedReader"/>.</summary>
+    sealed class UncachedStream : IByteStream
     {
-        const int Chunk = 1 << 20; // a multiple of every sector size
+        readonly string _path;
         readonly SafeFileHandle _h;
-        readonly byte* _buffer;
-        long _offset;
-        int _start, _end;
-        bool _eof;
+        readonly AlignedReader _reader;
 
         public UncachedStream(string path)
         {
+            _path = path;
             _h = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read, (FileOptions)Native.FILE_FLAG_NO_BUFFERING);
-            _buffer = (byte*)NativeMemory.AlignedAlloc(Chunk, 4096);
+            _reader = new AlignedReader((buffer, offset) => RandomAccess.Read(_h, buffer, offset));
         }
 
-        public byte[] Read(int maxBytes)
-        {
-            if (_start == _end && !_eof)
-            {
-                int n = RandomAccess.Read(_h, new Span<byte>(_buffer, Chunk), _offset);
-                _offset += n;
-                _start = 0;
-                _end = n;
-                _eof = n < Chunk;
-            }
-            int take = Math.Min(maxBytes, _end - _start);
-            var result = new ReadOnlySpan<byte>(_buffer + _start, take).ToArray();
-            _start += take;
-            return result;
-        }
+        public byte[] Read(int maxBytes) => Guard("read", _path, () => _reader.Read(maxBytes));
 
         public void Close()
         {
             _h.Dispose();
-            NativeMemory.AlignedFree(_buffer);
+            _reader.Dispose();
         }
     }
 

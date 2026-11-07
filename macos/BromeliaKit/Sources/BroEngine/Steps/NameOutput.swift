@@ -1,11 +1,11 @@
 import BroDomain
 import BroFoundation
 
-/// What NameStep decided (session F fills it; Seal reads it): the unit's folder relative to the library root
-/// (Layouts.paths, ConflictNamer), its name (a quarantined unit goes to _Quarantine/<name> [<tag>]), whether the folder
-/// is shared (a media server layout: the commit merges item by item), every produced item by the name Name gave it in
-/// staging, and the identity when Name corrected it (the format a backup showed; nil: Plan's stands, and the key is left
-/// out). Name renames inside staging, so staging is laid out as the unit's folder will be.
+/// What NameStep decided (Seal reads it): the unit's folder relative to the library root (Layouts.paths,
+/// ConflictNamer), its name (a quarantined unit goes to _Quarantine/<name> [<tag>]), whether the folder is shared (a
+/// media server layout: the commit merges item by item), every produced item by the name Name gave it in staging, and
+/// the identity when Name corrected it (the format a backup showed; nil: Plan's stands, and the key is left out). Name
+/// renames inside staging, so staging is laid out as the unit's folder will be.
 public struct NameOutput: Sendable, Equatable {
     public var folder: String
     public var name: String

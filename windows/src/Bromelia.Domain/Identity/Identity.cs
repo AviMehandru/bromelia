@@ -39,7 +39,8 @@ public sealed record Identity(string Name, MediaKind Kind, DiscFormat Format, Fo
         return new Identity(name, decision.Value, format, FormatDetector.Code(format, inputs.Encrypted), inputs.Encrypted, label, decision.Reason);
     }
 
-    /// <summary>The identity as JSON (dtos.json's Identity); the label's set is <see cref="LabelParser.SetDescription"/>.</summary>
+    /// <summary>The identity as JSON (dtos.json's Identity); the label's set is <see
+    /// cref="LabelParser.SetDescription"/>.</summary>
     public static JsonValue Encode(Identity identity)
     {
         var l = identity.Label;

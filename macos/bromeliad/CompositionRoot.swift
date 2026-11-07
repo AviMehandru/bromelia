@@ -5,9 +5,9 @@ import BroFoundation
 import BroPorts
 import Foundation
 
-/// Builds the real object graph (plan §17, decision 175): ports → adapters → services → LocalEngine; nothing else
-/// constructs adapters or services. TestCompositionRoot (SharedScenarioTests) builds the same graph over fakes. Nothing
-/// runs until LocalEngine.start; LocalEngine closes the store once it has stopped.
+/// Builds the real object graph (plan §17): ports → adapters → services → LocalEngine; nothing else constructs adapters
+/// or services. TestCompositionRoot (SharedScenarioTests) builds the same graph over fakes. Nothing runs until
+/// LocalEngine.start; LocalEngine closes the store once it has stopped.
 public enum CompositionRoot {
     /// The app version, until the release workflow (phase 6) stamps one.
     public static let appVersion = "1.0.0"
@@ -45,7 +45,7 @@ public enum CompositionRoot {
         let renderer = MessageTextRenderer(EnglishMessages.catalog)
         let log = FileEngineLog(fs: fs, clock: clock, path: data + "/logs/engine.log")
 
-        // No unexpected handler: Swift's executor actions can't throw (decision 204).
+        // No unexpected handler: Swift's executor actions can't throw.
         let executor = EngineExecutor()
         let bus = EventBus(clock: clock)
         let engineClock = EngineClock(clock: clock, executor: executor)
@@ -58,7 +58,7 @@ public enum CompositionRoot {
                                        fs: fs, libraries: store.libraries(), units: store.units(), catalog: store.catalog())
         let drives = DriveService(executor: executor, bus: bus, problems: problems, config: config, clock: engineClock, monitor: monitor,
                                   control: control, makemkv: makemkv, repository: store.drives())
-        // Today's paths (Bromelia.Core MakeMKV.cs): MakeMKV's folder and the settings.conf that holds its key.
+        // MakeMKV's folder and the settings.conf that holds its key.
         let makemkvFolder = options.home + "/Library/MakeMKV"
         let makemkvSetup = MakemkvService(fs: fs, config: config, dataDir: makemkvFolder, userSettings: makemkvFolder + "/settings.conf",
                                           home: options.home)

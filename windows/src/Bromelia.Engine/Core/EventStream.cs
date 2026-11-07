@@ -98,7 +98,8 @@ public sealed class EventStream
         }
     }
 
-    /// <summary>Ends the stream, from any thread: what was queued is dropped, the bus forgets it, Next returns null.</summary>
+    /// <summary>Ends the stream, from any thread: what was queued is dropped, the bus forgets it, Next returns
+    /// null.</summary>
     public void Close()
     {
         lock (_lock)

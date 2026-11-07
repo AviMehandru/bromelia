@@ -80,7 +80,7 @@ public struct ListingBuilder: Sendable {
 
     private static func kindOf(_ type: String?) -> TrackKind {
         guard let type else { return .unknown }
-        switch MessageCatalog.asciiLower(type) {
+        switch asciiLower(type) {
         case "video": return .video
         case "audio": return .audio
         case "subtitles", "subtitle": return .subtitle
@@ -90,7 +90,7 @@ public struct ListingBuilder: Sendable {
     }
 
     private static func typeOf(_ typeText: String) -> DiscType {
-        let t = MessageCatalog.asciiLower(typeText)
+        let t = asciiLower(typeText)
         if t.contains("blu") { return .bd }
         if t.contains("hd") { return .hddvd }
         if t.contains("dvd") { return .dvd }

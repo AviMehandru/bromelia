@@ -1,7 +1,8 @@
+import BroFoundation
 import CryptoKit
 import Foundation
 
-/// SHA256SUMS, in the format `sha256sum -c` and `shasum -a 256 -c` read (I4).
+/// SHA256SUMS, in the format `sha256sum -c` and `shasum -a 256 -c` read.
 public enum Sha256Sums {
     public static let fileName = "SHA256SUMS"
 
@@ -9,8 +10,8 @@ public enum Sha256Sums {
 
     /// "hash  path" or "hash *path" lines; others are skipped. Hashes come back in lower case.
     public static func parse(_ text: String) -> [SumEntry] {
-        text.split(separator: "\n", omittingEmptySubsequences: false).compactMap { raw in
-            var l = String(raw)
+        lines(of: text).compactMap { raw in
+            var l = raw
             if l.hasSuffix("\r") { l.removeLast() }
             guard let m = line.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)),
                   let h = Range(m.range(at: 1), in: l), let p = Range(m.range(at: 2), in: l) else { return nil }
@@ -24,19 +25,27 @@ public enum Sha256Sums {
     }
 
     /// The entries of `existing` (an earlier job's in the same folder) and `entries`; a path in both takes the new
-    /// hash.
-    public static func merge(_ existing: String, entries: [SumEntry]) -> String {
-        var merged: [String: String] = [:]
-        for e in parse(existing) { merged[e.path] = e.sha256 }
-        for e in entries { merged[e.path] = e.sha256 }
-        return render(merged.map { SumEntry(path: $0.key, sha256: $0.value) })
+    /// hash. Paths are the same only byte for byte: String's == is canonical, and two spellings can be two files. The file
+    /// is rewritten from this, so a line that can't be read follows the entries as it is, byte for byte: it isn't
+    /// Bromelia's to drop or to repair.
+    public static func merge(_ existing: [UInt8], entries: [SumEntry]) -> [UInt8] {
+        var merged: [[UInt8]: SumEntry] = [:]
+        var unread: [UInt8] = []
+        for var line in existing.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true) {
+            if line.last == UInt8(ascii: "\r") { line.removeLast() }
+            if line.isEmpty { continue }
+            if let text = String(bytes: line, encoding: .utf8), let e = parse(text).first {
+                merged[Array(e.path.utf8)] = e
+            } else {
+                unread += line + [UInt8(ascii: "\n")]
+            }
+        }
+        for e in entries { merged[Array(e.path.utf8)] = e }
+        return Array(render(Array(merged.values)).utf8) + unread
     }
 
     /// SHA-256 of bytes in memory, lower-case hex (a file is hashed as a stream with `Sha256Hasher`).
     public static func hash(_ bytes: [UInt8]) -> String {
-        SHA256.hash(data: bytes).map { b in
-            let h = String(b, radix: 16)
-            return h.count == 1 ? "0" + h : h
-        }.joined()
+        hex(SHA256.hash(data: bytes))
     }
 }

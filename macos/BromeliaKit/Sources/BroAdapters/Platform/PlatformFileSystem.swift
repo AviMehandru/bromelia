@@ -4,11 +4,11 @@ import BroPorts
 import Darwin
 import Foundation
 
-/// The FileSystem port on macOS (plan §9, §10.3; shared/fixtures/adapters/file-system.cases.json): writes are
-/// flushed with F_FULLFSYNC (the file, then its folder), renames never replace (renamex_np with RENAME_EXCL) except
+/// The FileSystem port on macOS (plan §9, §10.3; shared/fixtures/adapters/file-system.cases.json): writes are flushed
+/// with F_FULLFSYNC (the file, then its folder), renames never replace (renamex_np with RENAME_EXCL) except
 /// writeAtomically's, a missing parent is created only when asked, uncached reads use F_NOCACHE, and the volume comes
-/// from statfs. A file system without RENAME_EXCL (an SMB share) gets the Linux fallback: link + unlink for a file,
-/// else a rename only after checking nothing is there.
+/// from statfs. A file system without RENAME_EXCL (an SMB share) gets a fallback: link + unlink for a file, else a
+/// rename only after checking nothing is there.
 public final class PlatformFileSystem: FileSystem {
     public init() {}
 
@@ -162,7 +162,7 @@ public final class PlatformFileSystem: FileSystem {
         for e in entries {
             let src = source + "/" + e.name
             let existing = try list(target)
-            let same = existing.first { asciiLower($0.name) == asciiLower(e.name) }
+            let same = existing.first { asciiLower($0.name).utf8.elementsEqual(asciiLower(e.name).utf8) }
             if e.isDirectory, let same, same.isDirectory {
                 try merge(src, into: target + "/" + same.name, moved)
                 try remove(src)
@@ -257,10 +257,6 @@ public final class PlatformFileSystem: FileSystem {
         let fd = open(path, O_RDONLY | O_CLOEXEC)
         guard fd >= 0 else { throw errnoError(operation, path) }
         return fd
-    }
-
-    private func asciiLower(_ s: String) -> [UInt8] {
-        s.utf8.map { $0 >= 65 && $0 <= 90 ? $0 + 32 : $0 }
     }
 
     private func fsError(_ code: MessageCode, _ path: String) -> BroError {

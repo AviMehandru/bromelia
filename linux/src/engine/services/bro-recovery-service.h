@@ -1,9 +1,9 @@
 /* bro-recovery-service.h: BroRecoveryService: runs once at startup, before the libraries start (plan §11.1, §15.1,
- * §20.4, §15.8; review L3-3, L3-9). It sorts out the jobs the last engine left unfinished by where each stopped and what
- * its step can do after a stop (its Resumability), rolls open commit intents forward, sets aside staging folders no job
- * will continue, and removes the temporary files a stopped write leaves. Library work runs on a worker per library and
- * may take at most 30 s of the startup: a share that doesn't answer can't keep the engine from starting, and its work
- * goes on. shared/fixtures/engine/recovery-service.cases.json. */
+ * §20.4, §15.8). It sorts out the jobs the last engine left unfinished by where each stopped and what its step can do
+ * after a stop (its Resumability), rolls open commit intents forward, sets aside staging folders no job will continue,
+ * and removes the temporary files a stopped write leaves. Library work runs on a worker per library and may take at
+ * most 30 s of the startup: a share that doesn't answer can't keep the engine from starting, and its work goes on.
+ * shared/fixtures/engine/recovery-service.cases.json. */
 #pragma once
 
 #include "bro-config-source.h"

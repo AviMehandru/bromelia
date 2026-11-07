@@ -327,7 +327,8 @@ public sealed class DriveService : IDriveLookup
         return records;
     }
 
-    /// <summary>A tray closed at least 4 s ago that is still open is reported; one that isn't open any more, cleared.</summary>
+    /// <summary>A tray closed at least 4 s ago that is still open is reported; one that isn't open any more,
+    /// cleared.</summary>
     void CheckTrays(Config config, Instant now)
     {
         foreach (var (drive, asked) in _trayAsked.ToList())

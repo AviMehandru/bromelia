@@ -22,6 +22,10 @@ struct FoundationTests {
             if let json = given["json"]?.string {
                 let v = JsonValue.parse(json)
                 try Fixtures.same(expect["canonical"]?.string, v.map { String(decoding: JsonValue.encodeCanonical($0), as: UTF8.self) }, "canonical")
+                if let member = given["member"]?.string {
+                    try Fixtures.same(expect["memberCanonical"]?.string, v?[member].map { String(decoding: JsonValue.encodeCanonical($0), as: UTF8.self) }, "member")
+                }
+                if let other = given["other"]?.string { try Fixtures.same(expect["same"]?.bool, v == JsonValue.parse(other), "same") }
                 return true
             }
             return false

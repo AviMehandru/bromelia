@@ -11,14 +11,14 @@ namespace Bromelia.Engine;
 /// the job's steps found. Messages are kept as codes with parameters and as text in the configured language.</summary>
 public static class SealRecord
 {
-    /// <summary>A version 3 record. status: <paramref name="status"/> when given (KeepApartStep's incomplete), else errors
-    /// when MakeMKV reported read errors, else success. disc: the listing
-    /// Probe read and the identity Plan resolved (Name's when it corrected it). acquisition: the mode, "Backup" for a backup else "Rip", the job's
-    /// source as the request gives it (drive:&lt;id&gt;, iso:&lt;path&gt;, folder:&lt;path&gt;, file:&lt;path&gt;), the drive,
-    /// the profile, MakeMKV's version line and the app's. titles: each title Acquire ripped that the listing has, with its
-    /// read errors. files: <paramref name="files"/>, as SHA256SUMS lists them. attempts: this job's. counts: the warnings
-    /// and errors in the job's log (<paramref name="log"/>). problems: each read error (makemkv.message), then
-    /// rip.readErrors. logs: the log files copied into the folder.</summary>
+    /// <summary>A version 3 record. status: <paramref name="status"/> when given (KeepApartStep's incomplete), else
+    /// errors when MakeMKV reported read errors, else success. disc: the listing Probe read and the identity Plan
+    /// resolved (Name's when it corrected it). acquisition: the mode, "Backup" for a backup else "Rip", the job's
+    /// source as the request gives it (drive:&lt;id&gt;, iso:&lt;path&gt;, folder:&lt;path&gt;, file:&lt;path&gt;), the
+    /// drive, the profile, MakeMKV's version line and the app's. titles: each title Acquire ripped that the listing
+    /// has, with its read errors. files: <paramref name="files"/>, as SHA256SUMS lists them. attempts: this job's.
+    /// counts: the warnings and errors in the job's log (<paramref name="log"/>). problems: each read error
+    /// (makemkv.message), then rip.readErrors. logs: the log files copied into the folder.</summary>
     public static JsonValue Build(JobSnapshot job, PlanOutput plan, AcquireOutput acquired, Id unitId, IReadOnlyList<UnitFile> files,
         IReadOnlyList<LogLineDto> log, IReadOnlyList<string> logs, Instant finishedAt, string appVersion, IMessageRenderer messages, string? status = null)
     {

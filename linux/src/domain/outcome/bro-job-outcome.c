@@ -40,7 +40,7 @@ BroDecided *
 bro_job_outcome_decide (GPtrArray *steps, gboolean cancelled, const BroOutcomePolicy *policy)
 {
   /* A cancel after a Commit step that succeeded only stops the steps after it; a keepApart step that succeeded or was
-   * skipped: the job wasn't continued (owner, 2026-10-25). */
+   * skipped: the job wasn't continued. */
   gboolean committed = FALSE, kept_apart = FALSE;
   for (guint i = 0; i < steps->len; i++) {
     const BroStepResult *s = steps->pdata[i];

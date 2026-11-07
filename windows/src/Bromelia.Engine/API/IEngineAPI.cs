@@ -7,9 +7,9 @@ namespace Bromelia.Engine;
 
 /// <summary>
 /// The one interface between the engine and anything outside it (plan §13.1): DTOs in and out, never live objects.
-/// LocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of the phases built so far (G1
-/// owner question 1): it grows with each phase. Every operation fails with a BroFailure carrying the error the route
-/// lists; server.stopping once the engine stops.
+/// LocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of the phases built so far: it
+/// grows with each phase. Every operation fails with a BroFailure carrying the error the route lists; server.stopping
+/// once the engine stops.
 /// </summary>
 public interface IEngineAPI
 {
@@ -18,8 +18,8 @@ public interface IEngineAPI
     /// <summary>Versions, MakeMKV, tools, problems, libraries, configuration version, last event seq.</summary>
     Task<SystemStatusDto> System();
 
-    /// <summary>The stop order (decision 170): running jobs are left as a killed engine would leave them, for the next
-    /// start's recovery. server.stopping when stopping already.</summary>
+    /// <summary>The stop order: running jobs are left as a killed engine would leave them, for the next start's
+    /// recovery. server.stopping when stopping already.</summary>
     Task Stop();
 
     // ---- drives ----

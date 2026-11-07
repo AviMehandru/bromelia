@@ -6,13 +6,14 @@ using Bromelia.Foundation;
 namespace Bromelia.Domain;
 
 /// <summary>The .bromelia-library file at a library's root (plan §22.2): written when a library is attached (never on
-/// its own), so a library whose disk isn't there is offline instead of being written to the boot disk (I2).</summary>
+/// its own), so a library whose disk isn't there is offline instead of being written to the boot disk.</summary>
 public sealed record LibraryMarker(string Id, string Name, Instant? Created)
 {
     public const string FileName = ".bromelia-library";
 
-    /// <summary>A marker for a library attached now. Its id is a UUID (version 8, RFC 9562) made from the first 16 bytes
-    /// of SHA-256 of "&lt;libraryId&gt;\n&lt;path&gt;\n&lt;created&gt;": unique to this attach without any randomness.</summary>
+    /// <summary>A marker for a library attached now. Its id is a UUID (version 8, RFC 9562) made from the first 16
+    /// bytes of SHA-256 of "&lt;libraryId&gt;\n&lt;path&gt;\n&lt;created&gt;": unique to this attach without any
+    /// randomness.</summary>
     public static LibraryMarker Make(string libraryId, string path, string name, Instant created)
     {
         var b = SHA256.HashData(Encoding.UTF8.GetBytes(libraryId + "\n" + path + "\n" + Instant.Format(created)));

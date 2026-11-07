@@ -1,4 +1,4 @@
-# L5 Hosts (rearchitecture plan §4, §17; decision 167): the composition root, the one place that builds the real graph.
+# L5 Hosts (rearchitecture plan §4, §17): the composition root, the one place that builds the real graph.
 # A static library in phase 3; phase 4 adds bromeliad's main, HostOptions and EngineLock. The app version is meson's
 # project_version().
 bro_host_lib = static_library('bro-host',

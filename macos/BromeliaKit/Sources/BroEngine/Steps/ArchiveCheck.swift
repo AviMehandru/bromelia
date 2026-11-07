@@ -2,7 +2,7 @@ import BroDomain
 import BroFoundation
 import BroPorts
 
-/// Whether the disc was archived before (plan §20.1 Plan and Decide; today's checkAlreadyArchived).
+/// Whether the disc was archived before (plan §20.1 Plan and Decide).
 public enum ArchiveCheck {
     /// The newest committed unit with this fingerprint that still counts: its status is success, its library is online
     /// and its folder is there (read-error units, failures and vanished folders don't count). Nil without a fingerprint.

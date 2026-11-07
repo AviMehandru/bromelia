@@ -187,9 +187,9 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
     result = bro_library_port_quarantine (context->library, unit, intent, seal->files, seal->tag, context->cancel, error);
   else
     {
-      /* A folder of its own that another job committed after Name ran (two discs of the same name at once): the next free
-       * name, as Name would have given it, unless the profile says skip (owner H3b-2). The library refuses a taken folder
-       * before it writes anything, and an open intent or a unit committed already never gets that far. */
+      /* A folder of its own that another job committed after Name ran (two discs of the same name at once): the next
+       * free name, as Name would have given it, unless the profile says skip. The library refuses a taken folder before
+       * it writes anything, and an open intent or a unit committed already never gets that far. */
       BroJsonValue *given = bro_json_value_member (plan->profile, "naming");
       g_autoptr (BroJsonValue) none = bro_json_value_new_object ();
       g_autoptr (BroNamingSettings) naming = bro_naming_settings_decode (given ? given : none);

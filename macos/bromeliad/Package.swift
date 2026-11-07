@@ -1,5 +1,5 @@
 // swift-tools-version: 6.0
-// bromeliad: the macOS host (rearchitecture plan §4 Hosts, §17; decision 167, owner answer 4). Phase 3 builds the real
+// bromeliad: the macOS host (rearchitecture plan §4 Hosts, §17). Phase 3 builds the real
 // composition root as a library; phase 4 makes this target the bromeliad executable (main, HostOptions, EngineLock).
 import PackageDescription
 
@@ -22,7 +22,7 @@ let package = Package(
                     .product(name: "BroEngine", package: "BromeliaKit"),
                 ],
                 path: ".", exclude: ["Tests"]),
-        // The real root's smoke test (decision 175).
+        // The real root's smoke test.
         .testTarget(name: "BromeliadTests", dependencies: ["Bromeliad"], path: "Tests/BromeliadTests"),
     ],
     swiftLanguageModes: [.v6]

@@ -8,8 +8,9 @@ using Bromelia.Ports;
 
 namespace Bromelia.Engine;
 
-/// <summary>A job's log file, &lt;data&gt;/jobs/&lt;id&gt;/log.jsonl (plan §16): one JSON object per line, {t, severity, code,
-/// params}, in the canonical encoding written on one line, so every platform writes the same bytes.</summary>
+/// <summary>A job's log file, &lt;data&gt;/jobs/&lt;id&gt;/log.jsonl (plan §16): one JSON object per line, {t,
+/// severity, code, params}, in the canonical encoding written on one line, so every platform writes the same
+/// bytes.</summary>
 public static class JobLog
 {
     public const string FileName = "log.jsonl";

@@ -49,7 +49,7 @@ struct NamingTests {
             }
             if let name = given["name"]?.string {
                 let existing = (given["existing"]?.array ?? []).compactMap(\.string)
-                try Fixtures.same(expect["next"]?.string, ConflictNamer.next(name, existing: existing, isFolder: !name.contains(".")), "next")
+                try Fixtures.same(expect["next"]?.string, ConflictNamer.next(name, existing: existing, isFolder: !name.utf8.contains(UInt8(ascii: "."))), "next")
                 return true
             }
             return false

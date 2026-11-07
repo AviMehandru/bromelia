@@ -4,13 +4,13 @@ using Bromelia.Foundation;
 
 namespace Bromelia.Engine;
 
-/// <summary>Step 2 (plan §20.1): reads the disc's listing with makemkvcon (disc.op.reading), under the profile the drive
-/// gets before Plan. A disc opened in a session is read again (disc.readingAgain): ReconcileStep checks it is still
-/// that disc. A listing without titles fails with disc.noTitles and MakeMKV's notice (an expired key, LibreDrive
-/// required), except for a backup, which goes on as today with the opened listing (disc.usingOpenedListing) or without
-/// one (disc.continuingWithoutListing). Logs disc.found, the LibreDrive detail and what the run's isolation or
-/// transcript reported (the isolation's warning, the transcript's problem, then what giving the settings back
-/// reported). Data: ProbeOutput.</summary>
+/// <summary>Step 2 (plan §20.1): reads the disc's listing with makemkvcon (disc.op.reading), under the profile the
+/// drive gets before Plan. A disc opened in a session is read again (disc.readingAgain): ReconcileStep checks it is
+/// still that disc. A listing without titles fails with disc.noTitles and MakeMKV's notice (an expired key, LibreDrive
+/// required), except for a backup, which goes on with the opened listing (disc.usingOpenedListing) or without one
+/// (disc.continuingWithoutListing). Logs disc.found, the LibreDrive detail and what the run's isolation or transcript
+/// reported (the isolation's warning, the transcript's problem, then what giving the settings back reported). Data:
+/// ProbeOutput.</summary>
 public sealed class ProbeStep : IStep
 {
     public StepKind Kind => StepKind.Probe;

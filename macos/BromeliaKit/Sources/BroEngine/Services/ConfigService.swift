@@ -3,13 +3,12 @@ import BroFoundation
 import BroPorts
 
 /// The configuration (plan §11.1, §15.1, §15.7, §24), on the executor: config.json (mode 0600), its version (kv
-/// config.version, so it survives a restart) and the last good document (kv config.lastGood), and the secrets it
-/// refers to. The engine owns the secrets (owner, 2026-10-12, review L3-6): clients set them through `setSecret` and
-/// only ever see whether one is set. A secret comes from the system keystore, then BROMELIA_SECRET_<NAME>, then the
-/// secrets folder (plan §24); when two of them disagree, config secrets.prefer / secrets.bySecret pick one, and the
-/// disagreement is a problem: secret.conflict (an error) without a preference that settles it, secret.conflictPreferred
-/// (a warning) with one (owner, 2026-10-12). A source that fails is the problem secret.unreadable until it reads again
-/// (owner, G3 2026-10-26). File, keystore and store work runs on workers.
+/// config.version, so it survives a restart) and the last good document (kv config.lastGood), and the secrets it refers
+/// to. The engine owns the secrets: clients set them through `setSecret` and only ever see whether one is set. A secret
+/// comes from the system keystore, then BROMELIA_SECRET_<NAME>, then the secrets folder (plan §24); when two of them
+/// disagree, config secrets.prefer / secrets.bySecret pick one, and the disagreement is a problem: secret.conflict (an
+/// error) without a preference that settles it, secret.conflictPreferred (a warning) with one. A source that fails is
+/// the problem secret.unreadable until it reads again. File, keystore and store work runs on workers.
 /// shared/fixtures/engine/config-service.cases.json.
 @EngineActor
 public final class ConfigService: ConfigSource {
@@ -151,9 +150,9 @@ public final class ConfigService: ConfigSource {
     }
 
     /// A secret's value, from the first source that has it: the system keystore, BROMELIA_SECRET_<NAME> (upper case,
-    /// '.' → '_'), the secrets folder; a source `config` prefers (secrets.bySecret, else secrets.prefer) comes first when
-    /// it has one. Nil when none has it; the first failure when a source failed and none has it (fs.notPrivate on a
-    /// share, L3-8). Sources that disagree raise (or update) the secret's problem on the executor. Any thread but the
+    /// '.' → '_'), the secrets folder; a source `config` prefers (secrets.bySecret, else secrets.prefer) comes first
+    /// when it has one. Nil when none has it; the first failure when a source failed and none has it (fs.notPrivate on
+    /// a share). Sources that disagree raise (or update) the secret's problem on the executor. Any thread but the
     /// executor: the keystore may block.
     public nonisolated func secret(_ name: String, config: Config) throws(BroError) -> String? {
         let r = resolve(name, config: config)

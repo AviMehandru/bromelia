@@ -6,10 +6,10 @@ namespace Bromelia.Domain;
 /// <summary>The INCOMPLETE / READ ERRORS note, written into a folder whose files aren't a finished archive.</summary>
 public static class Notes
 {
-    /// <summary>The note's lines: the job and its outcome, a warning that the files are not a finished archive,
-    /// the error, the read errors MakeMKV reported, and the log files copied into the folder (<paramref name="logs"/>:
-    /// the job's log, then MakeMKV's, when it was copied), then where the job's full log is (<paramref name="fullLog"/>, its
-    /// log.jsonl in the data folder; none for a folder no job owns), as today's apps end the note (owner H3b-6).</summary>
+    /// <summary>The note's lines: the job and its outcome, a warning that the files are not a finished archive, the
+    /// error, the read errors MakeMKV reported, and the log files copied into the folder (<paramref name="logs"/>: the
+    /// job's log, then MakeMKV's, when it was copied), then where the job's full log is (<paramref name="fullLog"/>,
+    /// its log.jsonl in the data folder; none for a folder no job owns).</summary>
     public static List<BroMessage> Render(Id jobId, Outcome outcome, BroError? error, IReadOnlyList<RobotMessage> readErrors, IReadOnlyList<string> logs,
         string? fullLog)
     {

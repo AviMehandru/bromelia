@@ -8,9 +8,9 @@ namespace Bromelia.Domain;
 /// <summary>Disc fingerprints, to recognise a disc when it is inserted again.</summary>
 public static class Fingerprint
 {
-    /// <summary>v1, byte for byte as today: <c>v1:</c> and 32 hex digits of SHA-256 over the volume name (else
-    /// the name), the title count and, sorted, each title's source title id, length in seconds, segment map and
-    /// size in bytes. Null for a listing without titles.</summary>
+    /// <summary>v1, byte for byte as archives already record it: <c>v1:</c> and 32 hex digits of SHA-256 over the
+    /// volume name (else the name), the title count and, sorted, each title's source title id, length in seconds,
+    /// segment map and size in bytes. Null for a listing without titles.</summary>
     public static string? Of(Listing listing)
     {
         if (listing.Titles.Count == 0) return null;

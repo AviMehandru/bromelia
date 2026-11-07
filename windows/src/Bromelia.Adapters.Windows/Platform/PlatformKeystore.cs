@@ -9,13 +9,14 @@ using Bromelia.Ports;
 
 namespace Bromelia.Adapters.Windows;
 
-/// <summary>Keystore on Windows (plan §10.3): generic credentials in Credential Manager, target "&lt;service&gt;:&lt;name&gt;",
-/// the value as UTF-8. When Credential Manager can't be used at all (no logon session: a service account, an SSH key
-/// logon), the secrets are files &lt;fallbackDir&gt;/&lt;name&gt; instead; that is decided once, at the first call. The folder
-/// is owner-only (Windows' 0700: the current user and SYSTEM, nothing inherited), since a service's data folder may be
-/// readable by every user; files written there inherit that. A fallback folder on a network share, or one where that
-/// rule doesn't hold, is refused (fs.notPrivate) for reading and writing; removing still works. Names are SecretRef names (keystore.cases.json); anything
-/// else fails with keystore.failed.</summary>
+/// <summary>Keystore on Windows (plan §10.3): generic credentials in Credential Manager, target
+/// "&lt;service&gt;:&lt;name&gt;", the value as UTF-8. When Credential Manager can't be used at all (no logon session:
+/// a service account, an SSH key logon), the secrets are files &lt;fallbackDir&gt;/&lt;name&gt; instead; that is
+/// decided once, at the first call. The folder is owner-only (Windows' 0700: the current user and SYSTEM, nothing
+/// inherited), since a service's data folder may be readable by every user; files written there inherit that. A
+/// fallback folder on a network share, or one where that rule doesn't hold, is refused (fs.notPrivate) for reading and
+/// writing; removing still works. Names are SecretRef names (keystore.cases.json); anything else fails with
+/// keystore.failed.</summary>
 public sealed class PlatformKeystore : IKeystore
 {
     const uint CRED_TYPE_GENERIC = 1;

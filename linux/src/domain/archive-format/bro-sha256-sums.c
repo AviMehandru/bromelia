@@ -44,14 +44,31 @@ bro_sha256_sums_render (GPtrArray *entries)
   return g_string_free (out, FALSE);
 }
 
-char *
-bro_sha256_sums_merge (const char *existing, GPtrArray *entries)
+GBytes *
+bro_sha256_sums_merge (GBytes *existing, GPtrArray *entries)
 {
   g_autoptr (GHashTable) merged = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-  g_autoptr (GPtrArray) old = bro_sha256_sums_parse (existing);
-  for (guint i = 0; i < old->len; i++) {
-    const BroSumEntry *e = old->pdata[i];
-    g_hash_table_insert (merged, g_strdup (e->path), g_strdup (e->sha256));
+  g_autoptr (GByteArray) unread = g_byte_array_new ();
+  gsize size;
+  const char *data = g_bytes_get_data (existing, &size);
+  for (gsize start = 0, end; start < size; start = end + 1) {
+    const char *next = memchr (data + start, '\n', size - start);
+    gsize n;
+    end = next ? (gsize) (next - data) : size;
+    n = end - start;
+    if (n && data[end - 1] == '\r')
+      n--;
+    if (!n)
+      continue;
+    g_autofree char *line = g_strndup (data + start, n);
+    g_autoptr (GPtrArray) parsed = strlen (line) == n && g_utf8_validate (line, -1, NULL) ? bro_sha256_sums_parse (line) : NULL;
+    if (parsed && parsed->len) {
+      const BroSumEntry *e = parsed->pdata[0];
+      g_hash_table_insert (merged, g_strdup (e->path), g_strdup (e->sha256));
+    } else {
+      g_byte_array_append (unread, (const guint8 *) data + start, n);
+      g_byte_array_append (unread, (const guint8 *) "\n", 1);
+    }
   }
   for (guint i = 0; i < entries->len; i++) {
     const BroSumEntry *e = entries->pdata[i];
@@ -63,7 +80,11 @@ bro_sha256_sums_merge (const char *existing, GPtrArray *entries)
   g_hash_table_iter_init (&it, merged);
   while (g_hash_table_iter_next (&it, &k, &v))
     g_ptr_array_add (all, bro_sum_entry_new (k, v));
-  return bro_sha256_sums_render (all);
+  g_autofree char *text = bro_sha256_sums_render (all);
+  GByteArray *out = g_byte_array_new ();
+  g_byte_array_append (out, (const guint8 *) text, strlen (text));
+  g_byte_array_append (out, unread->data, unread->len);
+  return g_byte_array_free_to_bytes (out);
 }
 
 char *

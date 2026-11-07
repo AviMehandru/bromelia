@@ -79,7 +79,9 @@ gboolean bro_file_system_sync_file (BroFileSystem *self, const char *path, BroBr
  * set on failure. */
 gboolean bro_file_system_sync_directory (BroFileSystem *self, const char *path, BroBroError **error);
 
-/* F_NOCACHE / NO_BUFFERING / fadvise when bypassCache. */
+/* @bypass_cache: Windows reads past the system cache (FILE_FLAG_NO_BUFFERING). macOS (F_NOCACHE) only keeps the reads
+ * out of the cache, so a page already there can answer; Linux drops the file's clean pages first (posix_fadvise
+ * DONTNEED), which is a hint. */
 BroByteStream *bro_file_system_open_for_reading (BroFileSystem *self, const char *path, gboolean bypass_cache, BroBroError **error);
 
 BroVolumeInfo *bro_file_system_volume (BroFileSystem *self, const char *path, BroBroError **error);

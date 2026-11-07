@@ -1,11 +1,9 @@
-/* bro-verify-rips-step.h: BroVerifyRipsStep: Step 10 (plan §20.1; today's verify): checks what Acquire made before
- * anything is named, hashed or moved. A kept backup first (bro_backup_check_problem: backup.checkFailed). Then each
- * title's MKV files, in plan order, against Probe's listing title of the same index (bro_matroska_probe, then
- * bro_rip_check_check; ripcheck.checking): its notes as ripcheck.note warnings, then ripcheck.checked and, with fewer
- * tracks than the disc, ripcheck.trackSubset; a file mkvmerge can't read (ripcheck.unreadable) or that doesn't match
- * (ripcheck.mismatch) is rip.checkFailed, every title is still checked, and the step fails with rip.failed or
- * rip.titlesFailed. Without mkvmerge: ripcheck.cannotCheck and no MKV is checked, as today. Skipped when Acquire left
- * nothing. Data: {checked: [the names that passed]}. */
+/* bro-verify-rips-step.h: BroVerifyRipsStep: Step 10 (plan §20.1): checks what Acquire made before anything is named,
+ * hashed or moved. A kept backup first (BackupCheck), then each title's MKV files, in plan order, against Probe's
+ * listing title of the same index (MkvToolNix.probe, then RipCheck.check). A file mkvmerge can't read or that doesn't
+ * match fails the step, but every title is still checked. The files no title owns are sealed too, so they come last,
+ * with nothing to compare them with: readable and holding a track. Without mkvmerge no MKV is checked
+ * (ripcheck.cannotCheck). Skipped when Acquire left nothing. Data: {checked: [the names that passed]}. */
 #pragma once
 
 #include "bro-step.h"

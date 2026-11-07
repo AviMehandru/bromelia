@@ -1,5 +1,5 @@
-/// What the graph is built for. Phase 3 has no defaults (HostOptions gives them in phase 4): the platform's data folder is
-/// today's app's, with the real config.json and secrets, so a test always passes its own.
+/// What the graph is built for. There are no defaults: the platform's data folder holds the real config.json and
+/// secrets, so a test always passes its own.
 public struct RootOptions: Sendable {
     /// The data folder: bromelia.db, jobs, secrets, logs (made when it isn't there).
     public var dataDir: String

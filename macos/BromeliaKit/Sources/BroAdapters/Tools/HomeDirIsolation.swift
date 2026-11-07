@@ -45,7 +45,7 @@ public final class HomeDirIsolation: SettingsIsolation {
         guard fs.exists(conf) else { return nil }
         do throws(BroError) {
             let text = String(decoding: try fs.read(conf), as: UTF8.self)
-            let kept = text.split(separator: "\n", omittingEmptySubsequences: false).filter { !isKeyLine($0) }.joined(separator: "\n")
+            let kept = lines(of: text).filter { !isKeyLine($0) }.joined(separator: "\n")
             if kept != text { try fs.writeAtomically(conf, bytes: Array(kept.utf8), mode: 0o600) }
             return nil
         } catch {
@@ -55,7 +55,7 @@ public final class HomeDirIsolation: SettingsIsolation {
     }
 
     /// A settings.conf line that sets app_Key.
-    static func isKeyLine(_ line: Substring) -> Bool {
+    static func isKeyLine(_ line: String) -> Bool {
         let t = line.drop { $0 == " " || $0 == "\t" }
         guard t.hasPrefix("app_Key") else { return false }
         return t.dropFirst("app_Key".count).drop { $0 == " " || $0 == "\t" }.hasPrefix("=")

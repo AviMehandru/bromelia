@@ -1,5 +1,5 @@
-/* bro-platform-tool-paths.h: BroPlatformToolPaths: where each tool is usually installed on Linux, and its program
- * names (today's find_tool folders: /opt/homebrew/bin, /usr/local/bin, /usr/bin). */
+/* bro-platform-tool-paths.h: BroPlatformToolPaths: where each tool is usually installed on Linux, and its program names
+ * ( /opt/homebrew/bin, /usr/local/bin, /usr/bin). */
 #pragma once
 
 #include "bro-tool-kind.h"

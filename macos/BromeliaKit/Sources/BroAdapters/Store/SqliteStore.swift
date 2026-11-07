@@ -6,11 +6,8 @@ import SQLite3
 
 /// The Store port on SQLite (plan §10.4, §23; shared/fixtures/adapters/store.cases.json), on the system SQLite3. The
 /// shared migrations run verbatim; the connection uses WAL, synchronous=FULL and foreign keys. One connection, every
-/// call serialised (a read pool can come when measurements ask for it). Times are ISO 8601 text (Instant.format),
-/// enums their wire names, JSON columns the canonical encoding: BroError {code, params?, cause?}, BroMessage {code,
-/// params?, severity? (when not info)}, JobRequest {kind, title, automatic, driveId?, mediaGeneration?, sessionId?,
-/// parentId?, unitId?, options?, details?}, JobPlan {steps, mode?, profileId?, libraryId?, details?}, StepOutput {kind,
-/// data, summary?, readErrors? (when not 0)}.
+/// call serialised (a read pool can come when measurements ask for it). Times are ISO 8601 text (Instant.format), enums
+/// their wire names, JSON columns the canonical encoding (store.cases.json pins each one).
 public final class SqliteStore: Store, @unchecked Sendable {
     private let db: OpaquePointer
     private let clock: any Clock

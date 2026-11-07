@@ -79,7 +79,7 @@ public class MediaArgsTests
             Same(expect["arguments"], StringsJson(Split.Arguments(chapters, given["input"]!.AsString!, given["output"]!.AsString!)), "arguments");
             return true;
         }
-        if (id == "simple-chapters")
+        if (id.StartsWith("simple-chapters", StringComparison.Ordinal))
         {
             var starts = SimpleChapters.Parse(given["text"]!.AsString!);
             var want = expect["starts"]!.AsArray!;

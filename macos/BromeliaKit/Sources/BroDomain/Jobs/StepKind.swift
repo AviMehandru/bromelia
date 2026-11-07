@@ -18,7 +18,7 @@ public enum StepKind: String, Sendable, CaseIterable, Codable {
     case protect
     case postProcess
     case notify
-    /// Only after JobService.keepApart: an interrupted job's staging sealed and quarantined as INCOMPLETE (owner, 2026-10-25).
+    /// Only after JobService.keepApart: an interrupted job's staging sealed and quarantined as INCOMPLETE.
     case keepApart
     case ripAudio
     case imageData

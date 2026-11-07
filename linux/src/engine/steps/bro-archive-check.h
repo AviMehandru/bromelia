@@ -1,5 +1,4 @@
-/* bro-archive-check.h: BroArchiveCheck, whether the disc was archived before (plan §20.1 Plan and Decide; today's
- * checkAlreadyArchived). */
+/* bro-archive-check.h: BroArchiveCheck, whether the disc was archived before (plan §20.1 Plan and Decide). */
 #pragma once
 
 #include "bro-archived-match.h"

@@ -1,3 +1,5 @@
+import BroFoundation
+
 /// Which format a disc, ISO or backup is.
 public enum FormatDetector {
     /// From the listing (MakeMKV's type; a Blu-ray whose video is 2160p or HEVC is UHD), else from a backup's
@@ -5,7 +7,7 @@ public enum FormatDetector {
     /// the drive's flags; unknown otherwise.
     public static func detect(_ listing: Listing?, flags: DiscFlags?, indexBdmv: String?, hasVideoTs: Bool = false) -> DiscFormat {
         if let listing {
-            let t = MessageCatalog.asciiLower(listing.typeText)
+            let t = asciiLower(listing.typeText)
             if t.contains("blu") { return isUhd(listing) ? .uhd : .bluray }
             if t.contains("hd") { return .hddvd }
             if t.contains("dvd") { return .dvd }
@@ -39,7 +41,7 @@ public enum FormatDetector {
             t.tracks.contains { tr in
                 guard tr.kind == .video else { return false }
                 let size = tr.attributes[AttributeId.videoSize.rawValue] ?? ""
-                let codec = MessageCatalog.asciiLower((tr.attributes[AttributeId.codecId.rawValue] ?? "") + " " + (tr.attributes[AttributeId.codecShort.rawValue] ?? ""))
+                let codec = asciiLower((tr.attributes[AttributeId.codecId.rawValue] ?? "") + " " + (tr.attributes[AttributeId.codecShort.rawValue] ?? ""))
                 return size.contains("2160") || size.contains("3840") || codec.contains("hevc") || codec.contains("mpegh")
             }
         }

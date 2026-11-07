@@ -5,6 +5,9 @@
 
 G_BEGIN_DECLS
 
+/* Whether two names are one name here: the same but for ASCII case, as some file systems have it. */
+gboolean bro_conflict_namer_same (const char *a, const char *b);
+
 /* @name when no entry of @existing has it (ignoring ASCII case, as some file systems do), else "Name (2)",
  * "Name (3)" … before the extension of a file. Free with g_free. */
 char *bro_conflict_namer_next (const char *name, const char *const *existing, gboolean is_folder);

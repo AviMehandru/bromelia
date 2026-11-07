@@ -6,11 +6,12 @@ using Bromelia.Foundation;
 namespace Bromelia.Engine;
 
 /// <summary>A job with its steps, files and commands (dtos.json JobDetail: the Job's members, then these). Children are
-/// left out until JobQuery can ask for a job's children (decision 171).</summary>
+/// left out until JobQuery can ask for a job's children.</summary>
 public sealed record JobDetailDto(JobDto Job, IReadOnlyList<JobStepDto> Steps, IReadOnlyList<JobFileDto> Files, IReadOnlyList<string> Commands,
     long LogBytes)
 {
-    /// <summary>The Job's members, then steps, files, commands and logBytes; optional members left out when absent.</summary>
+    /// <summary>The Job's members, then steps, files, commands and logBytes; optional members left out when
+    /// absent.</summary>
     public static JsonValue Json(JobDetailDto detail)
     {
         var m = new List<KeyValuePair<string, JsonValue>>(((JsonValue.Object)JobDto.Json(detail.Job)).Members)

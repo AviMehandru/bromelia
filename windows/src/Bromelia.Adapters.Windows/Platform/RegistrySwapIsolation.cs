@@ -14,12 +14,12 @@ namespace Bromelia.Adapters.Windows;
 /// the run's values there, clearing the other catalogue keys, and gives the user's values back as soon as makemkvcon
 /// has read them: on its first output line, when the lease is released (it exited), or after 15 s. Launches are
 /// serialised: prepare waits for the previous lease to give the registry back. app_Key is touched only when the run
-/// sets it. The values are also written to settings.conf.txt in the run's folder, for reference.
-/// The user's values are written to a snapshot file (in an owner-only folder: it can hold app_Key) before anything
-/// changes, and the file is removed once every value is back. A crash, a service stop or a power cut in between leaves
-/// the file: <see cref="Recover"/> (at startup) or the next Prepare puts those values back first, and a run never
-/// starts while they can't be (makemkv.registryNotRestored). When the MakeMKV GUI is open while the run's values are in
-/// place, the lease warns (makemkv.guiRunning): the GUI may write its own preferences back over them (review L3-5).</summary>
+/// sets it. The values are also written to settings.conf.txt in the run's folder, for reference. The user's values are
+/// written to a snapshot file (in an owner-only folder: it can hold app_Key) before anything changes, and the file is
+/// removed once every value is back. A crash, a service stop or a power cut in between leaves the file: <see
+/// cref="Recover"/> (at startup) or the next Prepare puts those values back first, and a run never starts while they
+/// can't be (makemkv.registryNotRestored). When the MakeMKV GUI is open while the run's values are in place, the lease
+/// warns (makemkv.guiRunning): the GUI may write its own preferences back over them.</summary>
 public sealed class RegistrySwapIsolation : ISettingsIsolation
 {
     /// <summary>One launch at a time in this process: the registry is per user, not per job.</summary>

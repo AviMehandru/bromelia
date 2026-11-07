@@ -1,4 +1,4 @@
-/* bro-tool-set.h: the tools a step may run, as ports (owner, 2026-10-11). More join with their steps in phase 5. */
+/* bro-tool-set.h: the tools a step may run, as ports. More join with their steps in phase 5. */
 #pragma once
 
 #include "bro-makemkv.h"

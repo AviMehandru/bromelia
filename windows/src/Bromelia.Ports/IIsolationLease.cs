@@ -18,7 +18,7 @@ public interface IIsolationLease
 
     /// <summary>Why the run's settings may not hold, known once they are in place: makemkv.guiRunning (Windows: the
     /// MakeMKV GUI was open while the registry held the run's values, and it may write its own back), or null
-    /// (owner, 2026-10-15, review L3-5).</summary>
+    /// .</summary>
     BroMessage? Warning();
 
     /// <summary>makemkvcon has read its settings (its first output line).</summary>

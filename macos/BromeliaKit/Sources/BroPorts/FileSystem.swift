@@ -41,7 +41,9 @@ public protocol FileSystem: Sendable {
     /// Syncs a folder after a rename in it; succeeds when the file system can't sync folders at all.
     func syncDirectory(_ path: String) throws(BroError)
 
-    /// F_NOCACHE / NO_BUFFERING / fadvise when bypassCache.
+    /// `bypassCache`: Windows reads past the system cache (FILE_FLAG_NO_BUFFERING). macOS (F_NOCACHE) only keeps the
+    /// reads out of the cache, so a page already there can answer; Linux drops the file's clean pages first
+    /// (posix_fadvise DONTNEED), which is a hint.
     func openForReading(_ path: String, bypassCache: Bool) throws(BroError) -> any ByteStream
 
     func volume(_ path: String) throws(BroError) -> VolumeInfo

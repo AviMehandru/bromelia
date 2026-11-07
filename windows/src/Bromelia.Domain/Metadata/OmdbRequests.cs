@@ -18,7 +18,8 @@ public static class OmdbRequests
     /// only).</summary>
     public static HttpRequestSpec? Details(OnlineId id, string key) => id is OnlineId.Imdb imdb ? Get("i=" + Escape(imdb.Id) + "&plot=full", key) : null;
 
-    /// <summary>The episodes of <paramref name="season"/> of the show <paramref name="match"/> (null without an IMDb id).</summary>
+    /// <summary>The episodes of <paramref name="season"/> of the show <paramref name="match"/> (null without an IMDb
+    /// id).</summary>
     public static HttpRequestSpec? Season(Candidate match, int season, string key) =>
         match.ImdbId is { } tt ? Get("i=" + Escape(tt) + "&Season=" + Num(season), key) : null;
 }

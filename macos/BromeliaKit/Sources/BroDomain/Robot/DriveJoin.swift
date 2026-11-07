@@ -1,3 +1,4 @@
+import BroFoundation
 import CryptoKit
 
 /// MakeMKV's drives ⇄ the OS's drives and the configuration's entries.
@@ -45,10 +46,7 @@ public enum DriveJoin {
         let name = normalize(identification)
         let key = name.isEmpty ? "dev:" + device : name
         let digest = SHA256.hash(data: Array(key.utf8))
-        return "drv-" + digest.prefix(8).map { b in
-            let h = String(b, radix: 16)
-            return h.count == 1 ? "0" + h : h
-        }.joined()
+        return "drv-" + hex(digest.prefix(8))
     }
 
     /// driveName compared case- and space-insensitively with the identification; devicePath (ignoring case)
@@ -56,7 +54,7 @@ public enum DriveJoin {
     public static func matches(_ match: DriveMatch, drive: MakemkvDrive) -> Bool {
         let name = trimSpaces(match.driveName)
         if !name.isEmpty { return normalize(name) == normalize(drive.identification) }
-        return !match.devicePath.isEmpty && MessageCatalog.asciiLower(match.devicePath) == MessageCatalog.asciiLower(drive.device)
+        return !match.devicePath.isEmpty && asciiLower(match.devicePath) == asciiLower(drive.device)
     }
 
     /// The first enabled entry that matches, else the first that matches.
@@ -72,7 +70,7 @@ public enum DriveJoin {
     }
 
     static func normalize(_ s: String) -> String {
-        MessageCatalog.asciiLower(s.split(whereSeparator: { $0 == " " || $0 == "\t" }).joined(separator: " "))
+        asciiLower(s.split(whereSeparator: { $0 == " " || $0 == "\t" }).joined(separator: " "))
     }
 
     static func trimSpaces(_ s: String) -> String {
@@ -81,7 +79,7 @@ public enum DriveJoin {
 
     // /dev/rdisk4 (MakeMKV on macOS) and /dev/disk4 (DiskArbitration) are one drive; E: and E:\ too.
     static func deviceKey(_ device: String) -> String {
-        var d = MessageCatalog.asciiLower(device)
+        var d = asciiLower(device)
         while d.hasSuffix("\\") || d.hasSuffix("/") { d.removeLast() }
         return d.hasPrefix("/dev/rdisk") ? "/dev/disk" + d.dropFirst(10) : d
     }

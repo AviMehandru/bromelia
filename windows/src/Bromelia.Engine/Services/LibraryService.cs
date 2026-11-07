@@ -12,14 +12,14 @@ namespace Bromelia.Engine;
 
 /// <summary>
 /// The libraries of the configuration (plan §11.1, §22). A library is online while its folder holds the
-/// .bromelia-library marker it was attached with (I2): the markers are checked at start, every 30 s and on
-/// <see cref="Check"/> (mount events), each on its own worker; an offline library is blocked in the scheduler and raised
-/// as a problem. A check that hasn't come back by the next tick (a share that froze, review L3-9) counts as offline
-/// and isn't started again until it comes back. As the <see cref="ILibraryPort"/> of the steps it gives staging folders
-/// and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on workers, one at a time per unit: a
-/// commit waits while a roll forward of its unit runs (recovery's may outlast its 30 s at startup on a slow share). State
-/// is touched only on the executor; the steps read a snapshot. As the <see cref="ICatalogQueries"/> of the steps it asks
-/// the catalogue on a worker. shared/fixtures/engine/library-service.cases.json.
+/// .bromelia-library marker it was attached with: the markers are checked at start, every 30 s and on <see
+/// cref="Check"/> (mount events), each on its own worker; an offline library is blocked in the scheduler and raised as
+/// a problem. A check that hasn't come back by the next tick (a share that froze) counts as offline and isn't started
+/// again until it comes back. As the <see cref="ILibraryPort"/> of the steps it gives staging folders and runs the
+/// commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on workers, one at a time per unit: a commit waits
+/// while a roll forward of its unit runs (recovery's may outlast its 30 s at startup on a slow share). State is touched
+/// only on the executor; the steps read a snapshot. As the <see cref="ICatalogQueries"/> of the steps it asks the
+/// catalogue on a worker. shared/fixtures/engine/library-service.cases.json.
 /// </summary>
 public sealed class LibraryService : ILibraryPort, ICatalogQueries
 {
@@ -28,9 +28,9 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
     const string QuarantineFolder = "_Quarantine";
     const string IncompleteNote = "INCOMPLETE.txt";
     /// <summary>The media server layout's folder for backups (Layouts); servers are kept out of it by the ignore
-    /// files (owner, 2026-10-22).</summary>
+    /// files.</summary>
     const string BackupFolder = "Backup";
-    /// <summary>.plexignore for Plex, .ignore for Jellyfin and Emby, as today's apps wrote them.</summary>
+    /// <summary>.plexignore for Plex, .ignore for Jellyfin and Emby.</summary>
     static readonly (string Name, string Text)[] IgnoreFiles = { (".plexignore", "*\n"), (".ignore", "") };
     static readonly Duration CheckEvery = new(30);
     static readonly MessageCode[] ReasonCodes = { MessageCode.LibraryOffline, MessageCode.LibraryNotAttached, MessageCode.LibraryMarkerMismatch };
@@ -258,11 +258,11 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
         return _fs.List(staging).Where(e => e.IsDirectory).Select(e => e.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
     });
 
-    /// <summary>A staging folder no job will continue goes to &lt;library&gt;/_Quarantine/&lt;ConflictNamer('&lt;name&gt;
-    /// [INCOMPLETE]')&gt; with <paramref name="note"/> as INCOMPLETE.txt and <paramref name="logs"/> (the job's log copies,
-    /// by name; owner, 2026-10-25) next to it, each written atomically before the move, so the folder arrives marked (I1);
-    /// never reused or deleted (review L3-3, P1-3); one that holds no file is removed instead (null), and nothing is
-    /// written into it. The folders are synced. Any thread but the executor.</summary>
+    /// <summary>A staging folder no job will continue goes to
+    /// &lt;library&gt;/_Quarantine/&lt;ConflictNamer('&lt;name&gt; [INCOMPLETE]')&gt; with <paramref name="note"/> as
+    /// INCOMPLETE.txt and <paramref name="logs"/> (the job's log copies, by name) next to it, each written atomically
+    /// before the move, so the folder arrives marked; never reused or deleted; one that holds no file is removed
+    /// instead (null), and nothing is written into it. The folders are synced. Any thread but the executor.</summary>
     public Task<string?> SetAside(string libraryId, string folder, string name, byte[] note, IReadOnlyList<(string Name, byte[] Bytes)> logs) =>
         _executor.Worker(async () =>
     {
@@ -536,8 +536,8 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
         }
     });
 
-    /// <summary>Nothing is written unless every item is in staging with SHA256SUMS, and nothing at the destination
-    /// is in the way (I5).</summary>
+    /// <summary>Nothing is written unless every item is in staging with SHA256SUMS, and nothing at the destination is
+    /// in the way.</summary>
     void Precheck(CommitIntent intent)
     {
         if (!IsFolder(intent.Staging)) throw NotFound(intent.Staging);
@@ -552,15 +552,30 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
         }
         foreach (var item in intent.Items)
         {
-            var targets = item.IsDir
-                ? Walk(intent.Staging + "/" + item.FromPath).Select(f => intent.Destination + "/" + item.ToPath + "/" + f)
-                : new[] { intent.Destination + "/" + item.ToPath };
-            foreach (var t in targets)
-                if (_fs.Exists(t) && !_fs.Stat(t).IsDirectory) throw AlreadyExists(t);
+            var to = intent.Destination + "/" + item.ToPath;
+            if (item.IsDir) CheckMerge(intent.Staging + "/" + item.FromPath, to);
+            else if (_fs.Exists(to)) throw AlreadyExists(to);
         }
     }
 
-    /// <summary>Steps 5 and 6 from wherever the intent is: the move, SHA256SUMS, the syncs, then the unit committed.</summary>
+    /// <summary>Refuses what moveMerging would put under another name than SHA256SUMS lists: it matches names ignoring
+    /// ASCII case and renames whatever then clashes, so every entry of that kind is in the way, a folder spelled another
+    /// way too.</summary>
+    void CheckMerge(string source, string target)
+    {
+        if (!_fs.Exists(target)) return;
+        if (!IsFolder(target)) throw AlreadyExists(target);
+        var there = _fs.List(target);
+        foreach (var e in _fs.List(source).OrderBy(e => e.Name, StringComparer.Ordinal))
+        {
+            if (there.FirstOrDefault(x => ConflictNamer.Same(x.Name, e.Name)) is not { } same) continue;
+            if (!e.IsDirectory || same.Name != e.Name) throw AlreadyExists(target + "/" + same.Name);
+            CheckMerge(source + "/" + e.Name, target + "/" + e.Name);
+        }
+    }
+
+    /// <summary>Steps 5 and 6 from wherever the intent is: the move, SHA256SUMS, the syncs, then the unit
+    /// committed.</summary>
     async Task<CommitResult> Complete(string root, CommitIntent intent, IReadOnlyList<UnitFile>? files)
     {
         var moved = intent.Items.Count(i => i.Moved);
@@ -585,8 +600,8 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
             EnsureFolders(root, intent.Destination);
             if (intent.Merge || _fs.Exists(sums))
             {
-                var existing = _fs.Exists(sums) ? Text(_fs.Read(sums)) : "";
-                _fs.WriteAtomically(sums, Encoding.UTF8.GetBytes(Sha256Sums.Merge(existing, Sha256Sums.Parse(Text(_fs.Read(stagingSums))))), FileMode);
+                var existing = _fs.Exists(sums) ? _fs.Read(sums) : Array.Empty<byte>();
+                _fs.WriteAtomically(sums, Sha256Sums.Merge(existing, Sha256Sums.Parse(Text(_fs.Read(stagingSums)))), FileMode);
                 _fs.Remove(stagingSums);
             }
             else
@@ -597,6 +612,9 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
         if (intent.Merge) Ignored(intent);
         RemoveEmpty(intent.Staging);
         var unitFiles = files ?? FromSums(intent);
+        // Whatever happened on the way, a unit never ends committed naming a file that isn't there: the intent stays open.
+        foreach (var f in unitFiles)
+            if (!_fs.Exists(intent.Destination + "/" + f.Path)) throw NotFound(intent.Destination + "/" + f.Path);
         foreach (var folder in Synced(root, intent, unitFiles)) _fs.SyncDirectory(folder);
         _crash?.Invoke("commit.beforeDone");
         var record = await _units.Get(intent.UnitId).ConfigureAwait(false) ?? throw new BroFailure(Message(MessageCode.UnitNotFound).ToError());
@@ -635,9 +653,9 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
         else throw NotFound(from);
     }
 
-    /// <summary>A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are missing
-    /// (owner, 2026-10-22): outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from
-    /// the intent alone (an item under Backup/ of a shared folder), so a roll forward writes them too.</summary>
+    /// <summary>A media server's Backup/ folder the unit was merged into gets .plexignore and .ignore when they are
+    /// missing : outside the unit (not in SHA256SUMS), never overwritten, each written atomically. Told from the intent
+    /// alone (an item under Backup/ of a shared folder), so a roll forward writes them too.</summary>
     void Ignored(CommitIntent intent)
     {
         if (!intent.Items.Any(i => i.ToPath.StartsWith(BackupFolder + "/", StringComparison.Ordinal))) return;
@@ -647,12 +665,31 @@ public sealed class LibraryService : ILibraryPort, ICatalogQueries
             if (!_fs.Exists(folder + "/" + name)) _fs.WriteAtomically(folder + "/" + name, Encoding.UTF8.GetBytes(text), FileMode);
     }
 
-    /// <summary>The unit's lines of the destination's SHA256SUMS (a roll forward has no file list of its own).</summary>
+    /// <summary>The unit's lines of the destination's SHA256SUMS (a roll forward has no file list of its own), each
+    /// with the role and title its archive record gives. A file the record doesn't name has no role: "title" would be a
+    /// guess.</summary>
     IReadOnlyList<UnitFile> FromSums(CommitIntent intent)
     {
         var sums = Sha256Sums.Parse(Text(_fs.Read(intent.Destination + "/" + Sha256Sums.FileName)));
+        var recorded = RecordedFiles(intent);
         return sums.Where(s => intent.Items.Any(i => i.IsDir ? s.Path.StartsWith(i.ToPath + "/", StringComparison.Ordinal) : s.Path == i.ToPath))
-            .Select(s => new UnitFile(s.Path, _fs.Stat(intent.Destination + "/" + s.Path).Size, s.Sha256, "title")).ToList();
+            .Select(s =>
+            {
+                var file = recorded.GetValueOrDefault(s.Path);
+                return new UnitFile(s.Path, _fs.Stat(intent.Destination + "/" + s.Path).Size, s.Sha256, file?["role"]?.AsString ?? "",
+                    (int?)file?["title"]?.AsInteger);
+            }).ToList();
+    }
+
+    /// <summary>The files of the unit's archive record, by path; none when it isn't there or doesn't read.</summary>
+    Dictionary<string, JsonValue> RecordedFiles(CommitIntent intent)
+    {
+        var files = new Dictionary<string, JsonValue>(StringComparer.Ordinal);
+        var record = intent.Destination + "/bromelia-" + intent.UnitId.Value[..8] + ".json";
+        if (!_fs.Exists(record)) return files;
+        foreach (var file in JsonValue.Parse(Text(_fs.Read(record)))?["files"]?.AsArray ?? new List<JsonValue>())
+            if (file["path"]?.AsString is { } path) files[path] = file;
+        return files;
     }
 
     /// <summary>Every folder from the library's root down to each committed file, and the staging folder's parent.</summary>

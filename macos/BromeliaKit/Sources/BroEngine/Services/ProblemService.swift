@@ -2,9 +2,9 @@ import BroDomain
 import BroFoundation
 import BroPorts
 
-/// The active problems every UI shows until they are cleared (plan §11.1), on the executor; a minimal one (owner,
-/// 2026-10-12). In memory only: each service raises its problems again when it starts. A problem is keyed by its code
-/// and scope; its id is the code, or `code:kind:id` with a scope. shared/fixtures/engine/problem-service.cases.json.
+/// The active problems every UI shows until they are cleared (plan §11.1), on the executor; a minimal one. In memory
+/// only: each service raises its problems again when it starts. A problem is keyed by its code and scope; its id is the
+/// code, or `code:kind:id` with a scope. shared/fixtures/engine/problem-service.cases.json.
 @EngineActor
 public final class ProblemService {
     private let bus: EventBus

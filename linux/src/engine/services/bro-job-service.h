@@ -4,8 +4,8 @@
  * order the jobs were created, and in the store before jobChanged (queued) announces it; then it runs. start() runs the
  * jobs the last engine left unfinished (after recover()), in their queues' order. Each job's place in its queue is
  * stored when it changes (a transaction that changes only the position: the runner owns the rest of the record). The
- * continue offer comes with AutomationService (owner, 2026-10-17/18). stop() leaves the running jobs as a killed engine
- * would (decision 170): the next start's recovery takes them up. shared/fixtures/engine/job-service.cases.json. */
+ * continue offer comes with AutomationService. stop() leaves the running jobs as a killed engine would: the next
+ * start's recovery takes them up. shared/fixtures/engine/job-service.cases.json. */
 #pragma once
 
 #include "bro-engine-clock.h"
@@ -59,35 +59,31 @@ void bro_job_service_create (BroJobService *self, const BroJobRequest *request, 
  * finished one stays as it is. job.notFound. */
 void bro_job_service_cancel (BroJobService *self, const BroId *job_id, BroJobServiceDone done, gpointer data, GDestroyNotify destroy);
 
-/* Runs a finished job again (plan §13.1's retry(id, fromStep?); owner 2026-10-17/18).
- * - Without a step (@from_step NULL): one that failed, was cancelled or was skipped, as a new job with the same request,
- *   started by hand (not automatic, no media generation); an interrupted one is continued: the same job from its first
- *   step.
- * - From a step: one that failed, was cancelled or was interrupted, the same job, from that step (job.unknownStep {step}
- *   when its plan has none; server.badRequest when a step before it isn't done). A step up to Release starts it from its
- *   first step instead: the disc is read again (Acquire then keeps what an earlier attempt finished of the same disc).
- * The same job's steps from there are stored pending (their checkpoints kept), its plan cut back after Plan when Plan runs
- * again, and its record queued again (no outcome, by hand, no media generation; acquisition up to Release, else
- * processing) with job.retried {step} in its log, then it runs like a new one. job.notFound; job.notRetryable for any
- * other job (read errors and failed post steps get retries of their own). While the job has an open commit intent, only a
- * retry from Commit is taken (job.commitOpen). Once the job's unit is in a library (stored committed, quarantined or
- * missing), a retry from a step before Commit, or continuing it, is job.alreadyCommitted (owner, 2026-10-25); from Commit
- * or later, or as a new job (Decide asks whether to archive it again), it is taken. A job that was kept apart is retried
- * from its keepApart step only (that step again, in the processing queue), or as a new job; any other step is
- * job.notRetryable. */
+/* Runs a finished job again (plan §13.1's retry(id, fromStep?)). Without a step (@from_step NULL), a job that failed,
+ * was cancelled or was skipped runs as a new job with the same request, started by hand; an interrupted one is
+ * continued from its first step. From a step, a job that failed, was cancelled or was interrupted runs as the same job
+ * from there; a step up to Release starts it from its first step instead, as the disc is read again (Acquire then keeps
+ * what an earlier attempt finished of the same disc). The same job's steps from there are stored pending, their
+ * checkpoints kept, and its plan is cut back after Plan when Plan runs again.
+ *
+ * While the job has an open commit intent its files are partly in the library, so only a retry from Commit, which
+ * finishes it, is taken (job.commitOpen): a step before Commit would change staging under the intent, and a new job
+ * would archive the disc again beside it. Once the unit is in a library, a retry from a step before Commit, or
+ * continuing it, is job.alreadyCommitted: the same job would rip the disc again as the same unit. A job kept apart is
+ * retried from its keepApart step only, or as a new job. */
 void bro_job_service_retry (BroJobService *self, const BroId *job_id, const BroStepKind *from_step, BroJobDtoDone done, gpointer data,
                             GDestroyNotify destroy);
 
-/* Doesn't continue an interrupted, failed or cancelled job (owner, 2026-10-03 and 2026-10-25; plan §20.4): the same job runs
- * again with a keepApart step in place of the step it stopped at and what follows (KeepApartStep seals what staging holds
- * and quarantines it as INCOMPLETE; the job then ends cancelled). The step's row is stored pending (output and error
- * cleared) with the checkpoint bro_keep_apart_step_kept (the job's outcome and error), for its note; the plan cut back to
- * the steps before it plus keepApart, and the record queued again in the processing queue (no outcome; the request as it
- * was); jobChanged, then it runs. job.notFound; job.notInterrupted for a job that isn't finished interrupted, failed or
- * cancelled, that was kept apart already (retry its keepApart step instead), that this service runs, or whose Plan step
- * didn't succeed; job.processAbandoned {tool} for a job that logged process.abandoned in this engine run (the tool may
- * still be writing to its staging; after a restart it is kept apart as any other: owner, 2026-10-25); job.commitOpen
- * while it has an open commit intent (retry it from Commit); job.alreadyCommitted once its unit is in a library. */
+/* Doesn't continue an interrupted, failed or cancelled job (plan §20.4): the same job runs again with a keepApart step
+ * in place of the step it stopped at and what follows. KeepApartStep seals what staging holds and quarantines it as
+ * INCOMPLETE; the job then ends cancelled. The step's row is stored pending with the checkpoint
+ * bro_keep_apart_step_kept (the job's outcome and error) for its note, the plan is cut back to the steps before it plus
+ * keepApart, and the record is queued again in the processing queue.
+ *
+ * job.notInterrupted for a job that didn't end that way, was kept apart already (retry its keepApart step instead), is
+ * running here, or whose Plan step didn't succeed. job.processAbandoned for a job that logged process.abandoned in this
+ * engine run: the tool may still be writing to its staging (after a restart it is kept apart as any other).
+ * job.commitOpen while it has an open commit intent; job.alreadyCommitted once its unit is in a library. */
 void bro_job_service_keep_apart (BroJobService *self, const BroId *job_id, BroJobDtoDone done, gpointer data, GDestroyNotify destroy);
 
 /* Answers the job's question @decision_id. job.notFound; job.notAwaitingDecision when the job isn't waiting for that
@@ -110,15 +106,15 @@ void bro_job_service_query (BroJobService *self, const BroJobQueryDto *query, Br
 
 /* The job's log lines after seq @after (0: all), including a running step's lines not yet written. job.notFound. */
 void bro_job_service_log (BroJobService *self, const BroId *job_id, gint64 after, BroLogLinesDone done, gpointer data, GDestroyNotify destroy);
-/* The job with its steps, files and commands (dtos.json JobDetail; decision 171). job: as query gives it. steps: one per
- * step of its plan (the stored plan, else the planner's steps), each with the stored row of that seq when it is of that
- * kind, else pending; rows past the plan's end (decision 158: a keepApart cut the plan back) are left out. files: the
- * Seal row's files, else the Acquire row's produced files (names in staging), else none. commands: none yet (nothing
- * logs process.command). logBytes: the size of its log.jsonl. job.notFound. */
+/* The job with its steps, files and commands (dtos.json JobDetail). job: as query gives it. steps: one per step of its
+ * plan (the stored plan, else the planner's steps), each with the stored row of that seq when it is of that kind, else
+ * pending; rows past the plan's end (a keepApart cut the plan back) are left out. files: the Seal row's files, else the
+ * Acquire row's produced files (names in staging), else none. commands: none yet (nothing logs process.command).
+ * logBytes: the size of its log.jsonl. job.notFound. */
 void bro_job_service_job (BroJobService *self, const BroId *job_id, BroJobDetailDone done, gpointer data, GDestroyNotify destroy);
-/* At engine stop (decision 170, owner 2026-10-26): the runner shuts every live job down without storing anything more
- * for it (bro_pipeline_runner_shutdown) and no queue place is stored any more; @done (no error) once no job is live.
- * The commands answer server.stopping from now on. */
+/* At engine stop: the runner shuts every live job down without storing anything more for it
+ * (bro_pipeline_runner_shutdown) and no queue place is stored any more; @done (no error) once no job is live. The
+ * commands answer server.stopping from now on. */
 void bro_job_service_stop (BroJobService *self, BroJobServiceDone done, gpointer data, GDestroyNotify destroy);
 
 G_END_DECLS

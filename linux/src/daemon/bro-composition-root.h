@@ -1,6 +1,6 @@
-/* bro-composition-root.h: BroCompositionRoot: builds the real object graph (plan §17, decision 175): ports → adapters →
- * services → LocalEngine; nothing else constructs adapters or services. TestCompositionRoot (tests/) builds the same
- * graph over fakes. */
+/* bro-composition-root.h: BroCompositionRoot: builds the real object graph (plan §17): ports → adapters → services →
+ * LocalEngine; nothing else constructs adapters or services. TestCompositionRoot (tests/) builds the same graph over
+ * fakes. */
 #pragma once
 
 #include "bro-local-engine.h"

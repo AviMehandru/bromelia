@@ -1,3 +1,5 @@
+import BroFoundation
+
 /// Known MakeMKV message codes → severity and notices.
 public enum MessageCatalog {
     /// 2018: write error (e.g. "No space left on device"); 5006: the source file doesn't exist.
@@ -30,10 +32,5 @@ public enum MessageCatalog {
         }
         if t.contains("application version is too old") { return .versionTooOld }
         return nil
-    }
-
-    /// ASCII case folding, as on the other platforms.
-    static func asciiLower(_ s: String) -> String {
-        String(String.UnicodeScalarView(s.unicodeScalars.map { $0.value >= 65 && $0.value <= 90 ? Unicode.Scalar($0.value + 32)! : $0 }))
     }
 }

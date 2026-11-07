@@ -1,7 +1,6 @@
 import BroFoundation
 
-/// How a job ended, from its steps' results (plan §20.3): one pure function instead of today's chain of flags in
-/// three run() methods.
+/// How a job ended, from its steps' results (plan §20.3): one pure function.
 public enum JobOutcome {
     static let afterCommitKinds: Set<StepKind> = [.publish, .protect, .postProcess, .notify, .runCommand, .transcode]
 
@@ -10,11 +9,11 @@ public enum JobOutcome {
     public static func afterCommit(_ kind: StepKind) -> Bool { afterCommitKinds.contains(kind) }
 
     /// In order: cancelled before its unit was committed (a cancel after a Commit step that succeeded only stops the
-    /// steps after it: owner, 2026-10-25), or a keepApart step that succeeded or was skipped (the job wasn't continued;
-    /// owner, 2026-10-25), both job.cancelledByUser; interrupted (recovery.interrupted); skipped (the skip reason); a
-    /// failed step that isn't after the commit fails the job with its error, or with the MakeMKV problem that
-    /// explains it (the error as its cause); read errors give succeededWithReadErrors (rip.readErrors); a failed
-    /// post-commit step that affects the outcome gives succeededStepsFailed; else succeeded.
+    /// steps after it), or a keepApart step that succeeded or was skipped (the job wasn't continued), both
+    /// job.cancelledByUser; interrupted (recovery.interrupted); skipped (the skip reason); a failed step that isn't
+    /// after the commit fails the job with its error, or with the MakeMKV problem that explains it (the error as its
+    /// cause); read errors give succeededWithReadErrors (rip.readErrors); a failed post-commit step that affects the
+    /// outcome gives succeededStepsFailed; else succeeded.
     public static func decide(_ stepResults: [StepResult], cancelled: Bool, policy: OutcomePolicy) -> Decided {
         let committed = stepResults.contains(where: { $0.kind == .commit && $0.state == .succeeded })
         if (cancelled && !committed)

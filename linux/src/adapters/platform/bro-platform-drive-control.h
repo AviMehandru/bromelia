@@ -1,8 +1,8 @@
 /* bro-platform-drive-control.h: BroPlatformDriveControl: DriveControl on Linux (plan §10.3;
- * shared/fixtures/adapters/drive-control.cases.json), today's code: eject and close the tray with the eject tool (it
- * unmounts first), the mount from /proc/self/mountinfo, the content from udev's database (ID_CDROM_MEDIA_*: what
- * today read with udevadm) after a mounted DVD / Blu-ray structure, raw reads of the device (BLKGETSIZE64) or of a disc
- * image file. Only a /dev path is a drive. Synchronous. */
+ * shared/fixtures/adapters/drive-control.cases.json): eject and close the tray with the eject tool (it unmounts first),
+ * the mount from /proc/self/mountinfo, the content from udev's database (ID_CDROM_MEDIA_*: what udevadm reads) after a
+ * mounted DVD / Blu-ray structure, raw reads of the device (BLKGETSIZE64) or of a disc image file. Only a /dev path is
+ * a drive. Synchronous. */
 #pragma once
 
 #include "bro-clock.h"

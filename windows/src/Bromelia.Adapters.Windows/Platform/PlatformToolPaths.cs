@@ -5,8 +5,8 @@ using Bromelia.Ports;
 
 namespace Bromelia.Adapters.Windows;
 
-/// <summary>Where each tool is usually installed on Windows, and its program names (today's candidate lists). Tools
-/// shipped next to Bromelia (cyanrip, apprise) are found there first.</summary>
+/// <summary>Where each tool is usually installed on Windows, and its program names. Tools shipped next to Bromelia
+/// (cyanrip, apprise) are found there first.</summary>
 public static class PlatformToolPaths
 {
     public static IReadOnlyDictionary<ToolKind, IReadOnlyList<string>> Candidates(string home)

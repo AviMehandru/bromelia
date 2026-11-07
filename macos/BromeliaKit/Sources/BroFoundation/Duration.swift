@@ -6,8 +6,8 @@ public struct Duration: Sendable, Hashable, Comparable {
 
     public static func < (a: Duration, b: Duration) -> Bool { a.seconds < b.seconds }
 
-    /// makemkvcon's `h:mm:ss` (or `m:ss`, or seconds): `2:44:48` → 9888 s. A part that isn't a number counts as
-    /// 0, as today; nil when the text is empty.
+    /// makemkvcon's `h:mm:ss` (or `m:ss`, or seconds): `2:44:48` → 9888 s. A part that isn't a number counts as 0; nil
+    /// when the text is empty.
     public static func parseClock(_ text: String) -> Duration? {
         let isSpace: (Character) -> Bool = { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" }
         guard text.contains(where: { !isSpace($0) }) else { return nil }

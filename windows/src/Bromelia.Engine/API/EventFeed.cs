@@ -6,9 +6,9 @@ using Bromelia.Foundation;
 namespace Bromelia.Engine;
 
 /// <summary>
-/// What <see cref="IEngineAPI.Events"/> gives (decision 168): the snapshot event first when it was opened without a
-/// replayable after, then the deltas; after a gap (the stream's resync) a new snapshot instead of the missed deltas;
-/// jobLog events only for the jobs asked for. Read from any thread, one reader at a time; stop closes it.
+/// What <see cref="IEngineAPI.Events"/> gives: the snapshot event first when it was opened without a replayable after,
+/// then the deltas; after a gap (the stream's resync) a new snapshot instead of the missed deltas; jobLog events only
+/// for the jobs asked for. Read from any thread, one reader at a time; stop closes it.
 /// </summary>
 public sealed class EventFeed
 {
@@ -18,7 +18,8 @@ public sealed class EventFeed
     EngineEvent? _first;
 
     /// <param name="first">The snapshot event to give first (null when replaying from after).</param>
-    /// <param name="snapshot">Builds a new snapshot event on the executor (after a gap); fails once the engine stops.</param>
+    /// <param name="snapshot">Builds a new snapshot event on the executor (after a gap); fails once the engine
+    /// stops.</param>
     internal EventFeed(EventStream stream, IReadOnlyCollection<Id> jobLog, EngineEvent? first, Func<Task<EngineEvent>> snapshot)
     {
         _stream = stream;

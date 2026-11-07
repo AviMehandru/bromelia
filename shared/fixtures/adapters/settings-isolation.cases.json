@@ -220,6 +220,36 @@
         "releaseProblem": "makemkv.keyNotRemoved",
         "rule": "recover reports a key it can't remove (makemkv.keyNotRemoved) instead of going on without a word"
       }
+    },
+    {
+      "id": "home-key-on-a-crlf-line-goes-too",
+      "given": {
+        "layout": "linux",
+        "settings": {
+          "app_DataDir": "/data"
+        },
+        "profileXml": null,
+        "workDirectory": "home",
+        "duringRun": {
+          "home/.MakeMKV/settings.conf": "app_DataDir = \"/data\"\r\napp_Key = \"M-registered-meanwhile\"\r\n"
+        }
+      },
+      "expect": {
+        "environment": {
+          "HOME": "<root>/home"
+        },
+        "profilePath": null,
+        "files": {
+          "home/.MakeMKV/settings.conf": "app_DataDir = \"/data\"\r\napp_Key = \"M-registered-meanwhile\"\r\n"
+        },
+        "afterRelease": {
+          "home/.MakeMKV/settings.conf": "app_DataDir = \"/data\"\r\n"
+        },
+        "rule": "the key's line goes whatever ends it; the other lines keep their ends"
+      },
+      "from": [
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ]
     }
   ]
 }

@@ -149,11 +149,13 @@ typedef enum {
   BRO_MSG_RIP_FAILED, /* rip.failed */
   BRO_MSG_RIP_TITLES_FAILED, /* rip.titlesFailed */
   BRO_MSG_RIP_TITLE_REASON, /* rip.titleReason */
+  BRO_MSG_RIP_TITLE_MISSING, /* rip.titleMissing */
   BRO_MSG_RIP_KEPT_UNDER_MAKEMKV_NAME, /* rip.keptUnderMakemkvName */
   BRO_MSG_RIP_CONTINUED, /* rip.continued */
   BRO_MSG_RIP_LEFTOVER_REMOVED, /* rip.leftoverRemoved */
   BRO_MSG_RIP_PARTIAL_REMOVED, /* rip.partialRemoved */
   BRO_MSG_RIP_CHECK_FAILED, /* rip.checkFailed */
+  BRO_MSG_RIP_OTHER_CHECK_FAILED, /* rip.otherCheckFailed */
   BRO_MSG_RIP_READ_ERRORS, /* rip.readErrors */
   BRO_MSG_RIP_ONE_PASS, /* rip.onePass */
   BRO_MSG_RIP_ONE_PASS_MISMATCH, /* rip.onePassMismatch */
@@ -275,6 +277,7 @@ typedef enum {
   BRO_MSG_ARCHIVE_OUTPUT_FOLDER, /* archive.outputFolder */
   BRO_MSG_ARCHIVE_HASHING, /* archive.hashing */
   BRO_MSG_ARCHIVE_HASH_FAILED, /* archive.hashFailed */
+  BRO_MSG_ARCHIVE_SIZE_MISMATCH, /* archive.sizeMismatch */
   BRO_MSG_ARCHIVE_MOVING, /* archive.moving */
   BRO_MSG_ARCHIVE_MOVED, /* archive.moved */
   BRO_MSG_ARCHIVE_KEPT_APART, /* archive.keptApart */

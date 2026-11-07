@@ -23,7 +23,7 @@ public interface ILibraryPort
     /// the executor.</summary>
     Task<CommitResult> Commit(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, CancellationToken cancel);
 
-    /// <summary><see cref="Commit"/> into &lt;library&gt;/_Quarantine/&lt;name&gt; [&lt;tag&gt;] (a free name; name: the last
-    /// part of the intent's destination), not merged, the unit quarantined.</summary>
+    /// <summary><see cref="Commit"/> into &lt;library&gt;/_Quarantine/&lt;name&gt; [&lt;tag&gt;] (a free name; name:
+    /// the last part of the intent's destination), not merged, the unit quarantined.</summary>
     Task<CommitResult> Quarantine(UnitRecord unit, CommitIntent intent, IReadOnlyList<UnitFile> files, string tag, CancellationToken cancel);
 }

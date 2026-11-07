@@ -685,6 +685,146 @@
           "code": "check.sumsEmpty"
         }
       }
+    },
+    {
+      "id": "sums-parse-crlf",
+      "from": [
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\r\n2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824 *b c.mkv\r\n"
+      },
+      "expect": {
+        "entries": [
+          {
+            "path": "a.mkv",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          {
+            "path": "b c.mkv",
+            "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sums-merge-keeps-crlf-lines",
+      "from": [
+        "a SHA256SUMS saved with CRLF keeps every earlier job's line",
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "existing": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\r\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  b.mkv\r\n",
+        "entries": [
+          {
+            "path": "c.mkv",
+            "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+          }
+        ]
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  b.mkv\n2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824  c.mkv\n"
+      }
+    },
+    {
+      "id": "sums-merge-two-spellings-are-two-files",
+      "from": [
+        "names differing only in normalization are two files on a share",
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "existing": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  café.mkv\n",
+        "entries": [
+          {
+            "path": "café.mkv",
+            "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+          }
+        ]
+      },
+      "expect": {
+        "text": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824  café.mkv\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  café.mkv\n"
+      }
+    },
+    {
+      "id": "sums-merge-keeps-a-line-it-cannot-read",
+      "from": [
+        "a line of an archive file never vanishes silently"
+      ],
+      "given": {
+        "existing": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\nnot a checksum\nba7816bf8f  b.mkv\n",
+        "entries": [
+          {
+            "path": "c.mkv",
+            "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+          }
+        ]
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\n2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824  c.mkv\nnot a checksum\nba7816bf8f  b.mkv\n"
+      }
+    },
+    {
+      "id": "sums-merge-drops-only-empty-lines",
+      "from": [
+        "a line of an archive file never vanishes silently"
+      ],
+      "given": {
+        "existing": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\n\n\r\n   \n",
+        "entries": [
+          {
+            "path": "c.mkv",
+            "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+          }
+        ]
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\n2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824  c.mkv\n   \n"
+      }
+    },
+    {
+      "id": "sums-merge-keeps-a-crlf-line-it-cannot-read",
+      "from": [
+        "a line of an archive file never vanishes silently"
+      ],
+      "given": {
+        "existing": "not a checksum\r\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\r\n",
+        "entries": []
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\nnot a checksum\n"
+      }
+    },
+    {
+      "id": "sums-merge-keeps-a-line-without-a-final-line-break",
+      "from": [
+        "a line of an archive file never vanishes silently"
+      ],
+      "given": {
+        "existing": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\nnot a checksum",
+        "entries": []
+      },
+      "expect": {
+        "text": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.mkv\nnot a checksum\n"
+      }
+    },
+    {
+      "id": "sums-merge-keeps-a-line-that-is-not-utf-8-byte-for-byte",
+      "from": [
+        "a line of an archive file never vanishes silently",
+        "decoding it would rewrite it with replacement characters"
+      ],
+      "given": {
+        "existingHex": "626137383136626638663031636665613431343134306465356461653232323362303033363161333936313737613963623431306666363166323030313561642020636166e92e6d6b760a",
+        "entries": [
+          {
+            "path": "c.mkv",
+            "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+          }
+        ]
+      },
+      "expect": {
+        "hex": "326366323464626135666230613330653236653833623261633562396532396531623136316535633166613734323565373330343333363239333862393832342020632e6d6b760a626137383136626638663031636665613431343134306465356461653232323362303033363161333936313737613963623431306666363166323030313561642020636166e92e6d6b760a"
+      }
     }
   ]
 }

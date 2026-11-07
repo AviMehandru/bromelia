@@ -4,7 +4,7 @@
     "LibraryService.stagingFolders",
     "LibraryService.setAside"
   ],
-  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. A next step that is keepApart (running or not started; F8) is resumed the same way, in the processing queue. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job, and when that job finished failed in its Commit or keepApart step (the first row not done is that step, failed or cancelled), or cancelled with its Commit step unfinished (the first row not done is Commit, in any state), it gets the outcome that step gives when it succeeds, JobOutcome.decide of its steps with that step succeeded (owner I1-3, 2026-11-03 to 2026-11-05: a Commit gives what a committed unit gives, a keepApart cancelled; jobFinished; its finishedAt, step rows and log kept); a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker): temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the staging of an open intent is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<the name KeepApart gives the job (KeepApartStep.folderName: the Plan output's identity name, else its title, else Probe's listing name, else the source's label, else the job's id; owner H3a-2), or the folder when no job owns it> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], the log copies' names) each rendered by the MessageRenderer, one per line, and the job's logs as Seal copies them (F9, owner 2026-10-25: bromelia-<unit8>-log.txt = its log.jsonl as SealStep.logText, makemkv-<unit8>-log.txt and makemkv-<unit8>-debug-log.txt = its folder's makemkv.txt and makemkv-debug.txt, each when there; unit8 = the first 8 characters of ArchiveFiles.unitId(job); none for a folder no job owns, when the job's Plan output's profile has archive.archiveRecord false, or when one can't be read), written atomically before the move; removed instead when it holds no file, with nothing written). An offline library is left alone. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}], fail [{op, path, error, times}]), an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error, output (its StepOutput's data; {} by default)}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, quarantine (false by default), items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as canonical JSON without its final newline). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
+  "description": "A job's rows may give readErrors (the read errors of their StepOutput). RecoveryService.recover() (plan §20.4, §15.8, review L3-3, L3-9), once at startup, before the libraries start. In order: (1) the unfinished jobs (JobRepository.active); SettingsIsolation.recover with each one's <data>/jobs/<id>/home: a problem whose path is under a job's folder goes to that job's log, any other is raised (no scope). (2) Each job, by its steps (job_steps): the steps done are the leading ones, by seq, that succeeded or were skipped (or failed after the commit, JobOutcome.afterCommit); its steps are the plan's (JobPlanner.initial when it has none); the next one is where it stopped. A step that ended (failed, cancelled) or no next step: the job finishes with JobOutcome.decide of its steps. A next step that was running and is notResumable, or resumeFrom without a checkpoint of the kind it resumes from (the harness's resumeFrom steps name \"backup\": a checkpoint is {kind, ...}): the job finishes interrupted (recovery.interrupted{step}), the step stored interrupted (its checkpoint kept), its staging kept. A running resumeFrom step with a checkpoint of its kind: resumed (recovery.resumed{step}). Otherwise, before acquire (it isn't among the steps done): a job on a drive that is automatic finishes cancelled with disc.changed{why: disc.changed.generation} (the running step stored interrupted); a manual one on a drive starts again from its first step (plan and media generation cleared, its steps stored pending: recovery.requeued); any other is requeued where it stopped (recovery.requeued). After acquire: resumed (recovery.resumed{step}), in the processing queue once release is done. A next step that is keepApart (running or not started; F8) is resumed the same way, in the processing queue. Requeued and resumed jobs become queued with no decision or blockedBy (jobChanged); finished ones publish jobFinished. Log lines are appended to <data>/jobs/<id>/log.jsonl. (3) Per configured library, on a worker: its open commit intents (oldest first) rolled forward (LibraryService.rollForward: commit.rolledForward{unit}, a warning, on the intent's job, and when that job finished failed in its Commit or keepApart step (the first row not done is that step, failed or cancelled), or cancelled with its Commit step unfinished (the first row not done is Commit, in any state), it gets the outcome that step gives when it succeeds, JobOutcome.decide of its steps with that step succeeded (owner I1-3, 2026-11-03 to 2026-11-05: a Commit gives what a committed unit gives, a keepApart cancelled; jobFinished; its finishedAt, step rows and log kept); a failure is logged there as a warning and the intent stays), then the destination's temporary files removed; then its staging folders (LibraryService.stagingFolders, which checks the marker), in order, each with the row of the job it is named after read: temporary files removed from each (ArchiveFiles.isLeftover), then one whose job is unfinished, finished interrupted, or the job of an open intent (by the intent's job, not its staging path: the root may have moved) is kept; any other is set aside (LibraryService.setAside: <library>/_Quarantine/<ConflictNamer('<the name KeepApart gives the job (KeepApartStep.folderName: the Plan output's identity name, else its title, else Probe's listing name, else the source's label, else the job's id; owner H3a-2), or the folder when no job owns it> [INCOMPLETE]')> with INCOMPLETE.txt, the lines of Notes.render(folder, the job's outcome or interrupted, its error, [], the log copies' names) each rendered by the MessageRenderer, one per line, and the job's logs as Seal copies them (F9, owner 2026-10-25: bromelia-<unit8>-log.txt = its log.jsonl as SealStep.logText, makemkv-<unit8>-log.txt and makemkv-<unit8>-debug-log.txt = its folder's makemkv.txt and makemkv-debug.txt, each when there; unit8 = the first 8 characters of ArchiveFiles.unitId(job); none for a folder no job owns, when the job's Plan output's profile has archive.archiveRecord false, or when one can't be read), written atomically before the move; removed instead when it holds no file, with nothing written). An offline library is left alone, and so is the staging of a library whose open intents, units, jobs or step rows can't be read (the next start tries again; a job's row read after its folder was listed, so no row means no job). A log line that can't be written changes nothing. (4) The data folder's temporary files, on a worker. recover completes when all of that is done, or 30 s after it started (EngineClock), whichever comes first; the rest goes on, but jobs may be live from then on: no listing that answers after that removes anything, and only a folder no job owns is still set aside. It returns recovery.summary{count: unfinished jobs} (null when there were none). The harness: a real executor, EventBus, ProblemService, Scheduler and LibraryService (config: libraries, libraries: stored rows), a manual clock at 2026-10-02T20:00:00.000Z, the library harness's file tree (files {path: text}, dirs, hold [{op, path}], fail [{op, path, error, times}]), storeFail {openIntents: {after, times}, units: {after, times} (the reads of UnitRepository.openIntents and get: after that many, the next times fail with store.failed; times -1 by default), jobs: [id], steps: [id] (every read of that job's record or step rows fails)}, an in-memory store (jobs in the given order: {id, title, state, queue (acquisition), plan (kinds or null), rows [{kind, state, checkpoint, error, output (its StepOutput's data; {} by default)}] by seq, driveId, automatic, mediaGeneration, decision, outcome, error, unitId}; units [{id, library, job, path, name}] committing; intents [{unit, job, staging, destination, merge, quarantine (false by default), items [[seq, from, to, sha256, isDir, moved]]}]), data folder /data, steps whose resumability is given.resumability {kind: idempotent | resumeFrom | notResumable} (idempotent when not listed), a SettingsIsolation that records 'recover <homes>' and returns isolationProblems, and a MessageRenderer that writes '<code>' then ' <key>=<value>' per param (strings as they are, other values as canonical JSON without its final newline). Ops: recover ({wait: false}: its result comes when it completes), recovered (whether it has), {advance: s}, release (the held calls go on, and everything started finishes), startLibraries (LibraryService.start, on the executor: ok), {commit: unit} (LibraryService.commit of the stored unit with its stored open intent, no files and a cancel token of its own, off the executor as a step calls it: the destination, or {error}), {job: {as given.jobs}} (a job a running engine stored meanwhile, new or changed, with its rows: ok), {put: {path: text}} (files a running job wrote: ok). Expect: results; jobs {id: {state, queue, plan, mediaGeneration, outcome, error, decision}}; steps {id: ['<kind> <state>[ checkpoint]']}; logs {id: [{severity, code, params}]} (log.jsonl without t); eventLines ['jobChanged <id> <state>', 'jobFinished <id> <outcome>[ <error code>]', 'problemRaised <code>'] for the events of those types, in order; problems; isolation; files (every file but the jobs' log.jsonl); dirsUnder {folder: [its folders]}; db {units [{id, state}], intents [unit]}.",
   "cases": [
     {
       "id": "nothing-to-recover",
@@ -9455,6 +9455,2485 @@
           ]
         },
         "rule": "review L3-9: a frozen share can't keep the engine from starting; the work goes on, and finishes when the share answers"
+      }
+    },
+    {
+      "id": "a-job-that-started-during-a-long-roll-forward-keeps-its-staging",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000100",
+            "library": "lib",
+            "job": "j0",
+            "path": "Movies/Other Movie",
+            "name": "Other Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000100",
+            "job": "j0",
+            "staging": "/lib/.bromelia/staging/j0",
+            "destination": "/lib/Movies/Other Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Other Movie - Playlist 00001.mkv",
+                "Other Movie - Playlist 00001.mkv",
+                "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j0",
+            "title": "Other Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000100"
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "hold": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/j0"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j0/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/.bromelia/staging/j0/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n"
+        },
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          {
+            "job": {
+              "id": "jn",
+              "title": "New Disc",
+              "state": "running",
+              "plan": [
+                "probe",
+                "identify",
+                "plan",
+                "acquire",
+                "release",
+                "verifyRips",
+                "name",
+                "seal",
+                "commit",
+                "notify"
+              ],
+              "rows": [
+                {
+                  "kind": "probe",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "identify",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "plan",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "acquire",
+                  "state": "running"
+                }
+              ]
+            }
+          },
+          {
+            "put": {
+              "/lib/.bromelia/staging/jn/title_t00.mkv": "the rip so far",
+              "/lib/.bromelia/staging/jn/.title_t01.mkv.part-1a2b3c4d": "being written"
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          },
+          "ok",
+          true,
+          "ok",
+          "ok",
+          "ok"
+        ],
+        "jobs": {
+          "j0": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000100",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Other Movie/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/Movies/Other Movie/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/jn/title_t00.mkv": "the rip so far",
+          "/lib/.bromelia/staging/jn/.title_t01.mkv.part-1a2b3c4d": "being written"
+        },
+        "rule": "review A3: the roll forward outlasts recover's 30 s, jobs start, and the tidy reaches staging afterwards: a job that wasn't in its snapshot is live, so its folder is neither swept nor set aside"
+      }
+    },
+    {
+      "id": "a-job-that-restarted-during-a-long-roll-forward-keeps-its-temporary-files",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000100",
+            "library": "lib",
+            "job": "j0",
+            "path": "Movies/Other Movie",
+            "name": "Other Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000100",
+            "job": "j0",
+            "staging": "/lib/.bromelia/staging/j0",
+            "destination": "/lib/Movies/Other Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Other Movie - Playlist 00001.mkv",
+                "Other Movie - Playlist 00001.mkv",
+                "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j0",
+            "title": "Other Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000100"
+          },
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "running",
+                "checkpoint": {
+                  "kind": "backup"
+                }
+              }
+            ]
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "hold": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/j0"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j0/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/.bromelia/staging/j0/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/j1/backup.iso": "the backup"
+        },
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          {
+            "put": {
+              "/lib/.bromelia/staging/j1/.title_t00.mkv.part-1a2b3c4d": "being written"
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 2
+            }
+          },
+          "ok",
+          true,
+          "ok",
+          "ok"
+        ],
+        "jobs": {
+          "j0": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          },
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000100",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Other Movie/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/Movies/Other Movie/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/j1/backup.iso": "the backup",
+          "/lib/.bromelia/staging/j1/.title_t00.mkv.part-1a2b3c4d": "being written"
+        },
+        "rule": "review A3: an unfinished job recovery requeued runs once the 30 s are up: a temporary file in its folder is its own, not a leftover (the sweep of its folder waits for the next start)"
+      }
+    },
+    {
+      "id": "a-sweep-that-outlasts-the-30-s-stops-at-a-restarted-job-s-folder",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/backup.iso": "the backup",
+          "/lib/.bromelia/staging/j1/.title_t09.mkv.part-00000000": "left by the last engine"
+        },
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "running",
+                "checkpoint": {
+                  "kind": "backup"
+                }
+              }
+            ]
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "hold": [
+          {
+            "op": "list",
+            "path": "/lib/.bromelia/staging/j1"
+          }
+        ],
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          {
+            "put": {
+              "/lib/.bromelia/staging/j1/.title_t00.mkv.part-1a2b3c4d": "being written"
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          },
+          "ok",
+          true,
+          "ok",
+          "ok"
+        ],
+        "jobs": {
+          "j1": {
+            "state": "queued",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/backup.iso": "the backup",
+          "/lib/.bromelia/staging/j1/.title_t09.mkv.part-00000000": "left by the last engine",
+          "/lib/.bromelia/staging/j1/.title_t00.mkv.part-1a2b3c4d": "being written"
+        },
+        "rule": "review A3: a listing that answers after the 30 s can't tell a leftover from what the restarted job writes, so nothing it gives is removed"
+      }
+    },
+    {
+      "id": "a-job-that-failed-during-a-long-roll-forward-keeps-its-staging-until-the-next-start",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000100",
+            "library": "lib",
+            "job": "j0",
+            "path": "Movies/Other Movie",
+            "name": "Other Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000100",
+            "job": "j0",
+            "staging": "/lib/.bromelia/staging/j0",
+            "destination": "/lib/Movies/Other Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Other Movie - Playlist 00001.mkv",
+                "Other Movie - Playlist 00001.mkv",
+                "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j0",
+            "title": "Other Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000100"
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "hold": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/j0"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j0/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/.bromelia/staging/j0/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n"
+        },
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          {
+            "job": {
+              "id": "jn",
+              "title": "New Disc",
+              "state": "finished",
+              "plan": [
+                "probe",
+                "identify",
+                "plan",
+                "acquire",
+                "release",
+                "verifyRips",
+                "name",
+                "seal",
+                "commit",
+                "notify"
+              ],
+              "rows": [
+                {
+                  "kind": "probe",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "identify",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "plan",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "acquire",
+                  "state": "running"
+                }
+              ],
+              "outcome": "failed"
+            }
+          },
+          {
+            "put": {
+              "/lib/.bromelia/staging/jn/title_t00.mkv": "the rip so far",
+              "/lib/.bromelia/staging/jn/.title_t01.mkv.part-1a2b3c4d": "being written"
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          },
+          "ok",
+          true,
+          "ok",
+          "ok",
+          "ok"
+        ],
+        "jobs": {
+          "j0": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000100",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Other Movie/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/Movies/Other Movie/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/jn/title_t00.mkv": "the rip so far",
+          "/lib/.bromelia/staging/jn/.title_t01.mkv.part-1a2b3c4d": "being written"
+        },
+        "rule": "plan §20.4: a failed job's staging stays hidden so a retry can continue from it, until the next start; this start began before the job did"
+      }
+    },
+    {
+      "id": "a-failed-job-retried-during-a-long-roll-forward-keeps-its-staging",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000100",
+            "library": "lib",
+            "job": "j0",
+            "path": "Movies/Other Movie",
+            "name": "Other Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000100",
+            "job": "j0",
+            "staging": "/lib/.bromelia/staging/j0",
+            "destination": "/lib/Movies/Other Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Other Movie - Playlist 00001.mkv",
+                "Other Movie - Playlist 00001.mkv",
+                "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j0",
+            "title": "Other Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000100"
+          },
+          {
+            "id": "j3",
+            "title": "Failed Disc",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "acquire"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "failed"
+              }
+            ],
+            "outcome": "failed"
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "hold": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/j0"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j0/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/.bromelia/staging/j0/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp"
+        },
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          {
+            "job": {
+              "id": "j3",
+              "title": "Failed Disc",
+              "state": "running",
+              "plan": [
+                "probe",
+                "acquire"
+              ],
+              "rows": [
+                {
+                  "kind": "probe",
+                  "state": "succeeded"
+                },
+                {
+                  "kind": "acquire",
+                  "state": "failed"
+                }
+              ]
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          },
+          "ok",
+          true,
+          "ok",
+          "ok"
+        ],
+        "jobs": {
+          "j0": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000100",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Other Movie/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/Movies/Other Movie/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp"
+        },
+        "rule": "review A3: a retry makes a failed job live again; the folder it continues from stays where it is"
+      }
+    },
+    {
+      "id": "a-left-behind-job-s-staging-waits-for-the-next-start-once-the-30-s-are-up",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000100",
+            "library": "lib",
+            "job": "j0",
+            "path": "Movies/Other Movie",
+            "name": "Other Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000100",
+            "job": "j0",
+            "staging": "/lib/.bromelia/staging/j0",
+            "destination": "/lib/Movies/Other Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Other Movie - Playlist 00001.mkv",
+                "Other Movie - Playlist 00001.mkv",
+                "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j0",
+            "title": "Other Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000100"
+          },
+          {
+            "id": "j3",
+            "title": "Failed Disc",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "acquire"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "failed"
+              }
+            ],
+            "outcome": "failed"
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "hold": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/j0"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j0/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/.bromelia/staging/j0/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp"
+        },
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          },
+          "ok",
+          true,
+          "ok"
+        ],
+        "jobs": {
+          "j0": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000100",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Other Movie/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/Movies/Other Movie/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp"
+        },
+        "rule": "review A3: once jobs may run, any folder with a job row can be live, or become so by a retry; the set-aside is for the next start, as after a set-aside that failed. Only a folder no job owns still goes (a-library-that-does-not-answer-holds-startup-at-most-30-s)"
+      }
+    },
+    {
+      "id": "a-sweep-of-the-data-folder-that-outlasts-the-30-s-leaves-what-live-jobs-write",
+      "given": {
+        "files": {
+          "/data/jobs/j9/report.txt": "kept"
+        },
+        "hold": [
+          {
+            "op": "list",
+            "path": "/data/jobs"
+          }
+        ],
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          {
+            "put": {
+              "/data/jobs/jn/.log.jsonl.bromelia-tmp-00ff": "being written"
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          "ok",
+          true,
+          "ok",
+          "ok"
+        ],
+        "files": {
+          "/data/jobs/j9/report.txt": "kept",
+          "/data/jobs/jn/.log.jsonl.bromelia-tmp-00ff": "being written"
+        },
+        "rule": "review A3: the data folder holds the live jobs' folders too"
+      }
+    },
+    {
+      "id": "a-roll-forward-that-outlasts-the-30-s-leaves-a-live-commit-s-temporary-file-at-the-destination",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000100",
+            "library": "lib",
+            "job": "j0",
+            "path": "Movies/Other Movie",
+            "name": "Other Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000100",
+            "job": "j0",
+            "staging": "/lib/.bromelia/staging/j0",
+            "destination": "/lib/Movies/Other Movie",
+            "merge": true,
+            "items": [
+              [
+                0,
+                "Other Movie - Playlist 00001.mkv",
+                "Other Movie - Playlist 00001.mkv",
+                "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j0",
+            "title": "Other Movie",
+            "state": "running",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "running"
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000100"
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "hold": [
+          {
+            "op": "rename",
+            "path": "/lib/.bromelia/staging/j0/Other Movie - Playlist 00001.mkv"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j0/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/.bromelia/staging/j0/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/Movies/Other Movie/Earlier Movie.mkv": "an earlier unit"
+        },
+        "ops": [
+          {
+            "recover": {
+              "wait": false
+            }
+          },
+          {
+            "advance": 30
+          },
+          "recovered",
+          {
+            "put": {
+              "/lib/Movies/Other Movie/.SHA256SUMS.bromelia-tmp-00ff": "another commit's write"
+            }
+          },
+          "release"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "code": "recovery.summary",
+            "params": {
+              "count": 1
+            }
+          },
+          "ok",
+          true,
+          "ok",
+          "ok"
+        ],
+        "jobs": {
+          "j0": {
+            "state": "queued",
+            "queue": "processing",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null
+          }
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000100",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Other Movie/Other Movie - Playlist 00001.mkv": "content of the other movie",
+          "/lib/Movies/Other Movie/SHA256SUMS": "172851a41f95c6a74df1ee30c8270219fe8a75f0859a2d9ef318ecbd44dea749  Other Movie - Playlist 00001.mkv\n",
+          "/lib/Movies/Other Movie/Earlier Movie.mkv": "an earlier unit",
+          "/lib/Movies/Other Movie/.SHA256SUMS.bromelia-tmp-00ff": "another commit's write"
+        },
+        "rule": "review A3: a shared folder takes other units' commits, and by now one may be writing there"
+      }
+    },
+    {
+      "id": "open-intents-that-cannot-be-read-after-the-roll-forwards-leave-the-staging-alone",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "storeFail": {
+          "openIntents": {
+            "after": 2
+          }
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "problems": [],
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "fs.alreadyExists",
+              "params": {
+                "path": "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv"
+              }
+            }
+          ]
+        },
+        "rule": "review A4: a failed read isn't 'nothing is open': the intent's staging would be set aside under the commit that needs it"
+      }
+    },
+    {
+      "id": "open-intents-that-cannot-be-read-before-the-roll-forwards-leave-the-staging-alone",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "storeFail": {
+          "openIntents": {
+            "after": 0,
+            "times": 1
+          }
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "problems": [],
+        "logs": {
+          "j1": []
+        },
+        "rule": "review A4: nothing was rolled forward and nothing is known; the next read answering doesn't change that, and the next start tries again"
+      }
+    },
+    {
+      "id": "a-unit-that-cannot-be-read-leaves-the-staging-alone",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "storeFail": {
+          "units": {
+            "after": 0,
+            "times": 1
+          }
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "problems": [],
+        "logs": {
+          "j1": []
+        },
+        "rule": "review A4: the intent may be this library's; which one it is can't be told"
+      }
+    },
+    {
+      "id": "a-job-that-cannot-be-read-leaves-the-staging-alone",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "jobs": [
+          {
+            "id": "j3",
+            "title": "Failed Disc",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "acquire"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "failed"
+              }
+            ],
+            "outcome": "failed"
+          }
+        ],
+        "storeFail": {
+          "jobs": [
+            "j3"
+          ]
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "problems": [],
+        "rule": "review A4: a job that can't be read isn't 'no job owns it'; the folders after it wait too"
+      }
+    },
+    {
+      "id": "steps-that-cannot-be-read-leave-the-staging-alone",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "jobs": [
+          {
+            "id": "j3",
+            "title": "Failed Disc",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "acquire"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "failed"
+              }
+            ],
+            "outcome": "failed"
+          }
+        ],
+        "storeFail": {
+          "steps": [
+            "j3"
+          ]
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j3/title_t00.mkv": "part of a rip",
+          "/lib/.bromelia/staging/j3/.title_t01.mkv.part-1a2b3c4d": "temp",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "problems": [],
+        "rule": "review A4: the set-aside's name and logs come from the rows; the next start can still give them"
+      }
+    },
+    {
+      "id": "a-rolled-forward-job-gets-its-outcome-when-its-log-cannot-be-written",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/.bromelia/staging/j1/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/.SHA256SUMS.bromelia-tmp-0a1b2c3d": "half a SHA256SUMS"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                true
+              ],
+              [
+                1,
+                "Sample Movie - Playlist 00002.mkv",
+                "Sample Movie - Playlist 00002.mkv",
+                "2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8",
+                false,
+                false
+              ],
+              [
+                2,
+                "bromelia-00000000.json",
+                "bromelia-00000000.json",
+                "c2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded",
+                "readErrors": 2
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                "reason": "EIO"
+              }
+            }
+          }
+        ],
+        "fail": [
+          {
+            "op": "writeAtomically",
+            "path": "/data/jobs/j1/log.jsonl",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "write",
+                "path": "/data/jobs/j1/log.jsonl",
+                "reason": "ENOSPC"
+              }
+            }
+          }
+        ],
+        "resumability": {
+          "acquire": "resumeFrom"
+        },
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "succeededWithReadErrors",
+            "error": {
+              "code": "rip.readErrors",
+              "params": {
+                "count": 2
+              }
+            }
+          }
+        },
+        "logs": {
+          "j1": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00002.mkv": "content of Sample Movie - Playlist 00002.mkv",
+          "/lib/Movies/Sample Movie/bromelia-00000000.json": "content of bromelia-00000000.json",
+          "/lib/Movies/Sample Movie/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committed"
+            }
+          ],
+          "intents": []
+        },
+        "eventLines": [
+          "jobFinished j1 succeededWithReadErrors rip.readErrors"
+        ],
+        "rule": "review A5: the unit is committed whether or not the line can be written, so the job gets the committed outcome and the destination's temporary file still goes"
+      }
+    },
+    {
+      "id": "a-roll-forward-that-fails-with-a-log-that-cannot-be-written-keeps-its-intent",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/.bromelia/staging/zz/a.mkv": "unknown",
+          "/lib/.bromelia/staging/zz/.a.mkv.part-1a2b3c4d": "temp"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/lib/.bromelia/staging/j1",
+            "destination": "/lib/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "fail": [
+          {
+            "op": "writeAtomically",
+            "path": "/data/jobs/j1/log.jsonl",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "write",
+                "path": "/data/jobs/j1/log.jsonl",
+                "reason": "ENOSPC"
+              }
+            }
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "logs": {
+          "j1": []
+        },
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n",
+          "/lib/Movies/Sample Movie/Sample Movie - Playlist 00001.mkv": "someone else's file",
+          "/lib/_Quarantine/zz [INCOMPLETE]/a.mkv": "unknown",
+          "/lib/_Quarantine/zz [INCOMPLETE]/INCOMPLETE.txt": "archive.note.title jobId=zz outcome=interrupted\narchive.note.notFinished\n"
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "rule": "review A5: the tidy goes on: a line that can't be written isn't a reason to leave the library half tidied"
+      }
+    },
+    {
+      "id": "staging-of-an-open-commit-is-not-set-aside-after-the-library-moved",
+      "given": {
+        "config": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib"
+          }
+        ],
+        "libraries": [
+          {
+            "id": "lib",
+            "name": "Library",
+            "path": "/lib",
+            "markerId": "m-lib",
+            "attachedAt": "2026-10-01T12:00:00.000Z",
+            "online": true,
+            "lastSeenAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "units": [
+          {
+            "id": "00000000-0000-4000-8000-000000000101",
+            "library": "lib",
+            "job": "j1",
+            "path": "Movies/Sample Movie",
+            "name": "Sample Movie"
+          }
+        ],
+        "intents": [
+          {
+            "unit": "00000000-0000-4000-8000-000000000101",
+            "job": "j1",
+            "staging": "/Volumes/Old Name/.bromelia/staging/j1",
+            "destination": "/Volumes/Old Name/Movies/Sample Movie",
+            "merge": false,
+            "items": [
+              [
+                0,
+                "Sample Movie - Playlist 00001.mkv",
+                "Sample Movie - Playlist 00001.mkv",
+                "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489",
+                false,
+                false
+              ]
+            ]
+          }
+        ],
+        "jobs": [
+          {
+            "id": "j1",
+            "title": "Sample Movie",
+            "state": "finished",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "rows": [
+              {
+                "kind": "probe",
+                "state": "succeeded"
+              },
+              {
+                "kind": "identify",
+                "state": "succeeded"
+              },
+              {
+                "kind": "plan",
+                "state": "succeeded"
+              },
+              {
+                "kind": "acquire",
+                "state": "succeeded"
+              },
+              {
+                "kind": "release",
+                "state": "succeeded"
+              },
+              {
+                "kind": "verifyRips",
+                "state": "succeeded"
+              },
+              {
+                "kind": "name",
+                "state": "succeeded"
+              },
+              {
+                "kind": "seal",
+                "state": "succeeded"
+              },
+              {
+                "kind": "commit",
+                "state": "failed",
+                "error": {
+                  "code": "fs.failed",
+                  "params": {
+                    "operation": "rename",
+                    "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                    "reason": "EIO"
+                  }
+                }
+              }
+            ],
+            "unitId": "00000000-0000-4000-8000-000000000101",
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                "reason": "EIO"
+              }
+            }
+          }
+        ],
+        "ops": [
+          "recover"
+        ]
+      },
+      "expect": {
+        "results": [
+          null
+        ],
+        "files": {
+          "/lib/.bromelia-library": "{\n  \"id\": \"m-lib\",\n  \"name\": \"Library\",\n  \"created\": \"2026-10-01T12:00:00.000Z\"\n}\n",
+          "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv": "content of Sample Movie - Playlist 00001.mkv",
+          "/lib/.bromelia/staging/j1/SHA256SUMS": "180c9897e93e9fddfdd3f270cbf90dfe5ee8e1280f5f3d410c1adb28a3465489  Sample Movie - Playlist 00001.mkv\n2a5f3512f22b0d760a8bded6a2bc9458b4cb83d5ce6daa7a836a34f41ed818a8  Sample Movie - Playlist 00002.mkv\nc2aea97ba044d3aee98cef52247cad3290c64a2a59da79b00b136dbc5fd5d635  bromelia-00000000.json\n"
+        },
+        "jobs": {
+          "j1": {
+            "state": "finished",
+            "queue": "acquisition",
+            "plan": [
+              "probe",
+              "identify",
+              "plan",
+              "acquire",
+              "release",
+              "verifyRips",
+              "name",
+              "seal",
+              "commit",
+              "notify"
+            ],
+            "mediaGeneration": null,
+            "outcome": "failed",
+            "error": {
+              "code": "fs.failed",
+              "params": {
+                "operation": "rename",
+                "path": "/lib/.bromelia/staging/j1/Sample Movie - Playlist 00002.mkv",
+                "reason": "EIO"
+              }
+            }
+          }
+        },
+        "logs": {
+          "j1": [
+            {
+              "severity": "warning",
+              "code": "fs.notFound",
+              "params": {
+                "path": "/Volumes/Old Name/.bromelia/staging/j1/Sample Movie - Playlist 00001.mkv"
+              }
+            }
+          ]
+        },
+        "db": {
+          "units": [
+            {
+              "id": "00000000-0000-4000-8000-000000000101",
+              "state": "committing"
+            }
+          ],
+          "intents": [
+            "00000000-0000-4000-8000-000000000101"
+          ]
+        },
+        "rule": "review A6: an intent's paths are absolute, and a remount or a new drive letter moves the root under them: the folder is the intent's job's, whatever its path says. The roll forward itself stays stuck (owner item F3)"
       }
     }
   ]

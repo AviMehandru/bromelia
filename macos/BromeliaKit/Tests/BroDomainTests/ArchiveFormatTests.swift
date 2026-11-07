@@ -17,7 +17,12 @@ struct ArchiveFormatTests {
             if let bytes = given["bytes"]?.string {
                 try Fixtures.same(expect["sha256"]?.string, Sha256Sums.hash(Array(bytes.utf8)), "sha256")
             } else if let existing = given["existing"]?.string {
-                try Fixtures.same(expect["text"]?.string, Sha256Sums.merge(existing, entries: entriesOf(given["entries"])), "merged")
+                try Fixtures.same(expect["text"]?.string.map { Array($0.utf8) }, Sha256Sums.merge(Array(existing.utf8), entries: entriesOf(given["entries"])), "merged") // bytes: == on String is canonical
+            } else if let hex = given["existingHex"]?.string {
+                let digits = Array(hex.utf8).map { UInt8(String(UnicodeScalar($0)), radix: 16) ?? 0 }
+                let bytes = stride(from: 0, to: digits.count, by: 2).map { digits[$0] * 16 + digits[$0 + 1] }
+                let merged = Sha256Sums.merge(bytes, entries: entriesOf(given["entries"]))
+                try Fixtures.same(expect["hex"]?.string, merged.map { ($0 < 16 ? "0" : "") + String($0, radix: 16) }.joined(), "merged")
             } else if let entries = given["entries"] {
                 try Fixtures.same(expect["text"]?.string, Sha256Sums.render(entriesOf(entries)), "text")
             } else if let text = given["text"]?.string {

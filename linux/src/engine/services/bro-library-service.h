@@ -1,13 +1,12 @@
-/* bro-library-service.h: BroLibraryService: the libraries of the configuration (plan §11.1, §22), used on the
- * executor. A library is online while its folder holds the .bromelia-library marker it was attached with (I2): the
- * markers are checked at start, every 30 s and when a volume is mounted or unmounted, each on its own worker; an
- * offline library is blocked in the scheduler and raised as a problem. A check that hasn't come back by the next tick (a
- * share that froze, review L3-9) counts as offline and isn't started again until it comes back. As the BroLibraryPort
- * of the steps it gives staging folders and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on
- * the caller's worker, one at a time per unit: a commit waits while a roll forward of its unit runs (recovery's may
- * outlast its 30 s at startup on a slow share). State is touched only on the executor; the steps read a snapshot. As
- * the BroCatalogQueries of the steps it asks the catalogue on the caller's worker.
- * shared/fixtures/engine/library-service.cases.json. */
+/* bro-library-service.h: BroLibraryService: the libraries of the configuration (plan §11.1, §22), used on the executor.
+ * A library is online while its folder holds the .bromelia-library marker it was attached with: the markers are checked
+ * at start, every 30 s and when a volume is mounted or unmounted, each on its own worker; an offline library is blocked
+ * in the scheduler and raised as a problem. A check that hasn't come back by the next tick (a share that froze) counts
+ * as offline and isn't started again until it comes back. As the BroLibraryPort of the steps it gives staging folders
+ * and runs the commit protocol (§22.3 steps 4–6) and its roll forward (§15.8) on the caller's worker, one at a time per
+ * unit: a commit waits while a roll forward of its unit runs (recovery's may outlast its 30 s at startup on a slow
+ * share). State is touched only on the executor; the steps read a snapshot. As the BroCatalogQueries of the steps it
+ * asks the catalogue on the caller's worker. shared/fixtures/engine/library-service.cases.json. */
 #pragma once
 
 #include "bro-catalog-queries.h"
@@ -64,9 +63,9 @@ void bro_library_service_check (BroLibraryService *self, BroLibraryDone done, gp
 void bro_library_service_attach (BroLibraryService *self, const char *library_id, const char *path, const char *name, BroLibraryDtoDone done,
                                  gpointer data, GDestroyNotify destroy);
 
-/* Takes back an attach whose configuration save failed (LocalEngine's attachLibrary, decision 166): the marker in the
- * stored library's folder is removed while it is still the one the row names (another marker stays), and the library
- * is forgotten unless the configuration lists it. Nothing when there is no stored row. @destroy frees @data afterwards. */
+/* Takes back an attach whose configuration save failed (LocalEngine's attachLibrary): the marker in the stored
+ * library's folder is removed while it is still the one the row names (another marker stays), and the library is
+ * forgotten unless the configuration lists it. Nothing when there is no stored row. @destroy frees @data afterwards. */
 void bro_library_service_remove_marker (BroLibraryService *self, const char *library_id, BroLibraryDone done, gpointer data,
                                         GDestroyNotify destroy);
 /* Finishes an interrupted commit (§15.8): once no other commit of the unit runs, the marker checked, then what is left
@@ -86,11 +85,10 @@ int bro_library_service_waiting (BroLibraryService *self);
 GPtrArray *bro_library_service_staging_folders (BroLibraryService *self, const char *library_id, BroBroError **error);
 
 /* A staging folder no job will continue goes to <library>/_Quarantine/<ConflictNamer('<@name> [INCOMPLETE]')> with
- * @note as INCOMPLETE.txt and @logs (nullable; char * name → GBytes *: the job's log copies; owner, 2026-10-25) next to it,
- * each written atomically before the move (the logs in name order, then the note), so the folder arrives marked (I1);
- * never reused or deleted (review L3-3, P1-3); the folders are synced. The new path (yours to free); NULL when the folder
- * held no file and was removed instead, nothing written (@error unset), or on failure (@error set). On a worker, never the
- * executor. */
+ * @note as INCOMPLETE.txt and @logs (nullable; char * name → GBytes *: the job's log copies) next to it, each written
+ * atomically before the move (the logs in name order, then the note), so the folder arrives marked; never reused or
+ * deleted; the folders are synced. The new path (yours to free); NULL when the folder held no file and was removed
+ * instead, nothing written (@error unset), or on failure (@error set). On a worker, never the executor. */
 char *bro_library_service_set_aside (BroLibraryService *self, const char *library_id, const char *folder, const char *name, GBytes *note,
                                      GHashTable *logs, BroBroError **error);
 

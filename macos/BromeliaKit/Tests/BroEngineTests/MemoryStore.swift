@@ -65,6 +65,12 @@ final class MemoryStore: Store, JobRepository, StepRepository, UnitRepository, @
     /// Loads waiting for `releaseLoads()`.
     var heldLoads: Int { lock.withLock { heldLoadList.count } }
 
+    /// Reads of these jobs' records and step rows fail with store.failed.
+    var failJobLoads: Set<Id> = []
+    var failStepLoads: Set<Id> = []
+
+    private func readFailed() -> BroError { BroError("store.failed", [("operation", .string("read")), ("reason", .string("disk I/O error"))]) }
+
     /// The lock held.
     private func put(_ job: JobRecord) {
         if jobsById[job.id] == nil { order.append(job.id) }
@@ -86,6 +92,7 @@ final class MemoryStore: Store, JobRepository, StepRepository, UnitRepository, @
     }
     func update(_ job: JobRecord) async throws(BroError) { lock.withLock { jobsById[job.id] = job } }
     func load(_ jobId: Id) async throws(BroError) -> JobRecord? {
+        if failJobLoads.contains(jobId) { throw readFailed() }
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             let now = lock.withLock { () -> Bool in
                 guard holdLoadsOf.contains(jobId) else { return true }
@@ -127,7 +134,8 @@ final class MemoryStore: Store, JobRepository, StepRepository, UnitRepository, @
         lock.withLock { stepsByKey.values.filter { $0.jobId == jobId && $0.state == .succeeded }.sorted { $0.seq < $1.seq } }
     }
     func load(_ jobId: Id) async throws(BroError) -> [StepRecord] {
-        lock.withLock { stepsByKey.values.filter { $0.jobId == jobId }.sorted { $0.seq < $1.seq } }
+        if failStepLoads.contains(jobId) { throw readFailed() }
+        return lock.withLock { stepsByKey.values.filter { $0.jobId == jobId }.sorted { $0.seq < $1.seq } }
     }
 
     /// An open commit intent of the job (its unit is half moved into a library).

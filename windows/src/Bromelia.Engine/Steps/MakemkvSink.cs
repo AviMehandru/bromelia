@@ -23,10 +23,10 @@ public sealed class MakemkvSink : IRunSink
         _operation = operation;
     }
 
-    /// <summary>MakeMKV starts its debug log (app_ShowDebug, named by message 1004) afresh at every start, so after each run
-    /// the steps add it to the job folder's makemkv-debug.txt (SealStep.debugTranscript), after a line "==== &lt;its path&gt;
-    /// after $ makemkvcon &lt;command&gt;" (the subcommand: info, mkv, backup), as today's apps do. Nothing when the run named none or it is empty; a file that can't be read or written is
-    /// left out (the run's result stands).</summary>
+    /// <summary>MakeMKV starts its debug log (app_ShowDebug, named by message 1004) afresh at every start, so after
+    /// each run the steps add it to the job folder's makemkv-debug.txt (SealStep.debugTranscript), after a line "====
+    /// &lt;its path&gt; after $ makemkvcon &lt;command&gt;" (the subcommand: info, mkv, backup). Nothing when the run
+    /// named none or it is empty; a file that can't be read or written is left out (the run's result stands).</summary>
     public static void KeepDebugLog(StepContext context, RunOutcome outcome, string command)
     {
         if (outcome.DebugLog is not { Length: > 0 } path) return;

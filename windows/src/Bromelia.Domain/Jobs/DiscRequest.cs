@@ -6,7 +6,8 @@ namespace Bromelia.Domain;
 /// titles were chosen on an opened disc, that session's snapshot.</summary>
 public sealed record DiscRequest(DiscSource Source, SessionSnapshot? Session = null)
 {
-    /// <summary><c>{"source": …, "session": {"listing": …, "choices": …}}</c>; session left out when there is none.</summary>
+    /// <summary><c>{"source": …, "session": {"listing": …, "choices": …}}</c>; session left out when there is
+    /// none.</summary>
     public static JsonValue Encode(DiscRequest request) => request.Session is { } s
         ? JsonValue.Of(("source", DiscSource.Encode(request.Source)),
             ("session", JsonValue.Of(("listing", Listing.Encode(s.Listing)), ("choices", SessionChoices.Encode(s.Choices)))))

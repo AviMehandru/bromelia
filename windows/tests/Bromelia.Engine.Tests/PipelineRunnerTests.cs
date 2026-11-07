@@ -210,6 +210,12 @@ public sealed class PipelineRunnerTests
                     Fs.WriteAtomically($"/data/jobs/{id.Value}/log.jsonl", Encoding.UTF8.GetBytes(logText), 0x180);
                 }
             }
+            int logWritesToFail = (int)(given["failLogWrites"]?.AsInteger ?? 0);
+            Fs.OnOp = (op, path) =>
+            {
+                if (op == "write" && path.EndsWith("/log.jsonl", StringComparison.Ordinal) && logWritesToFail > 0 && logWritesToFail-- > 0)
+                    throw new BroFailure(new BroError("fs.failed", ("operation", JsonValue.Of("write")), ("path", JsonValue.Of(path)), ("reason", JsonValue.Of("EIO"))));
+            };
         }
 
         public readonly JobService Service;

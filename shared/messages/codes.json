@@ -888,6 +888,13 @@
       },
       "today": "JobRunner.ripTitles"
     },
+    "rip.titleMissing": {
+      "kind": "reason",
+      "params": {
+        "file": "string"
+      },
+      "today": "new: AcquireStep (a wanted title of a run for all titles left no file)"
+    },
     "rip.keptUnderMakemkvName": {
       "kind": "log",
       "severity": "warning",
@@ -928,6 +935,14 @@
         "problem": "message"
       },
       "today": "JobRunner.ripTitles"
+    },
+    "rip.otherCheckFailed": {
+      "kind": "log",
+      "severity": "error",
+      "params": {
+        "problem": "message"
+      },
+      "today": "new: VerifyRipsStep (a file no title owns)"
     },
     "rip.readErrors": {
       "kind": "error",
@@ -1813,6 +1828,15 @@
         "reason": "string"
       },
       "today": "JobRunner.hashProducedFiles"
+    },
+    "archive.sizeMismatch": {
+      "kind": "error",
+      "params": {
+        "file": "string",
+        "size": "bytes",
+        "hashed": "bytes"
+      },
+      "today": "new: SealStep and KeepApartStep (the bytes hashed aren't the file's stat size)"
     },
     "archive.moving": {
       "kind": "progress",

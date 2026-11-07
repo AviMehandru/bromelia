@@ -104,6 +104,7 @@ struct _BroPipelineRunner {
   BroStepEnvironment *environment;
   BroEngineClock *clock;
   BroCoalescer *coalescer;
+  BroCoalescer *log_coalescer;
   GHashTable *live; /* job id → Live (a reference) */
   BroRunnerCrashFunc crash; /* nullable: the test roots' crash hook */
   gpointer crash_data;
@@ -128,6 +129,8 @@ idle_free (gpointer data)
 
 G_DEFINE_FINAL_TYPE (BroPipelineRunner, bro_pipeline_runner, G_TYPE_OBJECT)
 
+#define LOG_INTERVAL 2.0 /* seconds */
+
 typedef struct _Live Live;
 static void gone (Live *l);
 static void stopped (Live *l);
@@ -150,6 +153,10 @@ struct _Live {
   GBytes *log_before; /* the log file as an earlier run (or recovery) left it; this run's lines follow */
   int warnings_before, errors_before; /* the warnings and errors in log_before, for the job's counts */
   GPtrArray *log;     /* BroLogLineDto */
+  /* The log file as this run writes it, whole, from workers: the writes never overlap, and one that was overtaken by a
+   * later one is dropped, so the file never goes back. */
+  GMutex log_lock;
+  guint log_written;
   gboolean directory_made;
   gboolean log_read;
   BroConfig *config;  /* read when the job starts */
@@ -191,6 +198,7 @@ live_unref (gpointer data)
   bro_decision_dto_free (l->decision);
   waiter_unref (l->waiter);
   g_clear_pointer (&l->log_before, g_bytes_unref);
+  g_mutex_clear (&l->log_lock);
   g_ptr_array_unref (l->log);
   bro_config_free (l->config);
   g_ptr_array_unref (l->outputs);
@@ -294,7 +302,7 @@ typedef struct {
   BroFileSystem *fs;
   char *log_directory;
   GBytes *log;
-  gboolean make_directory;
+  guint log_lines;
   Next next;
 } Work;
 
@@ -443,6 +451,10 @@ on_log (gpointer data)
   bro_json_value_set (data_json, "jobId", bro_json_value_new_string (l->id.value));
   bro_json_value_set (data_json, "lines", lines);
   bro_engine_event_unref (bro_event_bus_publish (l->runner->bus, BRO_ENGINE_EVENT_TYPE_JOB_LOG, data_json));
+  {
+    g_autoptr (BroJsonValue) none = bro_json_value_new_null ();
+    bro_coalescer_offer (l->runner->log_coalescer, l->id.value, none);
+  }
 }
 
 static void
@@ -728,15 +740,41 @@ end_work (gpointer data, BroBroError **error)
   return bro_step_repository_save (bro_store_steps (w->store), w->step, error);
 }
 
-/* Writes the job's log file (w->log into w->log_directory). */
+/* @w's copy of what the log file is to hold: what was there when the job started, then this run's lines. */
+static void
+log_snapshot (Live *l, Work *w)
+{
+  g_autoptr (GBytes) added = bro_job_log_encode (l->log);
+  GByteArray *all = g_byte_array_new ();
+  if (l->log_before)
+    g_byte_array_append (all, g_bytes_get_data (l->log_before, NULL), g_bytes_get_size (l->log_before));
+  g_byte_array_append (all, g_bytes_get_data (added, NULL), g_bytes_get_size (added));
+  w->log = g_byte_array_free_to_bytes (all);
+  w->log_lines = l->log->len;
+  w->log_directory = job_directory (l->runner, &l->id);
+  w->fs = g_object_ref (l->runner->environment->fs);
+}
+
+/* Writes the job's log file (w->log into w->log_directory), written whole after each step and, through emit_log, while
+ * one runs. */
 static gboolean
 log_work (gpointer data, BroBroError **error)
 {
   Work *w = data;
+  Live *l = w->live;
   g_autofree char *path = g_strconcat (w->log_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
-  if (w->make_directory && !bro_file_system_create_directory (w->fs, w->log_directory, FALSE, error))
-    return FALSE;
-  return bro_file_system_write_atomically (w->fs, path, w->log, 0600, error);
+  gboolean ok = TRUE;
+  g_mutex_lock (&l->log_lock);
+  if (w->log_lines > l->log_written)
+    {
+      ok = l->directory_made || bro_file_system_create_directory (w->fs, w->log_directory, FALSE, error);
+      l->directory_made = l->directory_made || ok;
+      ok = ok && bro_file_system_write_atomically (w->fs, path, w->log, 0600, error);
+      if (ok)
+        l->log_written = w->log_lines;
+    }
+  g_mutex_unlock (&l->log_lock);
+  return ok;
 }
 
 /* The crash hook at a point: FALSE when it failed, which stops the runner (nothing more is stored for any job) and ends
@@ -800,18 +838,7 @@ end_done (gpointer data, const BroBroError *error)
     }
   lw = work_new (l);
   lw->step = g_steal_pointer (&w->step);
-  {
-    g_autoptr (GBytes) added = bro_job_log_encode (l->log);
-    GByteArray *all = g_byte_array_new ();
-    if (l->log_before)
-      g_byte_array_append (all, g_bytes_get_data (l->log_before, NULL), g_bytes_get_size (l->log_before));
-    g_byte_array_append (all, g_bytes_get_data (added, NULL), g_bytes_get_size (added));
-    lw->log = g_byte_array_free_to_bytes (all);
-  }
-  lw->log_directory = job_directory (self, &l->id);
-  lw->fs = g_object_ref (self->environment->fs);
-  lw->make_directory = !l->directory_made;
-  l->directory_made = TRUE;
+  log_snapshot (l, lw);
   bro_engine_executor_worker (self->executor, log_work, log_done, lw, work_free);
 }
 
@@ -1038,6 +1065,7 @@ next_step (Live *l)
       return;
     }
   bro_coalescer_drop (self->coalescer, l->id.value); /* a new step's first progress goes out at once */
+  bro_coalescer_drop (self->log_coalescer, l->id.value); /* and its first log line */
   bro_progress_dto_free (l->progress);
   l->progress = bro_progress_dto_new (kind, l->seq, l->steps->len, (double) l->seq / l->steps->len,
                                       bro_bro_message_new (BRO_MSG_JOB_OP_STARTING, NULL, BRO_SEVERITY_INFO));
@@ -1184,6 +1212,7 @@ bro_pipeline_runner_run (BroPipelineRunner *self, const BroId *job_id, BroRunDon
   l->cancel = bro_cancellation_source_new ();
   l->seq = -1;
   l->log = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_log_line_dto_free);
+  g_mutex_init (&l->log_lock);
   l->outputs = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_output_free);
   l->results = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_step_result_free);
   l->checkpoints = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) bro_json_value_unref);
@@ -1205,6 +1234,7 @@ finish_done (gpointer data, const BroBroError *error)
   BroPipelineRunner *self = l->runner;
   /* The job has ended either way; what the store couldn't keep, recovery will see as unfinished. */
   bro_coalescer_drop (self->coalescer, l->id.value);
+  bro_coalescer_drop (self->log_coalescer, l->id.value);
   bro_scheduler_finish (self->scheduler, &l->id);
   publish_job (self, BRO_ENGINE_EVENT_TYPE_JOB_FINISHED, l);
   {
@@ -1234,15 +1264,12 @@ release_work (gpointer data, BroBroError **error)
   return TRUE; /* the job ends either way; the step logs a failed eject itself */
 }
 
+/* A write that fails here is left alone: the job ends, or the next write takes it up, and a step's end reports it. */
 static gboolean
-release_log_work (gpointer data, BroBroError **error)
+quiet_log_work (gpointer data, BroBroError **error)
 {
-  Work *w = data;
   g_autoptr (BroBroError) ignored = NULL;
-  g_autofree char *path = g_strconcat (w->log_directory, "/" BRO_JOB_LOG_FILE_NAME, NULL);
-  if (w->make_directory && !bro_file_system_create_directory (w->fs, w->log_directory, FALSE, &ignored))
-    return TRUE;
-  bro_file_system_write_atomically (w->fs, path, w->log, 0600, &ignored);
+  log_work (data, &ignored);
   return TRUE;
 }
 
@@ -1265,23 +1292,12 @@ release_done (gpointer data, const BroBroError *error)
       return;
     }
   w = work_new (l);
-  {
-    g_autoptr (GBytes) added = bro_job_log_encode (l->log);
-    GByteArray *all = g_byte_array_new ();
-    if (l->log_before)
-      g_byte_array_append (all, g_bytes_get_data (l->log_before, NULL), g_bytes_get_size (l->log_before));
-    g_byte_array_append (all, g_bytes_get_data (added, NULL), g_bytes_get_size (added));
-    w->log = g_byte_array_free_to_bytes (all);
-  }
-  w->log_directory = job_directory (self, &l->id);
-  w->fs = g_object_ref (self->environment->fs);
-  w->make_directory = !l->directory_made;
-  l->directory_made = TRUE;
-  bro_engine_executor_worker (self->executor, release_log_work, release_log_done, w, work_free);
+  log_snapshot (l, w);
+  bro_engine_executor_worker (self->executor, quiet_log_work, release_log_done, w, work_free);
 }
 
-/* A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped, cancelled)
- * runs the Release step once more, unstored, with its outcome as the context's finishing (owner, 2026-10-18). */
+/* A job that ends while it still holds its drive (it stopped before its Release step: failed, skipped, cancelled) runs
+ * the Release step once more, unstored, with its outcome as the context's finishing. */
 static gboolean
 release_at_end (Live *l)
 {
@@ -1393,6 +1409,7 @@ stopped (Live *l)
 {
   g_autoptr (BroBroError) error = stopping_error ();
   bro_coalescer_drop (l->runner->coalescer, l->id.value);
+  bro_coalescer_drop (l->runner->log_coalescer, l->id.value);
   l->done (NULL, error, l->done_data);
   gone (l);
 }
@@ -1513,6 +1530,34 @@ emit_progress (const char *key, BroJsonValue *value, gpointer data)
   set_state (l, l->record->state);
 }
 
+/* ---- the log file while a step runs ---- */
+
+static void
+quiet_log_done (gpointer data, const BroBroError *error)
+{
+}
+
+/* A running step's lines reach the file too, a step's first at once and later ones every LOG_INTERVAL, so a crash in a
+ * long Acquire keeps them. The file is rewritten each time, so not per line. Never under Seal or KeepApart, which copy
+ * it into the unit: on Windows a file being replaced can read as not there, and they would take that for a job without
+ * a log. */
+static void
+emit_log (const char *key, BroJsonValue *value, gpointer data)
+{
+  BroPipelineRunner *self = data;
+  Live *l = g_hash_table_lookup (self->live, key);
+  BroStepKind kind;
+  Work *w;
+  if (self->stopping || !l)
+    return;
+  kind = g_array_index (l->steps, BroStepKind, l->seq);
+  if (kind == BRO_STEP_KIND_SEAL || kind == BRO_STEP_KIND_KEEP_APART)
+    return;
+  w = work_new (l);
+  log_snapshot (l, w);
+  bro_engine_executor_worker (self->executor, quiet_log_work, quiet_log_done, w, work_free);
+}
+
 /* ---- the object ---- */
 
 BroPipelineRunner *
@@ -1523,6 +1568,7 @@ bro_pipeline_runner_new (BroEngineExecutor *executor, BroEventBus *bus, BroSched
   self->crash = crash;
   self->crash_data = crash_data;
   BroDuration interval = { 0.1 };
+  BroDuration log_interval = { LOG_INTERVAL };
   self->executor = g_object_ref (executor);
   self->bus = g_object_ref (bus);
   self->scheduler = g_object_ref (scheduler);
@@ -1534,6 +1580,7 @@ bro_pipeline_runner_new (BroEngineExecutor *executor, BroEventBus *bus, BroSched
                                                 environment->app_version);
   self->clock = g_object_ref (clock);
   self->coalescer = bro_coalescer_new (clock, interval, emit_progress, self, NULL);
+  self->log_coalescer = bro_coalescer_new (clock, log_interval, emit_log, self, NULL);
   return self;
 }
 
@@ -1544,6 +1591,7 @@ bro_pipeline_runner_finalize (GObject *object)
   g_hash_table_unref (self->live);
   g_ptr_array_unref (self->idle);
   g_object_unref (self->coalescer);
+  g_object_unref (self->log_coalescer);
   g_object_unref (self->executor);
   g_object_unref (self->bus);
   g_object_unref (self->scheduler);

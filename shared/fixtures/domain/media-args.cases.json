@@ -766,6 +766,80 @@
       "expect": {
         "problem": null
       }
+    },
+    {
+      "id": "simple-chapters-a-huge-hour-is-left-out",
+      "from": [
+        "a tool's output never crashes the daemon"
+      ],
+      "given": {
+        "text": "CHAPTER01=00:00:00.000\nCHAPTER02=99999999999999999999:00:00.000\nCHAPTER03=00:01:00.000\n"
+      },
+      "expect": {
+        "starts": [
+          0,
+          60
+        ]
+      }
+    },
+    {
+      "id": "simple-chapters-a-huge-minute-is-left-out",
+      "from": [
+        "a tool's output never crashes the daemon"
+      ],
+      "given": {
+        "text": "CHAPTER01=00:00:00.000\nCHAPTER02=00:99999999999999999999:00.000\nCHAPTER03=00:01:00.000\n"
+      },
+      "expect": {
+        "starts": [
+          0,
+          60
+        ]
+      }
+    },
+    {
+      "id": "simple-chapters-seconds-that-are-no-number-are-left-out",
+      "from": [
+        "a tool's output never crashes the daemon"
+      ],
+      "given": {
+        "text": "CHAPTER01=00:00:00.000\nCHAPTER02=00:00:1.2.3\nCHAPTER03=00:01:00.000\n"
+      },
+      "expect": {
+        "starts": [
+          0,
+          60
+        ]
+      }
+    },
+    {
+      "id": "simple-chapters-seconds-too-long-for-a-number-are-left-out",
+      "from": [
+        "a tool's output never crashes the daemon"
+      ],
+      "given": {
+        "text": "CHAPTER01=00:00:00.000\nCHAPTER02=00:00:9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\nCHAPTER03=00:01:00.000\n"
+      },
+      "expect": {
+        "starts": [
+          0,
+          60
+        ]
+      }
+    },
+    {
+      "id": "simple-chapters-the-largest-hour-that-fits-is-read",
+      "from": [
+        "a tool's output never crashes the daemon"
+      ],
+      "given": {
+        "text": "CHAPTER01=2147483647:00:00.000\n"
+      },
+      "expect": {
+        "starts": [
+          7730941129200
+        ]
+      }
     }
   ]
 }

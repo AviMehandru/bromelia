@@ -61,6 +61,7 @@ typedef struct {
   GDestroyNotify done_destroy;
   gboolean finished;
   int pending; /* library and data-folder workers still out */
+  gint late;   /* atomic: recover stopped waiting for its libraries, so jobs may be live */
   BroEngineTimer *timer;
   guint count; /* unfinished jobs found */
   GPtrArray *publications;
@@ -317,8 +318,8 @@ recover_job (BroRecoveryService *self, Run *r, const BroJobRecord *job, BroBroEr
                     done_has (done, BRO_STEP_KIND_RELEASE) || kind == BRO_STEP_KIND_KEEP_APART ? BRO_QUEUE_PROCESSING : job->queue,
                     message (BRO_MSG_RECOVERY_RESUMED, BRO_SEVERITY_INFO, "step", step_name), error);
 
-  /* Before Acquire. A media generation doesn't outlive the engine (owner, 2026-10-14): an automatic job can't know its
-   * disc is still there (the new run's insert starts a fresh job), and a manual one reads the drive again. */
+  /* Before Acquire. A media generation doesn't outlive the engine: an automatic job can't know its disc is still there
+   * (the new run's insert starts a fresh job), and a manual one reads the drive again. */
   if (job->request->drive_id && job->request->automatic)
     {
       BroDecided *decided = g_new0 (BroDecided, 1);
@@ -409,12 +410,14 @@ jobs_work (gpointer data, BroBroError **error)
 /* ---- libraries and files (workers) ---- */
 
 /* Removes what a stopped write leaves (bro_archive_files_is_leftover) from the folder, and its subfolders when
- * @recursive. */
+ * @recursive. A listing that answers once jobs may be live can't tell that from what they are writing, so nothing it gives
+ * goes; one that answered before that can only name leftovers. */
 static void
-remove_leftovers (BroFileSystem *fs, const char *folder, gboolean recursive)
+remove_leftovers (Run *r, const char *folder, gboolean recursive)
 {
+  BroFileSystem *fs = r->self->fs;
   g_autoptr (GPtrArray) entries = NULL;
-  if (!bro_file_system_exists (fs, folder) || !(entries = bro_file_system_list (fs, folder, NULL)))
+  if (!bro_file_system_exists (fs, folder) || !(entries = bro_file_system_list (fs, folder, NULL)) || g_atomic_int_get (&r->late))
     return;
   for (guint i = 0; i < entries->len; i++)
     {
@@ -423,7 +426,7 @@ remove_leftovers (BroFileSystem *fs, const char *folder, gboolean recursive)
       if (e->is_directory)
         {
           if (recursive)
-            remove_leftovers (fs, path, TRUE);
+            remove_leftovers (r, path, TRUE);
         }
       else if (bro_archive_files_is_leftover (e->name))
         bro_file_system_remove (fs, path, NULL);
@@ -448,14 +451,13 @@ tidy_free (gpointer data)
   g_free (t);
 }
 
-/* A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose commit a
- * roll forward has just finished, gets the outcome that step gives when it succeeds (owner I1-3, 2026-11-03 to 2026-11-05,
- * F9's rule): bro_job_outcome_decide of its steps with that step succeeded, so succeeded or succeededWithReadErrors after a
- * Commit, cancelled after a KeepApart. That step is the first row not done. In a cancelled job a Commit row counts in any
- * state, as however it got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after a
- * retry, running after a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending or
- * running one keeps its outcome. Its finished_at, step rows and log stay as they were; its jobFinished goes into
- * @publications. */
+/* A job that finished failed in its Commit or KeepApart step, or cancelled with its Commit step unfinished, whose
+ * commit a roll forward has just finished, gets the outcome that step gives when it succeeds: bro_job_outcome_decide of
+ * its steps with that step succeeded, so succeeded or succeededWithReadErrors after a Commit, cancelled after a
+ * KeepApart. That step is the first row not done. In a cancelled job a Commit row counts in any state, as however it
+ * got there (plan §20.4) is the rule: cancelled or failed by a cancel in the step, pending after a retry, running after
+ * a crash. In a failed job the row must be failed or cancelled: the step ended there, and a pending or running one
+ * keeps its outcome. Its finished_at, step rows and log stay as they were; its jobFinished goes into @publications. */
 static gboolean
 committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publications, BroBroError **error)
 {
@@ -501,17 +503,24 @@ committed (BroRecoveryService *self, const BroId *job_id, GPtrArray *publication
   return TRUE;
 }
 
-/* A failure is logged on its job (or left for the next start); it never stops the others. */
-static void
-roll_forward_all (BroRecoveryService *self, const char *library_id, GPtrArray *publications)
+/* A failed roll forward is logged on its job (or left for the next start); it never stops the others. FALSE when the intents
+ * or a unit can't be read. */
+static gboolean
+roll_forward_all (Run *r, const char *library_id, GPtrArray *publications)
 {
-  g_autoptr (GPtrArray) intents = bro_unit_repository_open_intents (bro_store_units (self->store), NULL);
-  for (guint i = 0; intents && i < intents->len; i++)
+  BroRecoveryService *self = r->self;
+  g_autoptr (BroBroError) unread = NULL;
+  g_autoptr (GPtrArray) intents = bro_unit_repository_open_intents (bro_store_units (self->store), &unread);
+  if (!intents)
+    return FALSE;
+  for (guint i = 0; i < intents->len; i++)
     {
       BroCommitIntent *intent = intents->pdata[i];
-      g_autoptr (BroUnitRecord) unit = bro_unit_repository_get (bro_store_units (self->store), intent->unit_id, NULL);
+      g_autoptr (BroUnitRecord) unit = bro_unit_repository_get (bro_store_units (self->store), intent->unit_id, &unread);
       g_autoptr (BroBroError) e = NULL;
       g_autoptr (BroCommitResult) result = NULL;
+      if (unread)
+        return FALSE;
       if (!unit || strcmp (unit->library_id, library_id) != 0)
         continue;
       result = bro_library_service_roll_forward (self->library, intent, &e);
@@ -520,13 +529,13 @@ roll_forward_all (BroRecoveryService *self, const char *library_id, GPtrArray *p
           g_autoptr (BroBroMessage) line = message (BRO_MSG_COMMIT_ROLLED_FORWARD, BRO_SEVERITY_WARNING, "unit", intent->unit_id.value);
           log_line (self, &intent->job_id, line, NULL);
           if (committed (self, &intent->job_id, publications, &e))
-            remove_leftovers (self->fs, intent->destination, FALSE);
+            remove_leftovers (r, intent->destination, FALSE);
         }
       if (e) /* the roll forward or the outcome failed (neither: the job's Commit finished it meanwhile) */
         {
-          /* A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A job whose
-           * new outcome couldn't be stored keeps its old one with this line in its log; a retry from Commit finds the unit
-           * committed. */
+          /* A roll forward that failed keeps its intent: the job's Commit step rolls it forward when it runs again. A
+           * job whose new outcome couldn't be stored keeps its old one with this line in its log; a retry from Commit
+           * finds the unit committed. */
           BroMessageCode code = BRO_MSG_INTERNAL_UNEXPECTED;
           g_autoptr (BroBroMessage) line = NULL;
           bro_message_code_parse (e->code, &code);
@@ -534,6 +543,7 @@ roll_forward_all (BroRecoveryService *self, const char *library_id, GPtrArray *p
           log_line (self, &intent->job_id, line, NULL);
         }
     }
+  return TRUE;
 }
 
 /* A BroSealWriteFunc that keeps each log copy in @data (GHashTable: name → GBytes). */
@@ -544,15 +554,13 @@ keep_copy (gpointer data, const char *name, GBytes *bytes, BroBroError **error)
   return TRUE;
 }
 
-/* The name a failed job's staging is set aside under: KeepApart's (bro_keep_apart_step_folder_name) for the job's request,
- * plan and succeeded step outputs in seq order (owner H3a-2). Rows that can't be loaded leave the outputs out (the name
- * from the job alone, as the Swift pass does). Transfer full. */
+/* The name a failed job's staging is set aside under: KeepApart's (bro_keep_apart_step_folder_name) for the job's
+ * request, plan and succeeded step outputs in seq order. Transfer full. */
 static char *
-set_aside_name (BroRecoveryService *self, const BroJobRecord *job)
+set_aside_name (const BroJobRecord *job, GPtrArray *rows)
 {
-  g_autoptr (GPtrArray) rows = bro_step_repository_load (bro_store_steps (self->store), job->id, NULL);
   g_autoptr (BroJobSnapshot) snap = bro_job_snapshot_new (&job->id, bro_job_request_copy (job->request), bro_job_plan_copy (job->plan));
-  for (guint i = 0; rows && i < rows->len; i++)
+  for (guint i = 0; i < rows->len; i++)
     {
       const BroStepRecord *row = rows->pdata[i];
       if (row->state == BRO_STEP_STATE_SUCCEEDED && row->output)
@@ -562,19 +570,16 @@ set_aside_name (BroRecoveryService *self, const BroJobRecord *job)
 }
 
 /* The job's logs as Seal copies them (_bro_seal_copy_logs_from: its log as text, MakeMKV's transcripts, each when the job
- * folder has it; none when its Plan's profile has archive.archiveRecord false) into @logs (name → GBytes), their names
- * into @names. When they can't be read, there are none: the files are set aside without them. */
+ * folder has it; none when its Plan's profile, in @rows, has archive.archiveRecord false) into @logs (name → GBytes), their
+ * names into @names. When they can't be read, there are none: the files are set aside without them. */
 static void
-copy_logs (BroRecoveryService *self, const BroJobRecord *job, GHashTable *logs, GPtrArray *names)
+copy_logs (BroRecoveryService *self, const BroJobRecord *job, GPtrArray *rows, GHashTable *logs, GPtrArray *names)
 {
-  g_autoptr (GPtrArray) rows = bro_step_repository_load (bro_store_steps (self->store), job->id, NULL);
   g_autoptr (BroPlanOutput) plan = NULL;
   g_autoptr (GPtrArray) log = NULL;
   g_autofree char *directory = job_directory (self, &job->id);
   BroId unit = bro_archive_files_unit_id (&job->id);
   char unit8[9];
-  if (!rows)
-    return;
   for (guint i = rows->len; i > 0 && !plan; i--)
     {
       const BroStepRecord *row = rows->pdata[i - 1];
@@ -604,16 +609,21 @@ tidy_work (gpointer data, BroBroError **error)
   g_autoptr (GPtrArray) open = NULL;
   g_autoptr (GHashTable) committing = NULL;
   g_autoptr (GPtrArray) folders = NULL;
+  g_autoptr (BroBroError) unread = NULL;
   if (!t->library_id)
     {
-      remove_leftovers (self->fs, self->data, TRUE);
+      remove_leftovers (r, self->data, TRUE);
       return TRUE;
     }
-  roll_forward_all (self, t->library_id, t->publications);
+  /* A read that fails can't say what is open or whose a folder is: this library's staging waits for the next start. */
+  if (!roll_forward_all (r, t->library_id, t->publications))
+    return TRUE;
+  if (!(open = bro_unit_repository_open_intents (bro_store_units (self->store), &unread)))
+    return TRUE;
+  /* By job, not by staging path: an intent's paths are absolute, and the library's root may have moved since. */
   committing = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-  open = bro_unit_repository_open_intents (bro_store_units (self->store), NULL);
-  for (guint i = 0; open && i < open->len; i++)
-    g_hash_table_add (committing, g_strdup (((BroCommitIntent *) open->pdata[i])->staging));
+  for (guint i = 0; i < open->len; i++)
+    g_hash_table_add (committing, g_strdup (((BroCommitIntent *) open->pdata[i])->job_id.value));
   folders = bro_library_service_staging_folders (self->library, t->library_id, NULL);
   for (guint i = 0; folders && i < folders->len; i++)
     {
@@ -621,6 +631,7 @@ tidy_work (gpointer data, BroBroError **error)
       g_autofree char *path = g_strconcat (t->root, "/.bromelia/staging/", folder, NULL);
       BroId id = { { 0 } };
       g_autoptr (BroJobRecord) job = NULL;
+      g_autoptr (GPtrArray) rows = NULL;
       g_autoptr (GPtrArray) lines = NULL;
       g_autoptr (GPtrArray) read_errors = NULL;
       g_autoptr (GBytes) note = NULL;
@@ -631,14 +642,17 @@ tidy_work (gpointer data, BroBroError **error)
       g_autoptr (GPtrArray) names = g_ptr_array_new_with_free_func (g_free);
       GString *text;
       g_strlcpy (id.value, folder, sizeof id.value);
-      remove_leftovers (self->fs, path, TRUE);
-      if (g_hash_table_contains (r->unfinished, folder) || g_hash_table_contains (committing, path))
+      /* Read after the listing, and a job's row is stored before its folder is made: no row means no job. */
+      job = bro_job_repository_load (bro_store_jobs (self->store), id, &unread);
+      if (unread || (job && !(rows = bro_step_repository_load (bro_store_steps (self->store), job->id, &unread))))
+        return TRUE;
+      remove_leftovers (r, path, TRUE);
+      if (g_hash_table_contains (r->unfinished, folder) || g_hash_table_contains (committing, folder))
         continue;
-      job = bro_job_repository_load (bro_store_jobs (self->store), id, NULL);
       if (job && job->has_outcome && job->outcome == BRO_OUTCOME_INTERRUPTED)
-        continue; /* kept so it can be continued (owner, 2026-10-03) */
+        continue; /* kept so it can be continued */
       if (job)
-        copy_logs (self, job, logs, names);
+        copy_logs (self, job, rows, logs, names);
       g_ptr_array_add (names, NULL);
       read_errors = g_ptr_array_new ();
       if (job)
@@ -656,7 +670,9 @@ tidy_work (gpointer data, BroBroError **error)
           g_string_append_c (text, '\n');
         }
       note = g_string_free_to_bytes (text);
-      title = job ? set_aside_name (self, job) : g_strdup (folder);
+      title = job ? set_aside_name (job, rows) : g_strdup (folder);
+      if (job && g_atomic_int_get (&r->late))
+        continue; /* live, or live after a retry at any moment; the next start sees */
       /* a failure leaves it hidden in staging; the next start tries again */
       dest = bro_library_service_set_aside (self->library, t->library_id, folder, title, note, logs, NULL);
     }
@@ -698,7 +714,9 @@ tidy_done (gpointer data, const BroBroError *error)
 static void
 deadline (gpointer data)
 {
-  complete (data);
+  Run *r = data;
+  g_atomic_int_set (&r->late, TRUE);
+  complete (r);
 }
 
 static void

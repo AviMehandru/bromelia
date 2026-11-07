@@ -1,4 +1,4 @@
-/* bro-space-check.h: BroSpaceCheck, room for a plan on its library's volume (plan §21; today's checkFreeSpace). */
+/* bro-space-check.h: BroSpaceCheck, room for a plan on its library's volume (plan §21). */
 #pragma once
 
 #include "bro-step-context.h"

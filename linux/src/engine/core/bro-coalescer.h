@@ -1,7 +1,7 @@
-/* bro-coalescer.h: BroCoalescer: at most one value per interval per key (plan §8 rule 5): a job's progress before
- * it becomes an event or is stored. A value goes out at once when nothing for its key went out in the last
- * interval; otherwise it waits (replacing the one waiting) until one interval after the last one went out. Used on
- * the executor. Today's macOS EventSink did this for robot progress; shared/fixtures/engine/coalescer.cases.json. */
+/* bro-coalescer.h: BroCoalescer: at most one value per interval per key (plan §8 rule 5): a job's progress before it
+ * becomes an event or is stored. A value goes out at once when nothing for its key went out in the last interval;
+ * otherwise it waits (replacing the one waiting) until one interval after the last one went out. Used on the executor.
+ * Robot progress goes through it; shared/fixtures/engine/coalescer.cases.json. */
 #pragma once
 
 #include "bro-engine-clock.h"

@@ -5,7 +5,7 @@ using Bromelia.Ports;
 
 namespace Bromelia.Engine;
 
-/// <summary>Whether the disc was archived before (plan §20.1 Plan and Decide; today's checkAlreadyArchived).</summary>
+/// <summary>Whether the disc was archived before (plan §20.1 Plan and Decide).</summary>
 public static class ArchiveCheck
 {
     /// <summary>The newest committed unit with this fingerprint that still counts: its status is success, its library is

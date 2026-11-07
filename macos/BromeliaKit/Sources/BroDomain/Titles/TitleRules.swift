@@ -1,7 +1,7 @@
 import BroFoundation
 import Foundation
 
-/// Which titles of a listing to rip (today's TitleSelector).
+/// Which titles of a listing to rip.
 public enum TitleRules {
     /// Filters, then duplicates (same segment map, length and angle), then the strategy, then maxTitles. Every
     /// title gets a reason.
@@ -115,7 +115,7 @@ public enum TitleRules {
         static func parse(_ text: String) -> IndexPattern? {
             var p = IndexPattern()
             for raw in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == " " }) {
-                let part = MessageCatalog.asciiLower(DriveJoin.trimSpaces(String(raw)))
+                let part = asciiLower(DriveJoin.trimSpaces(String(raw)))
                 if part == "*" || part == "all" { p.all = true; continue }
                 if part == "last" { p.last = true; continue }
                 if let dash = part.firstIndex(of: "-") {

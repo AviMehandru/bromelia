@@ -3,16 +3,15 @@ import BroFoundation
 import BroPorts
 
 /// Step 14 (plan §20.1, §15.4; §22.3 steps 4–6 through LibraryService): moves the unit Seal made in the job's staging
-/// folder into the library. Nothing is hashed again: the files are Seal's (unit_files rows), the record Seal's data. The
-/// intent's items are Name's, by the names they have in staging (each in place: staging is laid out as the unit's
-/// folder), a folder told from Seal's files, then Bromelia's own files Seal wrote (the record, the logs, the note); its
-/// destination is <library>/<Name's folder>, merged item by item when Name says the folder is shared. A unit Seal tagged
-/// (READ ERRORS) goes to _Quarantine/<Name's name> [<tag>] instead (commit.quarantined), never merged, and the step
-/// reports it quarantined; otherwise archive.moved. A folder of its own that another job committed after Name ran takes the
-/// next free name (archive.outputFolder, a warning), unless naming.conflictPolicy is skip (owner H3b-2), and never a name the library has called taken. LibraryService waits while a roll forward of the unit runs (the job's
-/// cancel ends that wait), finishes an open intent of the unit and gives a unit committed already its result again, so a
-/// rerun rolls forward. Holds the library write. Data: CommitOutput. Skipped when Plan or Seal hasn't run. Paths compare
-/// by their bytes.
+/// folder into the library. Nothing is hashed again: the files and the record are Seal's. The intent's items are
+/// Name's, each in place since staging is laid out as the unit's folder, then Bromelia's own files Seal wrote; its
+/// destination is <library>/<Name's folder>, merged item by item when Name says the folder is shared.
+///
+/// A unit Seal tagged goes to _Quarantine/<Name's name> [<tag>] instead, never merged. A folder of its own that another
+/// job committed after Name ran takes the next free name, unless naming.conflictPolicy is skip, and never a name the
+/// library has called taken. LibraryService finishes an open intent of the unit and gives a unit committed already its
+/// result again, so a rerun rolls forward; the job's cancel ends its wait for a roll forward of the unit. Holds the
+/// library write. Data: CommitOutput. Skipped when Plan or Seal hasn't run. Paths compare by their bytes.
 public struct CommitStep: Step {
     private static let quarantineFolder = "_Quarantine"
     private static let slash = UInt8(ascii: "/")
@@ -48,9 +47,9 @@ public struct CommitStep: Step {
         if let tag {
             committedResult = try await context.library.quarantine(unit, intent: intent, files: seal.files, tag: tag, cancel: context.cancel)
         } else {
-            // A folder of its own that another job committed after Name ran (two discs of the same name at once): the next
-            // free name, as Name would have given it, unless the profile says skip (owner H3b-2). The library refuses a
-            // taken folder before it writes anything, and an open intent or a unit committed already never gets that far.
+            // A folder of its own that another job committed after Name ran (two discs of the same name at once): the
+            // next free name, as Name would have given it, unless the profile says skip. The library refuses a taken
+            // folder before it writes anything, and an open intent or a unit committed already never gets that far.
             let free = !named.merge && NamingSettings.decode(plan.profile["naming"] ?? .object([])).conflictPolicy != .skip
             // Each name the library called taken, the first being Name's: never asked for again, even when the listing
             // shows it under other bytes (a file system that ignores case beyond ASCII, or normalization).

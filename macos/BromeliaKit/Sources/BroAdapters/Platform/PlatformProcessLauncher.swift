@@ -4,13 +4,12 @@ import BroPorts
 import Darwin
 import Foundation
 
-/// Starts processes with posix_spawn in their own process group and watches them (plan §10.3): stalls, stop
-/// escalation (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (then what the
-/// pipes hold is still taken, so nothing written before the exit is lost, however slow the reader), a transcript of
-/// every line. Lines are cut at 64 KiB
-/// (LineSplitter) and at most `queuedLines`, or `queuedBytes` of text, wait to be read: then the reading waits too, so
-/// the tool waits to write (nothing is lost) and that wait doesn't count as silence. Foundation's Process isn't used: it can't start a process
-/// group.
+/// Starts processes with posix_spawn in their own process group and watches them (plan §10.3): stalls, stop escalation
+/// (INT →) TERM → KILL 5 s apart, abandonment 30 s after KILL, output read for 5 s after exit (then what the pipes hold
+/// is still taken, so nothing written before the exit is lost, however slow the reader), a transcript of every line.
+/// Lines are cut at 64 KiB (LineSplitter) and at most `queuedLines`, or `queuedBytes` of text, wait to be read: then
+/// the reading waits too, so the tool waits to write (nothing is lost) and that wait doesn't count as silence.
+/// Foundation's Process isn't used: it can't start a process group.
 ///
 /// Signals go to the whole group. Once a stopped process has ended, whatever is left of its group is killed (a
 /// background child of a shell ignores SIGINT). A process left running after a normal exit is left alone. If the

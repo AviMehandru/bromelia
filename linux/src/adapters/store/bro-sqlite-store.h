@@ -1,10 +1,8 @@
-/* bro-sqlite-store.h: BroSqliteStore: the Store port on SQLite (plan §10.4, §23; shared/fixtures/adapters/store.cases.json).
- * The shared migrations run verbatim (compiled in by tools/gen-migrations.py); the connection uses WAL,
- * synchronous=FULL and foreign keys. One connection, every call serialised (a read pool can come when measurements
- * ask for it). Times are ISO 8601 text (bro_instant_format), enums their wire names, JSON columns the canonical
- * encoding: BroError {code, params?, cause?}, BroMessage {code, params?, severity? (when not info)}, JobRequest
- * {kind, title, automatic, driveId?, mediaGeneration?, sessionId?, parentId?, unitId?, options?, details?}, JobPlan
- * {steps, mode?, profileId?, libraryId?, details?}, StepOutput {kind, data, summary?, readErrors? (when not 0)}.
+/* bro-sqlite-store.h: BroSqliteStore: the Store port on SQLite (plan §10.4, §23;
+ * shared/fixtures/adapters/store.cases.json). The shared migrations run verbatim (compiled in by
+ * tools/gen-migrations.py); the connection uses WAL, synchronous=FULL and foreign keys. One connection, every call
+ * serialised (a read pool can come when measurements ask for it). Times are ISO 8601 text (bro_instant_format), enums
+ * their wire names, JSON columns the canonical encoding (store.cases.json pins each one).
  *
  * The object implements the Store port and every repository port: bro_store_jobs () and the others return it. */
 #pragma once

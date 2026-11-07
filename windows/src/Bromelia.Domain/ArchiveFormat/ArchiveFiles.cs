@@ -35,8 +35,9 @@ public static class ArchiveFiles
         return new Id(hex[..8] + "-" + hex[8..12] + "-" + hex[12..16] + "-" + hex[16..20] + "-" + hex[20..32]);
     }
 
-    /// <summary>What a write that was stopped leaves behind: .&lt;name&gt;.bromelia-tmp-&lt;id&gt; (FileSystem.writeAtomically)
-    /// and .&lt;name&gt;.part-&lt;id&gt; (DataImager). Startup recovery removes them (review L3-3).</summary>
+    /// <summary>What a write that was stopped leaves behind: .&lt;name&gt;.bromelia-tmp-&lt;id&gt;
+    /// (FileSystem.writeAtomically) and .&lt;name&gt;.part-&lt;id&gt; (DataImager). Startup recovery removes
+    /// them.</summary>
     public static bool IsLeftover(string name) =>
         name.StartsWith(".", StringComparison.Ordinal) && (name.Contains(".bromelia-tmp-", StringComparison.Ordinal) || name.Contains(".part-", StringComparison.Ordinal));
 

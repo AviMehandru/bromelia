@@ -2,8 +2,8 @@ using System.Collections.Generic;
 
 namespace Bromeliad;
 
-/// <summary>What the graph is built for. Phase 3 has no defaults (HostOptions gives them in phase 4): the platform's
-/// data folder is today's app's, with the real config.json and secrets, so a test always passes its own.</summary>
+/// <summary>What the graph is built for. There are no defaults: the platform's data folder holds the real config.json
+/// and secrets, so a test always passes its own.</summary>
 /// <param name="DataDir">The data folder: bromelia.db, jobs, secrets, logs (made when it isn't there).</param>
 /// <param name="ConfigPath">config.json; null: &lt;data&gt;/config.json.</param>
 /// <param name="Home">The user's home: MakeMKV's folder and ~ in paths.</param>

@@ -20,19 +20,20 @@ public enum ArchiveFiles {
     /// The unit a job archives: a UUID (version 8, RFC 9562) made from the first 16 bytes of SHA-256 of
     /// "bromelia-unit\n<jobId>", so a rerun of Seal names the same files (bromelia-<unit8>.json) without any randomness.
     public static func unitId(_ jobId: Id) -> Id {
-        var b = Array(SHA256.hash(data: Array("bromelia-unit\n\(jobId.value)".utf8)).prefix(16))
+        Id(uuid8("bromelia-unit\n\(jobId.value)"))
+    }
+
+    /// A UUID (version 8, RFC 9562) from the first 16 bytes of SHA-256 of `seed`.
+    static func uuid8(_ seed: String) -> String {
+        var b = Array(SHA256.hash(data: Array(seed.utf8)).prefix(16))
         b[6] = (b[6] & 0x0F) | 0x80
         b[8] = (b[8] & 0x3F) | 0x80
-        let hex = b.map { v in
-            let h = String(v, radix: 16)
-            return h.count == 1 ? "0" + h : h
-        }.joined()
-        let c = Array(hex)
-        return Id([String(c[0..<8]), String(c[8..<12]), String(c[12..<16]), String(c[16..<20]), String(c[20..<32])].joined(separator: "-"))
+        let c = Array(hex(b))
+        return [String(c[0..<8]), String(c[8..<12]), String(c[12..<16]), String(c[16..<20]), String(c[20..<32])].joined(separator: "-")
     }
 
     /// What a write that was stopped leaves behind: .<name>.bromelia-tmp-<id> (FileSystem.writeAtomically) and
-    /// .<name>.part-<id> (DataImager). Startup recovery removes them (review L3-3).
+    /// .<name>.part-<id> (DataImager). Startup recovery removes them.
     public static func isLeftover(_ name: String) -> Bool {
         let bytes = Array(name.utf8)
         return bytes.first == dot && (bytes.firstRange(of: Array(".bromelia-tmp-".utf8)) != nil || bytes.firstRange(of: Array(".part-".utf8)) != nil)
@@ -41,7 +42,7 @@ public enum ArchiveFiles {
     /// Files written for media servers, which SHA256SUMS doesn't list (servers may rewrite them): .nfo files and
     /// poster.jpg.
     public static func isMetadataFile(_ name: String) -> Bool {
-        endsWith(MessageCatalog.asciiLower(name), ".nfo") || name == "poster.jpg"
+        endsWith(asciiLower(name), ".nfo") || name == "poster.jpg"
     }
 
     // Path helpers for Swift only (package: BroEngine's SealStep uses them; C# and C get the same from ordinal / byte

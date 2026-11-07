@@ -140,7 +140,7 @@ struct RecoveryServiceTests {
                                                               destination: i["destination"]!.string!, merge: i["merge"]!.bool!, quarantine: i["quarantine"]?.bool == true,
                                                               createdAt: world.clock.now(), items: items)
         }
-        for j in given["jobs"]?.array ?? [] {
+        @Sendable func addJob(_ j: JsonValue) async throws {
             let jobId = Id(j["id"]!.string!)
             let generation = j["mediaGeneration"]?.int
             let request = JobRequest(kind: .videoDisc, title: j["title"]!.string!, automatic: j["automatic"]?.bool == true, driveId: j["driveId"]?.string,
@@ -160,6 +160,12 @@ struct RecoveryServiceTests {
                                                        error: r["error"].map(caseError), checkpoint: r["checkpoint"]))
             }
         }
+        for j in given["jobs"]?.array ?? [] { try await addJob(j) }
+        func fault(_ f: JsonValue?) -> (after: Int, times: Int)? { f.map { (Int($0["after"]!.int!), Int($0["times"]?.int ?? -1)) } }
+        db.intentReadFault = fault(given["storeFail"]?["openIntents"])
+        db.unitReadFault = fault(given["storeFail"]?["units"])
+        store.memory.failJobLoads = Set((given["storeFail"]?["jobs"]?.array ?? []).map { Id($0.string!) })
+        store.memory.failStepLoads = Set((given["storeFail"]?["steps"]?.array ?? []).map { Id($0.string!) })
         let resumability = given["resumability"]?.members ?? []
         let registry = StepRegistry(StepKind.allCases.map { k in
             RecoveryStep(kind: k, resumability: resumability.first { $0.key == k.rawValue }.flatMap { Resumability(rawValue: $0.value.string!) } ?? .idempotent)
@@ -243,6 +249,12 @@ struct RecoveryServiceTests {
                 let result = await started.value
                 try await settle()
                 await world.onExecutor { state.results[i] = result }
+            case "job":
+                try await addJob(arg)
+                await world.onExecutor { state.results[i] = .string("ok") }
+            case "put":
+                for (p, t) in arg.members! { tree.put(p, t.string!) }
+                await world.onExecutor { state.results[i] = .string("ok") }
             case "commit":
                 // As a step calls the port: off the executor, the stored unit with its stored open intent.
                 let unitId = Id(arg.string!)
@@ -263,6 +275,8 @@ struct RecoveryServiceTests {
         }
         for t in pending { await t.value }
         try await settle()
+        db.intentReadFault = nil
+        db.unitReadFault = nil
 
         let results = await world.onExecutorValue { (0..<ops.count).map { state.results[$0] ?? .null } }
         try Fixtures.same(expect["results"]!, .array(results), "results")

@@ -1,12 +1,12 @@
 /* bro-config-service.h: BroConfigService: the configuration (plan §11.1, §15.1, §15.7, §24), used on the executor:
  * config.json (mode 0600), its version (kv config.version, so it survives a restart) and the last good document (kv
- * config.lastGood), and the secrets it refers to. The engine owns the secrets (owner, 2026-10-12, review L3-6):
- * clients set them through bro_config_service_set_secret and only ever see whether one is set. A secret comes from the
- * system keystore, then BROMELIA_SECRET_<NAME>, then the secrets folder (plan §24); when two of them disagree, config
- * secrets.prefer / secrets.bySecret pick one, and the disagreement is a problem: secret.conflict (an error) without a
- * preference that settles it, secret.conflictPreferred (a warning) with one (owner, 2026-10-12). A source that fails is
- * the problem secret.unreadable until it reads again (owner, G3 2026-10-26). File, keystore and store work runs on
- * workers. Implements BroConfigSource. shared/fixtures/engine/config-service.cases.json. */
+ * config.lastGood), and the secrets it refers to. The engine owns the secrets: clients set them through
+ * bro_config_service_set_secret and only ever see whether one is set. A secret comes from the system keystore, then
+ * BROMELIA_SECRET_<NAME>, then the secrets folder (plan §24); when two of them disagree, config secrets.prefer /
+ * secrets.bySecret pick one, and the disagreement is a problem: secret.conflict (an error) without a preference that
+ * settles it, secret.conflictPreferred (a warning) with one. A source that fails is the problem secret.unreadable until
+ * it reads again. File, keystore and store work runs on workers. Implements BroConfigSource.
+ * shared/fixtures/engine/config-service.cases.json. */
 #pragma once
 
 #include "bro-config-envelope.h"
@@ -65,8 +65,8 @@ void bro_config_service_envelope (BroConfigService *self, BroEnvelopeDone done, 
 /* A secret's value (g_free it), from the first source that has it: the system keystore, BROMELIA_SECRET_<NAME> (upper
  * case, '.' → '_'), the secrets folder; a source @config prefers (secrets.bySecret, else secrets.prefer) comes first
  * when it has one. NULL with no error when none has it; the first failure when a source failed and none has it
- * (fs.notPrivate on a share, L3-8). Sources that disagree raise (or update) the secret's problem on the executor. Any
- * thread but the executor: the keystore may block. */
+ * (fs.notPrivate on a share). Sources that disagree raise (or update) the secret's problem on the executor. Any thread
+ * but the executor: the keystore may block. */
 char *bro_config_service_secret (BroConfigService *self, const char *name, const BroConfig *config, BroBroError **error);
 
 /* Stores a secret in the keystore ("" removes it), publishes configChanged{version} (the version doesn't change) and

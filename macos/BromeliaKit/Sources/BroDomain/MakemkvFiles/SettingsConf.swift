@@ -1,3 +1,4 @@
+import BroFoundation
 import Foundation
 
 /// MakeMKV's settings.conf format: `key = "value"` lines, # comments.
@@ -5,7 +6,7 @@ public enum SettingsConf {
     /// Every `key = value` line (quotes around the value removed); the last of a repeated key wins.
     public static func parse(_ text: String) -> [String: String] {
         var o: [String: String] = [:]
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        for raw in lines(of: text) {
             let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !t.isEmpty, !t.hasPrefix("#"), let eq = t.firstIndex(of: "=") else { continue }
             let key = t[..<eq].trimmingCharacters(in: .whitespacesAndNewlines)

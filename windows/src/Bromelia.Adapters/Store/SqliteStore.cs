@@ -15,10 +15,7 @@ namespace Bromelia.Adapters;
 /// <summary>The Store port on SQLite (plan §10.4, §23; shared/fixtures/adapters/store.cases.json). The shared
 /// migrations run verbatim; connections use WAL, synchronous=FULL and foreign keys. One connection, every call
 /// serialised (a read pool can come when measurements ask for it). Times are ISO 8601 text (Instant.Format), enums
-/// their wire names, JSON columns the canonical encoding: BroError {code, params?, cause?}, BroMessage {code, params?,
-/// severity? (when not info)}, JobRequest {kind, title, automatic, driveId?, mediaGeneration?, sessionId?, parentId?,
-/// unitId?, options?, details?}, JobPlan {steps, mode?, profileId?, libraryId?, details?}, StepOutput {kind, data,
-/// summary?, readErrors? (when not 0)}.</summary>
+/// their wire names, JSON columns the canonical encoding (store.cases.json pins each one).</summary>
 public sealed class SqliteStore : IStore, IDisposable
 {
     readonly SqliteConnection _db;

@@ -6,10 +6,10 @@ using System.Threading.Tasks;
 namespace Bromelia.Engine;
 
 /// <summary>
-/// The one thread that owns all service state (plan §8). Actions posted from any thread run one at a time, in the
-/// order they were posted, never inside <see cref="Post"/>. The thread's SynchronizationContext is the executor's, so
-/// an <c>await</c> in engine code comes back here. Blocking work goes to <see cref="Worker{T}(Func{T})"/>, whose result
-/// is delivered back on the executor. Today's daemon <c>Loop</c> and <c>UiDispatcher</c>, as one type.
+/// The one thread that owns all service state (plan §8). Actions posted from any thread run one at a time, in the order
+/// they were posted, never inside <see cref="Post"/>. The thread's SynchronizationContext is the executor's, so an
+/// <c>await</c> in engine code comes back here. Blocking work goes to <see cref="Worker{T}(Func{T})"/>, whose result is
+/// delivered back on the executor.
 /// </summary>
 public sealed class EngineExecutor
 {

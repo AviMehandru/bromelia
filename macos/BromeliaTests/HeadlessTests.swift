@@ -33,6 +33,13 @@ struct HeadlessTests {
         #expect(!second.acquire(who: "headless"))
         #expect(second.holder == "the app \(getpid())")
         first = nil
-        #expect(second.acquire(who: "headless") && second.holder.hasPrefix("headless "))
+        // A child another test is spawning holds a copy of the descriptor until its exec, and a flock lasts until the last
+        // copy closes, so the next holder may have to try again, as it does every minute in the app.
+        var taken = false
+        for _ in 0..<300 where !taken {
+            taken = second.acquire(who: "headless")
+            if !taken { usleep(10_000) }
+        }
+        #expect(taken && second.holder.hasPrefix("headless "))
     }
 }

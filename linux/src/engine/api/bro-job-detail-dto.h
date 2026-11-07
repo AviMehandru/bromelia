@@ -1,5 +1,5 @@
 /* bro-job-detail-dto.h: BroJobDetailDto: a job with its steps, files and commands (dtos.json JobDetail: the Job's
- * members, then these). Children are left out until JobQuery can ask for a job's children (decision 171). */
+ * members, then these). Children are left out until JobQuery can ask for a job's children. */
 #pragma once
 
 #include "bro-job-dto.h"

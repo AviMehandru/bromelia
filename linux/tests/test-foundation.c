@@ -39,6 +39,17 @@ foundation_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtr
     g_autoptr (BroJsonValue) parsed = bro_json_value_parse (bro_json_value_get_string (v, ""), -1);
     g_autofree char *s = parsed ? bro_json_value_to_text (parsed) : NULL;
     bro_test_same_string (failures, id, "canonical", bro_json_value_get_string (bro_json_value_member (expect, "canonical"), NULL), s);
+    const char *member = bro_json_value_get_string (bro_json_value_member (given, "member"), NULL);
+    if (member) {
+      g_autofree char *m = bro_json_value_to_text (bro_json_value_member (parsed, member));
+      bro_test_same_string (failures, id, "member", bro_json_value_get_string (bro_json_value_member (expect, "memberCanonical"), NULL), m);
+    }
+    const char *other = bro_json_value_get_string (bro_json_value_member (given, "other"), NULL);
+    if (other) {
+      g_autoptr (BroJsonValue) second = bro_json_value_parse (other, -1);
+      bro_test_same_string (failures, id, "same", bro_json_value_get_bool (bro_json_value_member (expect, "same"), TRUE) ? "true" : "false",
+                            bro_json_value_equal (parsed, second) ? "true" : "false");
+    }
     return TRUE;
   }
   return FALSE;

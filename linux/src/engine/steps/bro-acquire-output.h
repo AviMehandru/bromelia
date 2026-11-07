@@ -1,8 +1,8 @@
-/* bro-acquire-output.h: BroAcquireOutput, what AcquireStep left in the job's staging folder, by name (plan §12.4; review
- * L3-1: the steps after it use these lists, never a count): the titles in plan order, the files of a run no title owns (a
- * file an "all" run made that the listing doesn't name, and what a failed run left), the backup (a folder or an image)
- * when it is kept, disc-info.json when it was written, and the read errors of runs that ripped several titles at once or
- * made the backup. */
+/* bro-acquire-output.h: BroAcquireOutput, what AcquireStep left in the job's staging folder, by name (plan §12.4; the
+ * steps after it use these lists, never a count): the titles in plan order, the files of a run no title owns (a file an
+ * "all" run made that the listing doesn't name, and what a failed run left), the backup (a folder or an image) when it
+ * is kept, disc-info.json when it was written, and the read errors of runs that ripped several titles at once or made
+ * the backup. */
 #pragma once
 
 #include "bro-acquired-title.h"

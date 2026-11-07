@@ -5,8 +5,8 @@ using Bromelia.Ports;
 
 namespace Bromelia.Engine;
 
-/// <summary>The Clock port as engine code sees it: now, monotonic and local time as the clock says; a timer's handler runs on the
-/// executor, whatever thread the clock fires it on, and never after the timer was cancelled.</summary>
+/// <summary>The Clock port as engine code sees it: now, monotonic and local time as the clock says; a timer's handler
+/// runs on the executor, whatever thread the clock fires it on, and never after the timer was cancelled.</summary>
 public sealed class EngineClock
 {
     readonly IClock _clock;

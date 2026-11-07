@@ -337,79 +337,82 @@ recovery_case_error (BroJsonValue *j)
 }
 
 static void
+recovery_given_job (RecoveryHarness *h, BroJsonValue *j)
+{
+  BroJsonValue *plan = bro_json_value_member (j, "plan");
+  BroJsonValue *rows = bro_json_value_member (j, "rows");
+  BroJsonValue *v;
+  g_autoptr (BroJobRecord) r = bro_job_record_new ();
+  g_strlcpy (r->id.value, bro_json_value_get_string (bro_json_value_member (j, "id"), ""), sizeof r->id.value);
+  r->kind = BRO_JOB_KIND_VIDEO_DISC;
+  g_assert_true (bro_job_state_from_wire (bro_json_value_get_string (bro_json_value_member (j, "state"), ""), &r->state));
+  if ((v = bro_json_value_member (j, "outcome")))
+    {
+      r->has_outcome = TRUE;
+      g_assert_true (bro_outcome_from_wire (bro_json_value_get_string (v, ""), &r->outcome));
+    }
+  if ((v = bro_json_value_member (j, "error")))
+    r->error = recovery_case_error (v);
+  if ((v = bro_json_value_member (j, "decision")))
+    r->decision = bro_json_value_ref (v);
+  g_assert_true (bro_queue_from_wire (bro_json_value_get_string (bro_json_value_member (j, "queue"), "acquisition"), &r->queue));
+  r->title = g_strdup (bro_json_value_get_string (bro_json_value_member (j, "title"), ""));
+  r->drive_id = g_strdup (bro_json_value_get_string (bro_json_value_member (j, "driveId"), NULL));
+  r->automatic = bro_json_value_get_bool (bro_json_value_member (j, "automatic"), FALSE);
+  if ((v = bro_json_value_member (j, "mediaGeneration")))
+    {
+      r->has_media_generation = TRUE;
+      r->media_generation = bro_json_value_get_integer (v, 0);
+    }
+  r->request = bro_job_request_new (BRO_JOB_KIND_VIDEO_DISC, r->title);
+  r->request->automatic = r->automatic;
+  r->request->drive_id = g_strdup (r->drive_id);
+  r->request->has_media_generation = r->has_media_generation;
+  r->request->media_generation = r->media_generation;
+  if (plan && plan->kind == BRO_JSON_VALUE_ARRAY)
+    {
+      r->plan = bro_job_plan_new ();
+      for (guint k = 0; k < bro_json_value_length (plan); k++)
+        {
+          BroStepKind sk;
+          g_assert_true (bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_at (plan, k), ""), &sk));
+          g_array_append_val (r->plan->steps, sk);
+        }
+    }
+  if ((v = bro_json_value_member (j, "unitId")))
+    {
+      r->has_unit_id = TRUE;
+      g_strlcpy (r->unit_id.value, bro_json_value_get_string (v, ""), sizeof r->unit_id.value);
+    }
+  r->created_at = bro_clock_now (BRO_CLOCK (h->lib.clock));
+  bro_job_repository_insert (BRO_JOB_REPOSITORY (h->store), r, NULL);
+  for (guint k = 0; k < bro_json_value_length (rows); k++)
+    {
+      BroJsonValue *row = bro_json_value_at (rows, k);
+      g_autoptr (BroStepRecord) s = bro_step_record_new ();
+      s->job_id = r->id;
+      s->seq = (int) k;
+      g_assert_true (bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_member (row, "kind"), ""), &s->kind));
+      g_assert_true (bro_step_state_from_wire (bro_json_value_get_string (bro_json_value_member (row, "state"), ""), &s->state));
+      s->attempt = 1;
+      s->has_started_at = TRUE;
+      s->started_at = r->created_at;
+      v = bro_json_value_member (row, "output");
+      s->output = bro_step_output_new (s->kind, v ? bro_json_value_ref (v) : bro_json_value_new_object (), NULL);
+      s->output->read_errors = (int) bro_json_value_get_integer (bro_json_value_member (row, "readErrors"), 0);
+      if ((v = bro_json_value_member (row, "error")))
+        s->error = recovery_case_error (v);
+      if ((v = bro_json_value_member (row, "checkpoint")))
+        s->checkpoint = bro_json_value_ref (v);
+      bro_step_repository_save (BRO_STEP_REPOSITORY (h->store), s, NULL);
+    }
+}
+
+static void
 recovery_given_jobs (RecoveryHarness *h, BroJsonValue *jobs)
 {
   for (guint i = 0; jobs && i < bro_json_value_length (jobs); i++)
-    {
-      BroJsonValue *j = bro_json_value_at (jobs, i);
-      BroJsonValue *plan = bro_json_value_member (j, "plan");
-      BroJsonValue *rows = bro_json_value_member (j, "rows");
-      BroJsonValue *v;
-      g_autoptr (BroJobRecord) r = bro_job_record_new ();
-      g_strlcpy (r->id.value, bro_json_value_get_string (bro_json_value_member (j, "id"), ""), sizeof r->id.value);
-      r->kind = BRO_JOB_KIND_VIDEO_DISC;
-      g_assert_true (bro_job_state_from_wire (bro_json_value_get_string (bro_json_value_member (j, "state"), ""), &r->state));
-      if ((v = bro_json_value_member (j, "outcome")))
-        {
-          r->has_outcome = TRUE;
-          g_assert_true (bro_outcome_from_wire (bro_json_value_get_string (v, ""), &r->outcome));
-        }
-      if ((v = bro_json_value_member (j, "error")))
-        r->error = recovery_case_error (v);
-      if ((v = bro_json_value_member (j, "decision")))
-        r->decision = bro_json_value_ref (v);
-      g_assert_true (bro_queue_from_wire (bro_json_value_get_string (bro_json_value_member (j, "queue"), "acquisition"), &r->queue));
-      r->title = g_strdup (bro_json_value_get_string (bro_json_value_member (j, "title"), ""));
-      r->drive_id = g_strdup (bro_json_value_get_string (bro_json_value_member (j, "driveId"), NULL));
-      r->automatic = bro_json_value_get_bool (bro_json_value_member (j, "automatic"), FALSE);
-      if ((v = bro_json_value_member (j, "mediaGeneration")))
-        {
-          r->has_media_generation = TRUE;
-          r->media_generation = bro_json_value_get_integer (v, 0);
-        }
-      r->request = bro_job_request_new (BRO_JOB_KIND_VIDEO_DISC, r->title);
-      r->request->automatic = r->automatic;
-      r->request->drive_id = g_strdup (r->drive_id);
-      r->request->has_media_generation = r->has_media_generation;
-      r->request->media_generation = r->media_generation;
-      if (plan && plan->kind == BRO_JSON_VALUE_ARRAY)
-        {
-          r->plan = bro_job_plan_new ();
-          for (guint k = 0; k < bro_json_value_length (plan); k++)
-            {
-              BroStepKind sk;
-              g_assert_true (bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_at (plan, k), ""), &sk));
-              g_array_append_val (r->plan->steps, sk);
-            }
-        }
-      if ((v = bro_json_value_member (j, "unitId")))
-        {
-          r->has_unit_id = TRUE;
-          g_strlcpy (r->unit_id.value, bro_json_value_get_string (v, ""), sizeof r->unit_id.value);
-        }
-      r->created_at = bro_clock_now (BRO_CLOCK (h->lib.clock));
-      bro_job_repository_insert (BRO_JOB_REPOSITORY (h->store), r, NULL);
-      for (guint k = 0; k < bro_json_value_length (rows); k++)
-        {
-          BroJsonValue *row = bro_json_value_at (rows, k);
-          g_autoptr (BroStepRecord) s = bro_step_record_new ();
-          s->job_id = r->id;
-          s->seq = (int) k;
-          g_assert_true (bro_step_kind_from_wire (bro_json_value_get_string (bro_json_value_member (row, "kind"), ""), &s->kind));
-          g_assert_true (bro_step_state_from_wire (bro_json_value_get_string (bro_json_value_member (row, "state"), ""), &s->state));
-          s->attempt = 1;
-          s->has_started_at = TRUE;
-          s->started_at = r->created_at;
-          v = bro_json_value_member (row, "output");
-          s->output = bro_step_output_new (s->kind, v ? bro_json_value_ref (v) : bro_json_value_new_object (), NULL);
-          s->output->read_errors = (int) bro_json_value_get_integer (bro_json_value_member (row, "readErrors"), 0);
-          if ((v = bro_json_value_member (row, "error")))
-            s->error = recovery_case_error (v);
-          if ((v = bro_json_value_member (row, "checkpoint")))
-            s->checkpoint = bro_json_value_ref (v);
-          bro_step_repository_save (BRO_STEP_REPOSITORY (h->store), s, NULL);
-        }
-    }
+    recovery_given_job (h, bro_json_value_at (jobs, i));
 }
 
 static void
@@ -500,6 +503,28 @@ recovery_log_json (TestTree *t, const char *job)
   return a;
 }
 
+static void
+recovery_read_fault (DbReadFault *fault, BroJsonValue *f)
+{
+  if (!f)
+    return;
+  fault->after = (int) bro_json_value_get_integer (bro_json_value_member (f, "after"), 0);
+  fault->times = (int) bro_json_value_get_integer (bro_json_value_member (f, "times"), -1);
+}
+
+static void
+recovery_given_faults (RecoveryHarness *h, BroJsonValue *faults)
+{
+  BroJsonValue *list = bro_json_value_member (faults, "jobs");
+  recovery_read_fault (&h->lib.db->intent_reads, bro_json_value_member (faults, "openIntents"));
+  recovery_read_fault (&h->lib.db->unit_reads, bro_json_value_member (faults, "units"));
+  for (guint i = 0; list && i < bro_json_value_length (list); i++)
+    g_hash_table_add (h->store->fail_job_loads, g_strdup (bro_json_value_get_string (bro_json_value_at (list, i), "")));
+  list = bro_json_value_member (faults, "steps");
+  for (guint i = 0; list && i < bro_json_value_length (list); i++)
+    g_hash_table_add (h->store->fail_step_loads, g_strdup (bro_json_value_get_string (bro_json_value_at (list, i), "")));
+}
+
 static gboolean
 recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrArray *failures)
 {
@@ -588,6 +613,7 @@ recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
     }
   recovery_given_units (&h, given);
   recovery_given_jobs (&h, bro_json_value_member (given, "jobs"));
+  recovery_given_faults (&h, bro_json_value_member (given, "storeFail"));
   list = bro_json_value_member (given, "isolationProblems");
   for (guint i = 0; list && i < bro_json_value_length (list); i++)
     g_ptr_array_add (h.isolation->problems, bro_bro_message_decode (bro_json_value_at (list, i)));
@@ -633,6 +659,17 @@ recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
           library_settle (&h.lib);
           library_record (&h.lib, i, bro_json_value_new_string ("ok"));
         }
+      else if (strcmp (name, "job") == 0)
+        {
+          recovery_given_job (&h, arg);
+          library_record (&h.lib, i, bro_json_value_new_string ("ok"));
+        }
+      else if (strcmp (name, "put") == 0)
+        {
+          for (guint k = 0; k < arg->keys->len; k++)
+            tree_put (h.lib.tree, arg->keys->pdata[k], bro_json_value_get_string (arg->items->pdata[k], ""));
+          library_record (&h.lib, i, bro_json_value_new_string ("ok"));
+        }
       else if (strcmp (name, "startLibraries") == 0)
         {
           RecoveryOp *o = g_new0 (RecoveryOp, 1);
@@ -658,6 +695,7 @@ recovery_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtrAr
   if (h.recover_index >= 0)
     library_wait_for (&h.lib, (guint) h.recover_index);
   library_settle (&h.lib);
+  h.lib.db->intent_reads = h.lib.db->unit_reads = (DbReadFault) { 0, 0 };
 
   for (guint i = 0; i < h.lib.n_ops; i++)
     bro_json_value_append (results, h.lib.results[i] ? bro_json_value_ref (h.lib.results[i]) : bro_json_value_new_null ());

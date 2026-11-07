@@ -1,9 +1,8 @@
 /* bro-pipeline-runner.h: BroPipelineRunner: the only code that moves a job between states (plan §12.3), on the
- * executor. Today's JobRunner.run()/execute() becomes JobPlanner (which steps), the step types (what each does),
- * JobOutcome.decide (the result) and this loop (the order, the resources, and the durable record of every step).
- * In C the loop is a chain of callbacks: each await of the other two is a worker or a scheduler answer arriving on the
- * executor. An optional crash hook (test roots only) hears beforeStep:<kind> and afterStep:<kind>.
- * shared/fixtures/engine/pipeline-runner.cases.json. */
+ * executor. JobPlanner says which steps, the step types what each does, JobOutcome.decide the result; this loop owns
+ * the order, the resources and the durable record of every step. In C the loop is a chain of callbacks: each await of
+ * the other two is a worker or a scheduler answer arriving on the executor. An optional crash hook (test roots only)
+ * hears beforeStep:<kind> and afterStep:<kind>. shared/fixtures/engine/pipeline-runner.cases.json. */
 #pragma once
 
 #include "bro-coalescer.h"
@@ -47,10 +46,10 @@ BroPipelineRunner *bro_pipeline_runner_new (BroEngineExecutor *executor, BroEven
  * is, storing nothing more, with server.stopping. */
 void bro_pipeline_runner_run (BroPipelineRunner *self, const BroId *job_id, BroRunDone done, gpointer data, GDestroyNotify destroy);
 
-/* At engine stop (decision 170): every live job's waiting request and question are dropped and its running step's token
- * cancelled, and from now on the runner stores nothing more for any job (no step row, plan, outcome or jobFinished), so
- * what is stored is what a killed engine leaves and the next start's recovery takes each job up. Calls @done once no
- * job is live (at once when none is); @destroy frees @data afterwards. */
+/* At engine stop: every live job's waiting request and question are dropped and its running step's token cancelled, and
+ * from now on the runner stores nothing more for any job (no step row, plan, outcome or jobFinished), so what is stored
+ * is what a killed engine leaves and the next start's recovery takes each job up. Calls @done once no job is live (at
+ * once when none is); @destroy frees @data afterwards. */
 void bro_pipeline_runner_shutdown (BroPipelineRunner *self, BroRunnerIdle done, gpointer data, GDestroyNotify destroy);
 
 /* Cancels a running job: a waiting request or a decision ends at once, a running step sees its token. */

@@ -1,9 +1,9 @@
 import BroFoundation
 import Foundation
 
-/// What `EngineAPI.events` gives (decision 168): the snapshot event first when it was opened without a replayable
-/// after, then the deltas; after a gap (the stream's resync) a new snapshot instead of the missed deltas; jobLog events
-/// only for the jobs asked for. Read from any thread, one reader at a time; stop closes it.
+/// What `EngineAPI.events` gives: the snapshot event first when it was opened without a replayable after, then the
+/// deltas; after a gap (the stream's resync) a new snapshot instead of the missed deltas; jobLog events only for the
+/// jobs asked for. Read from any thread, one reader at a time; stop closes it.
 public final class EventFeed: @unchecked Sendable {
     private let stream: EventStream
     private let jobLog: Set<Id>

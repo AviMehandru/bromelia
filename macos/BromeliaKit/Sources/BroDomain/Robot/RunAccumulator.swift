@@ -48,7 +48,7 @@ public struct RunAccumulator: Sendable {
             feedMessage(m)
         case let .drive(index, _, _, _, _, device):
             if let expected = expectedIndex, index == expected, !expectedDevice.isEmpty, !device.isEmpty,
-               MessageCatalog.asciiLower(device) != MessageCatalog.asciiLower(expectedDevice) {
+               asciiLower(device) != asciiLower(expectedDevice) {
                 if driveMismatch == nil {
                     driveMismatch = BroMessage(.driveRenumbered, [("index", .integer(Int64(expected))), ("now", .string(device)),
                                                                   ("expected", .string(expectedDevice))], severity: .error)
@@ -91,9 +91,9 @@ public struct RunAccumulator: Sendable {
 
     /// The path of a file:// URL (percent-decoded; `file:///C:/x` → `C:/x`), else nil.
     static func filePath(_ url: String) -> String? {
-        guard MessageCatalog.asciiLower(String(url.prefix(7))) == "file://" else { return nil }
+        guard asciiLower(String(url.prefix(7))) == "file://" else { return nil }
         var rest = Array(url.utf8.dropFirst(7))
-        if MessageCatalog.asciiLower(String(decoding: rest.prefix(10), as: UTF8.self)) == "localhost/" { rest.removeFirst(9) }
+        if asciiLower(String(decoding: rest.prefix(10), as: UTF8.self)) == "localhost/" { rest.removeFirst(9) }
         guard rest.first == UInt8(ascii: "/") else { return nil }
         if rest.count >= 3, (rest[1] | 0x20) >= UInt8(ascii: "a"), (rest[1] | 0x20) <= UInt8(ascii: "z"), rest[2] == UInt8(ascii: ":") {
             rest.removeFirst()

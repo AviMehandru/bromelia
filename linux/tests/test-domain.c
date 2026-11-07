@@ -1379,8 +1379,24 @@ archive_format_case (const char *id, BroJsonValue *given, BroJsonValue *expect, 
     bro_test_same_string (failures, id, "sha256", JS (expect, "sha256"), h);
   } else if ((v = J (given, "existing"))) {
     g_autoptr (GPtrArray) entries = entries_of (J (given, "entries"));
-    g_autofree char *t = bro_sha256_sums_merge (v->string, entries);
+    g_autoptr (GBytes) before = g_bytes_new (v->string, strlen (v->string));
+    g_autoptr (GBytes) after = bro_sha256_sums_merge (before, entries);
+    g_autofree char *t = g_strndup (g_bytes_get_data (after, NULL), g_bytes_get_size (after));
     bro_test_same_string (failures, id, "merged", JS (expect, "text"), t);
+  } else if ((v = J (given, "existingHex"))) {
+    g_autoptr (GPtrArray) entries = entries_of (J (given, "entries"));
+    gsize n = strlen (v->string) / 2;
+    g_autofree guint8 *raw = g_malloc (n);
+    g_autoptr (GString) hex = g_string_new ("");
+    for (gsize i = 0; i < n; i++)
+      raw[i] = (guint8) (g_ascii_xdigit_value (v->string[2 * i]) * 16 + g_ascii_xdigit_value (v->string[2 * i + 1]));
+    g_autoptr (GBytes) before = g_bytes_new (raw, n);
+    g_autoptr (GBytes) after = bro_sha256_sums_merge (before, entries);
+    gsize size;
+    const guint8 *merged = g_bytes_get_data (after, &size);
+    for (gsize i = 0; i < size; i++)
+      g_string_append_printf (hex, "%02x", merged[i]);
+    bro_test_same_string (failures, id, "merged", JS (expect, "hex"), hex->str);
   } else if ((v = J (given, "entries"))) {
     g_autoptr (GPtrArray) entries = entries_of (v);
     g_autofree char *t = bro_sha256_sums_render (entries);
@@ -2077,7 +2093,7 @@ media_args_case (const char *id, BroJsonValue *given, BroJsonValue *expect, GPtr
     bro_test_same_json (failures, id, "arguments", J (expect, "arguments"), got);
     return TRUE;
   }
-  if (strcmp (id, "simple-chapters") == 0) {
+  if (g_str_has_prefix (id, "simple-chapters")) {
     g_autoptr (GArray) starts = bro_simple_chapters_parse (JS (given, "text"));
     BroJsonValue *want = J (expect, "starts");
     if (starts->len != bro_json_value_length (want))

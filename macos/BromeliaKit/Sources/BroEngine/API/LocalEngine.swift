@@ -62,9 +62,9 @@ public final class LocalEngine: EngineAPI {
 
     // MARK: Start and stop
 
-    /// The startup order (plan §15.1, decision 169): the configuration (a failed load fails start, and nothing else has
-    /// started), recovery (recovery.summary into the engine log), the configuration's limits to the Scheduler (and on
-    /// every configChanged), the libraries, the drives, then the jobs recovery left queued.
+    /// The startup order (plan §15.1): the configuration (a failed load fails start, and nothing else has started),
+    /// recovery (recovery.summary into the engine log), the configuration's limits to the Scheduler (and on every
+    /// configChanged), the libraries, the drives, then the jobs recovery left queued.
     public nonisolated func start() async throws(BroError) {
         try await on { () throws(BroError) in
             self.startedAt = self.clock.now()
@@ -78,10 +78,10 @@ public final class LocalEngine: EngineAPI {
         }
     }
 
-    /// The stop order (decision 170): from now on every call answers server.stopping; the feeds close and the intake
-    /// stops (drives, libraries); the runner shuts every live job down storing nothing more, so the store is what a
-    /// killed engine leaves; then, once no job is live and the executor is idle (at most 30 s, in real time), the
-    /// executor stops and the root's release runs.
+    /// The stop order: from now on every call answers server.stopping; the feeds close and the intake stops (drives,
+    /// libraries); the runner shuts every live job down storing nothing more, so the store is what a killed engine
+    /// leaves; then, once no job is live and the executor is idle (at most 30 s, in real time), the executor stops and
+    /// the root's release runs.
     public nonisolated func stop() async throws(BroError) {
         let state = Stopping()
         Task {
@@ -113,9 +113,8 @@ public final class LocalEngine: EngineAPI {
         release()
     }
 
-    /// A phase 3 door outside EngineAPI (G1 owner question 5): a job for the request (an ISO or a folder needs
-    /// SessionService otherwise), for the scenario runner and the real-ISO test. Retired when openSession/ripSession
-    /// come.
+    /// A door outside EngineAPI: a job for the request (an ISO or a folder needs SessionService otherwise), for the
+    /// scenario runner and the real-ISO test. Retired when openSession/ripSession come.
     public nonisolated func startJob(_ request: JobRequest) async throws(BroError) -> JobDto {
         try await on { () throws(BroError) in try await self.jobService.create(request) }
     }
@@ -215,11 +214,11 @@ public final class LocalEngine: EngineAPI {
     }
 
     /// The id is the name (else the folder's last part) made into an EntryId, with -2, -3 … when the configuration has
-    /// it already (decision 187). LibraryService writes the marker, then the configuration gets {id, name, path} at its
-    /// current version; if that save fails the marker is removed and the save's error returned, so a retry doesn't meet
+    /// it already. LibraryService writes the marker, then the configuration gets {id, name, path} at its current
+    /// version; if that save fails the marker is removed and the save's error returned, so a retry doesn't meet
     /// library.alreadyAttached. The path of a library the configuration already has (the user confirming a folder
-    /// without its marker, H1-7), compared byte for byte: the marker is written under that library's id and name, and
-    /// the configuration is left as it is.
+    /// without its marker), compared byte for byte: the marker is written under that library's id and name, and the
+    /// configuration is left as it is.
     public nonisolated func attachLibrary(_ path: String, name: String) async throws(BroError) -> LibraryDto {
         try await on { () throws(BroError) in
             let current = self.configService.current()
@@ -267,9 +266,9 @@ public final class LocalEngine: EngineAPI {
 
     // MARK: Events
 
-    /// Decision 168, 186: with `after` the feed replays from it (one the bus can't replay starts with a resync, which the
-    /// feed answers with a snapshot); without it the first event is a snapshot whose seq is the last event's before the
-    /// snapshot was gathered, and the events published while it was gathered follow it as deltas.
+    /// With `after` the feed replays from it (one the bus can't replay starts with a resync, which the feed answers
+    /// with a snapshot); without it the first event is a snapshot whose seq is the last event's before the snapshot was
+    /// gathered, and the events published while it was gathered follow it as deltas.
     public nonisolated func events(after: Int64?, jobLog: [Id]) async throws(BroError) -> EventFeed {
         try await on { () throws(BroError) in
             let stream: EventStream

@@ -1,3 +1,5 @@
+import BroFoundation
+
 /// Where a file or folder the user opened leads: MakeMKV opens discs (an image, or a folder holding BDMV, VIDEO_TS or
 /// HVDVD_TS), not single files, so a file inside a disc structure opens the disc it belongs to.
 public enum SourceResolver {
@@ -17,7 +19,7 @@ public enum SourceResolver {
         var p = Substring(path)
         while let last = p.last, isSeparator(last) { p = p.dropLast() }
         let item = String(p)
-        let lower = MessageCatalog.asciiLower(name(item))
+        let lower = asciiLower(name(item))
         if !isDirectory && (lower.hasSuffix(".iso") || lower.hasSuffix(".img") || lower.hasSuffix(".udf")) { return .iso(path: item) }
         var dir = isDirectory ? item : parent(item)
         for _ in 0..<4 where !dir.isEmpty {

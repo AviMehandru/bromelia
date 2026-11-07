@@ -9,9 +9,8 @@ using CancellationToken = Bromelia.Foundation.CancellationToken;
 namespace Bromelia.Engine;
 
 /// <summary>
-/// The three queues, the resources steps ask for, and space reservations (plan §21), on the executor. Replaces
-/// today's <c>AppState.Pump</c> (one running job per drive lane, maxConcurrentJobs) and <c>BackgroundQueue</c>
-/// (backgroundJobs at once). shared/fixtures/engine/scheduler.cases.json.
+/// The three queues, the resources steps ask for, and space reservations (plan §21), on the executor.
+/// shared/fixtures/engine/scheduler.cases.json.
 /// <list type="bullet">
 /// <item>A drive has room for one job, and a job keeps a drive it was given until <see cref="ReleaseDrives"/> or
 /// <see cref="Finish"/>; a step's other resources go back on <see cref="Release"/>.</item>

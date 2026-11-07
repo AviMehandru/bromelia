@@ -1,10 +1,10 @@
 import BroFoundation
 import BroPorts
 
-/// At most one value per interval per key (plan §8 rule 5): a job's progress before it becomes an event or is stored.
-/// A value goes out at once when nothing for its key went out in the last interval; otherwise it waits (replacing
-/// the one waiting) until one interval after the last one went out. Today's EventSink did this for robot progress
-/// (a value at most every 0.1 s); shared/fixtures/engine/coalescer.cases.json.
+/// At most one value per interval per key (plan §8 rule 5): a job's progress before it becomes an event or is stored. A
+/// value goes out at once when nothing for its key went out in the last interval; otherwise it waits (replacing the one
+/// waiting) until one interval after the last one went out. Robot progress goes through it (a value at most every 0.1
+/// s); shared/fixtures/engine/coalescer.cases.json.
 @EngineActor
 public final class Coalescer {
     private final class Key {

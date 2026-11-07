@@ -17,10 +17,10 @@ public enum JsonValue: Sendable, Equatable, CustomStringConvertible {
         case let (.bool(x), .bool(y)): return x == y
         case let (.integer(x), .integer(y)): return x == y
         case let (.number(x), .number(y)): return x == y
-        case let (.string(x), .string(y)): return x == y
+        case let (.string(x), .string(y)): return x.utf8.elementsEqual(y.utf8) // String's == is canonical
         case let (.array(x), .array(y)): return x == y
         case let (.object(x), .object(y)):
-            return x.count == y.count && zip(x, y).allSatisfy { $0.key == $1.key && $0.value == $1.value }
+            return x.count == y.count && zip(x, y).allSatisfy { $0.key.utf8.elementsEqual($1.key.utf8) && $0.value == $1.value }
         default: return false
         }
     }
@@ -29,7 +29,7 @@ public enum JsonValue: Sendable, Equatable, CustomStringConvertible {
 
     /// The member called `key` of an object; nil for anything else.
     public subscript(key: String) -> JsonValue? {
-        if case .object(let members) = self { return members.last { $0.key == key }?.value }
+        if case .object(let members) = self { return members.last { $0.key.utf8.elementsEqual(key.utf8) }?.value }
         return nil
     }
 

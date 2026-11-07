@@ -15,7 +15,7 @@ public enum BackupStructure {
             return id == "CD001" || id == "BEA01" ? nil : named(.structureNotImage)
         }
         guard let entries else { return named(isoHeader != nil ? .structureNotFolder : .structureNotCreated) }
-        func has(_ prefix: String) -> Bool { entries.contains { MessageCatalog.asciiLower($0).hasPrefix(MessageCatalog.asciiLower(prefix)) } }
+        func has(_ prefix: String) -> Bool { entries.contains { asciiLower($0).hasPrefix(asciiLower(prefix)) } }
         if has("BDMV/") { return has("BDMV/index.bdmv") ? nil : BroMessage(.structureBdmvIndexMissing) }
         if has("VIDEO_TS/") { return has("VIDEO_TS/VIDEO_TS.IFO") ? nil : BroMessage(.structureVideoTsIfoMissing) }
         if has("HVDVD_TS/") { return nil }

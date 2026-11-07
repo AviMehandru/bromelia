@@ -1,6 +1,6 @@
 /* bro-library-marker.h: BroLibraryMarker: the .bromelia-library file at a library's root (plan §22.2): written when a
  * library is attached (never on its own), so a library whose disk isn't there is offline instead of being written to
- * the boot disk (I2). */
+ * the boot disk. */
 #pragma once
 
 #include "bro-instant.h"

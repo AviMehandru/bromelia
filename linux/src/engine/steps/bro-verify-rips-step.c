@@ -62,15 +62,116 @@ title_at (const BroListing *listing, int index)
   return NULL;
 }
 
+/* @title below 0: a file no title owns, whose reason is the problem itself. */
 static BroJsonValue *
 reason_json (int title, const BroBroMessage *problem)
 {
   g_autofree char *number = g_strdup_printf ("%d", title);
-  BroJsonValue *params = _bro_param ("title", bro_json_value_new_string (number));
+  BroJsonValue *params;
   g_autoptr (BroBroMessage) m = NULL;
+  if (title < 0)
+    return bro_bro_message_to_json (problem);
+  params = _bro_param ("title", bro_json_value_new_string (number));
   bro_json_value_set (params, "reason", bro_bro_message_to_json (problem));
   m = bro_bro_message_new (BRO_MSG_RIP_TITLE_REASON, params, BRO_SEVERITY_INFO);
   return bro_bro_message_to_json (m);
+}
+
+static BroBroMessage *
+mismatch (const char *file, BroJsonValue *problems)
+{
+  BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
+  bro_json_value_set (params, "problems", problems);
+  return bro_bro_message_new (BRO_MSG_RIPCHECK_MISMATCH, params, BRO_SEVERITY_INFO);
+}
+
+/* One run over the files. */
+typedef struct {
+  const BroStepContext *context;
+  const char *staging;
+  GPtrArray *passed;
+  GArray *failed_titles;     /* int; below 0: a file no title owns */
+  GPtrArray *failed_problems;
+  guint total;
+  guint n;
+} Check;
+
+typedef enum { CHECK_GO_ON, CHECK_NO_MKVMERGE, CHECK_ERROR } CheckEnd;
+
+/* @index below 0: a file no title owns. @title: its listing title, when there is one. */
+static CheckEnd
+check_file (Check *k, int index, const BroTitle *title, const char *file, BroBroError **error)
+{
+  const BroStepContext *context = k->context;
+  g_autofree char *path = g_strconcat (k->staging, "/", file, NULL);
+  g_autoptr (BroBroMessage) operation = bro_bro_message_new (BRO_MSG_RIPCHECK_CHECKING, _bro_param ("file", bro_json_value_new_string (file)),
+                                                             BRO_SEVERITY_INFO);
+  g_autoptr (BroBroError) failure_error = NULL;
+  g_autoptr (BroMkvProbe) probe = NULL;
+  BroBroMessage *failure = NULL;
+  bro_progress_reporter_report (context->progress, (double) k->n++ / k->total, operation, NULL);
+  probe = bro_matroska_probe (context->tools->matroska, path, context->cancel, &failure_error);
+  if (failure_error)
+    {
+      if (strcmp (failure_error->code, "tool.missing") == 0 || strcmp (failure_error->code, "tool.notFoundAt") == 0)
+        {
+          _bro_step_log (context, BRO_MSG_RIPCHECK_CANNOT_CHECK, NULL, BRO_SEVERITY_WARNING);
+          return CHECK_NO_MKVMERGE;
+        }
+      *error = g_steal_pointer (&failure_error);
+      return CHECK_ERROR;
+    }
+  if (!probe)
+    failure = bro_bro_message_new (BRO_MSG_RIPCHECK_UNREADABLE, _bro_param ("file", bro_json_value_new_string (file)), BRO_SEVERITY_INFO);
+  else if (title)
+    {
+      g_autoptr (BroRipCheckResult) result = bro_rip_check_check (probe, title);
+      for (guint i = 0; i < result->notes->len; i++)
+        {
+          BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
+          bro_json_value_set (params, "note", bro_bro_message_to_json (result->notes->pdata[i]));
+          _bro_step_log (context, BRO_MSG_RIPCHECK_NOTE, params, BRO_SEVERITY_WARNING);
+        }
+      if (result->problems->len > 0)
+        {
+          BroJsonValue *problems = bro_json_value_new_array ();
+          for (guint i = 0; i < result->problems->len; i++)
+            bro_json_value_append (problems, bro_bro_message_to_json (result->problems->pdata[i]));
+          failure = mismatch (file, problems);
+        }
+    }
+  else if (index < 0 && probe->tracks->len == 0)
+    {
+      BroJsonValue *problems = bro_json_value_new_array ();
+      g_autoptr (BroBroMessage) none = bro_bro_message_new (BRO_MSG_RIPCHECK_NO_TRACKS, NULL, BRO_SEVERITY_INFO);
+      bro_json_value_append (problems, bro_bro_message_to_json (none));
+      failure = mismatch (file, problems);
+    }
+  if (failure)
+    {
+      BroJsonValue *params = index < 0 ? bro_json_value_new_object () : _bro_param ("title", bro_json_value_new_integer (index));
+      bro_json_value_set (params, "problem", bro_bro_message_to_json (failure));
+      _bro_step_log (context, index < 0 ? BRO_MSG_RIP_OTHER_CHECK_FAILED : BRO_MSG_RIP_CHECK_FAILED, params, BRO_SEVERITY_ERROR);
+      g_array_append_val (k->failed_titles, index);
+      g_ptr_array_add (k->failed_problems, failure);
+      return CHECK_GO_ON;
+    }
+  {
+    BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
+    bro_json_value_set (params, "duration", bro_json_value_new_integer ((gint64) round (probe->has_duration ? probe->duration_seconds : 0)));
+    bro_json_value_set (params, "tracks", bro_json_value_new_integer (probe->tracks->len));
+    bro_json_value_set (params, "chapters", bro_json_value_new_integer (probe->chapter_count));
+    _bro_step_log (context, BRO_MSG_RIPCHECK_CHECKED, params, BRO_SEVERITY_INFO);
+  }
+  if (title && title->tracks->len > 0 && probe->tracks->len < title->tracks->len)
+    {
+      BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
+      bro_json_value_set (params, "have", bro_json_value_new_integer (probe->tracks->len));
+      bro_json_value_set (params, "total", bro_json_value_new_integer (title->tracks->len));
+      _bro_step_log (context, BRO_MSG_RIPCHECK_TRACK_SUBSET, params, BRO_SEVERITY_INFO);
+    }
+  g_ptr_array_add (k->passed, g_strdup (file));
+  return CHECK_GO_ON;
 }
 
 static BroStepReport *
@@ -83,11 +184,12 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
   g_autoptr (GArray) failed_titles = g_array_new (FALSE, FALSE, sizeof (int));
   g_autoptr (GPtrArray) failed_problems = g_ptr_array_new_with_free_func ((GDestroyNotify) bro_bro_message_free);
   g_autofree char *staging = NULL;
-  guint total = 0, n = 0;
+  Check k = { context, NULL, passed, failed_titles, failed_problems, 0, 0 };
   if (!plan || !acquired)
     return _bro_step_skipped ();
   if (!(staging = bro_library_port_staging_directory (context->library, plan->library_id, &context->job->id, error)))
     return NULL;
+  k.staging = staging;
   {
     BroJsonValue *probe = bro_job_snapshot_output (context->job, BRO_STEP_KIND_PROBE);
     g_autoptr (BroJsonValue) none = bro_json_value_new_null ();
@@ -102,79 +204,24 @@ step_run (BroStep *step, const BroStepContext *context, BroBroError **error)
                                                     BRO_SEVERITY_ERROR));
       g_ptr_array_add (passed, g_strdup (acquired->backup));
     }
+  k.total = acquired->others->len;
   for (guint i = 0; i < acquired->titles->len; i++)
-    total += ((BroAcquiredTitle *) acquired->titles->pdata[i])->files->len;
-  for (guint i = 0; i < acquired->titles->len; i++)
+    k.total += ((BroAcquiredTitle *) acquired->titles->pdata[i])->files->len;
+  for (guint i = 0; i <= acquired->titles->len; i++)
     {
-      BroAcquiredTitle *t = acquired->titles->pdata[i];
-      const BroTitle *title = title_at (probed->listing, t->index);
-      for (guint j = 0; j < t->files->len; j++, n++)
-        {
-          const char *file = t->files->pdata[j];
-          g_autofree char *path = g_strconcat (staging, "/", file, NULL);
-          g_autoptr (BroBroMessage) operation = bro_bro_message_new (BRO_MSG_RIPCHECK_CHECKING, _bro_param ("file", bro_json_value_new_string (file)),
-                                                                     BRO_SEVERITY_INFO);
-          g_autoptr (BroBroError) failure_error = NULL;
-          g_autoptr (BroMkvProbe) probe = NULL;
-          BroBroMessage *failure = NULL;
-          bro_progress_reporter_report (context->progress, (double) n / total, operation, NULL);
-          probe = bro_matroska_probe (context->tools->matroska, path, context->cancel, &failure_error);
-          if (failure_error)
-            {
-              if (strcmp (failure_error->code, "tool.missing") == 0 || strcmp (failure_error->code, "tool.notFoundAt") == 0)
-                {
-                  _bro_step_log (context, BRO_MSG_RIPCHECK_CANNOT_CHECK, NULL, BRO_SEVERITY_WARNING);
-                  return report (passed, NULL);
-                }
-              *error = g_steal_pointer (&failure_error);
-              return NULL;
-            }
-          if (!probe)
-            failure = bro_bro_message_new (BRO_MSG_RIPCHECK_UNREADABLE, _bro_param ("file", bro_json_value_new_string (file)), BRO_SEVERITY_INFO);
-          else if (title)
-            {
-              g_autoptr (BroRipCheckResult) result = bro_rip_check_check (probe, title);
-              for (guint k = 0; k < result->notes->len; k++)
-                {
-                  BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
-                  bro_json_value_set (params, "note", bro_bro_message_to_json (result->notes->pdata[k]));
-                  _bro_step_log (context, BRO_MSG_RIPCHECK_NOTE, params, BRO_SEVERITY_WARNING);
-                }
-              if (result->problems->len > 0)
-                {
-                  BroJsonValue *problems = bro_json_value_new_array ();
-                  BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
-                  for (guint k = 0; k < result->problems->len; k++)
-                    bro_json_value_append (problems, bro_bro_message_to_json (result->problems->pdata[k]));
-                  bro_json_value_set (params, "problems", problems);
-                  failure = bro_bro_message_new (BRO_MSG_RIPCHECK_MISMATCH, params, BRO_SEVERITY_INFO);
-                }
-            }
-          if (failure)
-            {
-              BroJsonValue *params = _bro_param ("title", bro_json_value_new_integer (t->index));
-              bro_json_value_set (params, "problem", bro_bro_message_to_json (failure));
-              _bro_step_log (context, BRO_MSG_RIP_CHECK_FAILED, params, BRO_SEVERITY_ERROR);
-              g_array_append_val (failed_titles, t->index);
-              g_ptr_array_add (failed_problems, failure);
-              continue;
-            }
+      BroAcquiredTitle *t = i < acquired->titles->len ? acquired->titles->pdata[i] : NULL; /* NULL: the files no title owns, last */
+      GPtrArray *files = t ? t->files : acquired->others;
+      const BroTitle *title = t ? title_at (probed->listing, t->index) : NULL;
+      for (guint j = 0; j < files->len; j++)
+        switch (check_file (&k, t ? t->index : -1, title, files->pdata[j], error))
           {
-            BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
-            bro_json_value_set (params, "duration", bro_json_value_new_integer ((gint64) round (probe->has_duration ? probe->duration_seconds : 0)));
-            bro_json_value_set (params, "tracks", bro_json_value_new_integer (probe->tracks->len));
-            bro_json_value_set (params, "chapters", bro_json_value_new_integer (probe->chapter_count));
-            _bro_step_log (context, BRO_MSG_RIPCHECK_CHECKED, params, BRO_SEVERITY_INFO);
+          case CHECK_GO_ON:
+            break;
+          case CHECK_NO_MKVMERGE:
+            return report (passed, NULL);
+          case CHECK_ERROR:
+            return NULL;
           }
-          if (title && title->tracks->len > 0 && probe->tracks->len < title->tracks->len)
-            {
-              BroJsonValue *params = _bro_param ("file", bro_json_value_new_string (file));
-              bro_json_value_set (params, "have", bro_json_value_new_integer (probe->tracks->len));
-              bro_json_value_set (params, "total", bro_json_value_new_integer (title->tracks->len));
-              _bro_step_log (context, BRO_MSG_RIPCHECK_TRACK_SUBSET, params, BRO_SEVERITY_INFO);
-            }
-          g_ptr_array_add (passed, g_strdup (file));
-        }
     }
   if (failed_titles->len == 0)
     return report (passed, NULL);

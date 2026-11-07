@@ -1,7 +1,7 @@
 import BroFoundation
 
 /// A job with its steps, files and commands (dtos.json JobDetail: the Job's members, then these). Children are left out
-/// until JobQuery can ask for a job's children (decision 171).
+/// until JobQuery can ask for a job's children.
 public struct JobDetailDto: Sendable, Equatable {
     public var job: JobDto
     public var steps: [JobStepDto]

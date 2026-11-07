@@ -1,21 +1,18 @@
 /* bro-seal-step.h: BroSealStep: Step 13 (plan §20.1; §22.3 steps 1–3): makes the job's staging folder a sealed unit, so
- * the commit only moves it. What it seals is the produced items by name (review L3-1: the lists, never a count): Name's
- * output, else Acquire's names as they are (bro_name_output_from_acquire). An item that isn't in staging, or holds no
- * file (an empty folder, a hidden path, a path through '..'; owner, 2026-10-21), fails with archive.fileMissing before
- * anything is touched, a visible file no step made with archive.unlisted (owner, 2026-10-20), and leftovers of a stopped
- * write are removed. Then, in order:
- * 1. every file is synced to disk, then every folder from staging down to each file (archive.synced): a folder that
- *    holds only folders (a backup's) is synced too, so each entry on the way to a file is durable;
- * 2. every file is hashed read back from disk (archive.hashFromDisk, on by default: the cache is bypassed), with
- *    archive.hashing progress; a file that can't be read fails with archive.hashFailed;
- * 3. SHA256SUMS, the logs (the job's log.jsonl rendered line by line, MakeMKV's transcripts as they are), the READ
- *    ERRORS note when MakeMKV reported read errors, and the record are written, each atomically; a write that fails
- *    fails with archive.writeFailed. Bromelia's own files from an earlier attempt that this one doesn't write go.
- * SHA256SUMS and the record are always written; archive.checksums: false is ignored (archive.checksumsRequired) and
- * archive.archiveRecord: false leaves out only the logs (owner, 2026-10-20). Nothing is trusted from an earlier attempt:
- * a rerun syncs and hashes everything again and writes the same files. Read errors give the unit the tag "READ ERRORS"
- * (Commit puts it in _Quarantine/<name> [READ ERRORS], plan §22.2) and the record's status errors. Data: BroSealOutput.
- * Skipped when Plan or Acquire hasn't run. */
+ * the commit only moves it. It seals the produced items by name, never by a count: Name's output, else Acquire's names
+ * as they are. An item that isn't in staging or holds no file (an empty folder, a hidden path, a path through '..')
+ * fails before anything is touched, and so does a visible file no step made; leftovers of a stopped write are removed.
+ *
+ * In order: every file is synced, then every folder from staging down to each file, so each entry on the way to a file
+ * is durable; every file is hashed read back from disk (archive.hashFromDisk, on by default); then SHA256SUMS, the
+ * logs, the READ ERRORS note and the record are written, each atomically. Read back from disk goes past the system
+ * cache only on Windows: macOS and Linux ask the cache to stay out of the way, and a page still in it can answer
+ * (FileSystem.openForReading).
+ *
+ * SHA256SUMS and the record are always written: archive.checksums: false is ignored and archive.archiveRecord: false
+ * leaves out only the logs. Nothing is trusted from an earlier attempt: a rerun syncs and hashes everything again and
+ * writes the same files. Read errors tag the unit "READ ERRORS", so Commit puts it in _Quarantine/<name> [READ ERRORS]
+ * (plan §22.2). Data: SealOutput. Skipped when Plan or Acquire hasn't run. */
 #pragma once
 
 #include "bro-step.h"

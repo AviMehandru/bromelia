@@ -21,7 +21,8 @@ public enum StepKind
     Protect,
     PostProcess,
     Notify,
-    /// <summary>Only after JobService.keepApart: an interrupted job's staging sealed and quarantined as INCOMPLETE (owner, 2026-10-25).</summary>
+    /// <summary>Only after JobService.keepApart: an interrupted job's staging sealed and quarantined as
+    /// INCOMPLETE.</summary>
     KeepApart,
     RipAudio,
     ImageData,

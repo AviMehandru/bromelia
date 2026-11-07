@@ -40,10 +40,9 @@ ejected (gboolean value)
   return bro_step_report_new (_bro_param ("ejected", bro_json_value_new_bool (value)));
 }
 
-/* At the end of a job that stopped before it (the context's finishing, owner 2026-10-18): after a failure when
- * automation.ejectOnFailure says so, after "already archived, skipped" (disc.alreadyArchived) when ejectWhenDone says so,
- * and when the user answered eject to Decide's question; never after a cancel. Otherwise ejectWhenDone, or ejectOnFailure
- * after a rip with read errors (a step before it counted some), as today. */
+/* At the end of a job that stopped before it (the context's finishing): after a failure when automation.ejectOnFailure
+ * says so, after "already archived, skipped" (disc.alreadyArchived) when ejectWhenDone says so, and when the user
+ * answered eject to Decide's question; never after a cancel. Otherwise ejectWhenDone, or ejectOnFailure \1. */
 static gboolean
 ejects (const BroStepContext *context, const BroJsonValue *automation)
 {

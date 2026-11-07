@@ -411,6 +411,48 @@
       "expect": {
         "canonical": null
       }
+    },
+    {
+      "id": "json-two-spellings-of-a-key-are-two-keys",
+      "from": [
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "json": "{\"café\": 1, \"café\": 2}",
+        "member": "café"
+      },
+      "expect": {
+        "canonical": "{\n  \"café\": 1,\n  \"café\": 2\n}\n",
+        "memberCanonical": "1\n"
+      }
+    },
+    {
+      "id": "json-two-spellings-of-a-string-differ",
+      "from": [
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "json": "\"café\"",
+        "other": "\"café\""
+      },
+      "expect": {
+        "canonical": "\"café\"\n",
+        "same": false
+      }
+    },
+    {
+      "id": "json-two-spellings-of-a-key-make-two-objects",
+      "from": [
+        "Swift: \"\\r\\n\" is one Character and String's == is canonical; C# and C work on code units and bytes"
+      ],
+      "given": {
+        "json": "{\"café\": 1}",
+        "other": "{\"café\": 1}"
+      },
+      "expect": {
+        "canonical": "{\n  \"café\": 1\n}\n",
+        "same": false
+      }
     }
   ]
 }

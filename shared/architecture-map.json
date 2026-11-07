@@ -925,7 +925,7 @@
           "swift": "DriveJoin.join(_:osDrives:)",
           "cs": "DriveJoin.Join",
           "c": "bro_drive_join_join",
-          "doc": "One entry per present MakeMKV drive, with the OS drive of the same device, else the one OS drive whose identification (vendor and product) is part of MakeMKV's when that pairing is unambiguous (macOS names a drive by its IORegistry path; session A 2026-10-15); then the OS drives MakeMKV didn't report."
+          "doc": "One entry per present MakeMKV drive, with the OS drive of the same device, else the one OS drive whose identification (vendor and product) is part of MakeMKV's when that pairing is unambiguous (macOS names a drive by its IORegistry path); then the OS drives MakeMKV didn't report."
         },
         {
           "name": "DriveJoin.driveId",
@@ -1551,7 +1551,7 @@
             "listing"
           ],
           "returns": "String?",
-          "doc": "v1, byte for byte as today.",
+          "doc": "v1, byte for byte as archives already record it.",
           "swift": "Fingerprint.of(_:)",
           "cs": "Fingerprint.Of",
           "c": "bro_fingerprint_of"
@@ -4571,7 +4571,7 @@
             "name"
           ],
           "returns": "Bool",
-          "doc": "What a stopped write leaves: .<name>.bromelia-tmp-<id> (writeAtomically) and .<name>.part-<id> (DataImager); startup recovery removes them (review L3-3).",
+          "doc": "What a stopped write leaves: .<name>.bromelia-tmp-<id> (writeAtomically) and .<name>.part-<id> (DataImager); startup recovery removes them.",
           "phase": 3,
           "swift": "ArchiveFiles.isLeftover(_:)",
           "cs": "ArchiveFiles.IsLeftover",
@@ -6987,7 +6987,7 @@
             "outputs",
             "startedAt"
           ],
-          "doc": "An immutable view of a job that a step gets in its context (plan §12.2): its request, its plan, the outputs of the steps before it, and when it first started running (owner, 2026-10-20: the archive record's job.startedAt).",
+          "doc": "An immutable view of a job that a step gets in its context (plan §12.2): its request, its plan, the outputs of the steps before it, and when it first started running (the archive record's job.startedAt).",
           "swift": {
             "name": "JobSnapshot",
             "file": "macos/BromeliaKit/Sources/BroDomain/Jobs/JobSnapshot.swift"
@@ -7934,7 +7934,7 @@
             "instant"
           ],
           "returns": "LocalTime",
-          "doc": "The wall-clock time at instant in the user's time zone, to the second (the date tokens; owner, 2026-10-21).",
+          "doc": "The wall-clock time at instant in the user's time zone, to the second (the date tokens).",
           "phase": 3,
           "swift": "Clock.localTime(_:)",
           "cs": "Clock.LocalTime",
@@ -8550,7 +8550,7 @@
             "workDirectories"
           ],
           "returns": "[BroMessage]",
-          "doc": "At startup (RecoveryService), for the runs the engine never released: HOME folders lose the app_Key line of their settings.conf; the registry gets back the user's values a crash left in the snapshot file. What it couldn't do, as warnings; empty when all went well (owner, 2026-10-14).",
+          "doc": "At startup (RecoveryService), for the runs the engine never released: HOME folders lose the app_Key line of their settings.conf; the registry gets back the user's values a crash left in the snapshot file. What it couldn't do, as warnings; empty when all went well.",
           "swift": "SettingsIsolation.recover(_:)",
           "cs": "SettingsIsolation.Recover",
           "c": "bro_settings_isolation_recover"
@@ -8575,7 +8575,7 @@
           "name": "IsolationLease.warning",
           "params": [],
           "returns": "BroMessage?",
-          "doc": "Why the run's settings may not hold, known once they are in place: makemkv.guiRunning (Windows: the MakeMKV GUI was open while the registry held the run's values, and it may write its own back), or nil (owner, 2026-10-15, review L3-5).",
+          "doc": "Why the run's settings may not hold, known once they are in place: makemkv.guiRunning (Windows: the MakeMKV GUI was open while the registry held the run's values, and it may write its own back), or nil.",
           "swift": "IsolationLease.warning()",
           "cs": "IsolationLease.Warning",
           "c": "bro_isolation_lease_warning"
@@ -8930,7 +8930,7 @@
             "limit",
             "offset"
           ],
-          "doc": "Which jobs (GET /v1/jobs, owner 2026-10-17): in any of the states, with any of the outcomes (an empty list is any), of a kind, in a queue, on a drive, for a unit, finished after an instant; newest first, a page at a time.",
+          "doc": "Which jobs (GET /v1/jobs): in any of the states, with any of the outcomes (an empty list is any), of a kind, in a queue, on a drive, for a unit, finished after an instant; newest first, a page at a time.",
           "swift": {
             "name": "JobQuery",
             "file": "macos/BromeliaKit/Sources/BroPorts/JobQuery.swift"
@@ -8995,7 +8995,7 @@
             "query"
           ],
           "returns": "Int",
-          "doc": "How many jobs the query matches, whatever its page (owner, 2026-10-17).",
+          "doc": "How many jobs the query matches, whatever its page.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -10787,7 +10787,7 @@
       "folder": "Platform",
       "cFolder": "platform",
       "csRoot": "windows/src/Bromelia.Adapters.Windows",
-      "doc": "Where each tool is usually installed, and its program names, on this platform (today's candidate lists).",
+      "doc": "Where each tool is usually installed, and its program names, on this platform .",
       "phase": 2,
       "types": [
         {
@@ -11586,7 +11586,7 @@
       "layer": "adapters",
       "folder": "Tools",
       "cFolder": "tools",
-      "doc": "The Domain ByteSource over a DVD (shared/fixtures/adapters/video-ts-byte-source.cases.json): VIDEO_TS inside an ISO 9660 / UDF bridge image (or a disc device, read in whole sectors), a VIDEO_TS folder, or the folder that contains one. Today's IsoVideoTs and FolderVideoTs; reads now stop at the end of a file.",
+      "doc": "The Domain ByteSource over a DVD (shared/fixtures/adapters/video-ts-byte-source.cases.json): VIDEO_TS inside an ISO 9660 / UDF bridge image (or a disc device, read in whole sectors), a VIDEO_TS folder, or the folder that contains one. Reads stop at the end of a file.",
       "phase": 2,
       "types": [
         {
@@ -11634,7 +11634,7 @@
       "layer": "adapters",
       "folder": "Tools",
       "cFolder": "tools",
-      "doc": "Episode numbers from a DVD's menu stills (plan §10.1; shared/fixtures/adapters/menu-ocr.cases.json), today's OcrEpisodeNumbers split in two: ffmpeg turns each still cell (DvdNav.stillCells) of a ByteSource into a 2160×1440 grey PNG, tesseract (--psm 11) reads each, MenuNumbers.parse finds the numbers. A still a tool fails on is skipped; a missing tool is tool.missing.",
+      "doc": "Episode numbers from a DVD's menu stills (plan §10.1; shared/fixtures/adapters/menu-ocr.cases.json): ffmpeg turns each still cell (DvdNav.stillCells) of a ByteSource into a 2160×1440 grey PNG, tesseract (--psm 11) reads each, MenuNumbers.parse finds the numbers. A still a tool fails on is skipped; a missing tool is tool.missing.",
       "phase": 2,
       "types": [
         {
@@ -11906,7 +11906,7 @@
       "folder": "Platform",
       "cFolder": "platform",
       "csRoot": "windows/src/Bromelia.Adapters.Windows",
-      "doc": "DriveControl (plan §10.3; shared/fixtures/adapters/drive-control.cases.json), today's code on each platform. macOS: DiskArbitration eject (diskutil as a fallback), drutil tray close by product name, cddafs / video structure / optical media kind for the content, /dev/rdiskN for raw reads (a drive is its IORegistry path). Windows: IOCTL_STORAGE_EJECT_MEDIA / LOAD_MEDIA, the drive letter's readiness, a video structure or the table of contents, \\\\.\\E: raw reads with IOCTL_DISK_GET_LENGTH_INFO. Linux: the eject tool (eject, eject -t), mountinfo, udev's ID_CDROM_MEDIA_* (blank too), BLKGETSIZE64. A disc image file is read the same way as a drive.",
+      "doc": "DriveControl (plan §10.3; shared/fixtures/adapters/drive-control.cases.json). macOS: DiskArbitration eject (diskutil as a fallback), drutil tray close by product name, cddafs / video structure / optical media kind for the content, /dev/rdiskN for raw reads (a drive is its IORegistry path). Windows: IOCTL_STORAGE_EJECT_MEDIA / LOAD_MEDIA, the drive letter's readiness, a video structure or the table of contents, \\\\.\\E: raw reads with IOCTL_DISK_GET_LENGTH_INFO. Linux: the eject tool (eject, eject -t), mountinfo, udev's ID_CDROM_MEDIA_* (blank too), BLKGETSIZE64. A disc image file is read the same way as a drive.",
       "phase": 2,
       "types": [
         {
@@ -13063,7 +13063,7 @@
     "ports/makemkv": {
       "layer": "ports",
       "folder": "",
-      "doc": "The makemkvcon port (plan §10.1, owner 2026-10-11: steps reach tools through ports): the drive scan, listings, rips and backups, and the types a run takes and returns. MakemkvTool (Adapters) implements it.",
+      "doc": "The makemkvcon port (plan §10.1: steps reach tools through ports): the drive scan, listings, rips and backups, and the types a run takes and returns. MakemkvTool (Adapters) implements it.",
       "phase": 3,
       "types": [
         {
@@ -13332,7 +13332,7 @@
       "layer": "engine",
       "folder": "API",
       "cFolder": "api",
-      "doc": "The data the engine sends out (plan §13.1: DTOs from shared/schema/api/dtos.json), as typed containers with their JSON (owner, 2026-10-11: events carry JSON built from typed containers at the source). The jobs' DTOs come first, with the PipelineRunner; the rest come with LocalEngine.",
+      "doc": "The data the engine sends out (plan §13.1: DTOs from shared/schema/api/dtos.json), as typed containers with their JSON (events carry JSON built from typed containers at the source). The jobs' DTOs come first, with the PipelineRunner; the rest come with LocalEngine.",
       "phase": 3,
       "types": [
         {
@@ -13952,7 +13952,7 @@
         {
           "name": "EngineAPI",
           "kind": "protocol",
-          "doc": "The one interface between the engine and anything outside it (plan §13.1): DTOs in and out, never live objects. LocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of the phases built so far (G1 owner question 1).",
+          "doc": "The one interface between the engine and anything outside it (plan §13.1): DTOs in and out, never live objects. LocalEngine implements it now; RemoteEngine (phase 4) too. It holds the operations of the phases built so far.",
           "phase": 3,
           "swift": {
             "name": "EngineAPI",
@@ -14278,7 +14278,7 @@
         {
           "name": "EngineAPI.stop",
           "params": [],
-          "doc": "The stop order (G1 decision; owner question 2). server.stopping when stopping already.",
+          "doc": "The stop order. server.stopping when stopping already.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -14686,7 +14686,7 @@
           "params": [
             "driveId"
           ],
-          "doc": "AutomationService (the owner places it).",
+          "doc": "AutomationService.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -15187,7 +15187,7 @@
             "request"
           ],
           "returns": "JobDto",
-          "doc": "A phase 3 door outside EngineAPI (G1 owner question 5): JobService.create(request), for the scenario runner and the real-ISO test, whose sources (an ISO, a folder) need SessionService. Retired when openSession/ripSession come.",
+          "doc": "A door outside EngineAPI: JobService.create(request), for the scenario runner and the real-ISO test, whose sources (an ISO, a folder) need SessionService. Retired when openSession/ripSession come.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -15551,7 +15551,7 @@
         {
           "name": "SpaceReservations",
           "kind": "protocol",
-          "doc": "How a step keeps room on a volume for its job (plan §21), implemented by the runner over Scheduler.reserve (owner, 2026-10-18).",
+          "doc": "How a step keeps room on a volume for its job (plan §21), implemented by the runner over Scheduler.reserve.",
           "phase": 3,
           "swift": {
             "name": "SpaceReservations",
@@ -15670,7 +15670,7 @@
             "appVersion",
             "finishing"
           ],
-          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with; checkpoint keeps what a resumable step saved between attempts; messages renders what a step writes for people to read (owner, 2026-10-19); appVersion goes into archive records (owner, 2026-10-20); finishing is the job's outcome when the runner runs Release at the end of a job that stopped before it.",
+          "doc": "Everything a step may use from its worker (plan §12.2); thread-safe. The configuration is the one the job started with; checkpoint keeps what a resumable step saved between attempts; messages renders what a step writes for people to read; appVersion goes into archive records; finishing is the job's outcome when the runner runs Release at the end of a job that stopped before it.",
           "swift": {
             "name": "StepContext",
             "file": "macos/BromeliaKit/Sources/BroEngine/Pipeline/StepContext.swift"
@@ -16397,7 +16397,7 @@
             "discInfo",
             "readErrors"
           ],
-          "doc": "What AcquireStep left in staging, by name (L3-1: the lists, never a count): the titles, files no title owns, the kept backup, disc-info.json, run-level read errors.",
+          "doc": "What AcquireStep left in staging, by name (the lists, never a count): the titles, files no title owns, the kept backup, disc-info.json, run-level read errors.",
           "phase": 3,
           "swift": {
             "name": "AcquireOutput",
@@ -16688,7 +16688,7 @@
         {
           "name": "NotifyStep",
           "kind": "class",
-          "doc": "Step 18, a placeholder in Phase 3 (owner, 2026-10-21): it only reports success; the runner publishes JobFinished. The outbox and sending come in Phase 5.",
+          "doc": "Step 18, a placeholder in Phase 3: it only reports success; the runner publishes JobFinished. The outbox and sending come in Phase 5.",
           "phase": 3,
           "swift": {
             "name": "NotifyStep",
@@ -17291,7 +17291,7 @@
             "error"
           ],
           "returns": "JsonValue",
-          "doc": "The checkpoint JobService.keepApart stores with the step: {kind: \"outcome\", outcome, error?}, the outcome (interrupted, failed, cancelled) and error the job had, which the note names (F9, owner 2026-10-25).",
+          "doc": "The checkpoint JobService.keepApart stores with the step: {kind: \"outcome\", outcome, error?}, the outcome (interrupted, failed, cancelled) and error the job had, which the note names.",
           "phase": 3,
           "swift": "KeepApartStep.kept(_:error:)",
           "cs": "KeepApartStep.Kept",
@@ -17303,7 +17303,7 @@
             "job"
           ],
           "returns": "String",
-          "doc": "The job's name in _Quarantine, before \" [INCOMPLETE]\" and ConflictNamer: the Plan output's identity name, else the job's title, else Probe's listing name, else the source's label, else the job's id (Sanitizer.component). RecoveryService sets a failed job's staging aside under it too (owner H3a-2).",
+          "doc": "The job's name in _Quarantine, before \" [INCOMPLETE]\" and ConflictNamer: the Plan output's identity name, else the job's title, else Probe's listing name, else the source's label, else the job's id (Sanitizer.component). RecoveryService sets a failed job's staging aside under it too.",
           "phase": 3,
           "swift": "KeepApartStep.folderName(_:)",
           "cs": "KeepApartStep.FolderName",
@@ -17317,7 +17317,7 @@
             "command"
           ],
           "returns": "Void",
-          "doc": "After each makemkvcon run, MakeMKV's debug log (RunOutcome.debugLog, named by message 1004; MakeMKV starts it afresh at every start) is added to the job folder's makemkv-debug.txt after a line \"==== <its path> after $ makemkvcon <command>\" (info, mkv, backup), as today's apps do; nothing when it is missing or empty; a file that can't be read or written is left out.",
+          "doc": "After each makemkvcon run, MakeMKV's debug log (RunOutcome.debugLog, named by message 1004; MakeMKV starts it afresh at every start) is added to the job folder's makemkv-debug.txt after a line \"==== <its path> after $ makemkvcon <command>\" (info, mkv, backup); nothing when it is missing or empty; a file that can't be read or written is left out.",
           "phase": 3,
           "swift": "MakemkvSink.keepDebugLog(_:outcome:command:)",
           "cs": "MakemkvSink.KeepDebugLog",
@@ -17406,7 +17406,7 @@
         {
           "name": "RecoveryService",
           "kind": "class",
-          "doc": "Runs once at startup (plan §20.4, §15.8, review L3-3, L3-9): unfinished jobs requeued, resumed or finished by where each stopped and its step's resumability; open commit intents rolled forward; staging no job will continue set aside; temporary files removed. Library work takes at most 30 s of the startup.",
+          "doc": "Runs once at startup (plan §20.4, §15.8): unfinished jobs requeued, resumed or finished by where each stopped and its step's resumability; open commit intents rolled forward; staging no job will continue set aside; temporary files removed. Library work takes at most 30 s of the startup.",
           "swift": {
             "name": "RecoveryService",
             "file": "macos/BromeliaKit/Sources/BroEngine/Services/RecoveryService.swift"
@@ -17990,7 +17990,7 @@
             "fromStep"
           ],
           "returns": "JobDto",
-          "doc": "A finished job again: without a step, one that failed, was cancelled or was skipped as a new job started by hand, an interrupted one continued; from a step, the same job from there (up to Release: from its first step), its checkpoints kept; a kept-apart job from its keepApart step only. job.notFound, job.notRetryable, job.unknownStep, server.badRequest, job.commitOpen, job.alreadyCommitted (a step before Commit once the job's unit is in a library; owner 2026-10-25).",
+          "doc": "A finished job again: without a step, one that failed, was cancelled or was skipped as a new job started by hand, an interrupted one continued; from a step, the same job from there (up to Release: from its first step), its checkpoints kept; a kept-apart job from its keepApart step only. job.notFound, job.notRetryable, job.unknownStep, server.badRequest, job.commitOpen, job.alreadyCommitted (a step before Commit once the job's unit is in a library).",
           "throws": true,
           "async": true,
           "cNames": [
@@ -18009,7 +18009,7 @@
             "jobId"
           ],
           "returns": "JobDto",
-          "doc": "Doesn't continue an interrupted, failed or cancelled job (owner, 2026-10-25): the same job again with a keepApart step (checkpoint KeepApartStep.kept of its outcome and error) in place of the step it stopped at and what follows, in the processing queue; it ends cancelled. job.notFound, job.notInterrupted (any other job, or one kept apart already), job.processAbandoned (its MakeMKV was left behind in this engine run: after a restart), job.commitOpen, job.alreadyCommitted.",
+          "doc": "Doesn't continue an interrupted, failed or cancelled job: the same job again with a keepApart step (checkpoint KeepApartStep.kept of its outcome and error) in place of the step it stopped at and what follows, in the processing queue; it ends cancelled. job.notFound, job.notInterrupted (any other job, or one kept apart already), job.processAbandoned (its MakeMKV was left behind in this engine run: after a restart), job.commitOpen, job.alreadyCommitted.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -18031,7 +18031,7 @@
             "logs"
           ],
           "returns": "String?",
-          "doc": "A staging folder no job will continue goes to _Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with the note as INCOMPLETE.txt and the job's log copies (name, bytes) next to it, written before the move; one with no file is removed (null), nothing written (review L3-3, owner 2026-10-14 and 2026-10-25).",
+          "doc": "A staging folder no job will continue goes to _Quarantine/<ConflictNamer('<name> [INCOMPLETE]')> with the note as INCOMPLETE.txt and the job's log copies (name, bytes) next to it, written before the move; one with no file is removed (null), nothing written.",
           "throws": true,
           "async": true,
           "swift": "LibraryService.setAside(_:folder:name:note:logs:)",
@@ -18044,7 +18044,7 @@
             "jobId"
           ],
           "returns": "JobDetailDto",
-          "doc": "A job with its steps, files and commands (dtos.json JobDetail): the job as it runs (else as stored); one step per step of its plan (Plan's appended ones included; none past the plan's end, so rows a keepApart cut off are left out: decision 158), each with its stored row's state, times and error, pending without one; the files of its Seal output (else Acquire's produced files); the command lines its log holds (process.command); logBytes. job.notFound.",
+          "doc": "A job with its steps, files and commands (dtos.json JobDetail): the job as it runs (else as stored); one step per step of its plan (Plan's appended ones included; none past the plan's end, so rows a keepApart cut off are left out), each with its stored row's state, times and error, pending without one; the files of its Seal output (else Acquire's produced files); the command lines its log holds (process.command); logBytes. job.notFound.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -18059,7 +18059,7 @@
         {
           "name": "JobService.stop",
           "params": [],
-          "doc": "At engine stop (G1 owner question 2): the PipelineRunner shuts every live job down without storing anything more for it, then completes once none is live; what is stored is what a killed engine leaves, so the next start's recovery takes each job up (plan §20.4). Commands after it answer server.stopping.",
+          "doc": "At engine stop: the PipelineRunner shuts every live job down without storing anything more for it, then completes once none is live; what is stored is what a killed engine leaves, so the next start's recovery takes each job up (plan §20.4). Commands after it answer server.stopping.",
           "async": true,
           "cNames": [
             "done"
@@ -18074,7 +18074,7 @@
           "params": [
             "libraryId"
           ],
-          "doc": "Takes back an attach whose configuration save failed (LocalEngine's attachLibrary, decision 166): the marker is removed while the folder still holds the one the stored row names, and the library is forgotten unless the configuration lists it. Nothing when there is no stored row.",
+          "doc": "Takes back an attach whose configuration save failed (LocalEngine's attachLibrary): the marker is removed while the folder still holds the one the stored row names, and the library is forgotten unless the configuration lists it. Nothing when there is no stored row.",
           "throws": true,
           "async": true,
           "cNames": [
@@ -18092,7 +18092,7 @@
       "layer": "ports",
       "folder": "",
       "cFolder": "",
-      "doc": "Part of Store (plan §9): the libraries table, owned by LibraryService (added 2026-10-13: archive_units.library_id needs a row).",
+      "doc": "Part of Store (plan §9): the libraries table, owned by LibraryService (archive_units.library_id needs a row).",
       "phase": 3,
       "types": [
         {
@@ -18185,7 +18185,7 @@
       "layer": "ports",
       "folder": "",
       "cFolder": "",
-      "doc": "The MessageRenderer port (plan §16; owner 2026-10-14): the engine reaches the host's renderer of shared/messages for text people read, such as INCOMPLETE.txt. The adapter is MessageTextRenderer (adapters/message-renderer).",
+      "doc": "The MessageRenderer port (plan §16): the engine reaches the host's renderer of shared/messages for text people read, such as INCOMPLETE.txt. The adapter is MessageTextRenderer (adapters/message-renderer).",
       "phase": 3,
       "types": [
         {
@@ -18223,7 +18223,7 @@
       "layer": "ports",
       "folder": "",
       "cFolder": "",
-      "doc": "The IdGenerator port (owner, 2026-10-17): randomness is I/O, so the ids the engine creates (jobs first) come through a port. The adapter is RandomIdGenerator; the test kit counts.",
+      "doc": "The IdGenerator port: randomness is I/O, so the ids the engine creates (jobs first) come through a port. The adapter is RandomIdGenerator; the test kit counts.",
       "phase": 3,
       "types": [
         {
@@ -18260,7 +18260,7 @@
       "layer": "adapters",
       "folder": "Ids",
       "cFolder": "ids",
-      "doc": "The real IdGenerator (owner, 2026-10-17): random version 4 UUIDs.",
+      "doc": "The real IdGenerator: random version 4 UUIDs.",
       "phase": 3,
       "types": [
         {
@@ -18296,7 +18296,7 @@
       "layer": "adapters",
       "folder": "Messages",
       "cFolder": "messages",
-      "doc": "The MessageRenderer adapter (plan §16; session E1, 2026-10-19): ICU-lite over a catalog of shared/messages texts ({x}, plural, select, bytes, duration, durationPrecise, nested messages, causes). The English catalog is generated from en.json by tools/gen-messages.py.",
+      "doc": "The MessageRenderer adapter (plan §16): ICU-lite over a catalog of shared/messages texts ({x}, plural, select, bytes, duration, durationPrecise, nested messages, causes). The English catalog is generated from en.json by tools/gen-messages.py.",
       "phase": 3,
       "types": [
         {
@@ -18535,7 +18535,7 @@
             "drives",
             "environment"
           ],
-          "doc": "What the graph is built for: the data folder (required in phase 3: the platform default is today's app's folder), config.json (null: <data>/config.json), the user's home (MakeMKV's folder, ~ in paths), whether the system keystore is used (false in tests), whether the tools are looked for where they are usually installed and on PATH (false in tests: no tool is found, so nothing runs makemkvcon), whether the optical drives are used (false in tests: no device monitor, no drive control, no MakeMKV drive scan; real hosts pass true), the process's environment (the host passes it: ConfigService gets its BROMELIA_SECRET_* entries, the locator its PATH).",
+          "doc": "What the graph is built for: the data folder (required: the platform's default holds the real config.json and secrets), config.json (null: <data>/config.json), the user's home (MakeMKV's folder, ~ in paths), whether the system keystore is used (false in tests), whether the tools are looked for where they are usually installed and on PATH (false in tests: no tool is found, so nothing runs makemkvcon), whether the optical drives are used (false in tests: no device monitor, no drive control, no MakeMKV drive scan; real hosts pass true), the process's environment (the host passes it: ConfigService gets its BROMELIA_SECRET_* entries, the locator its PATH).",
           "swift": {
             "name": "RootOptions",
             "file": "macos/bromeliad/RootOptions.swift"

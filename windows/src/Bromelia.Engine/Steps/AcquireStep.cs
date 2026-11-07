@@ -9,34 +9,28 @@ using Bromelia.Ports;
 
 namespace Bromelia.Engine;
 
-/// <summary>Step 8 (plan §20.1, §12.4): makes what Plan decided in the job's staging folder (LibraryPort.stagingDirectory),
-/// holding the drive, an acquisition slot and the library (LibraryWrite). It names, hashes and moves nothing.
-/// <list type="bullet">
-/// <item>Space: the plan's need is reserved again (reservations don't outlive the engine), less what an earlier attempt
-/// kept.</item>
-/// <item>infoOnly: disc-info.json, the listing Probe read (Listing.encode; rip.discInfoWritten).</item>
-/// <item>mkv: the plan's titles from the source (and disc-info.json under archive.writeDiscInfo). One makemkvcon run for
-/// every title of the listing ("all"; rip.ripping), or with Plan's one-pass minimum length when a listing read with it
-/// holds exactly the titles (rip.onePassListing, then rip.onePass or rip.onePassMismatch); else title by title
-/// (rip.rippingTitle), hand-picked tracks with +sel:all. A failed title (rip.titleFailed) leaves its files under
-/// MakeMKV's names (rip.keptUnderMakemkvName) and the others are still ripped; the step then fails (rip.failed,
-/// rip.titlesFailed) with the MakeMKV notice that explains it. A run that was stopped (drive.renumbered,
-/// space.makemkvWarning, makemkv.stalled) fails the step with that reason at once.</item>
-/// <item>backup, backupDecrypted: the disc as a folder or an image (profile backup.format), named backup or backup.iso;
-/// an image MakeMKV made for a folder gets .iso (backup.imageForFolder), a folder made for an image loses it
-/// (backup.folderInsteadOfIso); backup.saved, or backup.failed (a stopped run: its reason; a folder without a disc
-/// structure, which counts as nothing produced: backup.checkFailed).</item>
-/// <item>backupThenMkv: a decrypted backup, its structure checked (backup.checkFailed), then the titles from the backup
-/// (mapped from Probe's listing to the backup's), and the backup removed unless backup.keepAfterMkv (backup.removed).</item>
-/// </list>
-/// Read errors are counted per title (title by title) or per run (StepReport.readErrors); Release and Commit act on them.
-/// A cancel removes what the stopped run wrote (rip.partialRemoved: makemkvcon leaves an unreadable file, P2-14) unless
-/// the process was abandoned after KILL (process.abandoned {tool} is logged for any run whose process was: it may still
-/// be writing, and JobService keeps the job's files where they are until a restart). After each title (its files synced) and after a checked backup, a checkpoint
-/// holds the disc's fingerprint and what is finished: "backup" once a backup-then-MKV job has its backup (recovery
-/// resumes from it by itself, plan §15.8: recovery.resumedFromBackup), else "titles". A later attempt of the step (a
-/// retry or a continue) with the same disc keeps those titles (rip.continued) and removes anything else in staging
-/// (rip.leftoverRemoved; owner 2026-10-18). Data: AcquireOutput.</summary>
+/// <summary>Step 8 (plan §20.1, §12.4): makes what Plan decided in the job's staging folder, holding the drive, an
+/// acquisition slot and the library. It names, hashes and moves nothing. The plan's need is reserved again, less what
+/// an earlier attempt kept: reservations don't outlive the engine.
+///
+/// mkv: one run for every title of the listing, or with Plan's one-pass minimum length when a listing read with it
+/// holds exactly the titles; else title by title. A failed title leaves its files under MakeMKV's names, the others are
+/// still ripped, and the step then fails. In a run for all titles a listed file that didn't appear fails its title too:
+/// MakeMKV's counts only say how many files it saved. A file the listing doesn't name goes to others. A stopped run
+/// fails the step at once with its reason.
+///
+/// backup: the disc as a folder or an image, named backup or backup.iso after what MakeMKV really made (it can make an
+/// image for a folder, or the reverse). A folder without a disc structure counts as nothing produced. backupThenMkv
+/// rips the titles from the checked backup, mapped from Probe's listing to the backup's, then removes it unless
+/// backup.keepAfterMkv.
+///
+/// Read errors are counted per title or per run; Release and Commit act on them. A cancel removes what the stopped run
+/// wrote, since makemkvcon leaves an unreadable file, unless the process was abandoned after KILL: it may still be
+/// writing, so JobService keeps the job's files where they are until a restart.
+///
+/// After each title (its files synced) and after a checked backup, a checkpoint holds the disc's fingerprint and what
+/// is finished: "backup" lets recovery resume by itself (plan §15.8), else "titles". A later attempt with the same disc
+/// keeps those and removes anything else in staging. Data: AcquireOutput.</summary>
 public sealed class AcquireStep : IStep
 {
     public const string TitlesCheckpoint = "titles";
@@ -271,11 +265,19 @@ public sealed class AcquireStep : IStep
                     foreach (var t in group)
                     {
                         var name = runListing.Titles.First(x => x.Index == runMap[t.Index]).OutputFileName;
-                        made.Add(new AcquiredTitle(t.Index, outcome.Produced.Where(f => name.Length > 0 && f == name).ToList(),
-                            group.Count == 1 ? errors : new List<string>()));
+                        var files = outcome.Produced.Where(f => name.Length > 0 && f == name).ToList();
+                        if (files.Count == 0)
+                        {
+                            var missing = new BroMessage(MessageCode.RipTitleMissing, Severity.Error, ("file", JsonValue.Of(name)));
+                            _c.Log.Log(new BroMessage(MessageCode.RipTitleFailed, Severity.Error,
+                                ("title", JsonValue.Of(t.Index.ToString(CultureInfo.InvariantCulture))), ("reason", missing.ToJson())));
+                            failures.Add((t.Index, missing));
+                            continue;
+                        }
+                        made.Add(new AcquiredTitle(t.Index, files, group.Count == 1 ? errors : new List<string>()));
                     }
                     _others.AddRange(outcome.Produced.Where(f => made.All(t => !t.Files.Contains(f))));
-                    if (group.Count > 1) _readErrors.AddRange(errors);
+                    if (group.Count > 1 || made.Count == 0) _readErrors.AddRange(errors);
                 }
                 else made.Add(new AcquiredTitle(group[0].Index, outcome.Produced.ToList(), errors));
                 foreach (var f in outcome.Produced) _fs.SyncFile(_staging + "/" + f);
@@ -314,7 +316,8 @@ public sealed class AcquireStep : IStep
             {
                 _notice ??= run.Notice;
                 var reason = outcome.Error ?? new BroMessage(MessageCode.ProcessExitStatus, Severity.Error, ("status", JsonValue.Of(outcome.ExitCode)));
-                // A folder without a disc structure isn't a backup MakeMKV made (RunOutcome counts none): the check says why.
+                // A folder without a disc structure isn't a backup MakeMKV made (RunOutcome counts none): the check
+                // says why.
                 if (reason.Code == MessageCode.ProcessSavedNothing && _fs.Exists(destination) && _fs.Stat(destination).IsDirectory
                     && BackupCheck.Problem(_fs, destination) is { } problem)
                     return (null, Failed(new BroMessage(MessageCode.BackupCheckFailed, Severity.Error, ("problem", problem.ToJson()))));
@@ -345,7 +348,8 @@ public sealed class AcquireStep : IStep
             return free;
         }
 
-        /// <summary>What a stopped run wrote: unreadable (P2-14), so removed; kept when the process may still be writing.</summary>
+        /// <summary>What a stopped run wrote: unreadable, so removed; kept when the process may still be
+        /// writing.</summary>
         void RemovePartial(IReadOnlyList<string> names, bool abandoned)
         {
             if (abandoned) return;
@@ -363,9 +367,9 @@ public sealed class AcquireStep : IStep
             _c.Log.Log(new BroMessage(MessageCode.RipDiscInfoWritten, Severity.Info, ("file", JsonValue.Of(DiscInfoFile))));
         }
 
-        /// <summary>The checkpoint: the disc, the titles done, the backup a backup-then-MKV job rips from and the read errors
-        /// of runs no title owns (a backup's: its MKV files inherit them). The staging folder is synced first, so what the
-        /// checkpoint names is there after a power loss.</summary>
+        /// <summary>The checkpoint: the disc, the titles done, the backup a backup-then-MKV job rips from and the read
+        /// errors of runs no title owns (a backup's: its MKV files inherit them). The staging folder is synced first,
+        /// so what the checkpoint names is there after a power loss.</summary>
         Task Save(string kind)
         {
             _fs.SyncDirectory(_staging);

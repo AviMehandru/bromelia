@@ -24,10 +24,11 @@ namespace Bromelia.Adapters.Windows;
 /// silence.
 ///
 /// Windows has no signals. A stop (either policy, or a stall) sends CTRL_BREAK to the tool's console (<see
-/// cref="ConsoleBreak"/>) so it can close its files, and ends the whole job (TerminateJobObject) 5 s later, or as soon as
-/// the tool has exited (whatever it left behind goes too). A tool that exits on the break reports its own exit status;
-/// one the job ends reports -1. The job also has KILL_ON_JOB_CLOSE until the process has ended, so a crashed engine leaves no tools
-/// behind. A process the tool leaves running after a normal exit is left alone, as on macOS and Linux.</summary>
+/// cref="ConsoleBreak"/>) so it can close its files, and ends the whole job (TerminateJobObject) 5 s later, or as soon
+/// as the tool has exited (whatever it left behind goes too). A tool that exits on the break reports its own exit
+/// status; one the job ends reports -1. The job also has KILL_ON_JOB_CLOSE until the process has ended, so a crashed
+/// engine leaves no tools behind. A process the tool leaves running after a normal exit is left alone, as on macOS and
+/// Linux.</summary>
 public sealed class PlatformProcessLauncher : IProcessLauncher
 {
     /// <summary>How many lines may wait to be read before the reading waits.</summary>
@@ -85,7 +86,8 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
         readonly Channel<OutputLine> _lines = Channel.CreateUnbounded<OutputLine>();
         /// <summary>Pumps waiting for room in <see cref="_lines"/>: the tool isn't silent, nobody is reading.</summary>
         int _waitingForRoom;
-        /// <summary>The text of the lines in <see cref="_lines"/>; a pump waits while it is <see cref="QueuedBytes"/>.</summary>
+        /// <summary>The text of the lines in <see cref="_lines"/>; a pump waits while it is <see
+        /// cref="QueuedBytes"/>.</summary>
         long _queuedBytes;
         /// <summary>Released when the reader takes a line: room, maybe.</summary>
         readonly SemaphoreSlim _taken = new(0, int.MaxValue);
@@ -193,7 +195,8 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
 
         public BroMessage? TranscriptProblem() => _transcript?.Problem;
 
-        /// <summary>How long a tool has after CTRL_BREAK before the job is ended, as macOS and Linux wait after a signal.</summary>
+        /// <summary>How long a tool has after CTRL_BREAK before the job is ended, as macOS and Linux wait after a
+        /// signal.</summary>
         static readonly TimeSpan Grace = TimeSpan.FromSeconds(5);
 
         public void Stop(StopReason reason)
@@ -261,7 +264,8 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             _ => null,
         };
 
-        /// <summary>Ends a tool just started that can't be watched, and throws: Start reports process.couldNotStart.</summary>
+        /// <summary>Ends a tool just started that can't be watched, and throws: Start reports
+        /// process.couldNotStart.</summary>
         void Abandon(string reason)
         {
             _draining = true;
@@ -285,8 +289,9 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
             public volatile bool InRead;
         }
 
-        /// <summary>Reads the pipe on a thread of its own. A pump that fails stops the tool, which could otherwise block for
-        /// ever writing to a pipe nobody reads; <see cref="Finish"/> then ends the run and <see cref="Wait"/> throws.</summary>
+        /// <summary>Reads the pipe on a thread of its own. A pump that fails stops the tool, which could otherwise
+        /// block for ever writing to a pipe nobody reads; <see cref="Finish"/> then ends the run and <see cref="Wait"/>
+        /// throws.</summary>
         Task Pump(SafeHandle pipe, OutputSource source)
         {
             var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -531,11 +536,10 @@ public sealed class PlatformProcessLauncher : IProcessLauncher
 
     /// <summary>CTRL_BREAK for a tool. The tool runs in a console of its own (CreateNoWindow gives every tool one, even
     /// when the engine has a console), and only a process attached to that console can send it. Attaching the engine
-    /// itself doesn't work: the break then ends the engine too, whatever handler it set (found 2026-10-07). So a
-    /// short-lived hidden PowerShell attaches to the tool's console and sends the break to everything on it (the tool
-    /// and its children); the break ends the helper as well, which is all it is for (about 0.7 s on the test VM).
-    /// Best effort: a tool the break doesn't reach, or without PowerShell, is ended with its job after the grace
-    /// period.</summary>
+    /// itself doesn't work: the break then ends the engine too, whatever handler it set. So a short-lived hidden
+    /// PowerShell attaches to the tool's console and sends the break to everything on it (the tool and its children);
+    /// the break ends the helper as well, which is all it is for (about 0.7 s on the test VM). Best effort: a tool the
+    /// break doesn't reach, or without PowerShell, is ended with its job after the grace period.</summary>
     internal static class ConsoleBreak
     {
         public static void Send(int pid)

@@ -2,9 +2,8 @@ import BroDomain
 import BroFoundation
 import Foundation
 
-/// The owner of all service state (plan §8): actions posted from any thread run one at a time on `EngineActor`, in
-/// the order they were posted, never inside `post`. Blocking work goes to `worker`, whose result comes back on the
-/// actor. Today's AppModel ran this on the main actor with `DispatchQueue.main.async`.
+/// The owner of all service state (plan §8): actions posted from any thread run one at a time on `EngineActor`, in the
+/// order they were posted, never inside `post`. Blocking work goes to `worker`, whose result comes back on the actor.
 public final class EngineExecutor: Sendable {
     public typealias Action = @EngineActor @Sendable () -> Void
 

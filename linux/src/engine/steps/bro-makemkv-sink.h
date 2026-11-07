@@ -19,11 +19,11 @@ G_DECLARE_FINAL_TYPE (BroMakemkvSink, bro_makemkv_sink, BRO, MAKEMKV_SINK, GObje
 /* Keeps references to @progress and @log; copies @operation. */
 BroMakemkvSink *bro_makemkv_sink_new (BroProgressReporter *progress, BroJobLogger *log, const BroBroMessage *operation);
 
-/* MakeMKV starts its debug log (app_ShowDebug, named by message 1004) afresh at every start, so after each run the steps
- * add it (BroRunOutcome's debug_log) to the job folder's makemkv-debug.txt (BRO_SEAL_STEP_DEBUG_TRANSCRIPT) of the
- * BroStepContext, after a line "==== <its path> after $ makemkvcon <command>" (the subcommand: info, mkv, backup), as
- * today's apps do. Nothing when the run named none or it is empty; a file that can't be read or written is left out (the
- * run's result stands). */
+/* MakeMKV starts its debug log (app_ShowDebug, named by message 1004) afresh at every start, so after each run the
+ * steps add it (BroRunOutcome's debug_log) to the job folder's makemkv-debug.txt (BRO_SEAL_STEP_DEBUG_TRANSCRIPT) of
+ * the BroStepContext, after a line "==== <its path> after $ makemkvcon <command>" (the subcommand: info, mkv, backup).
+ * Nothing when the run named none or it is empty; a file that can't be read or written is left out (the run's result
+ * stands). */
 void bro_makemkv_sink_keep_debug_log (const BroStepContext *context, const BroRunOutcome *outcome, const char *command);
 
 G_END_DECLS

@@ -36,14 +36,14 @@ BroLocalEngine *bro_local_engine_new (BroEngineExecutor *executor, BroEventBus *
                                       BroDriveService *drives, BroJobService *jobs, BroRecoveryService *recovery, BroToolLocator *locator,
                                       BroEngineLog *log, const BroEngineFacts *facts, BroEngineRelease release, gpointer release_data);
 
-/* The startup order (plan §15.1, decision 169): the configuration (a failed load fails start, and nothing else has
- * started), recovery (recovery.summary into the engine log), the configuration's limits to the Scheduler (and on every
- * configChanged), the libraries, the drives, then the jobs recovery left queued. A start that failed leaves the engine
- * as it is: the host stops it. */
+/* The startup order (plan §15.1): the configuration (a failed load fails start, and nothing else has started), recovery
+ * (recovery.summary into the engine log), the configuration's limits to the Scheduler (and on every configChanged), the
+ * libraries, the drives, then the jobs recovery left queued. A start that failed leaves the engine as it is: the host
+ * stops it. */
 void bro_local_engine_start (BroLocalEngine *self, BroEngineDone done, gpointer data, GDestroyNotify destroy);
 
-/* A phase 3 door outside EngineAPI (G1 owner question 5): a job for @request (an ISO or a folder needs SessionService
- * otherwise), for the scenario runner and the real-ISO test. Retired when openSession/ripSession come. */
+/* A door outside EngineAPI: a job for @request (an ISO or a folder needs SessionService otherwise), for the scenario
+ * runner and the real-ISO test. Retired when openSession/ripSession come. */
 void bro_local_engine_start_job (BroLocalEngine *self, const BroJobRequest *request, BroEngineJobDone done, gpointer data,
                                  GDestroyNotify destroy);
 

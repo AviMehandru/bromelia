@@ -1,6 +1,7 @@
-/* bro-await-media-step.h: BroAwaitMediaStep: Step 1 of an automatic rip (plan §20.1): waits up to the drive's automation.waitForMountSeconds for the OS to
- * mount the disc, then goes on either way (disc.mounted / disc.notMounted). Fails with disc.changed when another disc
- * was inserted since the job was queued. Skipped when the job isn't on a drive, the drive has no device or the wait is
+/* bro-await-media-step.h: BroAwaitMediaStep: Step 1 of an automatic rip (plan §20.1): waits up to the drive's
+ * automation.waitForMountSeconds for the OS to mount the disc, then goes on either way (disc.mounted /
+ * disc.notMounted). Fails with disc.changed when another disc was inserted since the job was queued. Skipped when the
+ * job isn't on a drive, the drive has no device or the wait is
  * 0. Data: {mountPath}. */
 #pragma once
 

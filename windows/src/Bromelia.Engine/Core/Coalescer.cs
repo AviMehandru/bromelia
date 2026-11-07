@@ -6,10 +6,10 @@ using Bromelia.Ports;
 namespace Bromelia.Engine;
 
 /// <summary>
-/// At most one value per interval per key (plan §8 rule 5): a job's progress before it becomes an event or is stored.
-/// A value goes out at once when nothing for its key went out in the last interval; otherwise it waits (replacing the
-/// one waiting) until one interval after the last one went out. Used on the executor. Today's macOS EventSink did this
-/// for robot progress (a value at most every 0.1 s); shared/fixtures/engine/coalescer.cases.json.
+/// At most one value per interval per key (plan §8 rule 5): a job's progress before it becomes an event or is stored. A
+/// value goes out at once when nothing for its key went out in the last interval; otherwise it waits (replacing the one
+/// waiting) until one interval after the last one went out. Used on the executor. Robot progress goes through it (a
+/// value at most every 0.1 s); shared/fixtures/engine/coalescer.cases.json.
 /// </summary>
 public sealed class Coalescer
 {

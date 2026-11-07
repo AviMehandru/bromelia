@@ -122,7 +122,7 @@ public sealed class RecoveryServiceTests
                         x.AsArray![5].AsBool!.Value)).ToList());
             var jobs = (IJobRepository)store.Jobs_;
             var steps = (IStepRepository)store.Jobs_;
-            foreach (var j in given["jobs"]?.AsArray ?? new List<JsonValue>())
+            void AddJob(JsonValue j)
             {
                 var jobId = new Id(j["id"]!.AsString!);
                 var generation = j["mediaGeneration"]?.AsInteger;
@@ -140,6 +140,12 @@ public sealed class RecoveryServiceTests
                         new StepOutput(kind, r["output"] ?? JsonValue.Of(), null, (int)(r["readErrors"]?.AsInteger ?? 0)), r["error"] is { } re ? LibraryServiceTests.Failure(re).Error : null, r["checkpoint"])).Wait();
                 }
             }
+            foreach (var j in given["jobs"]?.AsArray ?? new List<JsonValue>()) AddJob(j);
+            (int, int)? Fault(JsonValue? f) => f == null ? null : ((int)f["after"]!.AsInteger!.Value, (int)(f["times"]?.AsInteger ?? -1));
+            db.IntentReadFault = Fault(given["storeFail"]?["openIntents"]);
+            db.UnitReadFault = Fault(given["storeFail"]?["units"]);
+            foreach (var x in given["storeFail"]?["jobs"]?.AsArray ?? new List<JsonValue>()) store.Jobs_.FailJobLoads.Add(new Id(x.AsString!));
+            foreach (var x in given["storeFail"]?["steps"]?.AsArray ?? new List<JsonValue>()) store.Jobs_.FailStepLoads.Add(new Id(x.AsString!));
             var resumability = given["resumability"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>();
             var registry = new StepRegistry(Enum.GetValues<StepKind>().Select(k => new FakeStep(k,
                 resumability.FirstOrDefault(m => m.Key == EnumWire.Name(k)).Value?.AsString is { } r ? EnumWire.Parse<Resumability>(r)!.Value : Resumability.Idempotent)));
@@ -238,6 +244,14 @@ public sealed class RecoveryServiceTests
                         results[i] = JsonValue.Of("ok");
                         break;
                     }
+                    case "job":
+                        AddJob(arg);
+                        results[i] = JsonValue.Of("ok");
+                        break;
+                    case "put":
+                        foreach (var (p, t) in arg.AsObject!) tree.Put(p, t.AsString!);
+                        results[i] = JsonValue.Of("ok");
+                        break;
                     case "commit":
                     {
                         // As a step calls the port: off the executor, the stored unit with its stored open intent.
@@ -260,6 +274,7 @@ public sealed class RecoveryServiceTests
             }
             if (recovered != null && !recovered.Wait(Patience)) throw new TimeoutException("recover didn't finish");
             Settle();
+            db.IntentReadFault = db.UnitReadFault = null;
 
             Same(expect["results"]!, JsonValue.Of(results.Select(r => r ?? JsonValue.Null.Instance)), "results");
             foreach (var (jobId, want) in expect["jobs"]?.AsObject ?? new List<KeyValuePair<string, JsonValue>>())

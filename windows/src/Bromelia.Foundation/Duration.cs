@@ -6,8 +6,8 @@ namespace Bromelia.Foundation;
 /// <summary>A length of time in seconds.</summary>
 public readonly record struct Duration(double Seconds)
 {
-    /// <summary>makemkvcon's <c>h:mm:ss</c> (or <c>m:ss</c>, or seconds): <c>2:44:48</c> → 9888 s. A part that
-    /// isn't a number counts as 0, as today; null when the text is empty.</summary>
+    /// <summary>makemkvcon's <c>h:mm:ss</c> (or <c>m:ss</c>, or seconds): <c>2:44:48</c> → 9888 s. A part that isn't a
+    /// number counts as 0; null when the text is empty.</summary>
     public static Duration? ParseClock(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;

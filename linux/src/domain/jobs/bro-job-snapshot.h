@@ -1,6 +1,6 @@
 /* bro-job-snapshot.h: BroJobSnapshot, an immutable view of a job that a step gets in its context (plan §12.2): its
  * request, its plan, the outputs of the steps before it, and when the job first started running (none before its first
- * step; owner, 2026-10-20: the archive record's job.startedAt). */
+ * step; the archive record's job.startedAt). */
 #pragma once
 
 #include "bro-id.h"

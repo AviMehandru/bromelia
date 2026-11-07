@@ -11,31 +11,24 @@ using Bromelia.Ports;
 namespace Bromelia.Engine;
 
 /// <summary>Step 12 (plan §20.1): decides the unit's folder in the library and every produced item's name in it, and
-/// renames inside staging so staging is laid out exactly as the unit's folder will be (Seal hashes it so, Commit moves it).
-/// <list type="bullet">
-/// <item>The names: Layouts (the profile's naming) with the identity's tokens, the date tokens in local time at the job's
-/// start (Clock.localTime of JobSnapshot.startedAt, as today's apps use the rip's time); a title's hand-given name is its
-/// own template. A backup is named by the file name template, inside the backup subfolder when the job is backupThenMkv
-/// (owner H3b-1).
-/// disc-info.json and the files no title owns keep their names.</item>
-/// <item>A folder backup's BDMV/index.bdmv (or VIDEO_TS) gives the disc's format when it differs from the identity's (a
-/// UHD disc read without a listing looks like a Blu-ray; name.formatFromBackup): the names use it and NameOutput carries
-/// the corrected identity for Seal's record; the backup's new name is logged as backup.renamed too (today's apps did so).</item>
-/// <item>Nothing is overwritten (I5): a folder of its own takes a free name ("Name (2)"; conflictPolicy skip fails with
-/// library.folderExists); a shared folder (media server layout, conflictPolicy merge) is merged item by item, so an item
-/// whose name is taken there takes a free one. Names in staging never collide either, and an item never takes another
-/// item's Acquire name.</item>
-/// <item>An item whose place holds a target (its own too, ASCII case ignored: Acquire's "backup" and a media server's
-/// "Backup/") first goes to a free name at staging's root; an item inside another item's target fails with
-/// name.unusable.</item>
-/// <item>A name that would hold no file (empty, a component starting with '.', one of Bromelia's own file names at the
-/// unit's root) fails with name.unusable, an empty folder with name.noFolder, before anything is renamed.</item>
-/// </list>
-/// Idempotent: the decisions (folder, and per item where it is and where it goes) are saved as the "names" checkpoint
-/// before the first rename, so an attempt after a crash or a retry finds each item where it is and keeps the names
-/// already given, unless one is now taken in the library; a checkpoint for other items than Acquire's (Acquire ran again)
-/// is ignored. Data: NameOutput. Skipped when Plan or Acquire hasn't
-/// run.</summary>
+/// renames inside staging so staging is laid out exactly as the unit's folder will be: Seal hashes it so, Commit moves
+/// it.
+///
+/// Names come from Layouts with the identity's tokens, date tokens in local time at the job's start; a title's
+/// hand-given name is its own template. disc-info.json and the files no title owns keep their names. A folder backup's
+/// BDMV/index.bdmv or VIDEO_TS can correct the disc's format (a UHD disc read without a listing looks like a Blu-ray):
+/// NameOutput then carries the corrected identity for Seal's record.
+///
+/// Nothing is overwritten: a folder of its own takes a free name ("Name (2)"), a shared folder is merged item by item,
+/// and an item whose name is taken takes a free one. An item whose place holds a target, ASCII case ignored (Acquire's
+/// "backup" and a media server's "Backup/"), first goes to a free name at staging's root. A name that would hold no
+/// file (empty, a component starting with '.', one of Bromelia's own file names at the unit's root) fails before
+/// anything is renamed.
+///
+/// Idempotent: the decisions are saved as the "names" checkpoint before the first rename, so an attempt after a crash
+/// or a retry finds each item where it is and keeps the names given, unless one is now taken in the library. A
+/// checkpoint for other items than Acquire's (Acquire ran again) is ignored. Data: NameOutput. Skipped when Plan or
+/// Acquire hasn't run.</summary>
 public sealed class NameStep : IStep
 {
     public const string NamesCheckpoint = "names";
@@ -60,16 +53,17 @@ public sealed class NameStep : IStep
         if (plan.Mode != RipMode.BackupThenMkv) naming = naming with { BackupSubfolder = "" };
         var items = NameOutput.FromAcquire(acquired);
         var saved = context.Checkpoint.Saved is JsonValue.Object s && s["kind"]?.AsString == NamesCheckpoint ? s : null;
-        // A checkpoint made for other items than Acquire's is no guide: Acquire ran again since (a retry from it or Plan), and
-        // removed whatever Name had renamed, so every item is under Acquire's name.
+        // A checkpoint made for other items than Acquire's is no guide: Acquire ran again since (a retry from it or
+        // Plan), and removed whatever Name had renamed, so every item is under Acquire's name.
         if (saved != null && !(saved["files"]?.AsArray ?? new List<JsonValue>()).Select(f => f["from"]?.AsString ?? "")
                 .ToHashSet(StringComparer.Ordinal).SetEquals(items.Select(i => i.Path))) saved = null;
         var savedFiles = (saved?["files"]?.AsArray ?? new List<JsonValue>())
             .Where(f => f["from"]?.AsString != null).GroupBy(f => f["from"]!.AsString!, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
-        // 1. Where each produced item is now: where an earlier attempt sent it (its target, or the free name it went to on the
-        // way), else where that attempt found it, else under Acquire's name. In that order: a folder made for a target may
-        // be where an item was (ASCII case aside), but nothing but the item is ever at its target or its way.
+        // 1. Where each produced item is now: where an earlier attempt sent it (its target, or the free name it went to
+        // on the way), else where that attempt found it, else under Acquire's name. In that order: a folder made for a
+        // target may be where an item was (ASCII case aside), but nothing but the item is ever at its target or its
+        // way.
         var at = new List<string>();
         foreach (var item in items)
         {
@@ -246,7 +240,8 @@ public sealed class NameStep : IStep
             context.Clock.LocalTime(context.Job.StartedAt ?? context.Clock.Now()));
     }
 
-    /// <summary>The format a folder backup's structure shows (VIDEO_TS: DVD; BDMV/index.bdmv: UHD or Blu-ray), or null.</summary>
+    /// <summary>The format a folder backup's structure shows (VIDEO_TS: DVD; BDMV/index.bdmv: UHD or Blu-ray), or
+    /// null.</summary>
     static DiscFormat? BackupFormat(IFileSystem fs, string backup)
     {
         var index = backup + "/BDMV/index.bdmv";
@@ -264,7 +259,8 @@ public sealed class NameStep : IStep
     static List<string> Names(IFileSystem fs, string folder) =>
         fs.Exists(folder) && fs.Stat(folder).IsDirectory ? fs.List(folder).Select(e => e.Name).ToList() : new List<string>();
 
-    /// <summary>Whether <paramref name="path"/> lies inside the folder <paramref name="folder"/>, ignoring ASCII case.</summary>
+    /// <summary>Whether <paramref name="path"/> lies inside the folder <paramref name="folder"/>, ignoring ASCII
+    /// case.</summary>
     static bool Inside(string path, string folder) => AsciiLower(path).StartsWith(AsciiLower(folder) + "/", StringComparison.Ordinal);
 
     static string Parent(string path) => path.LastIndexOf('/') is var i and >= 0 ? path[..i] : "";

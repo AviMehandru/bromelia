@@ -1,24 +1,20 @@
-/* bro-keep-apart-step.h: BroKeepApartStep: the step JobService.keepApart puts in place of the step an interrupted, failed
- * or cancelled job stopped at and what follows (owner, 2026-10-03 and 2026-10-25; plan §20.1, §20.4): the job isn't
- * continued, and what it left in staging becomes a sealed unit in <library>/_Quarantine/<name> [INCOMPLETE] with a
- * quarantined row of status incomplete.
- * 1. Sealed as Seal seals, but with no produced lists (Acquire never finished): every visible file in staging (none
- *    hidden by its first byte, not one of Bromelia's own at the top; leftovers of a stopped write removed) is synced,
- *    then each folder down to it (archive.synced), and hashed read back from disk (archive.hashFromDisk) with
- *    archive.hashing progress. SHA256SUMS, the logs as Seal copies them, INCOMPLETE.txt (the note recovery writes, with
- *    the logs, for the outcome and error of the "outcome" checkpoint JobService stores with the step: interrupted
- *    without one) and the record (status incomplete, no titles acquired) are written atomically; an earlier attempt's
- *    own files that this one doesn't write go. Staging with no such file (a job that stopped before Acquire has an empty
- *    one) holds nothing to keep: its empty folders are removed and no unit is made.
- * 2. The checkpoint "sealed" (the files and Bromelia's own files) is saved before the unit is handed to the library: a
- *    rerun with it doesn't seal again (staging may already be moving) and hands over the same unit.
- * 3. library.quarantine(unit, intent, files, "INCOMPLETE"): the intent's items are staging's top-level entries that hold
- *    the files (a file with its SHA-256, a folder without), then the record, the logs and the note; LibraryService picks
- *    the free name, finishes an open intent and gives a unit quarantined already its result again, so a rerun rolls
- *    forward. recovery.keptApart {path} (warning).
- * <name>: Plan's identity name, else the request's title, else the listing's name, else the source's label, else the job
- * id, the first that stays non-empty as a path component. Holds the library write; idempotent. Data: CommitOutput
- * (quarantined). Skipped without Plan's output. JobOutcome makes the job cancelled once the step succeeded. */
+/* bro-keep-apart-step.h: BroKeepApartStep: The step JobService.keepApart puts in place of the step an interrupted,
+ * failed or cancelled job stopped at and what follows (plan §20.1, §20.4): the job isn't continued, and what it left in
+ * staging becomes a sealed unit in <library>/_Quarantine/<name> [INCOMPLETE] with a quarantined row of status
+ * incomplete. JobOutcome makes the job cancelled once the step succeeded.
+ *
+ * Sealed as Seal seals, but with no produced lists, since Acquire never finished: every visible file in staging, plus
+ * INCOMPLETE.txt for the outcome and error of the "outcome" checkpoint JobService stores with the step. Staging with no
+ * such file (a job that stopped before Acquire has an empty one) holds nothing to keep: its empty folders are removed
+ * and no unit is made.
+ *
+ * The checkpoint "sealed" is saved before the unit is handed to the library: a rerun with it doesn't seal again,
+ * because staging may already be moving, and hands over the same unit. LibraryService picks the free name, finishes an
+ * open intent and gives a unit quarantined already its result again, so a rerun rolls forward.
+ *
+ * <name>: Plan's identity name, else the request's title, the listing's name, the source's label or the job id, the
+ * first that stays non-empty as a path component. Holds the library write. Data: CommitOutput (quarantined). Skipped
+ * without Plan's output. */
 #pragma once
 
 #include "bro-bro-error.h"
@@ -45,8 +41,7 @@ BroJsonValue *bro_keep_apart_step_kept (BroOutcome outcome, const BroBroError *e
 
 /* The job's (BroJobSnapshot) name in _Quarantine, before " [INCOMPLETE]" and ConflictNamer: the Plan output's identity
  * name, else the job's title, else Probe's listing name, else the source's label, else the job's id
- * (bro_sanitizer_component). RecoveryService sets a failed job's staging aside under it too (owner H3a-2). Transfer
- * full. */
+ * (bro_sanitizer_component). RecoveryService sets a failed job's staging aside under it too. Transfer full. */
 char *bro_keep_apart_step_folder_name (const BroJobSnapshot *job);
 
 G_END_DECLS
