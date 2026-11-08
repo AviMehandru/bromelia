@@ -156,7 +156,7 @@
       },
       {
         "symbol": "bro_platform_process_launcher_delay_readers_for_tests",
-        "why": "A test-only hook (916b021: a reader that starts late loses nothing); Swift and C# keep theirs internal, a C hook needs a header, so its name is public."
+        "why": "A test-only hook (it proves a reader that starts late loses nothing); Swift and C# keep theirs internal, a C hook needs a header, so its name is public."
       }
     ]
   },
